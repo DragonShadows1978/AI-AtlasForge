@@ -1,0 +1,22 @@
+# AI-AtlasForge Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework and real-time communication
+flask>=2.0.0
+flask-socketio>=5.0.0
+simple-websocket>=0.5.0
+
+# Anthropic API client (for Claude integration)
+anthropic>=0.18.0
+
+# File watching for real-time updates
+watchdog>=3.0.0
+
+# Process management
+psutil>=5.9.0
+
+# Data processing
+numpy>=1.21.0
+
+# Optional: GUI system tray (Linux)
+# PyGObject>=3.42.0  # Uncomment if using rde_tray.py

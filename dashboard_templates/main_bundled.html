@@ -19,13 +19,12 @@
 
         MAINTENANCE: After rebuilding the bundle, update these hashes:
         1. Run: ls dashboard_static/dist/chunks/
-        2. Note new hash suffixes for git-analytics, kb-analytics, lessons
+        2. Note new hash suffixes for kb-analytics, lessons
         3. Update the hrefs below to match
 
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/git-analytics-H3IQ4JFO.js" as="script">
     <link rel="prefetch" href="/static/dist/chunks/kb-analytics-S7GSMTBL.js" as="script">
     <link rel="prefetch" href="/static/dist/chunks/lessons-YVT5J62T.js" as="script">
 
@@ -1878,21 +1877,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <!-- Drift Nudge Notification Panel (floating) -->
-    <div id="drift-nudge-panel" class="nudge-panel" style="display: none;">
-        <div class="nudge-header">
-            <span class="nudge-icon">&#128270;</span>
-            <span class="nudge-title">Mission Refocus Suggestion</span>
-            <button class="nudge-dismiss" onclick="dismissNudge()">&times;</button>
-        </div>
-        <div class="nudge-content" id="nudge-content">
-            <div class="nudge-text">Loading...</div>
-        </div>
-        <div class="nudge-footer">
-            <button class="btn btn-small" onclick="handleAcknowledgeNudge()">Acknowledge</button>
-        </div>
-    </div>
-
     <!-- Mission Modal -->
     <div id="mission-modal" class="modal">
         <div class="modal-content">
@@ -1926,39 +1910,6 @@
         </div>
     </div>
 
-    <!-- Git Analytics Timeline Modal -->
-    <div id="git-timeline-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
-            <div class="modal-header">
-                <h2>Mission Timeline</h2>
-                <button class="close-btn" onclick="closeGitTimelineModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="git-analytics-header" style="margin-bottom: 15px;">
-                    <select id="git-timeline-mission-select" onchange="loadGitTimeline()" style="padding: 6px 10px; font-size: 0.9em;">
-                        <option value="">Select a mission...</option>
-                    </select>
-                    <button class="btn" onclick="exportGitAnalytics()" style="font-size: 0.8em;">&#128190; Export</button>
-                </div>
-                <div class="timeline-container" id="git-timeline-container">
-                    <div style="text-align: center; color: var(--text-dim); padding: 40px;">
-                        Select a mission to view its timeline
-                    </div>
-                </div>
-                <div id="git-timeline-commits" style="margin-top: 15px;">
-                    <h4 style="font-size: 0.9em; margin-bottom: 10px;">Commit Details</h4>
-                    <div id="git-timeline-commit-list" style="max-height: 200px; overflow-y: auto; background: var(--bg); border-radius: 4px; padding: 10px;">
-                        <div style="color: var(--text-dim); font-size: 0.85em;">No commits loaded</div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn primary" onclick="closeGitTimelineModal()">Close</button>
-            </div>
-        </div>
-    </div>
-
-
     <!-- Main JavaScript Bundle (ES6 modules with code splitting) -->
     <!-- Critical widget functions (git/kb analytics refresh) are inlined in main bundle -->
     <!-- Tab-specific features are lazy-loaded on demand for performance -->
@@ -1978,15 +1929,11 @@
             '/static/js/chat.js',
             '/static/js/exploration.js',
             '/static/js/widgets.js',
-            '/static/js/git-analytics.js',
             '/static/js/kb-analytics.js',
             '/static/js/lessons.js',
             '/static/js/recovery.js',
-            '/static/js/decision-graph.js',
             '/static/js/glassbox.js',
             '/static/js/missionlogs.js',
-            '/static/js/bugbounty.js',
-            '/static/js/narrative.js',
             '/static/js/init.js'
         ];
         scripts.forEach(function(src) {

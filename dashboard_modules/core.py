@@ -40,13 +40,7 @@ stop_claude = None
 send_message_to_claude = None
 get_recent_journal = None
 
-# Narrative-specific functions
-get_narrative_status = None
-start_narrative = None
-stop_narrative = None
-send_message_to_narrative = None
-get_narrative_chat_history = None
-NARRATIVE_MISSION_PATH = None
+# NOTE: Narrative feature removed from AtlasForge public release
 
 # Mission queue
 MISSION_QUEUE_PATH = None
@@ -57,16 +51,13 @@ def init_core_blueprint(
     mission_path, proposals_path, recommendations_path,
     io_utils_module,
     status_fn, start_fn, stop_fn, send_msg_fn, journal_fn,
-    narrative_status_fn=None, narrative_start_fn=None, narrative_stop_fn=None,
-    narrative_send_msg_fn=None, narrative_chat_fn=None, narrative_mission_path=None,
-    mission_queue_path=None
+    mission_queue_path=None,
+    **kwargs  # Accept but ignore legacy narrative parameters
 ):
     """Initialize the core blueprint with required dependencies."""
     global BASE_DIR, STATE_DIR, WORKSPACE_DIR, MISSION_PATH, PROPOSALS_PATH, RECOMMENDATIONS_PATH
     global MISSION_LOGS_DIR, io_utils, MISSION_QUEUE_PATH
     global get_claude_status, start_claude, stop_claude, send_message_to_claude, get_recent_journal
-    global get_narrative_status, start_narrative, stop_narrative, send_message_to_narrative
-    global get_narrative_chat_history, NARRATIVE_MISSION_PATH
 
     BASE_DIR = base_dir
     STATE_DIR = state_dir
@@ -82,14 +73,6 @@ def init_core_blueprint(
     stop_claude = stop_fn
     send_message_to_claude = send_msg_fn
     get_recent_journal = journal_fn
-
-    # Narrative functions (optional)
-    get_narrative_status = narrative_status_fn
-    start_narrative = narrative_start_fn
-    stop_narrative = narrative_stop_fn
-    send_message_to_narrative = narrative_send_msg_fn
-    get_narrative_chat_history = narrative_chat_fn
-    NARRATIVE_MISSION_PATH = narrative_mission_path
 
     # Mission queue (optional)
     MISSION_QUEUE_PATH = mission_queue_path
@@ -178,170 +161,6 @@ def api_start(mode):
 def api_stop():
     success, message = stop_claude()
     return jsonify({"success": success, "message": message})
-
-
-# =============================================================================
-# NARRATIVE AUTONOMOUS ROUTES
-# =============================================================================
-
-@core_bp.route('/api/narrative-autonomous/status')
-def api_narrative_status():
-    """Get status of the narrative autonomous workflow."""
-    if get_narrative_status:
-        return jsonify(get_narrative_status())
-    return jsonify({"error": "Narrative not available"}), 503
-
-
-@core_bp.route('/api/narrative-autonomous/start', methods=['POST'])
-def api_narrative_start():
-    """Start narrative autonomous workflow."""
-    if start_narrative:
-        success, message = start_narrative()
-        return jsonify({"success": success, "message": message})
-    return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-
-@core_bp.route('/api/narrative-autonomous/stop', methods=['POST'])
-def api_narrative_stop():
-    """Stop narrative autonomous workflow."""
-    if stop_narrative:
-        success, message = stop_narrative()
-        return jsonify({"success": success, "message": message})
-    return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-
-@core_bp.route('/api/narrative-autonomous/chat', methods=['GET', 'POST'])
-def api_narrative_chat():
-    """Get or send chat messages to narrative workflow."""
-    if request.method == 'POST':
-        if send_message_to_narrative:
-            data = request.get_json()
-            message = data.get('message', '')
-            if message:
-                send_message_to_narrative(message)
-                return jsonify({"success": True, "message": "Message sent to narrative workflow"})
-            return jsonify({"success": False, "message": "No message provided"})
-        return jsonify({"success": False, "message": "Narrative not available"}), 503
-    else:
-        if get_narrative_chat_history:
-            return jsonify(get_narrative_chat_history(50))
-        return jsonify([])
-
-
-@core_bp.route('/api/narrative-autonomous/mission', methods=['GET', 'POST'])
-def api_narrative_mission():
-    """Get or set the narrative mission."""
-    if not NARRATIVE_MISSION_PATH:
-        return jsonify({"error": "Narrative not available"}), 503
-
-    if request.method == 'POST':
-        data = request.get_json()
-        story_number = data.get('story_number')
-        story_title = data.get('story_title')
-        story_genre = data.get('story_genre')
-        story_logline = data.get('story_logline')
-
-        if not story_number or not story_title:
-            return jsonify({"success": False, "message": "story_number and story_title required"})
-
-        import uuid
-        safe_title = story_title.replace(" ", "_").replace("/", "-")[:50]
-        project_base = Path("/media/vader/TIE-FIGHTER/RCFT - Narrative Project/01 - Narrative Research/Completed")
-        story_workspace = project_base / f"{story_number:03d}_{safe_title}"
-        story_workspace.mkdir(parents=True, exist_ok=True)
-
-        new_mission = {
-            "mission_id": f"narrative_{uuid.uuid4().hex[:8]}",
-            "story_number": story_number,
-            "story_title": story_title,
-            "story_genre": story_genre,
-            "story_logline": story_logline,
-            "current_step": "INIT",
-            "status": "running",
-            "step_results": [],
-            "files_created": [],
-            "story_workspace": str(story_workspace),
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat(),
-            "history": [],
-            "approval_pending": None,
-        }
-        io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, new_mission)
-
-        return jsonify({
-            "success": True,
-            "message": f"Narrative mission set for '{story_title}'",
-            "mission": new_mission
-        })
-    else:
-        mission = io_utils.atomic_read_json(NARRATIVE_MISSION_PATH, {})
-        return jsonify(mission)
-
-
-@core_bp.route('/api/narrative-autonomous/approve', methods=['POST'])
-def api_narrative_approve():
-    """Approve a step waiting for user approval."""
-    if not NARRATIVE_MISSION_PATH:
-        return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-    mission = io_utils.atomic_read_json(NARRATIVE_MISSION_PATH, {})
-    if mission.get("status") != "waiting_approval":
-        return jsonify({"success": False, "message": "No step waiting for approval"})
-
-    mission["status"] = "running"
-    mission["approval_pending"] = None
-    io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, mission)
-
-    if send_message_to_narrative:
-        send_message_to_narrative("approve")
-
-    return jsonify({"success": True, "message": "Step approved"})
-
-
-@core_bp.route('/api/narrative-autonomous/pause', methods=['POST'])
-def api_narrative_pause():
-    """Pause the narrative workflow."""
-    if send_message_to_narrative:
-        send_message_to_narrative("pause")
-        return jsonify({"success": True, "message": "Pause command sent"})
-    return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-
-@core_bp.route('/api/narrative-autonomous/resume', methods=['POST'])
-def api_narrative_resume():
-    """Resume the narrative workflow."""
-    if send_message_to_narrative:
-        send_message_to_narrative("resume")
-        return jsonify({"success": True, "message": "Resume command sent"})
-    return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-
-@core_bp.route('/api/narrative-autonomous/reset', methods=['POST'])
-def api_narrative_reset():
-    """Reset the narrative mission to initial state."""
-    if not NARRATIVE_MISSION_PATH:
-        return jsonify({"success": False, "message": "Narrative not available"}), 503
-
-    default_mission = {
-        "mission_id": "narrative_default",
-        "story_number": None,
-        "story_title": None,
-        "story_genre": None,
-        "story_logline": None,
-        "current_step": "INIT",
-        "status": "pending",
-        "step_results": [],
-        "files_created": [],
-        "story_workspace": None,
-        "created_at": datetime.now().isoformat(),
-        "last_updated": datetime.now().isoformat(),
-        "history": [],
-        "approval_pending": None,
-    }
-    io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, default_mission)
-    if send_message_to_narrative:
-        send_message_to_narrative("reset")
-    return jsonify({"success": True, "message": "Narrative mission reset"})
 
 
 # =============================================================================

@@ -335,38 +335,6 @@ async function lazyLoad(moduleName) {
             window.viewMissionLogRaw = module.viewMissionLogRaw;
             break;
 
-        case 'bugbounty':
-            module = await import('./modules/bugbounty.js');
-            // Expose to global
-            window.loadBugBountyTabData = module.loadBugBountyTabData;
-            window.refreshBugBountyData = module.refreshBugBountyData;
-            window.fetchBugBountyPrograms = module.fetchBugBountyPrograms;
-            window.searchBugBountyPrograms = module.searchBugBountyPrograms;
-            window.runQuickScan = module.runQuickScan;
-            window.showProgramDetails = module.showProgramDetails;
-            window.showCategoryDetails = module.showCategoryDetails;
-            break;
-
-        case 'narrative':
-            module = await import('./modules/narrative.js');
-            // Expose to global
-            window.loadNarrativeTabData = module.loadNarrativeTabData;
-            window.refreshNarrativeData = module.refreshNarrativeData;
-            window.searchNarrativeConcepts = module.searchNarrativeConcepts;
-            window.selectNarrativeConcept = module.selectNarrativeConcept;
-            window.viewNarrativeSession = module.viewNarrativeSession;
-            window.createNarrativeSession = module.createNarrativeSession;
-            window.pauseNarrativeSession = module.pauseNarrativeSession;
-            window.resumeNarrativeSession = module.resumeNarrativeSession;
-            window.deleteNarrativeSession = module.deleteNarrativeSession;
-            window.launchNarrativeMission = module.launchNarrativeMission;
-            window.syncFromFileSystem = module.syncFromFileSystem;
-            window.showNarrativeModal = module.showNarrativeModal;
-            window.hideNarrativeModal = module.hideNarrativeModal;
-            window.showCreateSessionModal = module.showCreateSessionModal;
-            window.initNarrativeTab = module.initNarrativeTab;
-            break;
-
         case 'lessons':
             module = await import('./modules/lessons.js');
             // Expose to global
@@ -393,22 +361,6 @@ async function lazyLoad(moduleName) {
             window.showBatchDeleteConfirm = module.showBatchDeleteConfirm;
             window.closeBatchDeleteModal = module.closeBatchDeleteModal;
             window.confirmBatchDelete = module.confirmBatchDelete;
-            break;
-
-        case 'git-analytics':
-            module = await import('./modules/git-analytics.js');
-            // Expose to global
-            window.loadGitAnalyticsTabData = module.loadGitAnalyticsTabData;
-            window.loadGitMissionDetails = module.loadGitMissionDetails;
-            window.showRepoLog = module.showRepoLog;
-            window.showHighChurnAlertsModal = module.showHighChurnAlertsModal;
-            window.showFileMissionsModal = module.showFileMissionsModal;
-            window.openCompareModal = module.openCompareModal;
-            window.runComparison = module.runComparison;
-            window.showGitTimelineModal = module.showGitTimelineModal;
-            window.closeGitTimelineModal = module.closeGitTimelineModal;
-            window.loadGitTimeline = module.loadGitTimeline;
-            window.exportGitAnalytics = module.exportGitAnalytics;
             break;
 
         case 'kb-analytics':
@@ -832,25 +784,12 @@ function setupWebSocketHandlers() {
         }
     });
 
-    registerHandler('git_status', (data) => {
-            // Update with pushed data instead of fetching
-            updateGitWidgetFromPush(data);
-        }
-    });
-
     registerHandler('rde_stats', (data) => {
         updateRDEWidgetsFromPush(data);
     });
 
     registerHandler('analytics', (data) => {
         updateAnalyticsFromPush(data);
-    });
-
-    registerHandler('decision_graph', (data) => {
-        if (typeof window.refreshDecisionGraph === 'function') {
-            // Decision graph module can handle data directly
-            window._decisionGraphPushData = data;
-        }
     });
 
     // Investigation mode real-time updates
@@ -861,46 +800,6 @@ function setupWebSocketHandlers() {
     registerHandler('investigation_complete', (data) => {
         investigation.handleInvestigationComplete(data);
     });
-}
-
-function updateGitWidgetFromPush(data) {
-    const status = data.status || data;
-
-    const setEl = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = val;
-    };
-
-    setEl('git-branch-name', status.current_branch || '-');
-    setEl('git-branch-remote', status.remote_branch ? `→ ${status.remote_branch}` : '');
-
-    const aheadEl = document.getElementById('git-ahead');
-    const behindEl = document.getElementById('git-behind');
-    if (aheadEl) {
-        aheadEl.textContent = status.commits_ahead || 0;
-        aheadEl.className = 'git-stat-value ahead' + (status.commits_ahead > 0 ? ' has-ahead' : '');
-    }
-    if (behindEl) {
-        behindEl.textContent = status.commits_behind || 0;
-        behindEl.className = 'git-stat-value behind' + (status.commits_behind > 0 ? ' has-behind' : '');
-    }
-
-    setEl('git-uncommitted', status.uncommitted_changes || 0);
-    setEl('git-untracked', status.untracked_files || 0);
-
-    const healthBadge = document.getElementById('git-health-badge');
-    const healthText = document.getElementById('git-health-text');
-    if (healthBadge && healthText) {
-        const health = status.sync_health || 'unknown';
-        healthBadge.className = 'git-health-badge ' + health;
-        const healthLabels = {
-            'healthy': 'In Sync',
-            'degraded': 'Behind Remote',
-            'critical': 'Conflicts Detected',
-            'unknown': 'Unknown'
-        };
-        healthText.textContent = healthLabels[health] || health;
-    }
 }
 
 function updateRDEWidgetsFromPush(data) {

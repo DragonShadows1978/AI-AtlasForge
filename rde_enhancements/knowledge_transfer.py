@@ -637,7 +637,7 @@ if __name__ == "__main__":
     # Create transfer instance
     kt = KnowledgeTransfer(
         current_mission_id="test_mission",
-        missions_base=Path("/home/vader/mini-mind-v2/missions"),
+        missions_base=Path(__file__).resolve().parent.parent / "missions",
         current_mission_context="Building a REST API with authentication and user management"
     )
 

@@ -392,9 +392,9 @@ def get_fast_chain_computer() -> FastChainComputer:
     """Get or create the fast chain computer singleton."""
     return FastChainComputer()
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-KNOWLEDGE_DIR = BASE_DIR / "rde_data" / "knowledge_base"
+# Paths - use centralized configuration
+from atlasforge_config import KNOWLEDGE_BASE_DIR
+KNOWLEDGE_DIR = KNOWLEDGE_BASE_DIR
 KB_DB_PATH = KNOWLEDGE_DIR / "mission_knowledge.db"
 
 

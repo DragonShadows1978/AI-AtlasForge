@@ -1069,7 +1069,8 @@ async function loadFiles() {
 }
 
 // File path detection - matches workspace file paths in messages
-const filePathRegex = /(?:\/home\/vader\/mini-mind-v2\/workspace\/|workspace\/|artifacts\/|research\/|tests\/)([\w\-\/.]+\.\w+)/g;
+// Supports both absolute paths (with dynamic base) and relative workspace paths
+const filePathRegex = /(?:\/[^\s]+\/workspace\/|workspace\/|artifacts\/|research\/|tests\/)([\w\-\/.]+\.\w+)/g;
 
 function processMessageForDownloads(content) {
     // Replace workspace file paths with download links
@@ -1078,7 +1079,7 @@ function processMessageForDownloads(content) {
         let relativePath = pathPart;
 
         // Handle full paths
-        if (match.includes('/home/vader/mini-mind-v2/workspace/')) {
+        if (match.includes('/workspace/')) {
             relativePath = pathPart;
         } else if (match.startsWith('workspace/')) {
             relativePath = pathPart;

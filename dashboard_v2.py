@@ -1040,7 +1040,8 @@ if __name__ == '__main__':
     print(f"Templates: {TEMPLATES_DIR}")
     print(f"Modules: dashboard_modules/")
     print("=" * 50)
-    print("Access at: http://localhost:5000")
+    PORT = int(os.environ.get('PORT', 5000))
+    print(f"Access at: http://localhost:{PORT}")
     print("=" * 50)
 
-    socketio.run(app, host='::', port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='::', port=PORT, allow_unsafe_werkzeug=True)

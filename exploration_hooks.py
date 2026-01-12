@@ -23,6 +23,13 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+from atlasforge_config import (
+    MISSION_PATH,
+    MISSIONS_DIR,
+    EXPLORATION_DIR,
+    ARTIFACTS_DIR,
+)
+
 # Decision Graph integration (optional)
 DECISION_GRAPH_AVAILABLE = False
 try:
@@ -155,7 +162,6 @@ def check_predictive_drift_risk(file_path: str) -> Optional[Dict]:
             return None
 
         # Load mission data
-        MISSION_PATH = PathLib("/home/vader/mini-mind-v2/state/mission.json")
         mission = io_utils.atomic_read_json(MISSION_PATH, {})
         mission_text = mission.get('problem_statement', '')
 
@@ -163,7 +169,7 @@ def check_predictive_drift_risk(file_path: str) -> Optional[Dict]:
             return None
 
         # Load drift tracking state for similarity/velocity history
-        TRACKING_PATH = PathLib(f"/home/vader/mini-mind-v2/missions/{mission_id}/drift_tracking_state.json")
+        TRACKING_PATH = MISSIONS_DIR / mission_id / "drift_tracking_state.json"
         tracking = io_utils.atomic_read_json(TRACKING_PATH, {})
 
         similarity_history = tracking.get('similarity_history', [0.9])
@@ -297,9 +303,7 @@ def _get_mission_info() -> Tuple[Optional[str], Optional[str]]:
     """Get current mission ID and workspace from state file."""
     try:
         import io_utils
-        mission = io_utils.atomic_read_json(
-            Path("/home/vader/mini-mind-v2/state/mission.json"), {}
-        )
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
         return mission.get('mission_id'), mission.get('mission_workspace')
     except Exception:
         return None, None
@@ -309,9 +313,7 @@ def _get_mission_stage() -> Optional[str]:
     """Get current mission stage from state file."""
     try:
         import io_utils
-        mission = io_utils.atomic_read_json(
-            Path("/home/vader/mini-mind-v2/state/mission.json"), {}
-        )
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
         return mission.get('current_stage', 'UNKNOWN')
     except Exception:
         return None
@@ -756,7 +758,7 @@ def get_recent_explorations(limit: int = 10, force_reload: bool = True) -> List[
         graph = enhancer.exploration_graph
     else:
         # Try global exploration data
-        global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+        global_graph_path = EXPLORATION_DIR
         if global_graph_path.exists():
             try:
                 global_graph = ExplorationGraph(storage_path=global_graph_path)
@@ -811,7 +813,7 @@ def get_rde_dashboard_data(force_reload: bool = True) -> Dict:
 
     # If no enhancer or empty graph, try global exploration data
     if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
-        global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+        global_graph_path = EXPLORATION_DIR
         if global_graph_path.exists():
             try:
                 global_graph = ExplorationGraph(storage_path=global_graph_path)
@@ -904,7 +906,7 @@ def get_visualization_data(width: float = 800, height: float = 600, force_reload
         graph = enhancer.exploration_graph
     else:
         # Try global exploration data
-        global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+        global_graph_path = EXPLORATION_DIR
         if global_graph_path.exists():
             try:
                 global_graph = ExplorationGraph(storage_path=global_graph_path)
@@ -1385,7 +1387,7 @@ def populate_from_mission_archive(mission_id: str) -> Dict:
     """
     from pathlib import Path
 
-    archive_dir = Path("/home/vader/mini-mind-v2/workspace/artifacts/transcripts") / mission_id
+    archive_dir = ARTIFACTS_DIR / "transcripts" / mission_id
 
     results = {
         "mission_id": mission_id,
@@ -1422,7 +1424,7 @@ def populate_all_archived_missions() -> Dict:
     """
     from pathlib import Path
 
-    archive_dir = Path("/home/vader/mini-mind-v2/workspace/artifacts/transcripts")
+    archive_dir = ARTIFACTS_DIR / "transcripts"
 
     results = {
         "missions_processed": 0,
@@ -1467,8 +1469,8 @@ def populate_exploration_from_transcripts(limit_missions: int = 10) -> Dict:
     from pathlib import Path
     from rde_enhancements import ExplorationGraph
 
-    archive_dir = Path("/home/vader/mini-mind-v2/workspace/artifacts/transcripts")
-    graph = ExplorationGraph(storage_path=Path('/home/vader/mini-mind-v2/rde_data/exploration'))
+    archive_dir = ARTIFACTS_DIR / "transcripts"
+    graph = ExplorationGraph(storage_path=EXPLORATION_DIR)
 
     results = {
         "missions_processed": 0,

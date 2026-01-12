@@ -18,29 +18,32 @@ from pathlib import Path
 # CONFIGURATION: Define your core files to protect
 # =============================================================================
 
+# Get the AI-AtlasForge root directory (two levels up from hooks dir)
+ATLASFORGE_ROOT = Path(__file__).resolve().parent.parent.parent
+
 CORE_FILES = [
-    # Mini-Mind v2 Core
-    "/home/vader/mini-mind-v2/dashboard_v2.py",
-    "/home/vader/mini-mind-v2/rd_engine.py",
-    "/home/vader/mini-mind-v2/claude_autonomous.py",
-    "/home/vader/mini-mind-v2/exploration_hooks.py",
-    "/home/vader/mini-mind-v2/io_utils.py",
-    "/home/vader/mini-mind-v2/GROUND_RULES.md",
+    # AI-AtlasForge Core
+    str(ATLASFORGE_ROOT / "dashboard_v2.py"),
+    str(ATLASFORGE_ROOT / "rd_engine.py"),
+    str(ATLASFORGE_ROOT / "claude_autonomous.py"),
+    str(ATLASFORGE_ROOT / "exploration_hooks.py"),
+    str(ATLASFORGE_ROOT / "io_utils.py"),
+    str(ATLASFORGE_ROOT / "GROUND_RULES.md"),
 
     # RDE Enhancements
-    "/home/vader/mini-mind-v2/rde_enhancements/rde_enhancer.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/exploration_graph.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/fingerprint_extractor.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/mission_continuity_tracker.py",
+    str(ATLASFORGE_ROOT / "rde_enhancements" / "rde_enhancer.py"),
+    str(ATLASFORGE_ROOT / "rde_enhancements" / "exploration_graph.py"),
+    str(ATLASFORGE_ROOT / "rde_enhancements" / "fingerprint_extractor.py"),
+    str(ATLASFORGE_ROOT / "rde_enhancements" / "mission_continuity_tracker.py"),
 
     # GlassBox
-    "/home/vader/mini-mind-v2/workspace/glassbox/dashboard_routes.py",
-    "/home/vader/mini-mind-v2/workspace/glassbox/mission_archiver.py",
-    "/home/vader/mini-mind-v2/workspace/glassbox/transcript_parser.py",
+    str(ATLASFORGE_ROOT / "workspace" / "glassbox" / "dashboard_routes.py"),
+    str(ATLASFORGE_ROOT / "workspace" / "glassbox" / "mission_archiver.py"),
+    str(ATLASFORGE_ROOT / "workspace" / "glassbox" / "transcript_parser.py"),
 ]
 
 # Backup directory
-BACKUP_DIR = "/home/vader/mini-mind-v2/backups/auto_backups"
+BACKUP_DIR = str(ATLASFORGE_ROOT / "backups" / "auto_backups")
 
 # Maximum backups to keep per file (oldest get deleted)
 MAX_BACKUPS_PER_FILE = 10

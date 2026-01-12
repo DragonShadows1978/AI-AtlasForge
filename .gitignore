@@ -1,6 +1,5 @@
 # ===================================
-# RDE (Research & Development Engine)
-# Git Ignore Configuration
+# AI-AtlasForge Git Ignore Configuration
 # ===================================
 
 # ------ Mission & Runtime Data ------
@@ -32,6 +31,14 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
 
 # ------ Large Files (ML/Models) ------
 *.onnx
@@ -53,17 +60,24 @@ build/
 *.swp
 *~
 *.pre_restore
+*.orig
 
-# Workspace (transient)
+# Workspace (transient work area)
 workspace/
 
-# ------ Environment ------
+# ------ Environment & Secrets ------
 .env
 .env.local
 .env.*.local
-.venv/
-venv/
-env/
+.env.production
+.env.development
+*.pem
+*.key
+credentials.json
+secrets.json
+config.local.json
+email_config.json
+*_config.json
 
 # ------ IDE/Editor ------
 .vscode/
@@ -71,11 +85,20 @@ env/
 *.sublime-*
 .project
 .pydevproject
+*.iml
+.spyderproject
+.spyproject
 
 # ------ OS ------
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 *.lnk
+desktop.ini
 
 # ------ Databases (local only) ------
 *.db
@@ -87,7 +110,42 @@ test_output/
 *.coverage
 .tox/
 .nox/
+coverage.xml
+*.cover
+.hypothesis/
 
-# ------ Git Recovery (keep recovery branches local) ------
-# Note: recovery-* branches are created locally but not pushed
+# ------ Node.js ------
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# ------ Build Artifacts ------
+*.bundle.js
+*.bundle.js.map
+
+# ------ Investigations (personal data) ------
+investigations/
+
+# ------ Predictive Drift (personal infrastructure) ------
+predictive_drift/
+
+# ------ Personal/Internal Documentation ------
+# Keep these out of public release
+docs/internal/
+*.personal.md
+
+# ------ Claude Hooks (may contain local paths) ------
+.claude/hooks/
+
+# ------ Jupyter Notebooks ------
+.ipynb_checkpoints/
+*.ipynb
+
+# ------ Coverage Reports ------
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml

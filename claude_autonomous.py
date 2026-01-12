@@ -35,7 +35,9 @@ import rd_engine
 # CONFIGURATION
 # =============================================================================
 
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Determine BASE_DIR from script location or environment variable
+_SCRIPT_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(os.environ.get("ATLASFORGE_ROOT", str(_SCRIPT_DIR)))
 STATE_DIR = BASE_DIR / "state"
 WORKSPACE_DIR = BASE_DIR / "workspace"
 LOG_DIR = BASE_DIR / "logs"

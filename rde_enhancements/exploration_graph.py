@@ -11,7 +11,7 @@ Key capabilities:
 3. Enable semantic search across exploration history (with embeddings!)
 4. Prevent redundant exploration of understood code
 
-Inspired by: mini-mind's extensive cycle-based exploration lacking structured retrieval
+Inspired by extensive cycle-based exploration patterns lacking structured retrieval
 
 Production Hardened (Cycle 5):
 - Comprehensive error handling with graceful degradation

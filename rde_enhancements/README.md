@@ -127,7 +127,7 @@ Transfer knowledge from prior missions to new ones.
 ```python
 enhancer = RDEEnhancer("new_mission")
 enhancer.enable_knowledge_transfer(
-    missions_base=Path("/home/vader/mini-mind-v2/missions"),
+    missions_base=Path("./missions"),  # Relative to your AtlasForge root
     current_mission_context="Building a REST API"
 )
 
@@ -275,7 +275,7 @@ node = enhancer.record_file_exploration("/test.py", "summary")  # Works even if 
 ## Testing
 
 ```bash
-cd /home/vader/mini-mind-v2
+cd /path/to/atlasforge
 python3 -m pytest workspace/tests/test_rde_integration.py -v
 ```
 
@@ -341,4 +341,4 @@ should, reason = enhancer.should_explore(path)
 
 ## License
 
-Part of the mini-mind-v2 project.
+Part of the AI-AtlasForge project.

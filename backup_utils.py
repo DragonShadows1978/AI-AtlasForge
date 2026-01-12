@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Backup Utilities: Standardized backup and restore for mini-mind-v2.
+Backup Utilities: Standardized backup and restore for AI-AtlasForge.
 
 Directory structure:
-    /home/vader/mini-mind-v2/backups/<module>/<file>.backup.<YYYY-MM-DD>.<ext>
+    <ATLASFORGE_ROOT>/backups/<module>/<file>.backup.<YYYY-MM-DD>.<ext>
 
 Examples:
     backups/rd_engine/rd_engine.backup.2024-12-08.py
@@ -13,7 +13,7 @@ Usage:
     from backup_utils import create_backup, restore_backup, list_backups
 
     # Create a backup
-    backup_path = create_backup("/home/vader/mini-mind-v2/rd_engine.py")
+    backup_path = create_backup("rd_engine.py")
 
     # Restore from backup
     restore_backup(backup_path)
@@ -27,9 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-BACKUPS_DIR = BASE_DIR / "backups"
+# Base paths - use centralized configuration
+from atlasforge_config import BACKUPS_DIR
 
 
 def get_backup_dir() -> Path:
@@ -51,7 +50,7 @@ def create_backup(source_path: str | Path, module_name: Optional[str] = None) ->
         Path to the backup file, or None if backup failed
 
     Example:
-        backup_path = create_backup("/home/vader/mini-mind-v2/rd_engine.py")
+        backup_path = create_backup("rd_engine.py")
         # Creates: backups/rd_engine/rd_engine.backup.2024-12-08.py
     """
     source = Path(source_path)
@@ -102,7 +101,7 @@ def restore_backup(backup_path: str | Path, target_path: Optional[str | Path] = 
 
     Example:
         restore_backup("backups/rd_engine/rd_engine.backup.2024-12-08.py")
-        # Restores to: /home/vader/mini-mind-v2/rd_engine.py
+        # Restores to: <ATLASFORGE_ROOT>/rd_engine.py
     """
     backup = Path(backup_path)
 

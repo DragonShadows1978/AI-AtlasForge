@@ -32,6 +32,8 @@ from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
 
+from atlasforge_config import BASE_DIR
+
 # YAML parsing
 try:
     import yaml
@@ -572,11 +574,11 @@ class RemoteConfigManager:
         Initialize the remote configuration manager.
 
         Args:
-            rde_root: Path to RDE root (default: from env or /home/vader/mini-mind-v2)
+            rde_root: Path to RDE root (default: from env or BASE_DIR from atlasforge_config)
         """
         self.rde_root = rde_root or os.environ.get(
             "RDE_REPO_PATH",
-            "/home/vader/mini-mind-v2"
+            str(BASE_DIR)
         )
         self.config_path = os.path.join(self.rde_root, "repo_routing.yaml")
         self.credentials = CredentialManager()

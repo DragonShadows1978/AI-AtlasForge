@@ -809,7 +809,7 @@ class RDEEnhancer:
         Allows loading and querying exploration graphs from prior missions.
 
         Args:
-            missions_base: Path to missions directory (default: /home/vader/mini-mind-v2/missions)
+            missions_base: Path to missions directory (default: <ATLASFORGE_ROOT>/missions)
             current_mission_context: Description of current mission for relevance scoring
         """
         try:
@@ -817,7 +817,7 @@ class RDEEnhancer:
         except ImportError:
             from knowledge_transfer import KnowledgeTransfer
 
-        base = missions_base or Path("/home/vader/mini-mind-v2/missions")
+        base = missions_base or Path(__file__).resolve().parent.parent / "missions"
         self.knowledge_transfer = KnowledgeTransfer(
             current_mission_id=self.mission_id,
             missions_base=base,

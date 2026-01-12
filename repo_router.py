@@ -911,7 +911,7 @@ class RepoRouter:
         """
         self.rde_root = rde_root or os.environ.get(
             "RDE_REPO_PATH",
-            "/home/vader/mini-mind-v2"
+            str(Path(__file__).resolve().parent)
         )
         self.rde_root = os.path.abspath(self.rde_root)
 

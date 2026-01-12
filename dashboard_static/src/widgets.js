@@ -1,6 +1,6 @@
 /**
  * Dashboard Widgets Module (ES6)
- * RDE widgets, analytics, git status, file handling, collapsible cards, journal
+ * RDE widgets, analytics, file handling, collapsible cards, journal
  * Dependencies: core.js, api.js
  */
 
@@ -331,30 +331,6 @@ export function updateInvestigationServiceStatus(running, status) {
 }
 
 // =============================================================================
-// EMAIL INVESTIGATION SERVICE STATUS
-// =============================================================================
-
-/**
- * Update the Email Investigation service status indicator in the service bar
- * @param {number} count - Number of running email investigations
- */
-export function updateEmailInvestigationServiceStatus(count) {
-    const container = document.getElementById('email-investigation-service-status');
-    const stateEl = document.getElementById('email-investigation-service-state');
-    if (!container || !stateEl) return;
-
-    container.classList.remove('online', 'offline', 'busy');
-
-    if (count > 0) {
-        container.classList.add('busy');
-        stateEl.textContent = count + ' running';
-    } else {
-        container.classList.add('online');
-        stateEl.textContent = '0 running';
-    }
-}
-
-// =============================================================================
 // TERMINAL SERVICE STATUS (Port 5002)
 // =============================================================================
 
@@ -475,15 +451,6 @@ export async function refresh() {
         updateInvestigationServiceStatus(false, null);
     }
 
-    // Check Email Investigation status
-    try {
-        const emailStatus = await api('/api/email/status');
-        updateEmailInvestigationServiceStatus(emailStatus.running_investigations || 0);
-    } catch (e) {
-        // Email API not available or error
-        updateEmailInvestigationServiceStatus(0);
-    }
-
     // Update external service statuses (terminal server, etc.)
     refreshServiceStatuses();
 
@@ -543,21 +510,6 @@ export async function refresh() {
             await window.refreshKBAnalyticsWidget();
         }
         window.lastKBRefresh = Date.now();
-    }
-
-    // Refresh Git Status widget
-    if (typeof window.refreshGitStatusWidget === 'function') {
-        await window.refreshGitStatusWidget();
-    }
-
-    // Refresh Repo Status widget (lazy-loaded, might not be available yet)
-    if (typeof window.refreshRepoStatusWidget === 'function') {
-        await window.refreshRepoStatusWidget();
-    }
-
-    // Refresh Git Analytics widget (lazy-loaded, might not be available yet)
-    if (typeof window.refreshGitAnalyticsWidget === 'function') {
-        await window.refreshGitAnalyticsWidget();
     }
 
     // Refresh Recommendations widget (Investigation-KB integration)

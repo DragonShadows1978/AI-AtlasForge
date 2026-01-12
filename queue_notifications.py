@@ -32,9 +32,8 @@ import urllib.error
 # Configure logging
 logger = logging.getLogger("queue_notifications")
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-STATE_DIR = BASE_DIR / "state"
+# Paths - use centralized configuration
+from atlasforge_config import STATE_DIR
 NOTIFICATION_STATE_PATH = STATE_DIR / "queue_notification_state.json"
 NOTIFICATION_CONFIG_PATH = STATE_DIR / "queue_notification_config.json"
 

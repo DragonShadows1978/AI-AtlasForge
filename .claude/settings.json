@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/vader/mini-mind-v2/.claude/hooks/backup-core-files.py"
+            "command": ".claude/hooks/backup-core-files.py"
           }
         ]
       }

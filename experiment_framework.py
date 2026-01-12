@@ -25,10 +25,10 @@ import hashlib
 
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION - use centralized configuration
 # ============================================================================
 
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+from atlasforge_config import BASE_DIR
 EXPERIMENTS_DIR = BASE_DIR / "experiments"
 RESULTS_DIR = EXPERIMENTS_DIR / "results"
 

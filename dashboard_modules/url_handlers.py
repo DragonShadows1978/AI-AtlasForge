@@ -17,11 +17,9 @@ logger = logging.getLogger(__name__)
 # Create Blueprint
 url_handlers_bp = Blueprint('url_handlers', __name__)
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-MISSIONS_DIR = BASE_DIR / "missions"
+# Base paths - use centralized configuration
+from atlasforge_config import BASE_DIR, MISSIONS_DIR, WORKSPACE_DIR
 INVESTIGATIONS_DIR = BASE_DIR / "investigations"
-WORKSPACE_DIR = BASE_DIR / "workspace"
 
 
 @url_handlers_bp.route('/missions/<mission_id>/artifacts/<path:filename>')

@@ -9,7 +9,7 @@ Scaffolds are injected into prompts when bias patterns are detected.
 Each scaffold is designed to address specific bias types while being
 minimally intrusive to the main task.
 
-Inspired by: mini-mind's phenomenological scaffolding experiments that
+Inspired by phenomenological scaffolding experiments that
 showed a 37.5% reduction in bias with appropriate scaffolding.
 """
 

@@ -7,7 +7,7 @@ Identifies patterns like sycophancy, anchoring, overconfidence, etc.
 
 Used by the scaffold system to determine when corrective scaffolding is needed.
 
-Inspired by: mini-mind's attention manipulation experiments (wc379-390)
+Inspired by attention manipulation experiments
 which showed that how you prompt dramatically affects outcomes.
 """
 

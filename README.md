@@ -1,10 +1,10 @@
-# RDE - Research & Development Engine
+# AI-AtlasForge
 
-An autonomous AI research system that runs long-duration missions using Claude as the execution engine.
+An autonomous AI research and development platform powered by Claude. Run long-duration missions, accumulate cross-session knowledge, and build software autonomously.
 
-## What is RDE?
+## What is AI-AtlasForge?
 
-RDE is not a chatbot wrapper. It's an **autonomous research platform** that:
+AI-AtlasForge is not a chatbot wrapper. It's an **autonomous research engine** that:
 
 - Runs multi-day missions without human intervention
 - Maintains mission continuity across context windows
@@ -12,48 +12,87 @@ RDE is not a chatbot wrapper. It's an **autonomous research platform** that:
 - Self-corrects when drifting from objectives
 - Adversarially tests its own outputs
 
-Built in 3.5 weeks. Running on spare parts in a basement.
+## Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- Claude API access (via Claude Code CLI - `claude` command)
+- Linux environment (tested on Ubuntu/Linux Mint)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/AI-AtlasForge.git
+cd AI-AtlasForge
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install Node dependencies (for dashboard)
+npm install
+
+# Create required directories
+mkdir -p state logs workspace/{artifacts,research,tests} missions rde_data/knowledge_base
+```
+
+### Running Your First Mission
+
+1. **Start the Dashboard** (optional, for monitoring):
+   ```bash
+   python3 dashboard_v2.py
+   # Access at http://localhost:5050
+   ```
+
+2. **Create a Mission**:
+   - Via Dashboard: Click "Create Mission" and enter your objectives
+   - Via JSON: Create `state/mission.json` manually
+
+3. **Start the Engine**:
+   ```bash
+   python3 claude_autonomous.py --mode=rd
+   ```
 
 ## Architecture
 
 ```
-                    ┌─────────────────┐
-                    │  Mission State  │
-                    │   (mission.json)│
-                    └────────┬────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │                             │
-    ┌─────────▼─────────┐         ┌────────▼────────┐
-    │  Claude Autonomous │         │    Dashboard    │
-    │  (Execution Engine)│         │  (Monitoring)   │
-    └─────────┬─────────┘         └─────────────────┘
-              │
-    ┌─────────▼─────────┐
-    │    R&D Engine     │
-    │  (State Machine)  │
-    └─────────┬─────────┘
-              │
-    ┌─────────▼─────────┐
-    │   Stage Pipeline  │
-    │                   │
-    │  PLANNING         │
-    │      ↓            │
-    │  BUILDING         │
-    │      ↓            │
-    │  TESTING          │
-    │      ↓            │
-    │  ANALYZING        │
-    │      ↓            │
-    │  CYCLE_END ──┐    │
-    │      ↓       │    │
-    │  COMPLETE    │    │
-    │      ↑       │    │
-    │      └───────┘    │
-    │   (iterate if     │
-    │    cycles remain) │
-    └───────────────────┘
+                    +-------------------+
+                    |   Mission State   |
+                    |  (mission.json)   |
+                    +--------+----------+
+                             |
+              +--------------+--------------+
+              |                             |
+    +---------v---------+         +--------v--------+
+    | Claude Autonomous |         |    Dashboard    |
+    | (Execution Engine)|         |   (Monitoring)  |
+    +---------+---------+         +-----------------+
+              |
+    +---------v---------+
+    |    R&D Engine     |
+    |   (State Machine) |
+    +---------+---------+
+              |
+    +---------v-------------------+
+    |     Stage Pipeline          |
+    |                             |
+    |  PLANNING -> BUILDING ->    |
+    |  TESTING -> ANALYZING ->    |
+    |  CYCLE_END -> COMPLETE      |
+    +-----------------------------+
 ```
+
+## Mission Lifecycle
+
+1. **PLANNING** - Understand objectives, research codebase, create implementation plan
+2. **BUILDING** - Implement the solution
+3. **TESTING** - Validate implementation
+4. **ANALYZING** - Evaluate results, identify issues
+5. **CYCLE_END** - Generate reports, prepare continuation
+6. **COMPLETE** - Mission finished
+
+Missions can iterate through multiple cycles until success criteria are met.
 
 ## Core Components
 
@@ -63,40 +102,27 @@ Main execution loop. Spawns Claude instances, manages state, handles graceful sh
 ### rd_engine.py
 State machine for mission execution. Manages stages, enforces constraints, tracks progress.
 
-### Mission Lifecycle
-1. **PLANNING** - Understand objectives, research codebase, create plan
-2. **BUILDING** - Implement the solution
-3. **TESTING** - Validate implementation
-4. **ANALYZING** - Evaluate results, identify issues
-5. **CYCLE_END** - Generate reports, prepare continuation
-6. **COMPLETE** - Mission finished
+### dashboard_v2.py
+Web-based monitoring interface showing mission status, knowledge base, and analytics.
 
 ### Knowledge Base
 SQLite database accumulating learnings across all missions:
 - Techniques discovered
 - Insights gained
 - Gotchas encountered
-- Code templates
+- Reusable code patterns
 
 ### Adversarial Testing
-Separate Claude instances that attempt to break implementations:
+Separate Claude instances that test implementations:
 - RedTeam agents with no implementation knowledge
 - Mutation testing
 - Property-based testing
-- Blind specification validation
 
-### Glassbox
-Introspection system for post-mission analysis:
+### GlassBox
+Post-mission introspection system:
 - Transcript parsing
 - Agent hierarchy reconstruction
 - Stage timeline visualization
-
-### Dashboard
-Web-based monitoring:
-- Active mission status
-- Knowledge base queries
-- Mission recommendations
-- Analytics
 
 ## Key Features
 
@@ -106,11 +132,8 @@ Missions survive context window limits through:
 - Cycle-based iteration
 - Continuation prompts that preserve context
 
-### Drift Detection
-Monitors mission alignment and heals when work diverges:
-- Compares current focus to original objectives
-- Injects healing prompts when drift exceeds threshold
-- Prevents tangential rabbit holes
+### Knowledge Accumulation
+Every mission adds to the knowledge base. The system improves over time as it learns patterns, gotchas, and techniques.
 
 ### Autonomous Operation
 Designed for unattended execution:
@@ -121,55 +144,46 @@ Designed for unattended execution:
 ## Directory Structure
 
 ```
-mini-mind-v2/
-├── claude_autonomous.py    # Main entry point
-├── rd_engine.py            # Stage state machine
-├── dashboard_v2.py         # Web dashboard
-├── adversarial_testing/    # Testing framework
-├── glassbox/               # Introspection tools
-├── rde_enhancements/       # Optional modules
-├── state/                  # Runtime state
-│   ├── mission.json        # Current mission
-│   └── claude_state.json   # Execution state
-├── missions/               # Mission workspaces
-├── workspace/              # Active workspace
-├── rde_data/
-│   └── knowledge_base/     # Accumulated learnings
-└── logs/                   # Execution logs
+AI-AtlasForge/
++-- claude_autonomous.py    # Main entry point
++-- rd_engine.py            # Stage state machine
++-- dashboard_v2.py         # Web dashboard
++-- adversarial_testing/    # Testing framework
++-- rde_enhancements/       # Enhancement modules
++-- workspace/              # Active workspace
+|   +-- glassbox/           # Introspection tools
+|   +-- artifacts/          # Plans, reports
+|   +-- research/           # Notes, findings
+|   +-- tests/              # Test scripts
++-- state/                  # Runtime state
+|   +-- mission.json        # Current mission
+|   +-- claude_state.json   # Execution state
++-- missions/               # Mission workspaces
++-- rde_data/
+|   +-- knowledge_base/     # Accumulated learnings
++-- logs/                   # Execution logs
 ```
 
-## Usage
+## Configuration
 
-### Start a Mission
-```bash
-# Load mission from dashboard recommendations
-# Or create mission.json manually
+AI-AtlasForge uses environment variables for configuration:
 
-python3 claude_autonomous.py --mode=rd
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ATLASFORGE_PORT` | `5050` | Dashboard port |
+| `ATLASFORGE_ROOT` | (script directory) | Base directory |
+| `ATLASFORGE_DEBUG` | `false` | Enable debug logging |
 
-### Monitor Progress
-```bash
-# Start dashboard
-python3 dashboard_v2.py
+## Dashboard Features
 
-# Access at http://localhost:5000
-```
+The web dashboard provides real-time monitoring:
 
-### Check Status
-```bash
-# View current mission state
-cat state/mission.json | python3 -m json.tool
-
-# Tail execution log
-tail -f logs/claude_autonomous.log
-```
-
-## Requirements
-
-- Python 3.10+
-- Claude API access (via Claude Code CLI)
-- Linux environment (tested on Linux Mint)
+- **Mission Status** - Current stage, progress, timing
+- **Activity Feed** - Live log of agent actions
+- **Knowledge Base** - Search and browse learnings
+- **Analytics** - Token usage, cost tracking
+- **Mission Queue** - Queue and schedule missions
+- **GlassBox** - Post-mission analysis
 
 ## Philosophy
 
@@ -181,16 +195,32 @@ tail -f logs/claude_autonomous.log
 
 **Trust but verify.** Adversarial testing catches what regular testing misses. The same agent that writes code doesn't validate it.
 
-## Origin
+## Requirements
 
-RDE emerged from necessity. Complex multi-system projects couldn't be held in a single Claude context. The solution: build infrastructure for mission continuity, knowledge persistence, and autonomous iteration.
+- Python 3.10+
+- Node.js 18+ (for dashboard build)
+- Claude API access (via Claude Code CLI)
+- Linux environment
 
-Built in 3.5 weeks. 4,200+ learnings accumulated. Multiple 24+ hour missions completed successfully.
+### Python Dependencies
+
+```
+flask
+flask-socketio
+simple-websocket
+anthropic
+```
+
+See `requirements.txt` for full list.
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) for details.
 
-## Author
+## Contributing
 
-Dave (DragonShadows1978)
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+## Acknowledgments
+
+Built on Claude by Anthropic. Special thanks to the Claude Code team for making autonomous AI development possible.

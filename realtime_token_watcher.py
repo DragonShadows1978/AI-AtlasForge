@@ -21,7 +21,7 @@ Usage:
     watcher = get_token_watcher()
     watcher.start(
         mission_id="mission_abc123",
-        workspace_path="/home/vader/mini-mind-v2/missions/mission_abc123/workspace"
+        workspace_path="/path/to/atlasforge/missions/mission_abc123/workspace"
     )
 
     # Stop when mission completes
@@ -36,6 +36,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Set, Callable
+
+from atlasforge_config import ANALYTICS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,7 @@ class TranscriptFileTracker:
             import sqlite3
             from pathlib import Path
 
-            db_path = Path("/home/vader/mini-mind-v2/rde_data/analytics/mission_analytics.db")
+            db_path = ANALYTICS_DIR / "mission_analytics.db"
             if not db_path.exists():
                 return
 
@@ -268,8 +270,8 @@ class RealTimeTokenWatcher:
             Path to transcript directory, or None if not found
         """
         # Convert workspace path to Claude's format
-        # /home/vader/mini-mind-v2/missions/mission_xxx/workspace
-        # -> -home-vader-mini-mind-v2-missions-mission-xxx-workspace
+        # /path/to/atlasforge/missions/mission_xxx/workspace
+        # -> -path-to-atlasforge-missions-mission-xxx-workspace
         escaped = workspace_path.replace('/', '-').replace('_', '-')
 
         transcript_dir = CLAUDE_PROJECTS_DIR / escaped
@@ -663,8 +665,8 @@ if __name__ == "__main__":
     # Test 2: Find transcript directory for current mission
     print("\n[TEST 2] Testing transcript directory lookup...")
     test_paths = [
-        "/home/vader/mini-mind-v2/missions/mission_1b2fe87d/workspace",
-        "/home/vader/mini-mind-v2/workspace",
+        "/path/to/atlasforge/missions/mission_1b2fe87d/workspace",
+        "/path/to/atlasforge/workspace",
     ]
 
     for path in test_paths:
@@ -677,7 +679,8 @@ if __name__ == "__main__":
     tracker = TranscriptFileTracker()
 
     # Find a real transcript file to test with
-    test_dir = CLAUDE_PROJECTS_DIR / "-home-vader-mini-mind-v2-missions-mission-1b2fe87d-workspace"
+    # Test with any available transcript directory
+    test_dir = next(CLAUDE_PROJECTS_DIR.iterdir(), None) if CLAUDE_PROJECTS_DIR.exists() else None
     if test_dir.exists():
         jsonl_files = list(test_dir.glob("*.jsonl"))
         if jsonl_files:
@@ -713,7 +716,7 @@ if __name__ == "__main__":
         print("\n[TEST 5] Full watch test (Ctrl+C to stop)...")
 
         mission_id = "mission_1b2fe87d"
-        workspace = "/home/vader/mini-mind-v2/missions/mission_1b2fe87d/workspace"
+        workspace = "/path/to/atlasforge/missions/mission_1b2fe87d/workspace"
 
         success = watcher.start(mission_id, workspace, stage="TESTING")
         print(f"  Started: {success}")

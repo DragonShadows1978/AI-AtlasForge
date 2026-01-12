@@ -182,7 +182,7 @@ Leverage knowledge from prior missions:
 
 ```python
 enhancer.enable_knowledge_transfer(
-    missions_base=Path("/home/vader/mini-mind-v2/missions"),
+    missions_base=Path("./missions"),  # Relative to your AtlasForge root
     current_mission_context="Building a REST API with authentication"
 )
 

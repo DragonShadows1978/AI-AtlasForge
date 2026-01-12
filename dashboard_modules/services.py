@@ -15,15 +15,18 @@ from flask import Blueprint, jsonify
 services_bp = Blueprint('services', __name__, url_prefix='/api/services')
 
 # Service configurations
-SERVICES = {
-    'terminal': {
-        'name': 'Web Terminal',
-        'port': 5002,
-        'process_pattern': 'uvicorn main:app.*--port 5002',
-        'start_script': '/home/vader/mini-mind-v2/missions/mission_d11f8468/workspace/terminal_dashboard/run.sh',
-        'working_dir': '/home/vader/mini-mind-v2/missions/mission_d11f8468/workspace/terminal_dashboard'
-    }
-}
+# Services configuration - add service definitions here as needed
+# Example format:
+# SERVICES = {
+#     'service_name': {
+#         'name': 'Display Name',
+#         'port': 5002,
+#         'process_pattern': 'uvicorn main:app.*--port 5002',
+#         'start_script': '/path/to/start_script.sh',
+#         'working_dir': '/path/to/working/dir'
+#     }
+# }
+SERVICES = {}
 
 
 def find_service_process(service_id: str) -> dict | None:

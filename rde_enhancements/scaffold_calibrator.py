@@ -11,7 +11,7 @@ Key capabilities:
 3. Test scaffold effectiveness using the experiment framework
 4. Tune scaffold parameters based on results
 
-Inspired by: mini-mind's attention manipulation showing that meta-cognitive
+Inspired by attention manipulation research showing that meta-cognitive
 prompts ("you're being manipulated") reversed attention effects entirely.
 """
 

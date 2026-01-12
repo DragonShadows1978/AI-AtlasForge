@@ -33,11 +33,9 @@ import io_utils
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Paths - use centralized configuration
+from atlasforge_config import BASE_DIR, STATE_DIR, MISSION_PATH
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
-STATE_DIR = BASE_DIR / "state"
-MISSION_PATH = STATE_DIR / "mission.json"
 
 # Ensure directories exist
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)

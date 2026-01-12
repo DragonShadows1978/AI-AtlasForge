@@ -42,12 +42,10 @@ from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-ANALYTICS_DIR = BASE_DIR / "rde_data" / "analytics"
-MISSION_LOGS_DIR = BASE_DIR / "missions" / "mission_logs"
-TRANSCRIPTS_DIR = BASE_DIR / "workspace" / "artifacts" / "transcripts"
-MISSIONS_DIR = BASE_DIR / "missions"
+# Paths - use centralized configuration
+from atlasforge_config import ANALYTICS_DIR, MISSIONS_DIR, ARTIFACTS_DIR
+MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
+TRANSCRIPTS_DIR = ARTIFACTS_DIR / "transcripts"
 
 # Claude transcript directories (live, not archived)
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -703,8 +701,8 @@ class MissionAnalytics:
             Path to transcript directory, or None if not found
         """
         # Construct the expected directory name
-        # Pattern: /home/vader/mini-mind-v2/missions/mission_xxx/workspace
-        # -> -home-vader-mini-mind-v2-missions-mission-xxx-workspace
+        # Pattern: <ATLASFORGE_ROOT>/missions/mission_xxx/workspace
+        # -> -path-to-atlasforge-missions-mission-xxx-workspace
         workspace_path = str(MISSIONS_DIR / mission_id / "workspace")
         escaped = workspace_path.replace('/', '-').replace('_', '-')
 
@@ -1168,7 +1166,7 @@ class MissionAnalytics:
 # =============================================================================
 
 _analytics_instance = None
-MISSION_PATH = BASE_DIR / "state" / "mission.json"
+from atlasforge_config import MISSION_PATH
 
 
 def get_current_mission_analytics() -> Dict[str, Any]:

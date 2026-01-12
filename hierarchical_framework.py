@@ -46,8 +46,8 @@ from experiment_framework import ModelType, TrialResult, invoke_fresh_claude
 
 logger = logging.getLogger("hierarchical_framework")
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Base paths - use centralized configuration
+from atlasforge_config import BASE_DIR
 EXPERIMENTS_DIR = BASE_DIR / "experiments"
 HIERARCHICAL_RESULTS_DIR = EXPERIMENTS_DIR / "hierarchical_results"
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"

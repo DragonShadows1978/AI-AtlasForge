@@ -30,7 +30,6 @@ const CONFIG = {
         endpoints: {
             mission_status: '/api/status',
             journal: '/api/journal',
-            git_status: '/api/git/status',
             rde_stats: '/api/rde/exploration-stats',
             analytics: '/api/analytics/current',
             chat_history: '/api/chat-history'  // Chat fallback polling
@@ -72,15 +71,11 @@ let connectionState = {
 const eventHandlers = {
     mission_status: [],
     journal: [],
-    git_status: [],
     rde_stats: [],
-    decision_graph: [],
     glassbox: [],
     analytics: [],
     exploration: [],
-    drift_status: [],
     connection_status: [],
-    email_monitor: [],
     backup_status: [],
     backup_stale_alert: []
 };
@@ -565,7 +560,6 @@ function resubscribeToRooms() {
         // Subscribe to default rooms
         subscribeToRoom('mission_status');
         subscribeToRoom('journal');
-        subscribeToRoom('git_status');
         subscribeToRoom('rde_stats');
         subscribeToRoom('analytics');
     } else {

@@ -31,9 +31,9 @@ from typing import Dict, Any, Optional, List, Set
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-BACKUP_DIR = BASE_DIR / "backups" / "plan_backups"
+# Configuration - use centralized configuration
+from atlasforge_config import BACKUPS_DIR
+BACKUP_DIR = BACKUPS_DIR / "plan_backups"
 MAX_VERSIONS_PER_FILE = 10
 MAX_FILE_SIZE_MB = 10  # Skip files larger than this
 
@@ -48,7 +48,7 @@ def parse_plan_for_files(plan_path: Path) -> List[str]:
     Looks for:
     - Explicit file paths in markdown (backticks, bold, or plain)
     - Paths in code blocks (e.g., File: /path/to/file.py)
-    - Common patterns like `/home/vader/...` or `workspace/...`
+    - Common patterns like absolute paths or `workspace/...`
 
     Args:
         plan_path: Path to the implementation_plan.md file
@@ -69,8 +69,8 @@ def parse_plan_for_files(plan_path: Path) -> List[str]:
     found_paths: Set[str] = set()
 
     # Pattern 1: Explicit file paths with common extensions
-    # Match paths like /home/vader/... or relative paths with extensions
-    path_pattern = r'(?:^|\s|[`"\'\(])(/home/vader/[^\s`"\'\)]+\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml|toml|sh|sql|css|html))'
+    # Match absolute paths like /home/user/... or /opt/... with file extensions
+    path_pattern = r'(?:^|\s|[`"\'\(])(/(?:home|opt|var|usr|tmp)/[^\s`"\'\)]+\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml|toml|sh|sql|css|html))'
     for match in re.finditer(path_pattern, content, re.MULTILINE):
         found_paths.add(match.group(1))
 
@@ -480,11 +480,11 @@ if __name__ == "__main__":
 
 ## Implementation
 
-**File:** `/home/vader/mini-mind-v2/plan_backup.py`
+**File:** `plan_backup.py`
 
 This is the main module.
 
-Also modify `/home/vader/mini-mind-v2/mission_analytics.py` for analytics.
+Also modify `mission_analytics.py` for analytics.
 
 ```python
 # Example code

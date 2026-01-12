@@ -96,7 +96,9 @@ except ImportError:
 AFTERIMAGE_AVAILABLE = False
 try:
     import sys
-    sys.path.insert(0, "/home/vader/mini-mind-v2/workspace/AI-AfterImage")
+    from atlasforge_config import WORKSPACE_DIR
+    afterimage_path = str(WORKSPACE_DIR / "AI-AfterImage")
+    sys.path.insert(0, afterimage_path)
     from afterimage.search import HybridSearch as AfterImageSearch
     AFTERIMAGE_AVAILABLE = True
 except ImportError:
@@ -190,8 +192,10 @@ try:
 except ImportError:
     pass  # Queue notifications module not available
 
-# Paths - Updated for mini-mind-v2
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Paths - Determined from script location or environment
+import os as _os
+_SCRIPT_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(_os.environ.get("ATLASFORGE_ROOT", str(_SCRIPT_DIR)))
 STATE_DIR = BASE_DIR / "state"
 MISSION_PATH = STATE_DIR / "mission.json"
 GROUND_RULES_PATH = BASE_DIR / "GROUND_RULES.md"
@@ -209,7 +213,9 @@ RESEARCH_DIR.mkdir(exist_ok=True)
 
 # Transcript archival paths
 CLAUDE_TRANSCRIPTS_BASE = Path.home() / ".claude" / "projects"
-CLAUDE_TRANSCRIPTS_DIR = CLAUDE_TRANSCRIPTS_BASE / "-home-vader-mini-mind-v2"
+# Dynamically compute transcript dir from BASE_DIR
+_transcript_dir_name = "-" + str(BASE_DIR).replace("/", "-").lstrip("-")
+CLAUDE_TRANSCRIPTS_DIR = CLAUDE_TRANSCRIPTS_BASE / _transcript_dir_name
 TRANSCRIPTS_ARCHIVE_DIR = ARTIFACTS_DIR / "transcripts"
 
 
@@ -218,8 +224,8 @@ def _workspace_to_transcript_dir(workspace_path: str) -> Path:
     Convert a workspace path to Claude's transcript directory format.
 
     Claude stores transcripts in: ~/.claude/projects/-{path-with-dashes}
-    e.g., /home/vader/mini-mind-v2/missions/mission_xyz/workspace
-       -> ~/.claude/projects/-home-vader-mini-mind-v2-missions-mission-xyz-workspace
+    e.g., /path/to/AI-AtlasForge/missions/mission_xyz/workspace
+       -> ~/.claude/projects/-path-to-AI-AtlasForge-missions-mission-xyz-workspace
 
     Note: Claude converts underscores to dashes in directory names.
 
@@ -1464,7 +1470,7 @@ Tasks:
 3. Verify against success criteria from your plan
 
 === PHASE 2: ADVERSARIAL TESTING (Epistemic Rigor) ===
-The adversarial_testing module is available at /home/vader/mini-mind-v2/adversarial_testing/
+The adversarial_testing module is available in the project's adversarial_testing/ directory.
 
 Adversarial Testing Tasks:
 1. **Red Team Analysis**: Use the AdversarialRunner to spawn a fresh agent that tries to BREAK your code
@@ -1486,8 +1492,6 @@ Adversarial Testing Tasks:
 === ADVERSARIAL TESTING CODE ===
 ```python
 # Example usage (run this to perform adversarial testing)
-import sys
-sys.path.insert(0, '/home/vader/mini-mind-v2')
 from adversarial_testing import AdversarialRunner, AdversarialConfig
 from experiment_framework import ModelType
 

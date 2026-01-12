@@ -9,7 +9,7 @@ Tracks concept fingerprints across multi-cycle missions to:
 
 Integrates with RDE's cycle system to checkpoint fingerprints at CYCLE_END.
 
-Inspired by: mini-mind's identity fingerprinting and RCFT theory
+Inspired by identity fingerprinting patterns and RCFT theory
 """
 
 import json
@@ -397,7 +397,7 @@ class MissionContinuityTracker:
         """
         Merge multiple fingerprints into one (for fork-remerge scenarios).
 
-        This implements the identity healing concept from mini-mind's PCIT theory -
+        This implements the identity healing concept from PCIT theory -
         merged fingerprint can be closer to each source than sources are to each other.
 
         Args:

@@ -25,11 +25,11 @@ from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-RECOMMENDATIONS_PATH = BASE_DIR / "state" / "recommendations.json"
-MISSION_PATH = BASE_DIR / "state" / "mission.json"
-MISSION_LOGS_DIR = BASE_DIR / "missions" / "mission_logs"
+# Paths - use centralized configuration
+from atlasforge_config import BASE_DIR, STATE_DIR, MISSIONS_DIR
+RECOMMENDATIONS_PATH = STATE_DIR / "recommendations.json"
+MISSION_PATH = STATE_DIR / "mission.json"
+MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
 
 
 # =============================================================================

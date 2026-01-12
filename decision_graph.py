@@ -40,9 +40,9 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-DECISION_GRAPH_DIR = BASE_DIR / "rde_data" / "decision_graphs"
+# Paths - use centralized configuration
+from atlasforge_config import RDE_DATA_DIR
+DECISION_GRAPH_DIR = RDE_DATA_DIR / "decision_graphs"
 DECISION_GRAPH_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -666,7 +666,7 @@ if __name__ == "__main__":
         mission_id=test_mission,
         stage="PLANNING",
         tool_name="Read",
-        input_summary={"file_path": "/home/vader/project/main.py"},
+        input_summary={"file_path": "/home/user/project/main.py"},
         output_summary={"lines": 100},
         status="success",
         duration_ms=50
@@ -677,7 +677,7 @@ if __name__ == "__main__":
         mission_id=test_mission,
         stage="BUILDING",
         tool_name="Edit",
-        input_summary={"file_path": "/home/vader/project/main.py", "old_string": "foo", "new_string": "bar"},
+        input_summary={"file_path": "/home/user/project/main.py", "old_string": "foo", "new_string": "bar"},
         output_summary={"success": True},
         status="success",
         duration_ms=100

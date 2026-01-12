@@ -10,7 +10,7 @@ This module provides the intelligence behind mission recovery:
 - Generates targeted prompts to restore alignment
 - Can merge multiple diverged mission branches
 
-Inspired by: mini-mind's identity healing protocol and PCIT theory
+Inspired by identity healing protocols and PCIT theory
 """
 
 import json
@@ -340,7 +340,7 @@ def merge_diverged_branches(
     """
     Merge fingerprints from diverged mission branches.
 
-    This implements the fork-remerge capability from mini-mind's PCIT theory.
+    This implements the fork-remerge capability from PCIT theory.
     The merged fingerprint can be closer to each source than sources are to each other.
 
     Args:

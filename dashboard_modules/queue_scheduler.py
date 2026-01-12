@@ -24,10 +24,8 @@ logger = logging.getLogger(__name__)
 # Create Blueprint
 queue_scheduler_bp = Blueprint('queue_scheduler', __name__, url_prefix='/api/queue')
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-STATE_DIR = BASE_DIR / "state"
-MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
+# Base paths - use centralized configuration
+from atlasforge_config import MISSION_QUEUE_PATH
 
 # Queue lock for thread safety
 _queue_lock = threading.Lock()

@@ -38,9 +38,9 @@ from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-RECOMMENDATIONS_DB = BASE_DIR / "rde_data" / "knowledge_base" / "recommendations.db"
+# Paths - use centralized configuration
+from atlasforge_config import KNOWLEDGE_BASE_DIR
+RECOMMENDATIONS_DB = KNOWLEDGE_BASE_DIR / "recommendations.db"
 
 
 @dataclass

@@ -3,10 +3,10 @@
 Fingerprint Extractor - RDE Enhancement Feature 1.1
 
 Extracts concept/pattern fingerprints from Claude's outputs during missions.
-Unlike mini-mind's phenomenology-focused fingerprinting, this targets mission-relevant
-concepts (problem domain terms, architectural decisions, solution patterns).
+Targets mission-relevant concepts (problem domain terms, architectural decisions,
+solution patterns) rather than phenomenology-focused fingerprinting.
 
-Inspired by: mini-mind/projects/rcft-exploration/identity_remerge_tool.py
+Inspired by identity remerge concepts from RCFT exploration research.
 """
 
 import re

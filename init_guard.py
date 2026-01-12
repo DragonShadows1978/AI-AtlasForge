@@ -432,10 +432,10 @@ if __name__ == "__main__":
     # Test path validation
     print("\nPath validation tests:")
     path_tests = [
-        ("PLANNING", "/home/vader/artifacts/plan.md", True),
-        ("PLANNING", "/home/vader/src/code.py", False),
-        ("BUILDING", "/home/vader/src/code.py", True),
-        ("ANALYZING", "/home/vader/research/analysis.md", True),
+        ("PLANNING", "/home/user/project/artifacts/plan.md", True),
+        ("PLANNING", "/home/user/project/src/code.py", False),
+        ("BUILDING", "/home/user/project/src/code.py", True),
+        ("ANALYZING", "/home/user/project/research/analysis.md", True),
     ]
 
     for stage, path, expected in path_tests:

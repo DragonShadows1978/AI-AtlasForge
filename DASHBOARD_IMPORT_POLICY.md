@@ -1,7 +1,8 @@
 # Dashboard Import Policy Document
 
-**Version:** 1.0
+**Version:** 2.0
 **Created:** 2025-12-23
+**Updated:** 2026-01-12
 **Status:** Production
 **Scope:** dashboard_v2.py, dashboard_modules/, and integrated workspace modules
 
@@ -9,7 +10,7 @@
 
 ## Executive Summary
 
-This document establishes the import policy for the Mini-Mind RDE Dashboard codebase. It defines which paths are valid import sources, which patterns are forbidden, and provides guidelines to prevent cross-mission contamination.
+This document establishes the import policy for the AI-AtlasForge Dashboard codebase. It defines which paths are valid import sources, which patterns are forbidden, and provides guidelines to prevent cross-mission contamination.
 
 ---
 
@@ -23,9 +24,10 @@ The dashboard may import from the following sources:
 |-------------|------|-----------------|
 | **Standard Library** | Python stdlib | `os`, `json`, `pathlib`, `datetime` |
 | **Third-Party Packages** | pip installed | `flask`, `flask_socketio`, `jinja2` |
-| **Top-Level Project Modules** | `/home/vader/mini-mind-v2/*.py` | `mission_analytics`, `mission_knowledge_base`, `decision_graph` |
-| **Dashboard Modules** | `/home/vader/mini-mind-v2/dashboard_modules/` | `from dashboard_modules.analytics import analytics_bp` |
-| **Shared Workspace Modules** | `/home/vader/mini-mind-v2/workspace/` | `glassbox`, `bug_bounty`, `narrative` |
+| **Top-Level Project Modules** | `<ATLASFORGE_ROOT>/*.py` | `mission_analytics`, `mission_knowledge_base`, `decision_graph` |
+| **Dashboard Modules** | `<ATLASFORGE_ROOT>/dashboard_modules/` | `from dashboard_modules.analytics import analytics_bp` |
+| **Shared Workspace Modules** | `<ATLASFORGE_ROOT>/workspace/` | `glassbox`, `investigation_validator` |
+| **Config Module** | `atlasforge_config.py` | `from atlasforge_config import BASE_DIR, WORKSPACE_DIR` |
 
 ### 1.2 Forbidden Import Sources
 
@@ -38,6 +40,7 @@ The following import sources are **NEVER** permitted:
 | **Hardcoded Mission IDs** | `mission_865ac720`, etc. | Non-portable, breaks on mission cleanup |
 | **Temporary Directories** | `/tmp/`, `/var/tmp/` | Unreliable, ephemeral |
 | **User Home Subpaths** | `~/.local/`, `/home/*/` (outside project) | Not portable, security concern |
+| **Hardcoded Absolute Paths** | `/home/vader/...` | Not portable across installations |
 
 ---
 
@@ -47,8 +50,8 @@ The following import sources are **NEVER** permitted:
 
 `sys.path.insert()` may be used when:
 
-1. **Shared workspace access** - Adding `/home/vader/mini-mind-v2/workspace` to enable imports of glassbox, bug_bounty, or narrative modules
-2. **Project root access** - Adding `/home/vader/mini-mind-v2` for top-level module imports
+1. **Shared workspace access** - Adding workspace directory to enable imports of glassbox, investigation_validator modules
+2. **Project root access** - Adding project root for top-level module imports
 3. **Script self-reference** - Adding the script's own directory via `Path(__file__).parent`
 
 ### 2.2 Required Pattern for New Modules
@@ -56,15 +59,15 @@ The following import sources are **NEVER** permitted:
 When adding a new module that needs sys.path manipulation:
 
 ```python
-# CORRECT: Use Path objects and insert at index 0
+# CORRECT: Use atlasforge_config for paths
+from atlasforge_config import BASE_DIR, WORKSPACE_DIR
 import sys
-from pathlib import Path
 
 # Shared workspace (acceptable)
-sys.path.insert(0, str(Path("/home/vader/mini-mind-v2/workspace")))
+sys.path.insert(0, str(WORKSPACE_DIR))
 
 # Project root (acceptable)
-sys.path.insert(0, str(Path("/home/vader/mini-mind-v2")))
+sys.path.insert(0, str(BASE_DIR))
 
 # Self-relative (acceptable)
 sys.path.insert(0, str(Path(__file__).parent))
@@ -74,14 +77,17 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 ```python
 # FORBIDDEN: Mission-specific workspace
-sys.path.insert(0, "/home/vader/mini-mind-v2/missions/mission_abc123/workspace")
+sys.path.insert(0, "/path/to/missions/mission_abc123/workspace")
 
 # FORBIDDEN: Hardcoded mission ID
-mission_path = f"/home/vader/mini-mind-v2/missions/{mission_id}/workspace"
+mission_path = f"/path/to/missions/{mission_id}/workspace"
 sys.path.insert(0, mission_path)
 
 # FORBIDDEN: Dynamic mission path from state
 sys.path.insert(0, state["mission_workspace"])
+
+# FORBIDDEN: Hardcoded user paths
+sys.path.insert(0, "/home/vader/some/path")
 ```
 
 ---
@@ -111,23 +117,21 @@ app.register_blueprint(module_bp)
 
 ### 3.2 Workspace Module Registration
 
-Workspace modules (glassbox, bug_bounty, narrative) require sys.path setup:
+Workspace modules (glassbox, etc.) require sys.path setup:
 
 ```python
 # In dashboard_v2.py
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path("/home/vader/mini-mind-v2/workspace")))
+
+# Use relative path from script location
+sys.path.insert(0, str(Path(__file__).parent / "workspace"))
 
 # Then import
 from glassbox.dashboard_routes import glassbox_bp
-from bug_bounty.dashboard_routes import bug_bounty_bp
-from narrative.dashboard_routes import narrative_bp
 
 # Register blueprints
 app.register_blueprint(glassbox_bp, url_prefix='/api/glassbox')
-app.register_blueprint(bug_bounty_bp, url_prefix='/api/bug-bounty')
-app.register_blueprint(narrative_bp, url_prefix='/api/narrative')
 ```
 
 ---
@@ -169,7 +173,7 @@ It is acceptable to **reference** mission workspace files in data:
 ```python
 # ACCEPTABLE: Data reference (reading files, storing paths in JSON)
 scan_result = {
-    "code_path": "/home/vader/mini-mind-v2/missions/mission_865ac720/workspace/file.py",
+    "code_path": f"{MISSIONS_DIR}/mission_865ac720/workspace/file.py",
     "finding": "potential issue"
 }
 ```
@@ -180,7 +184,7 @@ It is **not** acceptable to **import** code from mission workspaces:
 
 ```python
 # FORBIDDEN: Code import
-sys.path.insert(0, "/home/vader/mini-mind-v2/missions/mission_865ac720/workspace")
+sys.path.insert(0, f"{MISSIONS_DIR}/mission_865ac720/workspace")
 from performance import web_vitals  # NEVER DO THIS
 ```
 
@@ -197,8 +201,9 @@ When adding new features to the dashboard:
 3. [ ] Import only from allowed sources (Section 1.1)
 4. [ ] No hardcoded mission IDs
 5. [ ] No sys.path manipulation pointing to missions/
-6. [ ] Register blueprint in dashboard_v2.py
-7. [ ] Add API routes with `/api/` prefix
+6. [ ] No hardcoded absolute paths - use atlasforge_config
+7. [ ] Register blueprint in dashboard_v2.py
+8. [ ] Add API routes with `/api/` prefix
 
 ### 6.2 Example: Adding a New Widget
 
@@ -224,7 +229,7 @@ def get_data():
 A validation script should be run to ensure compliance:
 
 ```bash
-python /home/vader/mini-mind-v2/workspace/tests/test_import_policy.py
+python workspace/tests/test_import_policy.py
 ```
 
 ### 7.2 Manual Review Points
@@ -235,27 +240,31 @@ When reviewing code changes:
 2. Verify no imports from `missions/mission_*/`
 3. Ensure new blueprints follow registration pattern
 4. Confirm relative imports are used appropriately
+5. Check for hardcoded absolute paths
 
 ---
 
 ## 8. Current Compliance Status
 
-As of 2025-12-23, all dashboard infrastructure is **compliant**:
+As of 2026-01-12, all dashboard infrastructure is **compliant**:
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | dashboard_v2.py | Compliant | sys.path only adds shared workspace |
 | dashboard_modules/*.py | Compliant | All imports from allowed sources |
 | workspace/glassbox/ | Compliant | Relative imports with fallback |
-| workspace/bug_bounty/ | Compliant | Relative imports with fallback |
-| workspace/narrative/ | Compliant | Relative imports with fallback |
+| atlasforge_config.py | Compliant | Centralized path configuration |
 
 ---
 
 ## 9. Import Architecture Overview
 
 ```
-/home/vader/mini-mind-v2/
+<ATLASFORGE_ROOT>/
+├── atlasforge_config.py         <- Centralized path configuration
+│   ├── BASE_DIR, WORKSPACE_DIR, STATE_DIR, etc.
+│   └── All other modules import paths from here
+│
 ├── dashboard_v2.py              <- Main entry point
 │   ├── imports from: dashboard_modules/, top-level *.py, workspace/
 │   └── sys.path adds: /workspace (allowed)
@@ -263,7 +272,6 @@ As of 2025-12-23, all dashboard infrastructure is **compliant**:
 ├── dashboard_modules/           <- Blueprint modules
 │   ├── analytics.py             -> imports mission_analytics
 │   ├── knowledge_base.py        -> imports mission_knowledge_base
-│   ├── git.py                   -> imports git_*, git_push_manager
 │   ├── rde.py                   -> imports exploration_hooks
 │   ├── recovery.py              -> imports stage_checkpoint_recovery
 │   ├── investigation.py         -> imports investigation_engine
@@ -271,8 +279,7 @@ As of 2025-12-23, all dashboard infrastructure is **compliant**:
 │
 ├── workspace/                   <- Shared workspace (OK to import)
 │   ├── glassbox/                -> Introspection system
-│   ├── bug_bounty/              -> Security scanning
-│   └── narrative/               -> Narrative workflows
+│   └── investigation_validator/ -> Fact-checking system
 │
 ├── missions/                    <- NEVER import from here
 │   └── mission_*/workspace/     FORBIDDEN
@@ -291,6 +298,7 @@ As of 2025-12-23, all dashboard infrastructure is **compliant**:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2025-12-23 | RDE Mission | Initial policy document |
+| 2.0 | 2026-01-12 | AI-AtlasForge | Updated for public release, removed hardcoded paths |
 
 ---
 

@@ -33,10 +33,10 @@ from sklearn.cluster import AgglomerativeClustering
 
 logger = logging.getLogger(__name__)
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-KNOWLEDGE_DIR = BASE_DIR / "rde_data" / "knowledge_base"
-MISSION_LOGS_DIR = BASE_DIR / "missions" / "mission_logs"
+# Paths - use centralized configuration
+from atlasforge_config import KNOWLEDGE_BASE_DIR, MISSIONS_DIR
+KNOWLEDGE_DIR = KNOWLEDGE_BASE_DIR
+MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
 
 # Ensure directories exist
 KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)

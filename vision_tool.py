@@ -4,7 +4,8 @@ Vision tool for Claude Autonomous - enables screen capture capability.
 """
 import sys
 import base64
-sys.path.insert(0, '/home/vader/mini-mind-v2/workspace')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "workspace"))
 
 from vision.screen_capture import ScreenCortex
 
@@ -93,7 +94,7 @@ def capture_burst_screenshots(
 
     if output_dir is None:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_dir = f'/home/vader/mini-mind-v2/screenshots/burst_{timestamp}'
+        output_dir = str(Path(__file__).resolve().parent / "screenshots" / f"burst_{timestamp}")
 
     try:
         result = capture_burst(

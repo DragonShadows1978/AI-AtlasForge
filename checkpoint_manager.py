@@ -27,8 +27,8 @@ import logging
 
 logger = logging.getLogger("checkpoint_manager")
 
-# Base directory for checkpoints
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Base directory for checkpoints - use centralized configuration
+from atlasforge_config import BASE_DIR
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
 
 # Ensure checkpoint directory exists

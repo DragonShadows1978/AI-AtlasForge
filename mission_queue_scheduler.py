@@ -26,12 +26,9 @@ import uuid as uuid_module
 # Configure logging
 logger = logging.getLogger("mission_queue_scheduler")
 
-# Paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-STATE_DIR = BASE_DIR / "state"
-MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
-MISSION_PATH = STATE_DIR / "mission.json"
-MISSION_LOGS_DIR = BASE_DIR / "missions" / "mission_logs"
+# Paths - use centralized configuration
+from atlasforge_config import MISSION_QUEUE_PATH, MISSION_PATH, MISSIONS_DIR
+MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
 
 
 class Priority(Enum):

@@ -25,8 +25,8 @@ from checkpoint_manager import CheckpointManager, Checkpoint, CheckpointStatus
 
 logger = logging.getLogger("result_aggregator")
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
+# Base paths - use centralized configuration
+from atlasforge_config import BASE_DIR
 
 
 class ConflictType(Enum):

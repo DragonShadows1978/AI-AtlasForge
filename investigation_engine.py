@@ -31,9 +31,8 @@ _url_handlers_available = None
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("investigation_engine")
 
-# Base paths
-BASE_DIR = Path("/home/vader/mini-mind-v2")
-STATE_DIR = BASE_DIR / "state"
+# Base paths - use centralized configuration
+from atlasforge_config import BASE_DIR, STATE_DIR
 INVESTIGATION_STATE_PATH = STATE_DIR / "investigation_state.json"
 INV_GROUND_RULES_PATH = BASE_DIR / "investigations" / "INV_GROUND_RULES.md"
 
@@ -164,10 +163,6 @@ def _check_url_handlers():
     global _url_handlers_available
     if _url_handlers_available is None:
         try:
-            import sys
-            handler_path = "/home/vader/mini-mind-v2"
-            if handler_path not in sys.path:
-                sys.path.insert(0, handler_path)
             from url_handlers import classify_url, extract_metadata, extract_all_metadata
             _url_handlers_available = True
         except ImportError as e:
@@ -1618,7 +1613,8 @@ class InvestigationRunner:
         try:
             # Import the validator (deferred to avoid circular imports)
             import sys
-            validator_path = "/home/vader/mini-mind-v2/workspace/investigation_validator"
+            from atlasforge_config import WORKSPACE_DIR
+            validator_path = str(WORKSPACE_DIR / "investigation_validator")
             if validator_path not in sys.path:
                 sys.path.insert(0, validator_path)
 

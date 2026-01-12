@@ -18,6 +18,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 
+from atlasforge_config import EXPLORATION_DIR, MISSION_PATH
+
 # Import our modules
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -80,7 +82,7 @@ def register_interactive_graph_routes(app):
 
             if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
                 # Try global graph
-                global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+                global_graph_path = EXPLORATION_DIR
                 if global_graph_path.exists():
                     graph = ExplorationGraph(storage_path=global_graph_path)
                 else:
@@ -134,7 +136,7 @@ def register_interactive_graph_routes(app):
 
             if not mission_id:
                 # Use current mission
-                mission_path = Path('/home/vader/mini-mind-v2/state/mission.json')
+                mission_path = MISSION_PATH
                 mission = io_utils.atomic_read_json(mission_path, {})
                 mission_id = mission.get('mission_id')
 
@@ -201,7 +203,7 @@ def register_interactive_graph_routes(app):
 
             if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
                 # Try global graph
-                global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+                global_graph_path = EXPLORATION_DIR
                 if global_graph_path.exists():
                     graph = ExplorationGraph(storage_path=global_graph_path)
                 else:
@@ -295,7 +297,7 @@ def register_interactive_graph_routes(app):
             enhancer = exploration_hooks.get_current_enhancer(force_reload=True)
 
             if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
-                global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+                global_graph_path = EXPLORATION_DIR
                 if global_graph_path.exists():
                     graph = ExplorationGraph(storage_path=global_graph_path)
                 else:
@@ -359,9 +361,11 @@ def register_interactive_graph_routes(app):
                 return jsonify({"error": "No path provided", "content": "", "total_lines": 0})
 
             # Security: only allow files under certain directories
+            # These are dynamically set based on the AtlasForge installation
+            from atlasforge_config import BASE_DIR
             allowed_roots = [
-                '/home/vader/mini-mind-v2/',
-                '/home/vader/'
+                str(BASE_DIR) + '/',
+                str(Path.home()) + '/'
             ]
             abs_path = str(Path(file_path).resolve())
 
@@ -414,7 +418,7 @@ def register_interactive_graph_routes(app):
             enhancer = exploration_hooks.get_current_enhancer(force_reload=True)
 
             if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
-                global_graph_path = Path('/home/vader/mini-mind-v2/rde_data/exploration')
+                global_graph_path = EXPLORATION_DIR
                 if global_graph_path.exists():
                     graph = ExplorationGraph(storage_path=global_graph_path)
                 else:

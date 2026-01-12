@@ -136,8 +136,9 @@ def api_kb_learning_detail(learning_id):
         # Add investigation report path if from investigation
         if data.get("source_type") == "investigation" and data.get("source_investigation_id"):
             from pathlib import Path
+            from atlasforge_config import INVESTIGATIONS_DIR
             inv_id = data["source_investigation_id"]
-            report_path = Path(f"/home/vader/mini-mind-v2/investigations/{inv_id}/artifacts/investigation_report.md")
+            report_path = INVESTIGATIONS_DIR / inv_id / "artifacts" / "investigation_report.md"
             if report_path.exists():
                 data["investigation_report_path"] = str(report_path)
 
@@ -722,11 +723,12 @@ def api_kb_ingest_single_investigation(investigation_id):
     try:
         from mission_knowledge_base import get_knowledge_base
         from pathlib import Path
+        from atlasforge_config import INVESTIGATIONS_DIR
 
         kb = get_knowledge_base()
 
         # Find investigation directory
-        investigations_dir = Path("/home/vader/mini-mind-v2/investigations")
+        investigations_dir = INVESTIGATIONS_DIR
         inv_dir = investigations_dir / investigation_id
 
         if not inv_dir.exists():
@@ -992,8 +994,9 @@ def api_kb_investigation_report(investigation_id):
     try:
         from pathlib import Path
         import markdown
+        from atlasforge_config import INVESTIGATIONS_DIR
 
-        investigations_dir = Path("/home/vader/mini-mind-v2/investigations")
+        investigations_dir = INVESTIGATIONS_DIR
         report_path = investigations_dir / investigation_id / "artifacts" / "investigation_report.md"
 
         if not report_path.exists():
