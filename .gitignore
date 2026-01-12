@@ -1,0 +1,93 @@
+# ===================================
+# RDE (Research & Development Engine)
+# Git Ignore Configuration
+# ===================================
+
+# ------ Mission & Runtime Data ------
+# Mission data (runtime generated)
+missions/
+checkpoints/
+
+# State/runtime data (critical for operation, not versioned)
+state/
+rde_data/
+backups/
+experiments/
+
+# Runtime logs and screenshots
+logs/
+screenshots/
+
+# Process ID files
+*.pid
+
+# ------ Python ------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ------ Large Files (ML/Models) ------
+*.onnx
+*.pth
+*.pt
+*.pkl
+*.model
+*.weights
+*.h5
+*.ckpt
+*.safetensors
+*.bin
+
+# ------ Temp Files ------
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+*.pre_restore
+
+# Workspace (transient)
+workspace/
+
+# ------ Environment ------
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+env/
+
+# ------ IDE/Editor ------
+.vscode/
+.idea/
+*.sublime-*
+.project
+.pydevproject
+
+# ------ OS ------
+.DS_Store
+Thumbs.db
+*.lnk
+
+# ------ Databases (local only) ------
+*.db
+*.sqlite
+*.sqlite3
+
+# ------ Testing Artifacts ------
+test_output/
+*.coverage
+.tox/
+.nox/
+
+# ------ Git Recovery (keep recovery branches local) ------
+# Note: recovery-* branches are created locally but not pushed
+node_modules/

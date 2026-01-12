@@ -1,0 +1,2457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-AtlasForge</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">
+
+    <!-- Preload critical resources for LCP optimization -->
+    <link rel="preload" href="/static/dist/bundle.min.css" as="style" fetchpriority="high">
+    <link rel="modulepreload" href="/static/dist/bundle.min.js" fetchpriority="high">
+    <link rel="preload" href="/static/vendor/socket.io.min.js" as="script" fetchpriority="high">
+
+    <!--
+        Prefetch commonly-used lazy chunks (loaded on idle)
+
+        MAINTENANCE: After rebuilding the bundle, update these hashes:
+        1. Run: ls dashboard_static/dist/chunks/
+        2. Note new hash suffixes for git-analytics, kb-analytics, lessons
+        3. Update the hrefs below to match
+
+        These prefetch hints are optional - if stale, lazy loading still works,
+        but users experience a brief delay on first tab access.
+    -->
+    <link rel="prefetch" href="/static/dist/chunks/git-analytics-H3IQ4JFO.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-S7GSMTBL.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-YVT5J62T.js" as="script">
+
+    <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
+    <!-- Socket.io - critical, must load before ES6 bundle -->
+    <script src="/static/vendor/socket.io.min.js"></script>
+
+    <!-- Non-critical vendor libraries - loaded via lazy loader after initial render -->
+    <!-- These large libraries (vis-timeline 556KB, xterm 277KB, chart.js 201KB) are -->
+    <!-- dynamically loaded only when their features are first accessed -->
+    <script>
+        // Lazy library loader - loads scripts on demand
+        window.lazyLibs = {
+            chart: { loaded: false, loading: false, src: '/static/vendor/chart.umd.min.js', callbacks: [] },
+            vis: { loaded: false, loading: false, src: '/static/vendor/vis-timeline-graph2d.min.js', css: '/static/vendor/vis-timeline-graph2d.min.css', callbacks: [] },
+            xterm: { loaded: false, loading: false, src: '/static/vendor/xterm.min.js', addon: '/static/vendor/xterm-addon-fit.min.js', css: '/static/vendor/xterm.min.css', callbacks: [] }
+        };
+        window.loadLib = function(name) {
+            return new Promise(function(resolve, reject) {
+                var lib = window.lazyLibs[name];
+                if (!lib) { reject(new Error('Unknown lib: ' + name)); return; }
+                if (lib.loaded) { resolve(); return; }
+                lib.callbacks.push(resolve);
+                if (lib.loading) return;
+                lib.loading = true;
+                // Load CSS first if needed
+                if (lib.css) {
+                    var link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = lib.css;
+                    document.head.appendChild(link);
+                }
+                // Load main script
+                var script = document.createElement('script');
+                script.src = lib.src;
+                script.onload = function() {
+                    // Load addon if exists
+                    if (lib.addon) {
+                        var addon = document.createElement('script');
+                        addon.src = lib.addon;
+                        addon.onload = function() {
+                            lib.loaded = true;
+                            lib.callbacks.forEach(function(cb) { cb(); });
+                        };
+                        document.head.appendChild(addon);
+                    } else {
+                        lib.loaded = true;
+                        lib.callbacks.forEach(function(cb) { cb(); });
+                    }
+                };
+                script.onerror = function() { reject(new Error('Failed to load ' + name)); };
+                document.head.appendChild(script);
+            });
+        };
+    </script>
+
+    <!-- Bundled CSS (minified) -->
+    <link rel="stylesheet" href="/static/dist/bundle.min.css">
+
+    <!-- Fallback to original CSS if bundle not found -->
+    <link rel="stylesheet" href="/static/css/main.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="/static/css/main.css"></noscript>
+
+    <!-- Critical CSS for above-the-fold content - eliminates render-blocking CSS -->
+    <style>
+        /* CSS Variables */
+        :root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#c9d1d9;--text-dim:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d29922}
+
+        /* Base Styles */
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+        /* Header & Navigation */
+        header{background:var(--panel);border-bottom:1px solid var(--border);padding:15px 20px;display:flex;justify-content:space-between;align-items:center}
+        h1{color:var(--accent);font-size:1.3em}
+        .status-badge{padding:5px 12px;border-radius:20px;font-size:0.85em;font-weight:500}
+        .status-badge.on{background:rgba(63,185,80,0.2);color:var(--green)}
+        .status-badge.off{background:rgba(248,81,73,0.2);color:var(--red)}
+        .main-tabs{display:flex;background:var(--panel);border-bottom:1px solid var(--border);padding:0 20px}
+        .main-tab{padding:12px 20px;color:var(--text-dim);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s}
+        .main-tab:hover{color:var(--text)}
+        .main-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+        /* Layout */
+        .container{display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr) minmax(300px,1.2fr);gap:15px;padding:15px;height:calc(100vh - 140px);overflow:hidden}
+        .widget-column-1,.widget-column-2{overflow-y:auto;height:100%;padding-right:5px;scrollbar-gutter:stable}
+        .left-panel{overflow-y:auto;max-height:calc(100vh - 140px)}
+        /* Mobile: horizontal scroll layout */
+        @media(max-width:600px){html,body{min-width:300vw;background:var(--bg)}body{overflow-x:auto}#rde-tab{width:100vw;overflow-x:scroll;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth;background:var(--bg)}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:300vw;min-width:300vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - 140px);background:var(--bg)}.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - 160px)}}
+        .mobile-scroll-dots{display:none}
+        @media(max-width:600px){.mobile-scroll-dots{display:flex;justify-content:center;gap:8px;position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(22,27,34,0.95);border-radius:20px;padding:6px 12px;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.3)}.scroll-dot{width:8px;height:8px;border-radius:50%;background:var(--text-dim);cursor:pointer;transition:all 0.3s ease}.scroll-dot.active{background:var(--accent);transform:scale(1.3);box-shadow:0 0 8px var(--accent)}.scroll-dot:hover{background:var(--accent);opacity:0.7}}
+        .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:15px}
+        .card h3{color:var(--accent);font-size:0.9em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+        .tab-content{display:none}
+        .tab-content.active{display:block}
+
+        /* Buttons */
+        .btn{padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer;font-size:0.85em;transition:all 0.2s}
+        .btn:hover{background:var(--border)}
+        .btn.primary{border-color:var(--accent);color:var(--accent)}
+        .btn.success{border-color:var(--green);color:var(--green)}
+        .btn.danger{border-color:var(--red);color:var(--red)}
+        .btn-group{display:flex;gap:8px;margin-top:10px}
+
+        /* Status Widget */
+        .stat-row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:0.9em}
+        .stat-label{color:var(--text-dim)}
+        .stat-value{color:var(--text);font-weight:500}
+        .stat-value.highlight{color:var(--accent)}
+        .stage-indicator{display:flex;gap:4px;margin-top:15px}
+        .stage{flex:1;padding:6px;text-align:center;font-size:0.7em;background:var(--bg);border-radius:4px;color:var(--text-dim)}
+        .stage.active{background:var(--accent);color:var(--bg)}
+        .stage.complete{background:var(--green);color:var(--bg)}
+
+        /* Chat Container */
+        .chat-container{height:calc(100vh - 200px);display:flex;flex-direction:column}
+        .chat-messages{flex:1;overflow-y:auto;padding:15px;display:flex;flex-direction:column;gap:10px}
+
+        /* Loading Spinner */
+        .loading-spinner{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:40px;height:40px;border:3px solid var(--border);border-top:3px solid var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+        @keyframes spin{0%{transform:translate(-50%,-50%) rotate(0deg)}100%{transform:translate(-50%,-50%) rotate(360deg)}}
+
+        /* WebSocket Connection Indicator */
+        .ws-indicator{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border);transition:all 0.3s ease}
+        .ws-dot{width:8px;height:8px;border-radius:50%;transition:all 0.3s ease}
+        .ws-status-text{color:var(--text-dim)}
+        .ws-indicator.ws-connected .ws-dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+        .ws-indicator.ws-connected .ws-status-text{color:var(--green)}
+        .ws-indicator.ws-connecting .ws-dot{background:var(--yellow);animation:pulse 1.5s infinite}
+        .ws-indicator.ws-connecting .ws-status-text{color:var(--yellow)}
+        .ws-indicator.ws-reconnecting .ws-dot{background:var(--yellow);animation:pulse 0.8s infinite}
+        .ws-indicator.ws-reconnecting .ws-status-text{color:var(--yellow)}
+        .ws-indicator.ws-disconnected .ws-dot{background:var(--red)}
+        .ws-indicator.ws-disconnected .ws-status-text{color:var(--red)}
+        .ws-indicator.ws-error .ws-dot{background:var(--red);animation:pulse 0.5s infinite}
+        .ws-indicator.ws-error .ws-status-text{color:var(--red)}
+        .ws-indicator.ws-polling .ws-dot{background:#bc8cff}
+        .ws-indicator.ws-polling .ws-status-text{color:#bc8cff}
+        .ws-indicator.ws-unknown .ws-dot{background:var(--text-dim)}
+        .ws-indicator.ws-unknown .ws-status-text{color:var(--text-dim)}
+        /* Mini indicator for inline use (RDE Activity header) */
+        h3 .ws-indicator{display:inline-block;width:8px;height:8px;border-radius:50%;padding:0;border:none;background:var(--text-dim);margin-left:5px;vertical-align:middle}
+        h3 .ws-indicator.ws-connected{background:var(--green);box-shadow:0 0 4px var(--green)}
+        h3 .ws-indicator.ws-polling{background:#bc8cff;animation:pulse 1.5s infinite}
+        h3 .ws-indicator.ws-disconnected{background:var(--red)}
+        h3 .ws-indicator.ws-error{background:var(--red);animation:pulse 0.5s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+        /* Service Status Indicators (RDE + Investigation) */
+        .service-status-group{display:flex;align-items:center;gap:12px}
+        .service-status{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border)}
+        .service-status .service-label{color:var(--text-dim);font-weight:500}
+        .service-status .service-dot{width:8px;height:8px;border-radius:50%;transition:all 0.3s ease}
+        .service-status .service-state{font-weight:500}
+        .service-status.online .service-dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+        .service-status.online .service-state{color:var(--green)}
+        .service-status.offline .service-dot{background:var(--red)}
+        .service-status.offline .service-state{color:var(--red)}
+        .service-status.busy .service-dot{background:var(--yellow);animation:pulse 1.5s infinite}
+        .service-status.busy .service-state{color:var(--yellow)}
+
+        /* Service Status Bar (below header) */
+        .service-status-bar{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 20px;display:flex;align-items:center;gap:20px}
+        .service-status-bar .bar-label{color:var(--text-dim);font-size:0.8em;font-weight:500}
+        .service-status-bar .service-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:6px;background:var(--bg);border:1px solid var(--border);cursor:pointer;transition:all 0.2s}
+        .service-status-bar .service-item:hover{border-color:var(--accent);background:rgba(88,166,255,0.1)}
+        .service-status-bar .service-item .svc-dot{width:10px;height:10px;border-radius:50%;transition:all 0.3s}
+        .service-status-bar .service-item .svc-name{color:var(--text);font-size:0.85em;font-weight:500}
+        .service-status-bar .service-item .svc-port{color:var(--text-dim);font-size:0.75em}
+        .service-status-bar .service-item.online .svc-dot{background:var(--green);box-shadow:0 0 8px var(--green)}
+        .service-status-bar .service-item.offline .svc-dot{background:var(--red)}
+        .service-status-bar .service-item.restarting .svc-dot{background:var(--yellow);animation:pulse 0.5s infinite}
+        .service-status-bar .service-item .restart-hint{font-size:0.7em;color:var(--text-dim);margin-left:4px}
+
+        /* Restart Modal */
+        .restart-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:2000;opacity:0;visibility:hidden;transition:all 0.2s}
+        .restart-modal-overlay.visible{opacity:1;visibility:visible}
+        .restart-modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:400px;width:90%}
+        .restart-modal h3{color:var(--accent);margin-bottom:16px}
+        .restart-modal p{color:var(--text);margin-bottom:20px;line-height:1.5}
+        .restart-modal .modal-btns{display:flex;gap:12px;justify-content:flex-end}
+    </style>
+</head>
+<body>
+    <!-- Loading indicator (hidden after JS loads) -->
+    <div id="loading-indicator" class="loading-spinner"></div>
+
+    <!-- Offline indicator -->
+    <div id="offline-indicator" class="offline-indicator">
+        ⚠ Connection Lost - Attempting to reconnect...
+    </div>
+    <!-- Graph tooltip -->
+    <div id="graph-tooltip" class="graph-tooltip">
+        <div class="tt-name"></div>
+        <div class="tt-type"></div>
+        <div class="tt-path"></div>
+        <div class="tt-summary"></div>
+    </div>
+    <header>
+        <h1>AI-AtlasForge</h1>
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <!-- Layout Toolbar -->
+            <div class="layout-toolbar" id="layout-toolbar">
+                <!-- Undo/Redo Buttons -->
+                <button id="layout-undo-btn" class="toolbar-btn" title="Undo layout change (Ctrl+Z)" disabled aria-label="Undo layout change">
+                    <span class="toolbar-icon">&#8630;</span>
+                </button>
+                <button id="layout-redo-btn" class="toolbar-btn" title="Redo layout change (Ctrl+Y)" disabled aria-label="Redo layout change">
+                    <span class="toolbar-icon">&#8631;</span>
+                </button>
+
+                <span class="toolbar-divider"></span>
+
+                <!-- Preset Selector -->
+                <div class="preset-selector" id="preset-selector" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false" title="Select layout preset">
+                    <span id="preset-name" class="preset-name">Default</span>
+                    <span id="unsaved-indicator" class="unsaved-indicator" title="Unsaved changes">*</span>
+                    <span class="preset-arrow">&#9662;</span>
+                </div>
+
+                <!-- Preset Dropdown (hidden by default) -->
+                <div id="preset-dropdown" class="preset-dropdown" role="listbox" aria-label="Layout presets" style="display: none;"></div>
+
+                <!-- Save Preset Button -->
+                <button id="save-preset-btn" class="toolbar-btn" title="Save current layout as preset" aria-label="Save layout preset">
+                    <span class="toolbar-icon">&#128190;</span> Save
+                </button>
+
+                <span class="toolbar-divider"></span>
+
+                <!-- Reset Button -->
+                <button class="toolbar-btn" onclick="resetWidgetLayout()" title="Reset widget layout to default order" aria-label="Reset layout">
+                    Reset
+                </button>
+
+                <span class="toolbar-divider"></span>
+
+                <!-- Lock Tiles Button -->
+                <button id="lock-tiles-btn" class="lock-tiles-btn" onclick="toggleTileLock()" title="Lock tiles to prevent accidental movement while navigating">
+                    <span class="lock-icon">&#128275;</span>
+                    <span class="lock-text">Lock</span>
+                </button>
+            </div>
+            <!-- WebSocket Connection Status Indicator -->
+            <div id="ws-connection-indicator" class="ws-indicator ws-disconnected" title="WebSocket connection status">
+                <span class="ws-dot"></span>
+                <span id="ws-connection-status" class="ws-status-text">Connecting...</span>
+            </div>
+            <!-- Service Status Indicators -->
+            <div class="service-status-group">
+                <div id="rde-service-status" class="service-status offline" title="R&D Engine status">
+                    <span class="service-label">AtlasForge:</span>
+                    <span class="service-dot"></span>
+                    <span id="rde-service-state" class="service-state">Offline</span>
+                </div>
+                <div id="investigation-service-status" class="service-status offline" title="Dashboard Investigation status">
+                    <span class="service-label">AtlasForge Inv:</span>
+                    <span class="service-dot"></span>
+                    <span id="investigation-service-state" class="service-state">Offline</span>
+                </div>
+                </div>
+        </div>
+    </header>
+
+    <!-- Service Status Bar -->
+    <div class="service-status-bar">
+        <span class="bar-label">Services:</span>
+        <div id="terminal-service" class="service-item offline" onclick="showRestartModal('terminal')" title="Click to restart">
+            <span class="svc-dot"></span>
+            <span class="svc-name">Web Terminal</span>
+            <span class="svc-port">:5002</span>
+            <span class="restart-hint">(click to restart)</span>
+        </div>
+        <!-- Additional services can be added here -->
+    </div>
+
+    <!-- Restart Confirmation Modal -->
+    <div id="restart-modal-overlay" class="restart-modal-overlay">
+        <div class="restart-modal">
+            <h3>Restart Service?</h3>
+            <p id="restart-modal-text">Are you sure you want to restart the Web Terminal service on port 5002?</p>
+            <div class="modal-btns">
+                <button class="btn" onclick="hideRestartModal()">Cancel</button>
+                <button class="btn danger" id="restart-confirm-btn" onclick="confirmRestart()">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <nav class="main-tabs">
+        <div class="main-tab active" data-tab="rde" onclick="switchTab('rde')">AtlasForge</div>
+        <div class="main-tab" data-tab="investigations" onclick="switchTab('investigations')">Investigations</div>
+        <div class="main-tab" data-tab="analytics" onclick="switchTab('analytics')">Analytics</div>
+        <div class="main-tab" data-tab="lessons" onclick="switchTab('lessons')">Lessons Learned</div>
+        <div class="main-tab" data-tab="glassbox" onclick="switchTab('glassbox')">GlassBox</div>
+        <div class="main-tab" data-tab="missionlogs" onclick="switchTab('missionlogs')">Mission Logs</div>
+        </nav>
+
+    <div id="rde-tab" class="tab-content active">
+    <div class="container">
+        <!-- Widget Column 1 (Primary - User Priority) -->
+        <div class="widget-column-1">
+            <!-- Controls -->
+            <!-- Status -->
+            <div class="card" id="status-card">
+                <h3>Status</h3>
+                <div id="status-info">
+                    <div class="stat-row">
+                        <span class="stat-label">Mode</span>
+                        <span class="stat-value" id="stat-mode">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Stage</span>
+                        <span class="stat-value highlight" id="stat-stage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Iteration</span>
+                        <span class="stat-value" id="stat-iteration">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Mission Cycle</span>
+                        <span class="stat-value highlight" id="stat-mission-cycle">1/1</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Cycles</span>
+                        <span class="stat-value" id="stat-cycles">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Boots</span>
+                        <span class="stat-value" id="stat-boots">-</span>
+                    </div>
+                    <div class="stat-row" id="backup-age-row">
+                        <span class="stat-label">Backup</span>
+                        <span class="stat-value backup-age-badge fresh" id="stat-backup-age">-</span>
+                    </div>
+                </div>
+
+                <div class="stage-indicator" id="stage-indicator">
+                    <div class="stage" data-stage="PLANNING">PLAN</div>
+                    <div class="stage" data-stage="BUILDING">BUILD</div>
+                    <div class="stage" data-stage="TESTING">TEST</div>
+                    <div class="stage" data-stage="ANALYZING">ANALYZE</div>
+                    <div class="stage" data-stage="CYCLE_END">CYCLE</div>
+                    <div class="stage" data-stage="COMPLETE">DONE</div>
+                </div>
+            </div>
+
+            <!-- Mission -->
+            <div class="card" id="mission-card">
+                <h3>Mission</h3>
+                <div id="current-mission" style="font-size: 0.85em; color: var(--text-dim); margin-bottom: 10px;">
+                    No mission set
+                </div>
+                <textarea id="mission-input" class="mission-input" placeholder="Enter new mission..."></textarea>
+
+                <!-- Investigation Mode Toggle -->
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <label class="investigation-toggle" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="investigation-mode-checkbox" onchange="toggleInvestigationMode()">
+                        <span style="font-size: 0.85em; color: var(--accent);">Investigation Mode</span>
+                    </label>
+                    <span id="investigation-mode-hint" style="font-size: 0.75em; color: var(--text-dim);">Single-cycle deep dive research</span>
+                </div>
+
+                <!-- Standard R&D Controls (shown when investigation mode is OFF) -->
+                <div id="rd-mode-controls">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Cycle Budget:</label>
+                        <select id="cycle-budget-input" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="1">1 cycle</option>
+                            <option value="2">2 cycles</option>
+                            <option value="3">3 cycles</option>
+                            <option value="5" selected>5 cycles</option>
+                            <option value="10">10 cycles</option>
+                            <option value="20">20 cycles</option>
+                            <option value="30">30 cycles</option>
+                            <option value="40">40 cycles</option>
+                            <option value="50">50 cycles</option>
+                            <option value="100">100 cycles</option>
+                        </select>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn primary" onclick="setMission()">Set Mission</button>
+                        <button class="btn" onclick="resetMission()">Reset</button>
+                        <button class="btn success" onclick="startClaude('rd')">Start Mission</button>
+                    </div>
+                </div>
+
+                <!-- Investigation Mode Controls (shown when investigation mode is ON) -->
+                <div id="investigation-mode-controls" style="display: none;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Subagents:</label>
+                        <select id="investigation-subagents" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="3">3 subagents</option>
+                            <option value="5" selected>5 subagents</option>
+                            <option value="7">7 subagents</option>
+                            <option value="10">10 subagents</option>
+                        </select>
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Timeout:</label>
+                        <select id="investigation-timeout" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="5">5 min</option>
+                            <option value="10" selected>10 min</option>
+                            <option value="15">15 min</option>
+                            <option value="20">20 min</option>
+                        </select>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn primary" onclick="startInvestigation()">Start Investigation</button>
+                        <button class="btn danger" onclick="stopInvestigation()" id="stop-investigation-btn" style="display: none;">Stop</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mission Suggestions (legacy - from mission completion) -->
+            <div class="card" id="mission-suggestions-card">
+                <h3>Mission Suggestions <span id="rec-count" class="badge">0</span>
+                    <button class="btn btn-small similarity-audit-btn" onclick="openSimilarityAudit()" title="Find and merge similar suggestions">Audit Similarities</button>
+                    <button class="btn btn-small" onclick="refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
+                </h3>
+                <!-- Quick-Add Form -->
+                <div class="rec-quick-add">
+                    <input type="text" id="rec-quick-add-title" class="rec-quick-add-input" placeholder="Add new suggestion..." onkeypress="if(event.key==='Enter')submitQuickAdd()">
+                    <button class="btn btn-small primary" onclick="submitQuickAdd()">Add</button>
+                </div>
+                <!-- Sort and Filter Controls -->
+                <div class="rec-sort-controls">
+                    <label>Sort:</label>
+                    <select id="rec-sort-select" class="rec-sort-select" onchange="sortRecommendations()">
+                        <option value="priority_score">Priority Score</option>
+                        <option value="created_at">Date Created</option>
+                        <option value="health_status">Health Status</option>
+                    </select>
+                    <label>Tag:</label>
+                    <select id="rec-tag-filter" class="rec-filter-select" onchange="filterByTag()">
+                        <option value="">All Tags</option>
+                        <option value="feature">feature</option>
+                        <option value="bugfix">bugfix</option>
+                        <option value="infrastructure">infrastructure</option>
+                        <option value="refactor">refactor</option>
+                        <option value="documentation">documentation</option>
+                        <option value="performance">performance</option>
+                        <option value="security">security</option>
+                        <option value="ui">ui</option>
+                    </select>
+                </div>
+                <!-- Health Summary Bar (clickable for filtering) -->
+                <div id="rec-health-summary" class="rec-health-summary" style="display: none;">
+                    <div class="rec-health-stat hot" onclick="filterByHealth('hot')" title="Click to filter hot items">
+                        <span class="label">Hot</span>
+                        <span id="health-hot-count" class="count">0</span>
+                    </div>
+                    <div class="rec-health-stat stale" onclick="filterByHealth('stale')" title="Click to filter stale items">
+                        <span class="label">Stale</span>
+                        <span id="health-stale-count" class="count">0</span>
+                    </div>
+                    <div class="rec-health-stat needs-review" onclick="filterByHealth('needs_review')" title="Click to filter items needing review">
+                        <span class="label">Review</span>
+                        <span id="health-review-count" class="count">0</span>
+                    </div>
+                    <div class="rec-health-stat healthy" onclick="filterByHealth('healthy')" title="Click to filter healthy items">
+                        <span class="label">Healthy</span>
+                        <span id="health-healthy-count" class="count">0</span>
+                    </div>
+                    <span id="rec-filter-count" class="rec-filter-count" style="display: none;"></span>
+                    <button class="btn btn-tiny" onclick="clearAllFilters()" title="Clear all filters" style="margin-left: auto;">Clear</button>
+                </div>
+                <div id="legacy-recommendations-list" class="recommendations-list">
+                    <div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>
+                </div>
+                <!-- Pagination Controls -->
+                <div id="rec-pagination" class="rec-pagination" style="display: none;">
+                    <button class="btn btn-tiny" onclick="goToRecPage('prev')" id="rec-prev-btn" disabled>Prev</button>
+                    <span id="rec-page-info">Page 1 of 1</span>
+                    <button class="btn btn-tiny" onclick="goToRecPage('next')" id="rec-next-btn" disabled>Next</button>
+                </div>
+            </div>
+
+            <!-- Mission Queue -->
+            <div class="card" id="queue-card">
+                <div class="card-header" id="queue-widget-header" onclick="toggleCard('queue')">
+                    <h3>Mission Queue <span id="queue-count" class="badge" style="display: none;">0</span></h3>
+                    <span id="queue-notification-icon" onclick="event.stopPropagation(); toggleNotifications();" title="Click to enable browser notifications">🔔</span>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="queue-controls">
+                        <label class="queue-toggle">
+                            <input type="checkbox" id="queue-enabled-checkbox">
+                            <span>Auto-start</span>
+                        </label>
+                        <span class="queue-select-all" onclick="selectAllItems()" title="Select/deselect all">☑ All</span>
+                        <button class="btn btn-small primary" onclick="startNextFromQueue()" title="Start next mission manually">Start Next</button>
+                        <button class="btn btn-small" id="queue-pause-btn" onclick="toggleQueuePause()" title="Pause queue processing">Pause</button>
+                        <button class="btn btn-small" onclick="showSuggestions()" title="Get smart reordering suggestions">💡 Suggest</button>
+                        <button class="btn btn-small danger" onclick="clearQueue()" title="Clear all queued missions">Clear</button>
+                    </div>
+
+                    <!-- Bulk Action Bar (hidden until items selected) -->
+                    <div id="bulk-action-bar">
+                        <span class="selection-count">0 selected</span>
+                        <button class="btn btn-small" onclick="showBulkActionModal('priority')" title="Change priority for selected">Priority</button>
+                        <button class="btn btn-small" onclick="showBulkActionModal('dependency')" title="Add dependency to selected">Dependency</button>
+                        <button class="btn btn-small danger" onclick="bulkDelete()" title="Delete selected items">Delete</button>
+                        <button class="btn btn-small" onclick="clearSelection()" title="Clear selection">Cancel</button>
+                    </div>
+
+                    <div id="queue-items-list" class="queue-list">
+                        <div class="queue-placeholder">
+                            <span class="queue-placeholder-icon">📋</span>
+                            <span>No missions queued</span>
+                        </div>
+                    </div>
+                    <div class="queue-add-form">
+                        <select id="queue-add-priority" class="queue-priority-select" title="Priority">
+                            <option value="normal">🔵 Normal</option>
+                            <option value="critical">🔴 Critical</option>
+                            <option value="high">🟠 High</option>
+                            <option value="low">⚪ Low</option>
+                        </select>
+                        <input type="text" id="queue-add-input" class="queue-input" placeholder="Quick add mission to queue...">
+                        <button class="btn btn-small" onclick="quickAddEnhanced()">Add</button>
+                    </div>
+
+                    <!-- Timeline Visualization (Gantt-style) -->
+                    <div id="queue-timeline" class="queue-timeline collapsed">
+                        <div class="timeline-toggle" onclick="toggleQueueTimeline()">
+                            <span>📊 Timeline</span>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="timeline-container">
+                            <div class="timeline-header">
+                                <span class="timeline-mark timeline-now">Now</span>
+                                <span class="timeline-mark">+1h</span>
+                                <span class="timeline-mark">+2h</span>
+                                <span class="timeline-mark">+3h</span>
+                                <span class="timeline-mark">+4h</span>
+                            </div>
+                            <div class="timeline-body" id="timeline-body">
+                                <!-- Dynamic bars inserted here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Queue Analytics Panel -->
+                    <div id="queue-analytics" class="queue-analytics-panel collapsed">
+                        <div class="analytics-toggle" onclick="toggleQueueAnalytics()">
+                            <span>📈 Analytics</span>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="analytics-content">
+                            <div class="analytics-grid">
+                                <div class="stat-card">
+                                    <span class="stat-value" id="analytics-throughput">-</span>
+                                    <span class="stat-label">Daily Rate</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-value" id="analytics-duration">-</span>
+                                    <span class="stat-label">Avg Duration</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-value" id="analytics-success">-</span>
+                                    <span class="stat-label">Success Rate</span>
+                                </div>
+                                <div class="stat-card">
+                                    <span class="stat-value" id="analytics-week">-</span>
+                                    <span class="stat-label">This Week</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Queue Health Panel -->
+                    <div id="queue-health" class="queue-health-panel collapsed">
+                        <div class="health-toggle" onclick="toggleQueueHealth()">
+                            <span>🏥 Health</span>
+                            <span class="health-badge" id="health-badge">-</span>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div class="health-content">
+                            <div class="health-score" id="health-score">-</div>
+                            <div class="health-issues">
+                                <div class="health-section" id="health-blocked"></div>
+                                <div class="health-section" id="health-stale"></div>
+                                <div class="health-section" id="health-conflicts"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dependency Chain Visualization -->
+                    <div id="queue-dependency-graph" class="queue-dependency-graph collapsed">
+                        <div class="graph-toggle" onclick="toggleDependencyGraph()">
+                            <span>🔗 Dependencies</span>
+                            <span class="toggle-icon">▼</span>
+                        </div>
+                        <div id="dependency-graph-container">
+                            <div class="graph-empty">Click to load dependency graph</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Investigation Status Card (hidden by default) -->
+            <div class="card" id="investigation-status-card" style="display: none;">
+                <h3>Investigation Status</h3>
+                <div id="investigation-status-content">
+                    <div class="stat-row">
+                        <span class="stat-label">Status</span>
+                        <span class="stat-value highlight" id="investigation-status">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">ID</span>
+                        <span class="stat-value" id="investigation-id">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Progress</span>
+                        <span class="stat-value" id="investigation-progress">-</span>
+                    </div>
+                    <div id="investigation-log" style="max-height: 150px; overflow-y: auto; font-size: 0.8em; color: var(--text-dim); margin-top: 10px; padding: 8px; background: var(--bg); border-radius: 4px;">
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                    <button class="btn" onclick="viewInvestigationReport()" id="view-report-btn" style="display: none;">View Report</button>
+                    <button class="btn" onclick="hideInvestigationStatus()">Dismiss</button>
+                </div>
+            </div>
+
+            <!-- Journal -->
+            <!-- Created Files -->
+            <div class="card files-card" id="files-card">
+                <div class="card-header" onclick="toggleCard('files')">
+                    <h3>Created Files <span id="files-count" class="badge">0</span></h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div id="files-list" class="files-list">
+                        <div class="no-files">No files yet</div>
+                    </div>
+                </div>
+            </div>
+        </div><!-- End widget-column-1 -->
+
+        <!-- Widget Column 2 (Secondary - Monitoring/Analytics) -->
+        <div class="widget-column-2">
+            <!-- Investigation Status Banner (shown when investigation is running) -->
+            <div class="card investigation-banner" id="investigation-banner" style="display: none; border-left: 3px solid var(--accent); background: linear-gradient(90deg, rgba(88, 166, 255, 0.1), transparent);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <h3 style="margin: 0; border: none; padding: 0; font-size: 0.85em;">🔍 Investigation Running</h3>
+                    <span class="status-badge on" id="investigation-banner-status" style="font-size: 0.75em;">-</span>
+                </div>
+                <div class="stat-row" style="margin-bottom: 4px;">
+                    <span class="stat-label" style="font-size: 0.8em;">ID</span>
+                    <span class="stat-value" id="investigation-banner-id" style="font-size: 0.8em;">-</span>
+                </div>
+                <div class="stat-row" style="margin-bottom: 4px;">
+                    <span class="stat-label" style="font-size: 0.8em;">Progress</span>
+                    <span class="stat-value" id="investigation-banner-progress" style="font-size: 0.8em;">-</span>
+                </div>
+                <div class="btn-group" style="margin-top: 8px;">
+                    <button class="btn danger" onclick="stopInvestigation()" style="font-size: 0.8em; padding: 4px 10px;">Stop</button>
+                    <button class="btn" onclick="scrollToInvestigationCard()" style="font-size: 0.8em; padding: 4px 10px;">Details</button>
+                </div>
+            </div>
+
+            <!-- Backup Status Widget -->
+            <div class="card" id="backup-status-card">
+                <div class="card-header" onclick="toggleCard('backup-status')">
+                    <h3>Backup Status</h3>
+                    <span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div id="backup-status-container" class="backup-status-container">
+                        <div class="backup-status-header">
+                            <span class="backup-health-indicator"></span>
+                            <span class="backup-health-text">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Drift Monitoring Widget -->
+            <!-- Predictive Drift Prevention Widget -->
+            <!-- Cost Analytics Widget -->
+            <div class="card" id="analytics-widget-card">
+                <div class="card-header" onclick="toggleCard('analytics-widget')">
+                    <h3>Cost Analytics</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="analytics-tokens">0</div>
+                            <div class="analytics-stat-label">Tokens (Mission)</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value cost" id="analytics-cost">$0.00</div>
+                            <div class="analytics-stat-label">Est. Cost</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="analytics-30d-tokens">0</div>
+                            <div class="analytics-stat-label">30-Day Tokens</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value cost" id="analytics-30d-cost">$0.00</div>
+                            <div class="analytics-stat-label">30-Day Cost</div>
+                        </div>
+                    </div>
+                    <div class="analytics-trend-chart" id="analytics-trend-chart">
+                        <div style="color: var(--text-dim); font-size: 0.75em; width: 100%; text-align: center;">No trend data</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Validation Stats Widget -->
+            <!-- Source Quality Widget -->
+            <!-- KB Analytics Widget -->
+            <div class="card" id="kb-analytics-widget-card">
+                <div class="card-header" onclick="toggleCard('kb-analytics-widget')">
+                    <h3>Knowledge Analytics</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <!-- Time Range Filter -->
+                    <div class="kb-filter-bar" role="group" aria-label="Time range filter">
+                        <label for="kb-time-filter">Time Range:</label>
+                        <select id="kb-time-filter" onchange="applyKBTimeFilter()" aria-label="Select time range for analytics">
+                            <option value="all">All Time</option>
+                            <option value="7">Last 7 Days</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="90">Last 90 Days</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <input type="date" id="kb-start-date" style="display: none;" onchange="applyKBTimeFilter()" aria-label="Start date">
+                        <input type="date" id="kb-end-date" style="display: none;" onchange="applyKBTimeFilter()" aria-label="End date">
+                    </div>
+                    <!-- Source Type Filter (Investigation Integration) -->
+                    <div class="kb-filter-bar" role="group" aria-label="Source type filter" style="margin-top: 8px;">
+                        <label for="kb-source-filter">Source:</label>
+                        <select id="kb-source-filter" onchange="applyKBSourceFilter()" aria-label="Filter learnings by source type">
+                            <option value="">All Sources</option>
+                            <option value="mission">Missions Only</option>
+                            <option value="investigation">Investigations Only</option>
+                        </select>
+                        <span id="kb-source-stats" class="kb-source-stats" style="margin-left: 10px; font-size: 0.8em; color: var(--text-dim);">
+                            <!-- Dynamically populated with mission/investigation counts -->
+                        </span>
+                    </div>
+
+                    <!-- Summary Stats -->
+                    <div class="kb-analytics-grid" role="region" aria-label="Knowledge base summary statistics">
+                        <div class="kb-analytics-stat" role="status" aria-live="polite">
+                            <div class="value" id="kb-total-learnings" aria-label="Total learnings count">0</div>
+                            <div class="label" id="kb-learnings-label">Learnings</div>
+                        </div>
+                        <div class="kb-analytics-stat" role="status" aria-live="polite">
+                            <div class="value transfer" id="kb-transfer-rate" aria-label="Knowledge transfer rate">0%</div>
+                            <div class="label">Transfer Rate</div>
+                        </div>
+                    </div>
+
+                    <!-- Learning Accumulation Chart (SVG Line Chart) -->
+                    <div class="kb-chart-container">
+                        <div class="kb-chart-header" id="kb-accumulation-header">Learning Accumulation</div>
+                        <svg class="kb-line-svg" id="kb-accumulation-svg" viewBox="0 0 300 100"
+                             role="img" aria-labelledby="kb-accumulation-header"
+                             aria-describedby="kb-accumulation-desc">
+                            <desc id="kb-accumulation-desc">Line chart showing cumulative learnings over missions</desc>
+                            <text x="150" y="50" text-anchor="middle" fill="var(--text-dim)" font-size="10">Loading...</text>
+                        </svg>
+                        <div class="kb-tooltip" id="kb-line-tooltip" style="display: none;" role="tooltip"></div>
+                    </div>
+
+                    <!-- Type Distribution Pie Chart -->
+                    <div class="kb-chart-container">
+                        <div class="kb-chart-header" id="kb-types-header">Learning Types</div>
+                        <div class="kb-pie-chart-container">
+                            <svg class="kb-pie-svg" viewBox="0 0 100 100" id="kb-type-pie"
+                                 role="img" aria-labelledby="kb-types-header"
+                                 aria-describedby="kb-types-desc">
+                                <desc id="kb-types-desc">Pie chart showing distribution of learning types</desc>
+                                <circle cx="50" cy="50" r="40" fill="var(--bg)" stroke="var(--border)"/>
+                            </svg>
+                            <div class="kb-pie-legend" id="kb-type-legend" role="list" aria-label="Learning type legend">
+                                <div style="color: var(--text-dim);">No data</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Top Themes (Clickable for drill-down) -->
+                    <div class="kb-chart-container">
+                        <div class="kb-chart-header" id="kb-themes-header">Top Themes <span style="font-size: 0.8em; color: var(--text-dim);">(click for details)</span></div>
+                        <div class="kb-themes-list" id="kb-themes-list" role="list" aria-labelledby="kb-themes-header">
+                            <div style="color: var(--text-dim); font-size: 0.8em; text-align: center;">No themes</div>
+                        </div>
+                    </div>
+
+                    <!-- Learning Chain Graph (Lazy Loaded) -->
+                    <div class="kb-chain-container" id="kb-chain-container">
+                        <div class="kb-chart-header" id="kb-chains-header">Learning Chains</div>
+                        <svg class="kb-chain-svg" id="kb-chain-graph" viewBox="0 0 200 100"
+                             role="img" aria-labelledby="kb-chains-header"
+                             aria-describedby="kb-chains-desc">
+                            <desc id="kb-chains-desc">Graph showing learning chains across missions</desc>
+                            <text x="100" y="50" text-anchor="middle" fill="var(--text-dim)" font-size="8">Loading when visible...</text>
+                        </svg>
+                        <div class="kb-chain-legend" id="kb-chain-legend" role="list" aria-label="Chain color legend"></div>
+                    </div>
+
+                    <!-- Transfer Details -->
+                    <div class="kb-transfer-indicator" id="kb-transfer-details">
+                        <div>
+                            <span class="kb-transfer-rate" id="kb-chain-count">0</span>
+                            <span class="kb-transfer-label">Learning Chains</span>
+                        </div>
+                        <div class="kb-transfer-details">
+                            <span id="kb-domain-continuity">0%</span> domain continuity
+                        </div>
+                    </div>
+
+                    <!-- Mission Comparison Section -->
+                    <div class="kb-mission-selector" id="kb-mission-selector">
+                        <div class="kb-chart-header">
+                            Compare Missions
+                            <button class="btn-small" onclick="clearMissionComparison()" style="margin-left: 10px;">Clear</button>
+                        </div>
+                        <div class="kb-mission-checkboxes" id="kb-mission-checkboxes">
+                            <div style="color: var(--text-dim); font-size: 0.8em;">Loading missions...</div>
+                        </div>
+                    </div>
+                    <div class="kb-comparison-section" id="kb-comparison-section" style="display: none;">
+                        <div class="kb-chart-header">Comparison Results</div>
+                        <div class="kb-comparison-container" id="kb-comparison-container"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KB Theme Detail Modal -->
+            <div id="kb-theme-modal" class="modal" role="dialog" aria-modal="true"
+                 aria-labelledby="kb-theme-modal-title" style="display: none;">
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h3 id="kb-theme-modal-title">Theme Details</h3>
+                        <button class="modal-close" onclick="closeKBThemeModal()" aria-label="Close dialog">&times;</button>
+                    </div>
+                    <div class="modal-body" id="kb-theme-modal-body" aria-live="polite">
+                        <div style="color: var(--text-dim);">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mission Recommendations Widget (from Investigations) -->
+            <div class="card" id="recommendations-widget-card">
+                <div class="card-header" onclick="toggleCard('recommendations-widget')">
+                    <h3>Recommendations <span id="recommendations-badge" class="badge" style="display: none;">0</span></h3>
+                    <span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div class="recommendations-header">
+                        <span style="color: var(--text-dim); font-size: 0.85em;">
+                            Mission ideas generated from investigation insights
+                        </span>
+                        <button class="btn btn-small" onclick="refreshRecommendations()" title="Refresh recommendations">
+                            Refresh
+                        </button>
+                    </div>
+
+                    <!-- Filters Section -->
+                    <div class="rec-filters" id="rec-filters">
+                        <!-- Search bar -->
+                        <div class="rec-search-row">
+                            <input type="text" id="rec-search" placeholder="Search recommendations..."
+                                   class="rec-search-input" oninput="debounceRecSearch()" aria-label="Search recommendations">
+                        </div>
+
+                        <!-- Filter row -->
+                        <div class="rec-filter-row">
+                            <select id="rec-complexity-filter" onchange="applyRecFilters()" aria-label="Filter by complexity">
+                                <option value="">All Complexity</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+
+                            <select id="rec-priority-filter" onchange="applyRecFilters()" aria-label="Filter by priority">
+                                <option value="">All Priority</option>
+                                <option value="5">5 (Highest)</option>
+                                <option value="4">4</option>
+                                <option value="3">3</option>
+                                <option value="2">2</option>
+                                <option value="1">1 (Lowest)</option>
+                            </select>
+
+                            <select id="rec-investigation-filter" onchange="applyRecFilters()" aria-label="Filter by investigation">
+                                <option value="">All Investigations</option>
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+
+                        <!-- Date range row -->
+                        <div class="rec-filter-row">
+                            <label for="rec-start-date" class="rec-date-label">From:</label>
+                            <input type="date" id="rec-start-date" onchange="applyRecFilters()" class="rec-date-input" aria-label="Start date">
+                            <label for="rec-end-date" class="rec-date-label">To:</label>
+                            <input type="date" id="rec-end-date" onchange="applyRecFilters()" class="rec-date-input" aria-label="End date">
+                            <button class="btn btn-tiny" onclick="clearRecFilters()" title="Clear all filters">Clear</button>
+                        </div>
+                    </div>
+
+                    <!-- Controls ABOVE the list - always visible -->
+                    <div class="rec-controls-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 8px; background: var(--bg); border-radius: 6px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button id="rec-prev-btn" class="rec-page-btn" onclick="goToRecPage('prev')" aria-label="Previous page" disabled>
+                                &laquo;
+                            </button>
+                            <span id="rec-page-info" class="rec-page-info-clickable"
+                                  onclick="openExpandedRecModal()"
+                                  title="Click to expand and bulk manage recommendations">Loading...</span>
+                            <button id="rec-next-btn" class="rec-page-btn" onclick="goToRecPage('next')" aria-label="Next page" disabled>
+                                &raquo;
+                            </button>
+                            <select id="rec-per-page" onchange="changeRecPerPage()" class="rec-per-page-select" aria-label="Items per page" style="margin-left: 5px;">
+                                <option value="10">10</option>
+                                <option value="20" selected>20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button class="btn btn-small" onclick="generateNewRecommendations()" title="Generate new recommendations from investigations">Generate</button>
+                            <button class="btn btn-small danger" onclick="deleteAllRecommendations()" title="Delete all recommendations">Delete All</button>
+                        </div>
+                    </div>
+
+                    <div id="recommendations-list" class="recommendations-list">
+                        <div style="color: var(--text-dim); text-align: center; padding: 20px;">
+                            Loading recommendations...
+                        </div>
+                    </div>
+
+                    <!-- Page numbers bar (optional, hidden by default) -->
+                    <nav class="rec-pagination" id="rec-pagination" role="navigation" aria-label="Recommendations pagination" style="display: none;">
+                        <div class="rec-page-numbers" id="rec-page-numbers" role="group" aria-label="Page selection">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </nav>
+                </div>
+            </div>
+
+            <!-- Recommendation Detail Modal -->
+            <div id="recommendation-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+                <div class="modal-content" style="max-width: 700px;">
+                    <div class="modal-header">
+                        <h3 id="recommendation-modal-title">Recommendation Details</h3>
+                        <button class="modal-close" onclick="closeRecommendationModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="recommendation-modal-body">
+                        <div style="color: var(--text-dim);">Loading...</div>
+                    </div>
+                    <div class="modal-footer" id="recommendation-modal-footer">
+                        <button class="btn" onclick="closeRecommendationModal()">Close</button>
+                        <button class="btn danger" onclick="rejectRecommendation()">Reject</button>
+                        <button class="btn primary" onclick="acceptRecommendation()">Accept</button>
+                        <button class="btn success" onclick="convertToMission()">Convert to Mission</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Investigation Report Modal -->
+            <div id="investigation-report-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+                <div class="modal-content" style="max-width: 900px; max-height: 80vh;">
+                    <div class="modal-header">
+                        <h3 id="investigation-report-title">Investigation Report</h3>
+                        <button class="modal-close" onclick="closeInvestigationReportModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="investigation-report-body" style="overflow-y: auto; max-height: 60vh;">
+                        <div style="color: var(--text-dim);">Loading...</div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn" onclick="closeInvestigationReportModal()">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Git Status Widget -->
+            <!-- Multi-Repo Status Widget -->
+            <!-- Repo Log Modal (hidden) -->
+            <div id="repo-log-modal" class="repo-log-modal" style="display: none;" onclick="closeRepoLogModal(event)">
+                <div class="repo-log-modal-content" onclick="event.stopPropagation()">
+                    <div class="repo-log-modal-header">
+                        <span class="repo-log-modal-title">Recent Commits: <span id="repo-log-modal-repo">-</span></span>
+                        <button class="repo-log-modal-close" onclick="closeRepoLogModal()">&times;</button>
+                    </div>
+                    <div id="repo-log-modal-body" class="repo-log-modal-body">
+                        <div style="text-align: center; color: var(--text-dim);">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Git Analytics Widget -->
+            <!-- GitHub Status Widget -->
+            <!-- GitHub Activity Feed Widget -->
+            <!-- Recovery Banner (shown when crash recovery is available) -->
+            <div class="recovery-banner" id="recovery-banner">
+                <h4>Crash Recovery Available</h4>
+                <p>A previous session crashed during stage: <strong id="recovery-banner-stage">-</strong></p>
+                <p>Mission: <span id="recovery-banner-mission">-</span></p>
+                <div class="btn-group">
+                    <button class="btn danger" onclick="dismissRecovery()">Start Fresh</button>
+                    <button class="btn primary" onclick="showRecoveryModal()">View Details</button>
+                </div>
+            </div>
+
+            <!-- GlassBox: Mission Introspection -->
+            <div class="card" id="glassbox-card">
+                <div class="card-header" onclick="toggleCard('glassbox')">
+                    <h3>GlassBox <span id="glassbox-mission-count" class="badge">0</span></h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div style="margin-bottom: 10px;">
+                        <select id="glassbox-mission-select" class="mission-input" style="min-height: auto; padding: 8px;" onchange="loadGlassboxMission()">
+                            <option value="">Select archived mission...</option>
+                        </select>
+                    </div>
+                    <div id="glassbox-content">
+                        <div class="glassbox-placeholder" style="color: var(--text-dim); font-size: 0.85em;">
+                            Select a mission to view introspection data
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RDE: Exploration Stats Widget -->
+            <div class="card" id="rde-exploration-card">
+                <div class="card-header" onclick="toggleCard('rde-exploration')">
+                    <h3>Exploration Memory</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="rde-stat-grid">
+                        <div class="rde-stat-box">
+                            <div class="rde-stat-value" id="rde-files-count">0</div>
+                            <div class="rde-stat-label">Files</div>
+                        </div>
+                        <div class="rde-stat-box">
+                            <div class="rde-stat-value" id="rde-insights-count">0</div>
+                            <div class="rde-stat-label">Insights</div>
+                        </div>
+                        <div class="rde-stat-box">
+                            <div class="rde-stat-value" id="rde-edges-count">0</div>
+                            <div class="rde-stat-label">Relations</div>
+                        </div>
+                    </div>
+                    <div class="rde-drift-status">
+                        <span class="label">Embedding Coverage</span>
+                        <span class="value" id="rde-coverage-pct">0%</span>
+                    </div>
+                    <div class="rde-coverage-bar">
+                        <div class="rde-coverage-fill" id="rde-coverage-bar" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RDE: Drift Monitor Widget -->
+            <!-- RDE: Recent Explorations Widget -->
+            <div class="card" id="rde-recent-card">
+                <div class="card-header" onclick="toggleCard('rde-recent')">
+                    <h3>Recent Explorations</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div id="rde-recent-list" style="max-height: 200px; overflow-y: auto;">
+                        <div style="color: var(--text-dim); font-size: 0.85em;">No explorations yet</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RDE: Exploration Graph Visualization -->
+            <!-- RDE: Insight Search Widget -->
+            <!-- Decision Graph Widget -->
+            </div><!-- End widget-column-2 -->
+
+        <!-- Right Panel - RDE Activity Log -->
+        <div class="card chat-container">
+            <h3>RDE Activity <span id="chat-socket-indicator" class="ws-indicator ws-unknown" title="Chat connection status"></span></h3>
+            <div id="chat-messages" class="chat-messages"></div>
+        </div>
+    </div>
+    </div><!-- End of rde-tab -->
+
+    <!-- Investigations Tab Content -->
+    <div id="investigations-tab" class="tab-content">
+        <div class="glassbox-full-page">
+            <!-- Header with search, filters, and stats -->
+            <div class="glassbox-header">
+                <div class="investigations-search-bar">
+                    <input type="text" id="inv-search-input" placeholder="Search investigations..."
+                           oninput="debounceInvestigationSearch()"
+                           style="padding: 8px; width: 250px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                    <select id="inv-status-filter" onchange="applyInvestigationFilters()" style="padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <option value="">All Status</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                    <select id="inv-sort-by" onchange="applyInvestigationFilters()" style="padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <option value="timestamp">Sort by Date</option>
+                        <option value="elapsed">Sort by Duration</option>
+                        <option value="subagent_count">Sort by Subagents</option>
+                    </select>
+                    <select id="inv-sort-order" onchange="applyInvestigationFilters()" style="padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <option value="desc">Newest First</option>
+                        <option value="asc">Oldest First</option>
+                    </select>
+                    <!-- Date Range Picker -->
+                    <div class="date-filter-group" style="display: flex; gap: 5px; align-items: center;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">From:</label>
+                        <input type="date" id="inv-date-from" onchange="applyInvestigationFilters()"
+                               style="padding: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">To:</label>
+                        <input type="date" id="inv-date-to" onchange="applyInvestigationFilters()"
+                               style="padding: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <button class="btn" onclick="clearInvestigationDateFilter()" style="padding: 6px 8px;">Clear</button>
+                    </div>
+                    <!-- Content Search Toggle -->
+                    <label style="display: flex; align-items: center; gap: 5px; font-size: 0.85em; color: var(--text-dim);">
+                        <input type="checkbox" id="inv-search-content" onchange="debounceInvestigationSearch()">
+                        Search in reports
+                        <span title="Slower - searches inside report content" style="cursor: help; color: var(--yellow);">⚠</span>
+                    </label>
+                    <!-- Saved Searches Dropdown -->
+                    <select id="inv-saved-searches" onchange="applySavedSearch(this.value)" style="padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <option value="">Saved searches...</option>
+                    </select>
+                    <button class="btn" onclick="openSaveSearchModal()" title="Save current search">Save</button>
+                    <button class="btn" onclick="openTagStatsModal()" title="Tag Analytics">📊 Stats</button>
+                    <button class="btn" id="inv-selection-mode-btn" onclick="toggleInvestigationSelectionMode()" style="padding: 8px 12px;">Select</button>
+                    <button class="btn primary" onclick="refreshInvestigationHistory()">Refresh</button>
+                </div>
+                <div class="investigations-stats" id="inv-header-stats">
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="inv-total-count">0</div>
+                        <div class="lessons-stat-label">Total</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="inv-completed-count" style="color: var(--green);">0</div>
+                        <div class="lessons-stat-label">Completed</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="inv-failed-count" style="color: var(--red);">0</div>
+                        <div class="lessons-stat-label">Failed</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="inv-success-rate">0%</div>
+                        <div class="lessons-stat-label">Success Rate</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tags Filter Bar -->
+            <div class="investigations-tags-bar" id="inv-tags-bar" style="padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                <span style="color: var(--text-dim); font-size: 0.85em; margin-right: 10px;">Tags:</span>
+                <div id="inv-tags-list" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <!-- Tags will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Main Content: Cards Grid -->
+            <div class="investigations-grid-container" style="padding: 20px; overflow-y: auto; max-height: calc(100vh - 280px);">
+                <div class="investigations-grid" id="inv-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 15px;">
+                    <div style="color: var(--text-dim); grid-column: 1 / -1; text-align: center; padding: 40px;">
+                        Loading investigations...
+                    </div>
+                </div>
+                <!-- Load More / Pagination -->
+                <div id="inv-pagination" style="text-align: center; margin-top: 20px; display: none;">
+                    <button class="btn" onclick="loadMoreInvestigations()" id="inv-load-more-btn">Load More</button>
+                    <span id="inv-pagination-info" style="margin-left: 15px; color: var(--text-dim); font-size: 0.85em;"></span>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of investigations-tab -->
+
+    <!-- Investigation Detail Modal -->
+    <div id="inv-detail-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3 id="inv-detail-modal-title">Investigation Details</h3>
+                <button class="modal-close" onclick="closeInvestigationDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="inv-detail-modal-body" style="overflow-y: auto; max-height: 60vh;">
+                <div style="color: var(--text-dim);">Loading...</div>
+            </div>
+            <div class="modal-footer" id="inv-detail-modal-footer">
+                <button class="btn" onclick="closeInvestigationDetailModal()">Close</button>
+                <button class="btn" onclick="exportCurrentInvestigation('markdown')">Export MD</button>
+                <button class="btn" onclick="exportCurrentInvestigation('json')">Export JSON</button>
+                <button class="btn" onclick="exportCurrentInvestigation('html')">Export HTML</button>
+                <button class="btn" onclick="exportCurrentInvestigation('pdf')">Export PDF</button>
+                <button class="btn primary" onclick="rerunCurrentInvestigation()">Re-run</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Action Bar (floating) -->
+    <div id="inv-bulk-action-bar" style="display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+         background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 20px;
+         gap: 10px; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 1000;">
+        <span id="inv-selection-count" style="color: var(--text-dim);">0 selected</span>
+        <button class="btn" onclick="bulkAddTag()">Add Tag</button>
+        <button class="btn" onclick="compareSelectedInvestigations()">Compare</button>
+        <button class="btn" onclick="bulkExport()">Export</button>
+        <button class="btn danger" onclick="clearInvestigationSelection()">Clear</button>
+    </div>
+
+    <!-- Investigation Comparison Modal -->
+    <div id="inv-compare-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 1200px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3>Compare Investigations</h3>
+                <button class="modal-close" onclick="closeCompareModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="inv-compare-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; overflow-y: auto; max-height: 60vh;">
+                <!-- Comparison content -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeCompareModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tag Edit Modal -->
+    <div id="inv-tag-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Edit Tags</h3>
+                <button class="modal-close" onclick="closeTagModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="inv-tag-modal-current" style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-dim);">Current Tags:</label>
+                    <div id="inv-tag-modal-tags" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+                </div>
+                <!-- Query-based Suggestions (populated dynamically) -->
+                <div id="inv-query-tag-suggestions" style="margin-bottom: 15px; display: none;"></div>
+                <div>
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-dim);">Add New Tag:</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="inv-tag-modal-input" placeholder="Enter tag..."
+                               style="flex: 1; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <button class="btn primary" onclick="addTagFromModal()">Add</button>
+                    </div>
+                    <div id="inv-tag-suggestions" style="margin-top: 10px;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeTagModal()">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tag Statistics Modal -->
+    <div id="inv-tag-stats-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
+            <div class="modal-header">
+                <h3>Tag Analytics</h3>
+                <button class="modal-close" onclick="closeTagStatsModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="inv-tag-stats-body" style="overflow-y: auto; max-height: 60vh;">
+                <div style="color: var(--text-dim);">Loading...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeTagStatsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Search Modal -->
+    <div id="inv-save-search-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Save Current Search</h3>
+                <button class="modal-close" onclick="closeSaveSearchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label style="display: block; margin-bottom: 8px; color: var(--text-dim);">Search Name:</label>
+                <input type="text" id="inv-save-search-name" placeholder="e.g., Failed this week"
+                       style="width: 100%; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                <p style="margin-top: 10px; font-size: 0.85em; color: var(--text-dim);">
+                    This will save your current filters, search terms, sort order, and selected tags.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSaveSearchModal()">Cancel</button>
+                <button class="btn primary" onclick="saveCurrentSearch()">Save</button>
+            </div>
+        </div>
+    </div>
+
+        <!-- GlassBox Tab Content -->
+    <div id="glassbox-tab" class="tab-content">
+        <div class="glassbox-full-page">
+            <!-- Header with mission selector and stats -->
+            <div class="glassbox-header">
+                <div class="glassbox-selector">
+                    <input type="text" id="glassbox-search-input" placeholder="Search missions..."
+                           oninput="glassboxSearch(this.value)"
+                           style="padding: 8px; width: 150px; margin-right: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                    <select id="glassbox-tab-mission-select" onchange="loadGlassboxTabMission()">
+                        <option value="">Select archived mission...</option>
+                    </select>
+                    <button class="btn" onclick="refreshGlassboxMissions()">Refresh</button>
+                    <div class="date-filter-group">
+                        <label>From:</label>
+                        <input type="date" id="glassbox-date-from" onchange="glassboxDateFilter()">
+                        <label>To:</label>
+                        <input type="date" id="glassbox-date-to" onchange="glassboxDateFilter()">
+                        <button class="btn btn-clear" onclick="clearGlassboxDateFilter()">Clear</button>
+                    </div>
+                </div>
+                <div class="glassbox-stats" id="glassbox-tab-stats">
+                    <!-- Total missions, tokens, cost -->
+                </div>
+            </div>
+            <!-- Pagination -->
+            <div id="glassbox-pagination" style="margin: 10px 20px; display: flex; align-items: center; justify-content: flex-start; gap: 10px;">
+                <!-- Populated by updateGlassboxPagination() -->
+            </div>
+
+            <!-- Main content area with 3 columns -->
+            <div class="glassbox-main">
+                <!-- Left: Stage Timeline -->
+                <div class="glassbox-panel">
+                    <h3>Stage Timeline</h3>
+                    <div class="glassbox-panel-content" id="glassbox-tab-stages">
+                        <div style="color: var(--text-dim);">Select a mission to view</div>
+                    </div>
+                </div>
+
+                <!-- Center: Agent Hierarchy -->
+                <div class="glassbox-panel">
+                    <h3>Agent Hierarchy</h3>
+                    <div class="glassbox-panel-content" id="glassbox-tab-agents">
+                        <div style="color: var(--text-dim);">Select a mission to view</div>
+                    </div>
+                </div>
+
+                <!-- Right: Decision Log / Event Stream -->
+                <div class="glassbox-panel">
+                    <h3>Decision Log</h3>
+                    <div class="glassbox-panel-content" id="glassbox-tab-log">
+                        <div style="color: var(--text-dim);">Select a mission to view</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of glassbox-tab -->
+
+    <!-- Mission Logs Tab Content -->
+    <div id="missionlogs-tab" class="tab-content">
+        <div class="glassbox-full-page">
+            <!-- Header with mission log selector -->
+            <div class="glassbox-header">
+                <div class="glassbox-selector">
+                    <select id="missionlogs-select" onchange="loadMissionLog()">
+                        <option value="">Select a mission log...</option>
+                    </select>
+                    <button class="btn" onclick="refreshMissionLogs()">Refresh</button>
+                </div>
+                <div class="glassbox-stats" id="missionlogs-stats">
+                    <!-- Total missions, cycles count -->
+                </div>
+            </div>
+
+            <!-- Main content area -->
+            <div class="glassbox-main" style="grid-template-columns: 1fr 2fr;">
+                <!-- Left: Mission List -->
+                <div class="glassbox-panel">
+                    <h3>All Mission Logs</h3>
+                    <div class="glassbox-panel-content" id="missionlogs-list">
+                        <div style="color: var(--text-dim);">Loading mission logs...</div>
+                    </div>
+                </div>
+
+                <!-- Right: Mission Log Details -->
+                <div class="glassbox-panel">
+                    <h3>Mission Details</h3>
+                    <div class="glassbox-panel-content" id="missionlogs-details">
+                        <div style="color: var(--text-dim);">Select a mission log to view details</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of missionlogs-tab -->
+
+    <!-- Analytics Tab Content -->
+    <div id="analytics-tab" class="tab-content">
+        <div class="glassbox-full-page">
+            <div class="glassbox-header">
+                <div class="glassbox-selector">
+                    <span style="font-weight: 500; margin-right: 15px;">Mission Analytics</span>
+                    <select id="analytics-period-filter" class="analytics-filter-select" onchange="applyAnalyticsPeriodFilter()">
+                        <option value="7">Last 7 Days</option>
+                        <option value="30" selected>Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="0">All Time</option>
+                    </select>
+                    <button class="btn" onclick="refreshFullAnalytics()">Refresh</button>
+                    <button class="btn" onclick="exportAnalyticsCSV()">Export CSV</button>
+                </div>
+                <div class="lessons-stats" id="analytics-header-stats">
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-total-missions">0</div>
+                        <div class="lessons-stat-label">Total Missions</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-total-tokens">0</div>
+                        <div class="lessons-stat-label">Total Tokens</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-total-cost" style="color: var(--yellow);">$0.00</div>
+                        <div class="lessons-stat-label">Total Cost</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-avg-per-mission" style="color: var(--accent);">$0.00</div>
+                        <div class="lessons-stat-label">Avg/Mission</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-cache-rate" style="color: var(--green);">0%</div>
+                        <div class="lessons-stat-label">Cache Rate</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="analytics-today-cost" style="color: var(--yellow);">$0.00</div>
+                        <div class="lessons-stat-label">Today</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 1: Mission List, Trend Chart, Token Breakdown -->
+            <div class="glassbox-main" style="grid-template-columns: 1fr 1.5fr 1fr;">
+                <!-- Left: Mission Cost List -->
+                <div class="glassbox-panel">
+                    <h3>Recent Missions</h3>
+                    <div class="glassbox-panel-content analytics-mission-list" id="analytics-missions-list">
+                        <div style="color: var(--text-dim);">Loading missions...</div>
+                    </div>
+                </div>
+
+                <!-- Center: Spending Trend Chart -->
+                <div class="glassbox-panel">
+                    <h3>Spending Trend <span id="analytics-trend-period" style="color: var(--text-dim); font-size: 0.85em;">(30 Days)</span></h3>
+                    <div class="glassbox-panel-content">
+                        <canvas id="analytics-trend-canvas" width="500" height="250" style="width: 100%; height: 250px;"></canvas>
+                        <div id="analytics-trend-tooltip" class="analytics-chart-tooltip" style="display: none;"></div>
+                        <div id="analytics-trend-summary" style="margin-top: 15px; display: flex; gap: 20px;">
+                            <div class="stat-row" style="flex: 1;">
+                                <span class="stat-label">Daily Average</span>
+                                <span class="stat-value" id="analytics-daily-avg">$0.00</span>
+                            </div>
+                            <div class="stat-row" style="flex: 1;">
+                                <span class="stat-label">Peak Day</span>
+                                <span class="stat-value" id="analytics-peak-day">-</span>
+                            </div>
+                            <div class="stat-row" style="flex: 1;">
+                                <span class="stat-label">Peak Cost</span>
+                                <span class="stat-value" id="analytics-peak-cost">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Token Usage Breakdown (Donut Chart) -->
+                <div class="glassbox-panel">
+                    <h3>Token Usage Breakdown</h3>
+                    <div class="glassbox-panel-content">
+                        <div id="analytics-breakdown-container" style="position: relative; width: 100%; height: 200px;">
+                            <svg id="analytics-breakdown-svg" width="100%" height="200" viewBox="0 0 200 200"></svg>
+                            <div id="analytics-breakdown-center" class="analytics-donut-center">
+                                <div class="analytics-donut-total" id="analytics-breakdown-total">0</div>
+                                <div class="analytics-donut-label">tokens</div>
+                            </div>
+                        </div>
+                        <div id="analytics-breakdown-legend" class="analytics-legend" style="margin-top: 10px;"></div>
+                        <div id="analytics-breakdown-details" style="margin-top: 15px;">
+                            <div class="stat-row">
+                                <span class="stat-label">Input Tokens</span>
+                                <span class="stat-value" id="analytics-input-tokens">0</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Output Tokens</span>
+                                <span class="stat-value" id="analytics-output-tokens">0</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Cache Read</span>
+                                <span class="stat-value" id="analytics-cache-read-tokens">0</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Cache Write</span>
+                                <span class="stat-value" id="analytics-cache-write-tokens">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Stage Analysis and Model Comparison -->
+            <div class="glassbox-main" style="grid-template-columns: 1.5fr 1fr; margin-top: 15px;">
+                <!-- Left: Stage Analysis -->
+                <div class="glassbox-panel">
+                    <h3>Stage Analysis</h3>
+                    <div class="glassbox-panel-content">
+                        <div id="analytics-stage-chart" class="analytics-stage-chart">
+                            <div style="color: var(--text-dim); font-size: 0.85em;">Loading stage data...</div>
+                        </div>
+                        <div id="analytics-stage-details" style="margin-top: 15px;"></div>
+                    </div>
+                </div>
+
+                <!-- Right: Model Comparison -->
+                <div class="glassbox-panel">
+                    <h3>Model Comparison</h3>
+                    <div class="glassbox-panel-content">
+                        <div id="analytics-model-grid" class="analytics-model-grid">
+                            <div style="color: var(--text-dim); font-size: 0.85em;">Loading model data...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of analytics-tab -->
+
+    <!-- Mission Analytics Detail Modal -->
+    <div id="mission-analytics-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>Mission Details</h2>
+                <button class="modal-close" onclick="closeMissionAnalyticsModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="mission-analytics-modal-body">
+                <div style="color: var(--text-dim);">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lessons Learned Tab Content -->
+    <div id="lessons-tab" class="tab-content">
+        <div class="glassbox-full-page">
+            <div class="glassbox-header">
+                <div class="lessons-search">
+                    <input type="text" id="lessons-search-input" placeholder="Search learnings...">
+                    <select id="lessons-domain-filter" onchange="onLessonsFilterChange('lessons-domain-filter')">
+                        <option value="">All Domains</option>
+                    </select>
+                    <select id="lessons-type-filter" onchange="onLessonsFilterChange('lessons-type-filter')">
+                        <option value="">All Types</option>
+                        <option value="technique">Techniques</option>
+                        <option value="insight">Insights</option>
+                        <option value="gotcha">Gotchas</option>
+                        <option value="pattern">Patterns</option>
+                    </select>
+                    <select id="lessons-source-filter" onchange="onLessonsFilterChange('lessons-source-filter')">
+                        <option value="">All Sources</option>
+                        <option value="mission">Missions Only</option>
+                        <option value="investigation">Investigations Only</option>
+                    </select>
+                    <button class="btn primary" onclick="searchLessons()">Search</button>
+                    <button class="btn" onclick="loadAllLessons()">Show All</button>
+                </div>
+                <div class="lessons-stats" id="lessons-header-stats">
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="lessons-total-count">0</div>
+                        <div class="lessons-stat-label">Learnings</div>
+                    </div>
+                    <div class="lessons-stat">
+                        <div class="lessons-stat-value" id="lessons-missions-count">0</div>
+                        <div class="lessons-stat-label">Missions</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions Toolbar -->
+            <div class="quick-actions-toolbar">
+                <span style="color: var(--text-dim); margin-right: 10px;">Quick Actions:</span>
+                <button class="quick-action-btn" onclick="rebuildIndex()" title="Rebuild TF-IDF index">Rebuild Index</button>
+                <button class="quick-action-btn" onclick="mergeAllDuplicates()" title="Auto-merge all duplicate groups">Merge All Duplicates</button>
+                <button class="quick-action-btn" onclick="exportLearnings('json')" title="Export learnings to JSON">Export JSON</button>
+                <button class="quick-action-btn" onclick="exportLearnings('csv')" title="Export learnings to CSV">Export CSV</button>
+                <button class="quick-action-btn danger" onclick="toggleBatchDeleteMode()" title="Enter batch delete mode">Batch Delete</button>
+                <button class="quick-action-btn" onclick="toggleAnalytics()" title="Show/hide analytics">Analytics</button>
+            </div>
+
+            <!-- Visual Analytics Panel (hidden by default) -->
+            <div id="analytics-panel" class="analytics-container" style="display: none;">
+                <div class="analytics-chart">
+                    <h4>Learnings by Domain</h4>
+                    <div id="domain-bar-chart" class="bar-chart">
+                        <div style="color: var(--text-dim); text-align: center;">Loading...</div>
+                    </div>
+                </div>
+                <div class="analytics-chart">
+                    <h4>Type Distribution</h4>
+                    <div id="type-donut-chart" class="donut-chart">
+                        <svg class="donut-chart-svg" viewBox="0 0 100 100"></svg>
+                        <div class="donut-center">
+                            <div class="donut-total" id="donut-total">0</div>
+                            <div class="donut-label">total</div>
+                        </div>
+                    </div>
+                    <div id="type-legend" style="margin-top: 15px;"></div>
+                </div>
+            </div>
+
+            <!-- Sub-tabs for different views -->
+            <div class="lessons-subtabs">
+                <button class="lessons-subtab active" onclick="showLessonsSubtab('list')">List</button>
+                <button class="lessons-subtab" onclick="showLessonsSubtab('clusters')">Clusters</button>
+                <button class="lessons-subtab" onclick="showLessonsSubtab('duplicates')">Duplicates</button>
+                <button class="lessons-subtab" onclick="showLessonsSubtab('chains')">Chains</button>
+            </div>
+
+            <!-- List View (Default) -->
+            <div id="lessons-list-content" class="subtab-content active">
+                <div class="glassbox-main" style="grid-template-columns: 1fr 2fr;">
+                    <!-- Left: Learning List -->
+                    <div class="glassbox-panel">
+                        <h3>Learnings</h3>
+                        <div class="glassbox-panel-content" id="lessons-list" style="max-height: calc(100vh - 380px); overflow-y: auto;">
+                            <div style="color: var(--text-dim);">Click "Show All" to load learnings</div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Learning Details -->
+                    <div class="glassbox-panel">
+                        <h3>Details</h3>
+                        <div class="glassbox-panel-content" id="lessons-details">
+                            <div style="color: var(--text-dim); text-align: center; padding: 40px;">
+                                Select a learning from the list to view details
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clusters View -->
+            <div id="lessons-clusters-content" class="subtab-content">
+                <div class="glassbox-panel" style="margin: 0;">
+                    <h3>Learning Clusters</h3>
+                    <div class="glassbox-panel-content" id="clusters-tree" style="max-height: calc(100vh - 350px); overflow-y: auto;">
+                        <div style="color: var(--text-dim);">Loading clusters...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Duplicates View -->
+            <div id="lessons-duplicates-content" class="subtab-content">
+                <div class="glassbox-panel" style="margin: 0;">
+                    <h3>Duplicate Learnings <span id="duplicates-count" style="color: var(--text-dim); font-size: 0.8em;"></span></h3>
+                    <div class="glassbox-panel-content" id="duplicates-panel" style="max-height: calc(100vh - 350px); overflow-y: auto;">
+                        <div style="color: var(--text-dim);">Loading duplicates...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Learning Chains View -->
+            <div id="lessons-chains-content" class="subtab-content">
+                <div class="glassbox-panel" style="margin: 0;">
+                    <h3>Learning Chains <span id="chains-count" style="color: var(--text-dim); font-size: 0.8em;"></span></h3>
+                    <p style="color: var(--text-dim); font-size: 0.85em; margin-bottom: 15px;">
+                        Chains show how techniques and concepts evolved across multiple missions over time.
+                    </p>
+                    <div class="glassbox-panel-content" id="chains-panel" style="max-height: calc(100vh - 380px); overflow-y: auto;">
+                        <div style="color: var(--text-dim);">Loading learning chains...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of lessons-tab -->
+
+    <!-- Batch Delete Confirmation Modal -->
+    <div id="batch-delete-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Confirm Batch Delete</h3>
+                <button class="modal-close" onclick="closeBatchDeleteModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--yellow);">Warning: This action cannot be undone!</p>
+                <p>You are about to delete <strong id="delete-count">0</strong> learning(s):</p>
+                <div id="delete-confirm-list" class="delete-confirm-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBatchDeleteModal()">Cancel</button>
+                <button class="btn danger" onclick="confirmBatchDelete()">Delete Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating batch action bar -->
+    <div id="batch-action-bar" class="batch-action-bar">
+        <span class="batch-count"><span id="selected-count">0</span> selected</span>
+        <button class="btn" onclick="selectAllLearnings()">Select All</button>
+        <button class="btn" onclick="clearSelection()">Clear</button>
+        <button class="btn danger" onclick="showBatchDeleteConfirm()">Delete Selected</button>
+        <button class="btn" onclick="exitBatchMode()">Exit</button>
+    </div>
+
+    <!-- Recovery Mode Full-Screen Startup Modal -->
+    <div id="recovery-mode-screen" class="modal recovery-mode-fullscreen">
+        <div class="recovery-mode-content">
+            <div class="recovery-mode-header">
+                <div class="recovery-mode-icon">&#9888;</div>
+                <h2>Mission Recovery Required</h2>
+                <p class="recovery-mode-subtitle">A previous session crashed. Choose how to proceed:</p>
+            </div>
+
+            <div class="recovery-mode-details">
+                <div class="recovery-detail-row">
+                    <span class="recovery-detail-label">Mission:</span>
+                    <span class="recovery-detail-value" id="recovery-mode-mission">-</span>
+                </div>
+                <div class="recovery-detail-row">
+                    <span class="recovery-detail-label">Stage:</span>
+                    <span class="recovery-detail-value" id="recovery-mode-stage">-</span>
+                </div>
+                <div class="recovery-detail-row">
+                    <span class="recovery-detail-label">Crashed:</span>
+                    <span class="recovery-detail-value" id="recovery-mode-time">-</span>
+                </div>
+                <div class="recovery-detail-row">
+                    <span class="recovery-detail-label">Cycle:</span>
+                    <span class="recovery-detail-value" id="recovery-mode-cycle">-</span>
+                </div>
+            </div>
+
+            <div class="recovery-mode-options">
+                <div class="recovery-option" onclick="recoveryModeResume()">
+                    <div class="recovery-option-icon">&#9654;</div>
+                    <div class="recovery-option-info">
+                        <h4>Resume</h4>
+                        <p>Continue from where the mission crashed</p>
+                    </div>
+                </div>
+
+                <div class="recovery-option" onclick="recoveryModeRestore()">
+                    <div class="recovery-option-icon">&#128190;</div>
+                    <div class="recovery-option-info">
+                        <h4>Restore from Snapshot</h4>
+                        <p>Select a previous state to restore</p>
+                    </div>
+                </div>
+
+                <div class="recovery-option danger" onclick="recoveryModeStartFresh()">
+                    <div class="recovery-option-icon">&#128465;</div>
+                    <div class="recovery-option-info">
+                        <h4>Start Fresh</h4>
+                        <p>Discard recovery and begin a new mission</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="recovery-mode-snapshots" class="recovery-mode-snapshot-list" style="display: none;">
+                <h4>Available Snapshots</h4>
+                <div id="recovery-mode-snapshot-items"></div>
+                <button class="btn" onclick="hideRecoveryModeSnapshots()">Back</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recovery Modal -->
+    <div id="recovery-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Crash Recovery Details</h3>
+                <button class="modal-close" onclick="closeRecoveryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="recovery-info">
+                    <h4>Recovery Information</h4>
+                    <div class="recovery-info-row">
+                        <span class="label">Mission ID:</span>
+                        <span id="recovery-modal-mission-id">-</span>
+                    </div>
+                    <div class="recovery-info-row">
+                        <span class="label">Stage:</span>
+                        <span id="recovery-modal-stage">-</span>
+                    </div>
+                    <div class="recovery-info-row">
+                        <span class="label">Time Since Crash:</span>
+                        <span id="recovery-modal-time">-</span>
+                    </div>
+                    <div class="recovery-info-row">
+                        <span class="label">Iteration:</span>
+                        <span id="recovery-modal-iteration">-</span>
+                    </div>
+                    <div class="recovery-info-row">
+                        <span class="label">Cycle:</span>
+                        <span id="recovery-modal-cycle">-</span>
+                    </div>
+                </div>
+                <div class="recovery-info">
+                    <h4>Recovery Hint</h4>
+                    <p id="recovery-modal-hint" style="font-size: 0.9em;">-</p>
+                </div>
+                <div class="recovery-info" id="recovery-modal-files-section">
+                    <h4>Files Created</h4>
+                    <ul id="recovery-modal-files" style="font-size: 0.85em; max-height: 150px; overflow-y: auto;">
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn danger" onclick="dismissRecoveryFromModal()">Start Fresh</button>
+                <button class="btn primary" onclick="applyRecovery()">Resume Mission</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bug Bounty Tab Content -->
+    <!-- End of bugbounty-tab -->
+
+    <!-- Narrative Tab Content -->
+    <!-- End of narrative-tab -->
+
+    <!-- Email Monitor Tab Content -->
+    <!-- End of email-tab -->
+
+    <!-- Mobile Scroll Indicators (positioned outside all tabs for proper fixed positioning) -->
+    <nav class="mobile-scroll-dots" id="mobile-scroll-dots" role="tablist" aria-label="Dashboard column navigation">
+        <button class="scroll-dot active" data-column="0" onclick="scrollToColumn(0)"
+                role="tab" aria-selected="true" aria-label="Navigate to Controls & Mission"
+                tabindex="0" title="Controls & Mission" type="button"></button>
+        <button class="scroll-dot" data-column="1" onclick="scrollToColumn(1)"
+                role="tab" aria-selected="false" aria-label="Navigate to Analytics & Graphs"
+                tabindex="-1" title="Analytics & Graphs" type="button"></button>
+        <button class="scroll-dot" data-column="2" onclick="scrollToColumn(2)"
+                role="tab" aria-selected="false" aria-label="Navigate to RDE Activity"
+                tabindex="-1" title="RDE Activity" type="button"></button>
+    </nav>
+
+    <!-- Create Session Modal -->
+    <div id="narr-modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: var(--bg-card); border-radius: 8px; padding: 20px; width: 400px; max-height: 80vh; overflow-y: auto;">
+            <h3 style="margin-top: 0;">Start New Session</h3>
+            <div id="narr-modal-content">
+                <p style="color: var(--text-dim);">Click a story concept to start a session.</p>
+            </div>
+            <div style="text-align: right; margin-top: 15px;">
+                <button class="btn" onclick="hideNarrativeModal()">Cancel</button>
+                <button class="btn primary" onclick="createNarrativeSession()" id="narr-create-btn" disabled>Create Session</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <!-- Drift Nudge Notification Panel (floating) -->
+    <div id="drift-nudge-panel" class="nudge-panel" style="display: none;">
+        <div class="nudge-header">
+            <span class="nudge-icon">&#128270;</span>
+            <span class="nudge-title">Mission Refocus Suggestion</span>
+            <button class="nudge-dismiss" onclick="dismissNudge()">&times;</button>
+        </div>
+        <div class="nudge-content" id="nudge-content">
+            <div class="nudge-text">Loading...</div>
+        </div>
+        <div class="nudge-footer">
+            <button class="btn btn-small" onclick="handleAcknowledgeNudge()">Acknowledge</button>
+        </div>
+    </div>
+
+    <!-- Mission Modal -->
+    <div id="mission-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Full Mission</h3>
+                <span class="modal-close" onclick="closeMissionModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <pre id="mission-full-text"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="copyMission()">Copy</button>
+                <button class="btn primary" onclick="closeMissionModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GlassBox Transcript Modal -->
+    <div id="glassbox-modal" class="modal">
+        <div class="modal-content" style="max-width: 1000px; max-height: 90vh;">
+            <div class="modal-header">
+                <h3 id="glassbox-modal-title">Transcript Viewer</h3>
+                <span class="modal-close" onclick="closeGlassboxModal()">&times;</span>
+            </div>
+            <div class="modal-body" style="max-height: 70vh;">
+                <div id="glassbox-modal-content"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn primary" onclick="closeGlassboxModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Git Analytics Timeline Modal -->
+    <div id="git-timeline-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; max-height: 85vh;">
+            <div class="modal-header">
+                <h2>Mission Timeline</h2>
+                <button class="close-btn" onclick="closeGitTimelineModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="git-analytics-header" style="margin-bottom: 15px;">
+                    <select id="git-timeline-mission-select" onchange="loadGitTimeline()" style="padding: 6px 10px; font-size: 0.9em;">
+                        <option value="">Select a mission...</option>
+                    </select>
+                    <button class="btn" onclick="exportGitAnalytics()" style="font-size: 0.8em;">&#128190; Export</button>
+                </div>
+                <div class="timeline-container" id="git-timeline-container">
+                    <div style="text-align: center; color: var(--text-dim); padding: 40px;">
+                        Select a mission to view its timeline
+                    </div>
+                </div>
+                <div id="git-timeline-commits" style="margin-top: 15px;">
+                    <h4 style="font-size: 0.9em; margin-bottom: 10px;">Commit Details</h4>
+                    <div id="git-timeline-commit-list" style="max-height: 200px; overflow-y: auto; background: var(--bg); border-radius: 4px; padding: 10px;">
+                        <div style="color: var(--text-dim); font-size: 0.85em;">No commits loaded</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn primary" onclick="closeGitTimelineModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Main JavaScript Bundle (ES6 modules with code splitting) -->
+    <!-- Critical widget functions (git/kb analytics refresh) are inlined in main bundle -->
+    <!-- Tab-specific features are lazy-loaded on demand for performance -->
+    <script type="module" src="/static/dist/bundle.min.js"></script>
+
+    <!-- Legacy Fallback (for browsers without ES6 module support) -->
+    <script nomodule>
+        // Load traditional scripts if ES6 modules not supported
+        console.warn('ES6 modules not supported, loading legacy scripts');
+        var scripts = [
+            '/static/js/core.js',
+            '/static/js/api.js',
+            '/static/js/socket.js',
+            '/static/js/tabs.js',
+            '/static/js/modals.js',
+            '/static/js/charts.js',
+            '/static/js/chat.js',
+            '/static/js/exploration.js',
+            '/static/js/widgets.js',
+            '/static/js/git-analytics.js',
+            '/static/js/kb-analytics.js',
+            '/static/js/lessons.js',
+            '/static/js/recovery.js',
+            '/static/js/decision-graph.js',
+            '/static/js/glassbox.js',
+            '/static/js/missionlogs.js',
+            '/static/js/bugbounty.js',
+            '/static/js/narrative.js',
+            '/static/js/init.js'
+        ];
+        scripts.forEach(function(src) {
+            var s = document.createElement('script');
+            s.src = src;
+            document.body.appendChild(s);
+        });
+    </script>
+
+    <!-- Hide loading indicator after DOM ready -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var loader = document.getElementById('loading-indicator');
+            if (loader) loader.style.display = 'none';
+        });
+    </script>
+
+    <!-- Fallback status updater - ensures widgets always update even if bundle has issues -->
+    <script>
+        (function() {
+            'use strict';
+
+            // Wait for window load to ensure all scripts have had time to run
+            window.addEventListener('load', function() {
+                console.log('[FALLBACK] Window loaded, checking if widgets need fallback refresh');
+
+                // Give the bundle a moment to initialize
+                setTimeout(function() {
+                    // Check if service status is still showing "Offline" and we haven't had an update
+                    var rdeStatus = document.getElementById('rde-service-state');
+                    var mode = document.getElementById('stat-mode');
+
+                    if (rdeStatus && rdeStatus.textContent === 'Offline' && mode && mode.textContent === '-') {
+                        console.log('[FALLBACK] Widgets still at initial state, triggering fallback refresh');
+                        fallbackStatusRefresh();
+                    } else {
+                        console.log('[FALLBACK] Widgets appear initialized, skipping fallback');
+                    }
+                }, 2000);
+            });
+
+            function fallbackStatusRefresh() {
+                console.log('[FALLBACK] Fetching /api/status');
+                fetch('/api/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        console.log('[FALLBACK] Got status:', data);
+
+                        // Update RDE service status indicator
+                        updateRDEServiceStatusFallback(data.running, data.mode);
+
+                        // Update stat fields
+                        var fields = {
+                            'stat-mode': data.mode || '-',
+                            'stat-stage': data.rd_stage || '-',
+                            'stat-iteration': data.rd_iteration || 0,
+                            'stat-mission-cycle': (data.current_cycle || 1) + '/' + (data.cycle_budget || 1),
+                            'stat-cycles': data.total_cycles || '-',
+                            'stat-boots': data.boot_count || '-'
+                        };
+
+                        for (var id in fields) {
+                            var el = document.getElementById(id);
+                            if (el) el.textContent = fields[id];
+                        }
+
+                        // Update stage indicator
+                        updateStageIndicatorFallback(data.rd_stage);
+
+                        // Update mission
+                        var missionEl = document.getElementById('current-mission');
+                        if (missionEl && data.mission) {
+                            var preview = data.mission_preview || data.mission;
+                            missionEl.innerHTML =
+                                '<span style="cursor: pointer;">' + preview + '</span>';
+                        }
+
+                        console.log('[FALLBACK] Status updated successfully');
+                    })
+                    .catch(function(e) {
+                        console.error('[FALLBACK] Status fetch error:', e);
+                    });
+
+                // Fetch investigation status (dashboard-triggered)
+                fetch('/api/investigation/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        var isRunning = data && data.investigation_id &&
+                            data.status !== 'completed' && data.status !== 'failed' && data.status !== 'idle';
+                        updateInvestigationServiceStatusFallback(isRunning, data ? data.status : null);
+                    })
+                    .catch(function(e) {
+                        updateInvestigationServiceStatusFallback(false, null);
+                    });
+
+                // Fetch email investigation status
+                fetchEmailInvestigationStatus();
+
+                // Fetch journal
+                fetch('/api/journal')
+                    .then(function(r) { return r.json(); })
+                    .then(function(entries) {
+                        var journal = document.getElementById('journal');
+                        if (journal && entries && entries.length > 0) {
+                            journal.innerHTML = entries.map(function(j) {
+                                return '<div class="journal-entry">' +
+                                    '<span class="journal-type">' + escapeHtmlFallback(j.type || '') + '</span>' +
+                                    '<span class="journal-time">' + (j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : '') + '</span>' +
+                                    '<div>' + escapeHtmlFallback(j.message || j.full_message || j.status || '') + '</div>' +
+                                    '</div>';
+                            }).join('');
+                            console.log('[FALLBACK] Journal updated with', entries.length, 'entries');
+                        }
+                    })
+                    .catch(function(e) {
+                        console.error('[FALLBACK] Journal fetch error:', e);
+                    });
+            }
+
+            function updateStageIndicatorFallback(currentStage) {
+                var stages = ['PLANNING', 'BUILDING', 'TESTING', 'ANALYZING', 'CYCLE_END', 'COMPLETE'];
+                var stageEls = document.querySelectorAll('.stage');
+                var currentIdx = stages.indexOf(currentStage);
+
+                stageEls.forEach(function(el, idx) {
+                    el.classList.remove('active', 'complete');
+                    if (idx < currentIdx) {
+                        el.classList.add('complete');
+                    } else if (idx === currentIdx) {
+                        el.classList.add('active');
+                    }
+                });
+            }
+
+            function escapeHtmlFallback(str) {
+                if (!str) return '';
+                var div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            function updateRDEServiceStatusFallback(running, mode) {
+                var container = document.getElementById('rde-service-status');
+                var stateEl = document.getElementById('rde-service-state');
+                if (!container || !stateEl) return;
+
+                container.classList.remove('online', 'offline', 'busy');
+
+                if (running) {
+                    container.classList.add('online');
+                    if (mode === 'rd') {
+                        stateEl.textContent = 'R&D Mode';
+                    } else if (mode === 'free') {
+                        stateEl.textContent = 'Free Mode';
+                    } else {
+                        stateEl.textContent = 'Online';
+                    }
+                } else {
+                    container.classList.add('offline');
+                    stateEl.textContent = 'Offline';
+                }
+            }
+
+            function updateInvestigationServiceStatusFallback(running, status) {
+                var container = document.getElementById('investigation-service-status');
+                var stateEl = document.getElementById('investigation-service-state');
+                if (!container || !stateEl) return;
+
+                container.classList.remove('online', 'offline', 'busy');
+
+                if (running) {
+                    var statusLabels = {
+                        'pending': 'Pending',
+                        'analyzing': 'Analyzing',
+                        'spawning_subagents': 'Spawning',
+                        'exploring': 'Exploring',
+                        'synthesizing': 'Synthesizing',
+                        'completed': 'Complete',
+                        'failed': 'Failed'
+                    };
+                    var displayStatus = statusLabels[status] || status || 'Running';
+
+                    if (status === 'completed') {
+                        container.classList.add('online');
+                    } else if (status === 'failed') {
+                        container.classList.add('offline');
+                    } else {
+                        container.classList.add('busy');
+                    }
+                    stateEl.textContent = displayStatus;
+                } else {
+                    container.classList.add('offline');
+                    stateEl.textContent = 'Offline';
+                }
+            }
+
+            function updateEmailInvestigationServiceStatus(count) {
+                var container = document.getElementById('email-investigation-service-status');
+                var stateEl = document.getElementById('email-investigation-service-state');
+                if (!container || !stateEl) return;
+
+                container.classList.remove('online', 'offline', 'busy');
+
+                if (count > 0) {
+                    container.classList.add('busy');
+                    stateEl.textContent = count + ' running';
+                } else {
+                    container.classList.add('offline');
+                    stateEl.textContent = '0 running';
+                }
+            }
+
+            // Fetch email investigation count periodically
+            function fetchEmailInvestigationStatus() {
+                fetch('/api/email/status')
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        var count = data.running_investigations || 0;
+                        updateEmailInvestigationServiceStatus(count);
+                    })
+                    .catch(function(err) {
+                        console.log('[FALLBACK] Email status fetch failed:', err);
+                    });
+            }
+
+            // Periodic fallback refresh every 10 seconds if main refresh isn't working
+            var fallbackIntervalId = null;
+
+            window.addEventListener('load', function() {
+                setTimeout(function() {
+                    // Only set up periodic fallback if main refresh isn't set up
+                    var rdeStatus = document.getElementById('rde-service-state');
+                    if (typeof window.refresh !== 'function' ||
+                        !rdeStatus ||
+                        rdeStatus.textContent === 'Offline') {
+
+                        console.log('[FALLBACK] Setting up periodic fallback refresh');
+                        fallbackIntervalId = setInterval(fallbackStatusRefresh, 10000);
+                    }
+                }, 5000);
+            });
+        })();
+    </script>
+
+    <!-- Save Preset Modal -->
+    <div id="save-preset-modal" class="layout-modal" style="display: none;" role="dialog" aria-labelledby="save-preset-title" aria-modal="true">
+        <div class="layout-modal-backdrop" onclick="closeSavePresetModal()"></div>
+        <div class="layout-modal-content">
+            <div class="layout-modal-header">
+                <h3 id="save-preset-title">Save Layout Preset</h3>
+                <button class="modal-close-btn" onclick="closeSavePresetModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="layout-modal-body">
+                <label for="preset-name-input">Preset Name:</label>
+                <input type="text" id="preset-name-input" class="preset-input" placeholder="My Custom Layout" maxlength="100" autocomplete="off">
+            </div>
+            <div class="layout-modal-footer">
+                <button class="btn" onclick="closeSavePresetModal()">Cancel</button>
+                <button class="btn primary" onclick="confirmSavePreset()">Save Preset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Preset Confirmation Modal -->
+    <div id="delete-preset-modal" class="layout-modal" style="display: none;" role="alertdialog" aria-labelledby="delete-preset-title" aria-describedby="delete-preset-desc" aria-modal="true">
+        <div class="layout-modal-backdrop" onclick="closeDeletePresetModal()"></div>
+        <div class="layout-modal-content">
+            <div class="layout-modal-header">
+                <h3 id="delete-preset-title">Delete Preset</h3>
+                <button class="modal-close-btn" onclick="closeDeletePresetModal()" aria-label="Close">&times;</button>
+            </div>
+            <div class="layout-modal-body">
+                <p id="delete-preset-desc">Delete preset "<span id="delete-preset-name"></span>"?</p>
+                <p class="text-dim">This action cannot be undone.</p>
+            </div>
+            <div class="layout-modal-footer">
+                <button class="btn" onclick="closeDeletePresetModal()">Cancel</button>
+                <button class="btn danger" onclick="confirmDeletePreset()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== MODALS (Body-Level for Mobile) ========== -->
+
+    <!-- Recommendation Modal (Individual) with Edit Mode -->
+    <div id="rec-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="rec-modal-title">Recommendation</h3>
+                <button class="modal-close" onclick="closeRecModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- View Mode Container -->
+                <div id="rec-view-container">
+                    <div class="rec-detail">
+                        <label>Mission Title:</label>
+                        <div id="rec-modal-mission-title" class="rec-value"></div>
+                    </div>
+                    <div class="rec-detail">
+                        <label>Description:</label>
+                        <div id="rec-modal-description" class="rec-value rec-description"></div>
+                    </div>
+                    <div class="rec-detail">
+                        <label>Rationale:</label>
+                        <div id="rec-modal-rationale" class="rec-value"></div>
+                    </div>
+                    <div class="rec-detail">
+                        <label>From Mission:</label>
+                        <div id="rec-modal-source" class="rec-value rec-source"></div>
+                    </div>
+                </div>
+                <!-- Edit Mode Container (hidden by default) -->
+                <div id="rec-edit-container" class="rec-edit-container">
+                    <div class="rec-detail">
+                        <label class="rec-edit-label">Mission Title:</label>
+                        <input type="text" id="rec-edit-title" class="rec-edit-input" placeholder="Mission title">
+                    </div>
+                    <div class="rec-detail">
+                        <label class="rec-edit-label">Description:</label>
+                        <textarea id="rec-edit-description" class="rec-edit-textarea" rows="6" placeholder="Mission description"></textarea>
+                    </div>
+                    <div class="rec-detail">
+                        <label class="rec-edit-label">Rationale:</label>
+                        <textarea id="rec-edit-rationale" class="rec-edit-textarea" rows="3" placeholder="Rationale for this suggestion"></textarea>
+                    </div>
+                </div>
+                <!-- Drift context container (shown only for drift_halt recommendations) -->
+                <div id="rec-modal-drift-context" style="display: none;"></div>
+                <div class="rec-detail">
+                    <label>Cycle Budget:</label>
+                    <select id="rec-modal-cycles" class="mission-input" style="min-height: auto; padding: 8px; width: auto;">
+                        <option value="1">1 cycle</option>
+                        <option value="2">2 cycles</option>
+                        <option value="3" selected>3 cycles</option>
+                        <option value="5">5 cycles</option>
+                        <option value="10">10 cycles</option>
+                        <option value="20">20 cycles</option>
+                        <option value="30">30 cycles</option>
+                        <option value="40">40 cycles</option>
+                        <option value="50">50 cycles</option>
+                        <option value="100">100 cycles</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" id="rec-edit-toggle-btn" onclick="toggleEditMode()">Edit</button>
+                <button class="btn primary" id="rec-save-btn" onclick="saveRecChanges()" style="display: none;">Save Changes</button>
+                <button class="btn danger" onclick="deleteRecommendation()">Delete</button>
+                <button class="btn" onclick="queueMissionSuggestion()">Add to Queue</button>
+                <button class="btn primary" onclick="setMissionFromRec()">Set Mission</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Similarity Audit Modal -->
+    <div id="similarity-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3>Similarity Audit</h3>
+                <button class="modal-close" onclick="closeSimilarityModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="threshold-control">
+                    <label>Similarity Threshold:</label>
+                    <input type="range" id="similarity-threshold" min="0.1" max="0.8" step="0.05" value="0.3" onchange="document.getElementById('threshold-display').textContent = (this.value * 100).toFixed(0) + '%'">
+                    <span id="threshold-display" class="threshold-value">30%</span>
+                    <button class="btn btn-small" onclick="openSimilarityAudit()">Re-analyze</button>
+                </div>
+                <div id="similarity-modal-body">
+                    <div class="loading-spinner">Click Re-analyze to start...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSimilarityModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Modal -->
+    <div id="merge-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h3>Merge Suggestions</h3>
+                <button class="modal-close" onclick="closeMergeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="merge-modal-body">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeMergeModal()">Cancel</button>
+                <button class="btn primary" onclick="executeMerge()">Merge & Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merge Candidates Prompt Modal (Auto-shown when similar suggestions detected) -->
+    <div id="merge-candidates-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>Similar Suggestions Found</h3>
+                <button class="modal-close" onclick="closeMergeCandidatesModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="merge-candidates-body">
+                <!-- Dynamic content -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeMergeCandidatesModal()">Keep Separate</button>
+                <button class="btn primary" onclick="proceedToMerge()">Merge Suggestions</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expanded Recommendations Modal (Bulk Management) -->
+    <div id="expanded-recommendations-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content expanded-rec-modal-content">
+            <div class="modal-header">
+                <h3>All Recommendations</h3>
+                <button class="modal-close" onclick="closeExpandedRecModal()">&times;</button>
+            </div>
+            <div class="modal-body expanded-rec-body">
+                <div class="expanded-rec-controls">
+                    <div class="expanded-rec-select-controls">
+                        <button class="btn btn-small" onclick="selectAllRecs()">Select All</button>
+                        <button class="btn btn-small" onclick="deselectAllRecs()">Deselect All</button>
+                        <span id="expanded-rec-selected-count">0 selected</span>
+                    </div>
+                    <button class="btn btn-small danger" id="expanded-rec-clear-btn" onclick="clearSelectedRecs()" disabled>
+                        Clear Selected
+                    </button>
+                </div>
+                <div id="expanded-recommendations-list" class="expanded-rec-list">
+                    <!-- Populated dynamically with checkboxes -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <span id="expanded-rec-page-info">Showing 0 of 0</span>
+                <div class="rec-page-controls">
+                    <button class="rec-page-btn" onclick="goToExpandedRecPage('prev')">&laquo;</button>
+                    <span id="expanded-rec-page-number">1</span>
+                    <button class="rec-page-btn" onclick="goToExpandedRecPage('next')">&raquo;</button>
+                </div>
+                <button class="btn" onclick="closeExpandedRecModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cycle 2: Claim Inspector Modal -->
+    <div id="claim-inspector-modal" class="modal" role="dialog" aria-modal="true"
+         aria-labelledby="claim-modal-title" style="display: none;">
+        <div class="modal-backdrop" onclick="closeClaimInspector()"></div>
+        <div class="modal-content claim-inspector-content">
+            <div class="modal-header">
+                <h3 id="claim-modal-title">Claim Details</h3>
+                <button class="modal-close" onclick="closeClaimInspector()" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" id="claim-inspector-body">
+                <div class="claim-loading">Loading claim details...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeClaimInspector()">Close</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

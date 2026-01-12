@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/vader/mini-mind-v2/.claude/hooks/backup-core-files.py"
+          }
+        ]
+      }
+    ]
+  }
+}

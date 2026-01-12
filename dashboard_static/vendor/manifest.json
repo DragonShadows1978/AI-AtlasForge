@@ -1,0 +1,55 @@
+{
+  "version": "1.0.0",
+  "generated": true,
+  "resources": {
+    "socket.io.min.js": {
+      "path": "/static/vendor/socket.io.min.js",
+      "integrity": "sha384-LzhRnpGmQP+lOvWruF/lgkcqD+WDVt9fU3H4BWmwP5u5LTmkUGafMcpZKNObVMLU",
+      "priority": "high",
+      "type": "script",
+      "original_url": "https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"
+    },
+    "chart.umd.min.js": {
+      "path": "/static/vendor/chart.umd.min.js",
+      "integrity": "sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4",
+      "priority": "low",
+      "type": "script",
+      "original_url": "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
+    },
+    "vis-timeline-graph2d.min.js": {
+      "path": "/static/vendor/vis-timeline-graph2d.min.js",
+      "integrity": "sha384-MLX+7yEEPNEznaIWwQi2pBMODSBP6Qo6BOVpzjFWB0UkfEzEYsvHOo7ISLfcQeiI",
+      "priority": "low",
+      "type": "script",
+      "original_url": "https://cdn.jsdelivr.net/npm/vis-timeline@7.7.3/standalone/umd/vis-timeline-graph2d.min.js"
+    },
+    "vis-timeline-graph2d.min.css": {
+      "path": "/static/vendor/vis-timeline-graph2d.min.css",
+      "integrity": "sha384-N/4l0y8PNlO5uZuzP9PK3bAgJQ8ZChybZFXB2mpkZRUil/bui++mvYXPzPAHpbr6",
+      "priority": "low",
+      "type": "style",
+      "original_url": "https://cdn.jsdelivr.net/npm/vis-timeline@7.7.3/styles/vis-timeline-graph2d.min.css"
+    },
+    "xterm.min.css": {
+      "path": "/static/vendor/xterm.min.css",
+      "integrity": "sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh",
+      "priority": "low",
+      "type": "style",
+      "original_url": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+    },
+    "xterm.min.js": {
+      "path": "/static/vendor/xterm.min.js",
+      "integrity": "sha384-xjfWUeCWdMtvpAb/SmM6lMzS6pQGcQa0loOl1d97j6Odw0vjK9nW3+dTb/bn/mwH",
+      "priority": "low",
+      "type": "script",
+      "original_url": "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"
+    },
+    "xterm-addon-fit.min.js": {
+      "path": "/static/vendor/xterm-addon-fit.min.js",
+      "integrity": "sha384-dpjGwSSISUTz2taP54Bor7qkyMR20sSO9oe11UVYnGs2/YdUBf7HW30XKQx9PCzn",
+      "priority": "low",
+      "type": "script",
+      "original_url": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"
+    }
+  }
+}

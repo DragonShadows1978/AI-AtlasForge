@@ -1,0 +1,161 @@
+repos:
+  rde_core:
+    name: RDE Core (Autonomous Claude)
+    path: /home/vader/mini-mind-v2
+    remote: origin
+    remote_url: https://github.com/DragonShadows1978/Autonomous_Claude.git
+    is_primary: true
+    description: Core RDE engine, dashboard, git integration, and enhancement modules
+  narrative:
+    name: Narrative Workflow
+    path: /home/vader/mini-mind-v2/workspace/Narrative WorkFlow
+    remote: origin
+    remote_url: git@github.com:DragonShadows1978/Narrative-Creation.git
+    is_primary: false
+    description: Narrative creation and consciousness thesis work
+  brotato_bot:
+    name: Brotato Bot
+    path: /home/vader/mini-mind-v2/workspace/brotato_bot
+    remote: origin
+    remote_url: git@github.com:DragonShadows1978/brotato_bot.git
+    is_primary: false
+    description: Brotato game automation and ML models
+  glove:
+    name: GLOVE Framework
+    path: /home/vader/mini-mind-v2/workspace/glove
+    remote: origin
+    remote_url: git@github.com:DragonShadows1978/glove.git
+    is_primary: false
+    description: GPU-accelerated local vision engine
+  glassbox:
+    name: GlassBox
+    path: /home/vader/mini-mind-v2/workspace/glassbox
+    remote: origin
+    remote_url: git@github.com:DragonShadows1978/glassbox.git
+    is_primary: false
+    description: Transparent ML introspection framework
+  vision:
+    name: Vision Tools
+    path: /home/vader/mini-mind-v2/workspace/vision
+    remote: origin
+    remote_url: git@github.com:DragonShadows1978/vision_tools.git
+    is_primary: false
+    description: Computer vision utilities and screen capture
+routing_rules:
+- pattern: workspace/brotato_bot/**
+  repo: brotato_bot
+  priority: 100
+  description: Brotato bot core code
+- pattern: workspace/brotato_shop_brain/**
+  repo: brotato_bot
+  priority: 100
+  description: Brotato shop brain modules
+- pattern: workspace/models/shop_decision/**
+  repo: brotato_bot
+  priority: 100
+  description: Brotato shop decision models
+- pattern: workspace/Narrative WorkFlow/**
+  repo: narrative
+  priority: 100
+  description: Narrative workflow project
+- pattern: workspace/narrative/**
+  repo: narrative
+  priority: 100
+  description: Narrative helper modules
+- pattern: workspace/narrative_projects/**
+  repo: narrative
+  priority: 100
+  description: Narrative project data
+- pattern: workspace/glove/**
+  repo: glove
+  priority: 100
+  description: GLOVE framework code
+- pattern: workspace/glassbox/**
+  repo: glassbox
+  priority: 100
+  description: GlassBox introspection framework
+- pattern: glassbox/**
+  repo: glassbox
+  priority: 100
+  description: GlassBox symlink root
+- pattern: workspace/vision/**
+  repo: vision
+  priority: 100
+  description: Vision processing modules
+- pattern: rde_enhancements/**
+  repo: rde_core
+  priority: 90
+  description: RDE enhancement modules
+- pattern: git_*.py
+  repo: rde_core
+  priority: 90
+  description: Git integration modules
+- pattern: rd_engine.py
+  repo: rde_core
+  priority: 90
+  description: RDE engine
+- pattern: dashboard_v2.py
+  repo: rde_core
+  priority: 90
+  description: Dashboard UI
+- pattern: claude_autonomous.py
+  repo: rde_core
+  priority: 90
+  description: Autonomous agent runner
+- pattern: vision_tool.py
+  repo: rde_core
+  priority: 90
+  description: Vision tool (RDE root-level)
+- pattern: experiment_framework.py
+  repo: rde_core
+  priority: 90
+  description: Experiment framework
+- pattern: hierarchical_framework.py
+  repo: rde_core
+  priority: 90
+  description: Hierarchical agent framework
+- pattern: GROUND_RULES.md
+  repo: rde_core
+  priority: 90
+  description: Ground rules documentation
+- pattern: ENVIRONMENT.md
+  repo: rde_core
+  priority: 90
+  description: Environment documentation
+- pattern: README.md
+  repo: rde_core
+  priority: 90
+  description: Main README
+- pattern: repo_routing.yaml
+  repo: rde_core
+  priority: 90
+  description: This routing configuration
+- pattern: repo_router.py
+  repo: rde_core
+  priority: 90
+  description: Repo router module
+- pattern: repo_router_cli.py
+  repo: rde_core
+  priority: 90
+  description: Repo router CLI
+- pattern: workspace/**
+  repo: null
+  priority: 10
+  description: Untracked workspace content
+- pattern: '*.py'
+  repo: rde_core
+  priority: 5
+  description: Root Python files
+- pattern: '**'
+  repo: rde_core
+  priority: 0
+  description: Default fallback to RDE core
+settings:
+  warn_on_ambiguous: true
+  verbose_routing: false
+  auto_init_repos: false
+  validate_paths: true
+  commit_template: '{type}: {summary}
+
+
+    Routed via RepoRouter from {source_path}'
