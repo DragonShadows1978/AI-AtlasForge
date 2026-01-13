@@ -51,7 +51,7 @@ For detailed installation options, see [INSTALL.md](INSTALL.md).
 
 3. **Start the Engine**:
    ```bash
-   python3 claude_autonomous.py --mode=rd
+   python3 atlasforge.py --mode=rd
    ```
 
 ## Architecture
@@ -65,7 +65,7 @@ For detailed installation options, see [INSTALL.md](INSTALL.md).
               +--------------+--------------+
               |                             |
     +---------v---------+         +--------v--------+
-    | Claude Autonomous |         |    Dashboard    |
+    |    AtlasForge     |         |    Dashboard    |
     | (Execution Engine)|         |   (Monitoring)  |
     +---------+---------+         +-----------------+
               |
@@ -96,7 +96,7 @@ Missions can iterate through multiple cycles until success criteria are met.
 
 ## Core Components
 
-### claude_autonomous.py
+### atlasforge.py
 Main execution loop. Spawns Claude instances, manages state, handles graceful shutdown.
 
 ### af_engine.py
@@ -145,7 +145,7 @@ Designed for unattended execution:
 
 ```
 AI-AtlasForge/
-+-- claude_autonomous.py    # Main entry point
++-- atlasforge.py           # Main entry point
 +-- af_engine.py            # Stage state machine
 +-- dashboard_v2.py         # Web dashboard
 +-- adversarial_testing/    # Testing framework
