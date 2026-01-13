@@ -220,6 +220,10 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
+## Related Projects
+
+- **[AI-AfterImage](https://github.com/DragonShadows1978/AI-AfterImage)** - Episodic memory for AI coding agents. Gives Claude Code persistent memory of code it has written across sessions. Works great with AtlasForge for cross-mission code recall.
+
 ## Acknowledgments
 
 Built on Claude by Anthropic. Special thanks to the Claude Code team for making autonomous AI development possible.

@@ -3,7 +3,7 @@ name = "ai-atlasforge"
 version = "1.0.0"
 description = "Autonomous AI research and development platform powered by Claude"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = {text = "MIT"}
 requires-python = ">=3.10"
 keywords = ["ai", "claude", "autonomous", "research", "development"]
 classifiers = [
@@ -58,7 +58,7 @@ Repository = "https://github.com/DragonShadows1978/AI-AtlasForge.git"
 Issues = "https://github.com/DragonShadows1978/AI-AtlasForge/issues"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0,<77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
