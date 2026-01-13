@@ -1,7 +1,7 @@
 """
 Cache Management Blueprint
 
-Provides API endpoints for managing various caches in the RDE system:
+Provides API endpoints for managing various caches in the AtlasForge system:
 - KB analytics cache
 - Decision graph cache
 - Template cache

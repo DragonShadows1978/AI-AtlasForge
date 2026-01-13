@@ -219,7 +219,7 @@ def cmd_route(router: RepoRouter, args: argparse.Namespace) -> int:
     import subprocess
 
     result = subprocess.run(
-        ["git", "-C", router.rde_root, "status", "--porcelain"],
+        ["git", "-C", router.atlasforge_root, "status", "--porcelain"],
         capture_output=True,
         text=True
     )
@@ -285,7 +285,7 @@ def cmd_commit(router: RepoRouter, args: argparse.Namespace) -> int:
     import subprocess
 
     result = subprocess.run(
-        ["git", "-C", router.rde_root, "status", "--porcelain"],
+        ["git", "-C", router.atlasforge_root, "status", "--porcelain"],
         capture_output=True,
         text=True
     )
@@ -438,7 +438,7 @@ Examples:
     )
     parser.add_argument(
         "--root", "-r",
-        help="RDE root directory",
+        help="AtlasForge root directory",
         default=None
     )
 
@@ -484,7 +484,7 @@ Examples:
     try:
         router = get_router(
             config_path=args.config,
-            rde_root=args.root
+            atlasforge_root=args.root
         )
     except Exception as e:
         print(error(f"Failed to initialize router: {e}"))

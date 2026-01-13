@@ -54,7 +54,7 @@ if (widgetSocket) {
         // Subscribe to widget rooms
         widgetSocket.emit('subscribe', {room: 'mission_status'});
         widgetSocket.emit('subscribe', {room: 'journal'});
-        widgetSocket.emit('subscribe', {room: 'rde_stats'});
+        widgetSocket.emit('subscribe', {room: 'atlasforge_stats'});
         widgetSocket.emit('subscribe', {room: 'decision_graph'});
     });
 

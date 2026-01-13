@@ -11,7 +11,7 @@ import { showToast } from './core.js';
 // =============================================================================
 
 const tabLoadCallbacks = new Map();
-const loadedTabs = new Set(['rde']); // RDE is always loaded
+const loadedTabs = new Set(['atlasforge']); // AtlasForge is always loaded
 
 // =============================================================================
 // LAZY LOADING REGISTRATION
@@ -47,7 +47,7 @@ export function markTabLoaded(tabName) {
 // VALID TAB NAMES (for URL hash validation)
 // =============================================================================
 
-const VALID_TABS = ['rde', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
+const VALID_TABS = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
 
 /**
  * Get tab name from URL hash
@@ -84,8 +84,8 @@ export function switchTab(tabName, updateUrl = true) {
 
     // Validate tab name
     if (!VALID_TABS.includes(tabName)) {
-        console.warn(`Invalid tab name: ${tabName}, defaulting to rde`);
-        tabName = 'rde';
+        console.warn(`Invalid tab name: ${tabName}, defaulting to atlasforge`);
+        tabName = 'atlasforge';
     }
 
     // Update tab buttons
@@ -166,7 +166,7 @@ function fireTabRefresh(tabName) {
 export function initTabs() {
     // Run hash check immediately - don't defer
     const hashTab = getTabFromHash();
-    const savedTab = localStorage.getItem('activeTab') || 'rde';
+    const savedTab = localStorage.getItem('activeTab') || 'atlasforge';
     // URL hash takes priority over localStorage
     const initialTab = hashTab || savedTab;
 
@@ -221,7 +221,7 @@ function setupKeyboardShortcuts() {
 
         // Tab shortcuts: 1-6 for tab switching
         if (e.key >= '1' && e.key <= '6' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            const tabs = ['rde', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
+            const tabs = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
             const idx = parseInt(e.key) - 1;
             if (tabs[idx]) {
                 switchTab(tabs[idx]);
@@ -232,13 +232,13 @@ function setupKeyboardShortcuts() {
 
         // Other shortcuts
         if (e.key === 'e' || e.key === 'E') {
-            if (typeof window.toggleCard === 'function') window.toggleCard('rde-exploration');
+            if (typeof window.toggleCard === 'function') window.toggleCard('atlasforge-exploration');
         } else if (e.key === 'd' || e.key === 'D') {
-            if (typeof window.toggleCard === 'function') window.toggleCard('rde-drift');
+            if (typeof window.toggleCard === 'function') window.toggleCard('atlasforge-drift');
         } else if (e.key === 'r' || e.key === 'R') {
-            if (typeof window.refreshRDEWidgets === 'function') {
-                window.refreshRDEWidgets();
-                showToast('RDE widgets refreshed');
+            if (typeof window.refreshAtlasForgeWidgets === 'function') {
+                window.refreshAtlasForgeWidgets();
+                showToast('AtlasForge widgets refreshed');
             }
         } else if (e.key === 'g' || e.key === 'G') {
             switchTab('glassbox');

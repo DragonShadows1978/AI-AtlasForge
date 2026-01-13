@@ -428,7 +428,7 @@ class MissionQueueScheduler:
         Evaluate a start condition expression.
 
         Supported conditions:
-        - "idle_after:HH:MM" - After specified time AND RDE is idle
+        - "idle_after:HH:MM" - After specified time AND AtlasForge is idle
         - "at:YYYY-MM-DDTHH:MM" - At exact datetime
         - "after_mission:mission_id" - After specific mission completes
         """
@@ -448,8 +448,8 @@ class MissionQueueScheduler:
                 if now < target_time:
                     return False
 
-                # Also check if RDE is idle
-                return self._is_rde_idle()
+                # Also check if AtlasForge is idle
+                return self._is_atlasforge_idle()
 
             elif condition.startswith("at:"):
                 # Format: at:2026-01-02T17:00
@@ -468,8 +468,8 @@ class MissionQueueScheduler:
 
         return True  # Default to ready if condition can't be parsed
 
-    def _is_rde_idle(self) -> bool:
-        """Check if RDE is currently idle (not running a mission)."""
+    def _is_atlasforge_idle(self) -> bool:
+        """Check if AtlasForge is currently idle (not running a mission)."""
         if self.io_utils:
             current = self.io_utils.atomic_read_json(MISSION_PATH, {})
         else:

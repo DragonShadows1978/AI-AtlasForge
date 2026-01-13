@@ -1,5 +1,5 @@
 """
-RDE Enhancements Package
+AtlasForge Enhancements Package
 
 Three features to help Claude Code explore and build more effectively:
 
@@ -8,9 +8,9 @@ Three features to help Claude Code explore and build more effectively:
 3. Self-Calibrating Prompt Scaffolding - Reduce cognitive biases
 
 Usage:
-    from rde_enhancements import RDEEnhancer
+    from atlasforge_enhancements import AtlasForgeEnhancer
 
-    enhancer = RDEEnhancer(mission_id="my_mission")
+    enhancer = AtlasForgeEnhancer(mission_id="my_mission")
 
     # Track mission continuity
     enhancer.set_mission_baseline(mission_statement)
@@ -82,7 +82,7 @@ from .scaffold_calibrator import (
     quick_bias_check
 )
 
-from .rde_enhancer import RDEEnhancer
+from .atlasforge_enhancer import AtlasForgeEnhancer
 
 from .knowledge_transfer import (
     KnowledgeTransfer,
@@ -95,7 +95,7 @@ from .exploration_graph import EmbeddingModel
 
 __all__ = [
     # Main interface
-    'RDEEnhancer',
+    'AtlasForgeEnhancer',
 
     # Feature 1: Fingerprinting
     'ConceptFingerprint',

@@ -8,7 +8,7 @@ Structure:
 - core.py: Core routes (status, start/stop, journal, mission, proposals)
 - knowledge_base.py: Knowledge base API routes
 - analytics.py: Analytics and cost tracking routes
-- rde.py: AtlasForge exploration and enhancement routes
+- atlasforge.py: AtlasForge exploration and enhancement routes
 - recovery.py: Recovery and decision graph routes
 - investigation.py: Investigation mode routes
 - services.py: Service health monitoring
@@ -23,7 +23,7 @@ Usage in dashboard_v2.py:
         core_bp, init_core_blueprint,
         knowledge_base_bp,
         analytics_bp, init_analytics_blueprint,
-        rde_bp,
+        atlasforge_bp,
         recovery_bp, init_recovery_blueprint,
         investigation_bp, init_investigation_blueprint,
         services_bp,
@@ -44,7 +44,7 @@ Usage in dashboard_v2.py:
     app.register_blueprint(core_bp)
     app.register_blueprint(knowledge_base_bp)
     app.register_blueprint(analytics_bp)
-    app.register_blueprint(rde_bp)
+    app.register_blueprint(atlasforge_bp)
     app.register_blueprint(recovery_bp)
     app.register_blueprint(investigation_bp)
     app.register_blueprint(services_bp)
@@ -59,7 +59,7 @@ Usage in dashboard_v2.py:
 from .core import core_bp, init_core_blueprint
 from .knowledge_base import knowledge_base_bp
 from .analytics import analytics_bp, init_analytics_blueprint
-from .rde import rde_bp, register_archival_routes
+from .atlasforge import atlasforge_bp, register_archival_routes
 from .recovery import recovery_bp, init_recovery_blueprint
 from .investigation import investigation_bp, init_investigation_blueprint
 from .services import services_bp
@@ -72,7 +72,7 @@ __all__ = [
     'core_bp',
     'knowledge_base_bp',
     'analytics_bp',
-    'rde_bp',
+    'atlasforge_bp',
     'recovery_bp',
     'investigation_bp',
     'services_bp',

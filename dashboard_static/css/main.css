@@ -89,7 +89,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     html, body {
         background: var(--bg);
     }
-    #rde-tab {
+    #atlasforge-tab {
         background: var(--bg);
     }
     .container {
@@ -129,7 +129,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
         min-width: 300vw; /* Ensure body extends full width of content */
         background: var(--bg);
     }
-    #rde-tab {
+    #atlasforge-tab {
         width: 300vw; /* Match content width */
         min-width: 300vw;
         overflow-x: visible;
@@ -251,7 +251,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
 
 /* Reduced motion support for accessibility */
 @media (prefers-reduced-motion: reduce) {
-    #rde-tab {
+    #atlasforge-tab {
         scroll-behavior: auto !important;
     }
     .scroll-dot {
@@ -1957,32 +1957,32 @@ h1 { color: var(--accent); font-size: 1.3em; }
     color: var(--text-dim);
 }
 
-/* RDE Enhancement Widget Styles */
-.rde-widget { margin-bottom: 15px; }
-.rde-stat-grid {
+/* AtlasForge Enhancement Widget Styles */
+.atlasforge-widget { margin-bottom: 15px; }
+.atlasforge-stat-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 10px;
     margin-bottom: 15px;
 }
-.rde-stat-box {
+.atlasforge-stat-box {
     text-align: center;
     padding: 10px;
     background: var(--bg);
     border-radius: 6px;
     border: 1px solid var(--border);
 }
-.rde-stat-value {
+.atlasforge-stat-value {
     font-size: 1.5em;
     font-weight: bold;
     color: var(--accent);
 }
-.rde-stat-label {
+.atlasforge-stat-label {
     font-size: 0.7em;
     color: var(--text-dim);
     text-transform: uppercase;
 }
-.rde-drift-chart {
+.atlasforge-drift-chart {
     height: 60px;
     display: flex;
     align-items: flex-end;
@@ -1992,26 +1992,26 @@ h1 { color: var(--accent); font-size: 1.3em; }
     border-radius: 6px;
     margin-bottom: 10px;
 }
-.rde-drift-bar {
+.atlasforge-drift-bar {
     flex: 1;
     min-width: 8px;
     border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
 }
-.rde-drift-bar.green { background: var(--green); }
-.rde-drift-bar.yellow { background: var(--yellow); }
-.rde-drift-bar.red { background: var(--red); }
-.rde-drift-status {
+.atlasforge-drift-bar.green { background: var(--green); }
+.atlasforge-drift-bar.yellow { background: var(--yellow); }
+.atlasforge-drift-bar.red { background: var(--red); }
+.atlasforge-drift-status {
     display: flex;
     justify-content: space-between;
     font-size: 0.8em;
 }
-.rde-drift-status .label { color: var(--text-dim); }
-.rde-drift-status .value { font-weight: 500; }
-.rde-drift-status .value.green { color: var(--green); }
-.rde-drift-status .value.yellow { color: var(--yellow); }
-.rde-drift-status .value.red { color: var(--red); }
-.rde-exploration-item {
+.atlasforge-drift-status .label { color: var(--text-dim); }
+.atlasforge-drift-status .value { font-weight: 500; }
+.atlasforge-drift-status .value.green { color: var(--green); }
+.atlasforge-drift-status .value.yellow { color: var(--yellow); }
+.atlasforge-drift-status .value.red { color: var(--red); }
+.atlasforge-exploration-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -2019,14 +2019,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
     border-bottom: 1px solid var(--border);
     font-size: 0.85em;
 }
-.rde-exploration-item:last-child { border-bottom: none; }
-.rde-exploration-name {
+.atlasforge-exploration-item:last-child { border-bottom: none; }
+.atlasforge-exploration-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 200px;
 }
-.rde-exploration-type {
+.atlasforge-exploration-type {
     font-size: 0.7em;
     padding: 2px 6px;
     border-radius: 4px;
@@ -2034,14 +2034,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
     color: var(--accent);
     text-transform: uppercase;
 }
-.rde-coverage-bar {
+.atlasforge-coverage-bar {
     height: 8px;
     background: var(--bg);
     border-radius: 4px;
     overflow: hidden;
     margin-top: 8px;
 }
-.rde-coverage-fill {
+.atlasforge-coverage-fill {
     height: 100%;
     background: linear-gradient(90deg, var(--green), var(--accent));
     border-radius: 4px;
@@ -5937,8 +5937,8 @@ body.tiles-locked .keyboard-grabbed {
         left: 0 !important;
     }
 
-    /* Also prevent RDE tab from scrolling when modal is open */
-    body.modal-open #rde-tab,
+    /* Also prevent AtlasForge tab from scrolling when modal is open */
+    body.modal-open #atlasforge-tab,
     body.modal-open .container {
         overflow: hidden !important;
         pointer-events: none !important; /* Prevent interaction with background */

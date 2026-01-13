@@ -3,7 +3,7 @@
  *
  * Contains only the widget refresh functions that are called during page initialization.
  * These are inlined in the main bundle (not lazy-loaded) to ensure they're available
- * immediately when the RDE tab loads.
+ * immediately when the AtlasForge tab loads.
  *
  * Critical functions:
  * - refreshGitStatusWidget() - Git branch/changes display (called from init, 15s interval)
@@ -22,7 +22,7 @@ import { api } from './api.js';
 // =============================================================================
 
 /**
- * Refresh the git status widget on the RDE tab sidebar
+ * Refresh the git status widget on the AtlasForge tab sidebar
  * Shows current branch, ahead/behind status, and uncommitted changes count
  */
 export async function refreshGitStatusWidget() {
@@ -309,7 +309,7 @@ function renderKBTypePieChart(typeData) {
 }
 
 /**
- * Refresh the KB analytics widget on the RDE tab sidebar
+ * Refresh the KB analytics widget on the AtlasForge tab sidebar
  * Shows total learnings, transfer rate, top themes, and accumulation chart
  */
 export async function refreshKBAnalyticsWidget() {
@@ -395,7 +395,7 @@ export function getKBAnalyticsData() {
 // =============================================================================
 
 /**
- * Refresh the multi-repo status widget on the RDE tab sidebar
+ * Refresh the multi-repo status widget on the AtlasForge tab sidebar
  * Shows status of tracked repositories
  */
 export async function refreshRepoStatusWidget() {
@@ -468,7 +468,7 @@ export async function refreshRepoStatusWidget() {
 let gitAnalyticsData = null;
 
 /**
- * Refresh the git analytics summary widget on the RDE tab sidebar
+ * Refresh the git analytics summary widget on the AtlasForge tab sidebar
  * Shows commit counts, churn stats, and mission selector
  */
 export async function refreshGitAnalyticsWidget() {
@@ -977,7 +977,7 @@ export async function initRecommendationsWidget() {
 }
 
 /**
- * Refresh the recommendations widget on the RDE tab sidebar
+ * Refresh the recommendations widget on the AtlasForge tab sidebar
  * Shows pending recommendations from investigations with pagination
  */
 export async function refreshRecommendations() {

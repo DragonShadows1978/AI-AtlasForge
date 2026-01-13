@@ -2,7 +2,7 @@
 """
 Stage Checkpoint Recovery System
 
-This module provides crash recovery for the RDE by:
+This module provides crash recovery for the AtlasForge by:
 1. Checkpointing progress at key points within each stage
 2. Detecting incomplete missions on startup
 3. Generating recovery prompts to resume from last checkpoint

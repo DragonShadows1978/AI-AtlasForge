@@ -34,7 +34,7 @@ ps aux | grep -E "ollama|steam" | grep -v grep
 - If RAM is plentiful → cache more data
 - If Ollama is running → account for its VRAM usage
 
-**Don't leave performance on the table.** An RTX 3070 sitting idle while NumPy crunches tensors on CPU is a missed opportunity.
+**Don't leave performance on the table.** A GPU sitting idle while NumPy crunches tensors on CPU is a missed opportunity.
 
 ## Environment Access
 You have FULL control of this Linux system:
@@ -42,9 +42,10 @@ You have FULL control of this Linux system:
 - **Internet access** - Research documentation, APIs, techniques freely
 - **Package installation** - Install dependencies as needed (apt, pip, npm, etc.)
 - **System modification** - Modify configs, set up services, change environment
-- **Local LLM** - Ollama is running with `llama3.1:8b` available at `http://localhost:11434`
+- **Local LLM** - If Ollama is configured, it is available at the configured URL (default: `http://localhost:11434`)
   - Use for testing, training data generation, or any task where a local model helps
-  - API: `curl http://localhost:11434/api/generate -d '{"model":"llama3.1:8b","prompt":"..."}'`
+  - API: `curl $OLLAMA_URL/api/generate -d '{"model":"$OLLAMA_MODEL","prompt":"..."}'`
+  - Configure via `config.yaml` or environment variables (`OLLAMA_URL`, `OLLAMA_MODEL`)
 
 ## Virtual Display (IMPORTANT)
 **Use display :99 for ALL graphical operations.** A virtual framebuffer (Xvfb) is running:
@@ -54,7 +55,7 @@ You have FULL control of this Linux system:
 - The virtual display is 1920x1080x24
 
 ## Vision Tool - Screen Capture
-**You have a high-performance screen capture tool available:** `/home/vader/mini-mind-v2/vision_tool.py`
+**You have a high-performance screen capture tool available:** `vision_tool.py` in the project root.
 
 ### MANDATORY: UI Verification with Screenshots
 **ALL UI changes MUST be verified with actual screenshots.** Do NOT claim UI elements are "working" or "populated" based on code inspection alone. You must:
@@ -146,7 +147,7 @@ The mission file contains:
 
 ## Workspace Structure
 ```
-/home/vader/mini-mind-v2/
+$ATLASFORGE_ROOT/
 ├── workspace/           # Your working directory
 │   ├── artifacts/       # Plans, reports, documentation
 │   ├── research/        # Notes, findings, analysis
@@ -162,8 +163,8 @@ The mission file contains:
 **ALL projects MUST be rooted in `/workspace/`.**
 
 Regardless of where file paths lead or where source files are referenced, all project code must live within:
-- `/home/vader/mini-mind-v2/workspace/<project_name>/` - for standalone projects
-- `/home/vader/mini-mind-v2/missions/<mission_id>/workspace/` - for mission work
+- `$ATLASFORGE_ROOT/workspace/<project_name>/` - for standalone projects
+- `$ATLASFORGE_ROOT/missions/<mission_id>/workspace/` - for mission work
 
 **Do NOT:**
 - Create project folders outside of `/workspace/`
@@ -174,7 +175,7 @@ Regardless of where file paths lead or where source files are referenced, all pr
 
 ## Live Dashboard & Monitoring
 
-Your mission is being observed in real-time via the **RDE Dashboard** at `http://localhost:5000`.
+Your mission is being observed in real-time via the **AtlasForge Dashboard** at `http://localhost:5000`.
 
 **What's visible:**
 - Current stage (PLANNING, BUILDING, TESTING, etc.)
@@ -264,9 +265,9 @@ These logs enable post-mission analysis of execution patterns and help identify 
 
 ---
 
-## RDE Enhancements - AVAILABLE TOOLS
+## AtlasForge Enhancements - AVAILABLE TOOLS
 
-The RDE has enhancement modules in `/home/vader/mini-mind-v2/rde_enhancements/`:
+The AtlasForge has enhancement modules in `$ATLASFORGE_ROOT/atlasforge_enhancements/`:
 
 | Module | Purpose |
 |--------|---------|
@@ -289,12 +290,12 @@ These run automatically - you don't need to invoke them, but be aware your explo
 **Core files are automatically backed up** before any Edit or Write operation.
 
 Protected files include:
-- `dashboard_v2.py`, `rd_engine.py`, `claude_autonomous.py`
+- `dashboard_v2.py`, `af_engine.py`, `claude_autonomous.py`
 - `exploration_hooks.py`, `io_utils.py`, `GROUND_RULES.md`
-- All files in `rde_enhancements/`
+- All files in `atlasforge_enhancements/`
 - GlassBox modules in `workspace/glassbox/`
 
-Backups are stored in `/home/vader/mini-mind-v2/backups/auto_backups/` with timestamps.
+Backups are stored in `$ATLASFORGE_ROOT/backups/auto_backups/` with timestamps.
 
 **If you break something critical**, check the backup directory for recent copies.
 
@@ -366,7 +367,7 @@ def test_integration():
 
 You have access to `experiment_framework.py` - a controlled experimentation system for spawning fresh Claude instances and running systematic tests.
 
-**Location:** `/home/vader/mini-mind-v2/experiment_framework.py`
+**Location:** `$ATLASFORGE_ROOT/experiment_framework.py`
 
 **Capabilities:**
 - Spawn fresh Claude instances with controlled prompts (no prior context)
@@ -415,7 +416,7 @@ results.save()
 
 For complex, long-running missions that benefit from parallel execution, use the **Hierarchical Framework**.
 
-**Location:** `/home/vader/mini-mind-v2/hierarchical_framework.py`
+**Location:** `$ATLASFORGE_ROOT/hierarchical_framework.py`
 
 ### When to Use Hierarchical Framework
 

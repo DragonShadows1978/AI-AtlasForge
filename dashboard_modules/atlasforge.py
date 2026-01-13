@@ -1,5 +1,5 @@
 """
-RDE Enhancements API Routes Blueprint
+AtlasForge Enhancements API Routes Blueprint
 
 Contains routes for:
 - Exploration statistics
@@ -14,19 +14,19 @@ Contains routes for:
 from flask import Blueprint, jsonify, request
 
 # Create Blueprint
-rde_bp = Blueprint('rde', __name__, url_prefix='/api/rde')
+atlasforge_bp = Blueprint('atlasforge', __name__, url_prefix='/api/atlasforge')
 
 
 # =============================================================================
 # EXPLORATION STATS AND HISTORY
 # =============================================================================
 
-@rde_bp.route('/exploration-stats')
-def api_rde_exploration_stats():
+@atlasforge_bp.route('/exploration-stats')
+def api_af_exploration_stats():
     """Get exploration graph statistics for dashboard widget."""
     try:
         import exploration_hooks
-        data = exploration_hooks.get_rde_dashboard_data()
+        data = exploration_hooks.get_af_dashboard_data()
         return jsonify(data)
     except Exception as e:
         return jsonify({
@@ -38,8 +38,8 @@ def api_rde_exploration_stats():
         })
 
 
-@rde_bp.route('/drift-history')
-def api_rde_drift_history():
+@atlasforge_bp.route('/drift-history')
+def api_af_drift_history():
     """Get drift history for trend visualization."""
     try:
         import exploration_hooks
@@ -54,8 +54,8 @@ def api_rde_drift_history():
         return jsonify({"error": str(e), "history": []})
 
 
-@rde_bp.route('/recent-explorations')
-def api_rde_recent_explorations():
+@atlasforge_bp.route('/recent-explorations')
+def api_af_recent_explorations():
     """Get recently explored items."""
     try:
         import exploration_hooks
@@ -70,8 +70,8 @@ def api_rde_recent_explorations():
 # SEMANTIC SEARCH
 # =============================================================================
 
-@rde_bp.route('/semantic-search')
-def api_rde_semantic_search():
+@atlasforge_bp.route('/semantic-search')
+def api_af_semantic_search():
     """Perform semantic search on exploration graph."""
     try:
         import exploration_hooks
@@ -85,8 +85,8 @@ def api_rde_semantic_search():
         return jsonify({"error": str(e), "results": []})
 
 
-@rde_bp.route('/what-do-we-know')
-def api_rde_what_do_we_know():
+@atlasforge_bp.route('/what-do-we-know')
+def api_af_what_do_we_know():
     """Query exploration memory for knowledge on a topic."""
     try:
         import exploration_hooks
@@ -99,8 +99,8 @@ def api_rde_what_do_we_know():
         return jsonify({"error": str(e)})
 
 
-@rde_bp.route('/search-insights')
-def api_rde_search_insights():
+@atlasforge_bp.route('/search-insights')
+def api_af_search_insights():
     """Semantic search for insights."""
     try:
         import exploration_hooks
@@ -118,8 +118,8 @@ def api_rde_search_insights():
 # VISUALIZATION
 # =============================================================================
 
-@rde_bp.route('/exploration-graph')
-def api_rde_exploration_graph():
+@atlasforge_bp.route('/exploration-graph')
+def api_af_exploration_graph():
     """Get exploration graph for visualization."""
     try:
         import exploration_hooks
@@ -135,8 +135,8 @@ def api_rde_exploration_graph():
 # PRIOR MISSIONS KNOWLEDGE
 # =============================================================================
 
-@rde_bp.route('/prior-missions')
-def api_rde_prior_missions():
+@atlasforge_bp.route('/prior-missions')
+def api_af_prior_missions():
     """Get list of prior missions with exploration data."""
     try:
         import exploration_hooks
@@ -146,8 +146,8 @@ def api_rde_prior_missions():
         return jsonify({"error": str(e), "missions": []})
 
 
-@rde_bp.route('/query-prior-knowledge')
-def api_rde_query_prior_knowledge():
+@atlasforge_bp.route('/query-prior-knowledge')
+def api_af_query_prior_knowledge():
     """Query knowledge from prior missions."""
     try:
         import exploration_hooks
@@ -161,8 +161,8 @@ def api_rde_query_prior_knowledge():
         return jsonify({"error": str(e), "results": []})
 
 
-@rde_bp.route('/starting-suggestions')
-def api_rde_starting_suggestions():
+@atlasforge_bp.route('/starting-suggestions')
+def api_af_starting_suggestions():
     """Get starting point suggestions from prior missions."""
     try:
         import exploration_hooks
@@ -176,19 +176,19 @@ def api_rde_starting_suggestions():
 # RE-ARCHIVAL AND DECISION GRAPH POPULATION
 # =============================================================================
 
-# These routes don't have the /api/rde prefix in the original, so we need
+# These routes don't have the /api/atlasforge prefix in the original, so we need
 # to register them separately. They're included here for reference but
 # will be registered on the main app or a separate blueprint.
 
 
 def register_archival_routes(app):
-    """Register archival routes that don't follow the /api/rde prefix pattern."""
+    """Register archival routes that don't follow the /api/atlasforge prefix pattern."""
 
     @app.route('/api/rearchive/mission/<mission_id>', methods=['POST'])
     def api_rearchive_mission(mission_id):
         """Re-archive a specific mission's transcripts."""
         try:
-            from rd_engine import rearchive_mission
+            from atlasforge_engine import rearchive_mission
             result = rearchive_mission(mission_id)
             return jsonify(result)
         except Exception as e:
@@ -198,7 +198,7 @@ def register_archival_routes(app):
     def api_rearchive_all():
         """Re-archive all missions with empty/missing transcript data."""
         try:
-            from rd_engine import rearchive_all_missions
+            from atlasforge_engine import rearchive_all_missions
             result = rearchive_all_missions()
             return jsonify(result)
         except Exception as e:

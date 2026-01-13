@@ -455,7 +455,7 @@ export function loadGlassboxTabMission() {
 }
 
 // =============================================================================
-// WIDGET CARD FUNCTIONS (for RDE tab widget)
+// WIDGET CARD FUNCTIONS (for AtlasForge tab widget)
 // =============================================================================
 
 // Cache for widget mission summaries

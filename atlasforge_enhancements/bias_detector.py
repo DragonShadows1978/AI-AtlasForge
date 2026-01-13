@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Bias Detector - RDE Enhancement Feature 3.1
+Bias Detector - AtlasForge Enhancement Feature 3.1
 
 Detects common LLM bias patterns in Claude's responses.
 Identifies patterns like sycophancy, anchoring, overconfidence, etc.
@@ -377,7 +377,7 @@ def analyze_response(text: str) -> Dict:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Bias Detector - RDE Enhancement")
+    print("Bias Detector - AtlasForge Enhancement")
     print("=" * 50)
 
     # Test texts with different bias patterns

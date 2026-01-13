@@ -9,7 +9,7 @@ Features:
     - Chat interface
     - Real-time status
 
-Access: http://localhost:5000
+Access: http://localhost:5010
 
 Architecture:
     This file serves as the main entry point and orchestrator.
@@ -109,7 +109,7 @@ _ws_state_cache = {
     'mission': {},
     'journal': [],
     'glassbox': {},
-    'rde_stats': {},
+    'atlasforge_stats': {},
     'connected_clients': 0,
     'last_check': 0
 }
@@ -118,7 +118,7 @@ _ws_state_cache = {
 VALID_WS_ROOMS = [
     'mission_status',    # Mission stage, iteration, running status
     'journal',           # Journal entries
-    'rde_stats',         # RDE exploration stats, drift, coverage
+    'atlasforge_stats',         # AtlasForge exploration stats, drift, coverage
     'glassbox',          # GlassBox introspection data
     'analytics',         # Cost/token analytics
     'exploration',       # Exploration graph updates
@@ -283,7 +283,7 @@ from dashboard_modules import (
     core_bp, init_core_blueprint,
     knowledge_base_bp,
     analytics_bp, init_analytics_blueprint,
-    rde_bp, register_archival_routes,
+    atlasforge_bp, register_archival_routes,
     recovery_bp, init_recovery_blueprint,
     investigation_bp, init_investigation_blueprint,
     services_bp,
@@ -324,7 +324,7 @@ init_queue_scheduler_blueprint(socketio)
 app.register_blueprint(core_bp)
 app.register_blueprint(knowledge_base_bp)
 app.register_blueprint(analytics_bp)
-app.register_blueprint(rde_bp)
+app.register_blueprint(atlasforge_bp)
 app.register_blueprint(recovery_bp)
 app.register_blueprint(investigation_bp)
 app.register_blueprint(services_bp)
@@ -387,10 +387,10 @@ def queue_auto_start_watcher():
     Watch for queue auto-start signals AND idle-state auto-start.
 
     Two triggers:
-    1. Signal file exists (from /api/queue/next or rd_engine)
-    2. RDE is idle + auto_start enabled + queue has ready items (idle-state check)
+    1. Signal file exists (from /api/queue/next or atlasforge_engine)
+    2. AtlasForge is idle + auto_start enabled + queue has ready items (idle-state check)
 
-    This file is written by rd_engine.py when a queued mission is ready.
+    This file is written by atlasforge_engine.py when a queued mission is ready.
     When detected, this watcher:
     1. Reads the signal file
     2. Starts Claude in R&D mode if not already running
@@ -756,8 +756,8 @@ def get_initial_room_data(room: str) -> dict:
             return get_claude_status()
         elif room == 'journal':
             return {'entries': get_recent_journal(15)}
-        elif room == 'rde_stats':
-            return get_rde_exploration_stats()
+        elif room == 'atlasforge_stats':
+            return get_atlasforge_exploration_stats()
         elif room == 'analytics':
             return get_analytics_summary()
         elif room == 'glassbox':
@@ -771,10 +771,10 @@ def get_initial_room_data(room: str) -> dict:
     return {}
 
 
-def get_rde_exploration_stats() -> dict:
-    """Get RDE exploration stats for WebSocket push."""
+def get_atlasforge_exploration_stats() -> dict:
+    """Get AtlasForge exploration stats for WebSocket push."""
     try:
-        from rde_enhancements.exploration_graph import get_exploration_graph
+        from atlasforge_enhancements.exploration_graph import get_exploration_graph
         graph = get_exploration_graph()
         if graph:
             return {
@@ -823,7 +823,7 @@ def get_glassbox_summary() -> dict:
 def get_exploration_data() -> dict:
     """Get exploration graph data for WebSocket push."""
     try:
-        from rde_enhancements.exploration_graph import get_exploration_graph
+        from atlasforge_enhancements.exploration_graph import get_exploration_graph
         graph = get_exploration_graph()
         if graph:
             return {
@@ -871,8 +871,8 @@ def broadcast_state_change(event_type: str, data: dict):
         'mission_started': 'mission_status',
         'mission_stopped': 'mission_status',
         'journal_entry': 'journal',
-        'rde_exploration': 'rde_stats',
-        'rde_drift_alert': 'rde_stats',
+        'atlasforge_exploration': 'atlasforge_stats',
+        'atlasforge_drift_alert': 'atlasforge_stats',
         'analytics_update': 'analytics',
         'glassbox_event': 'glassbox',
         'exploration_update': 'exploration',
@@ -922,15 +922,15 @@ def check_and_emit_widget_updates():
     except Exception:
         pass
 
-    # RDE stats check (less frequent - every 10 seconds)
+    # AtlasForge stats check (less frequent - every 10 seconds)
     try:
-        if now - _widget_state.get('rde_last_check', 0) > 10:
-            _widget_state['rde_last_check'] = now
-            rde_data = get_rde_exploration_stats()
-            rde_key = str(rde_data.get('exploration', {}).get('total_insights', 0))
-            if _widget_state.get('rde_key') != rde_key:
-                _widget_state['rde_key'] = rde_key
-                emit_widget_update('rde_stats', rde_data)
+        if now - _widget_state.get('atlasforge_last_check', 0) > 10:
+            _widget_state['atlasforge_last_check'] = now
+            atlasforge_data = get_atlasforge_exploration_stats()
+            atlasforge_key = str(atlasforge_data.get('exploration', {}).get('total_insights', 0))
+            if _widget_state.get('atlasforge_key') != atlasforge_key:
+                _widget_state['atlasforge_key'] = atlasforge_key
+                emit_widget_update('atlasforge_stats', atlasforge_data)
     except Exception:
         pass
 
@@ -1040,7 +1040,7 @@ if __name__ == '__main__':
     print(f"Templates: {TEMPLATES_DIR}")
     print(f"Modules: dashboard_modules/")
     print("=" * 50)
-    PORT = int(os.environ.get('PORT', 5000))
+    PORT = int(os.environ.get('PORT', 5010))
     print(f"Access at: http://localhost:{PORT}")
     print("=" * 50)
 

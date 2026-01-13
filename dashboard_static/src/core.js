@@ -182,7 +182,7 @@ export function copyToClipboard(text) {
 // FILTER STATE PERSISTENCE
 // =============================================================================
 
-const FILTER_STATE_KEY = 'rde_filter_state';
+const FILTER_STATE_KEY = 'atlasforge_filter_state';
 
 /**
  * Save a filter value to localStorage

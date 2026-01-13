@@ -37,7 +37,7 @@ import {
 
 // =============================================================================
 // CRITICAL WIDGET IMPORTS - Loaded directly (NOT lazy) for immediate availability
-// These functions are called during page initialization on the RDE tab
+// These functions are called during page initialization on the AtlasForge tab
 // =============================================================================
 
 import {
@@ -173,7 +173,7 @@ window.resetMission = widgets.resetMission;
 window.loadFiles = widgets.loadFiles;
 window.updateStageIndicator = widgets.updateStageIndicator;
 window.updateStatusBar = widgets.updateStatusBar;
-window.updateRDEServiceStatus = widgets.updateRDEServiceStatus;
+window.updateAtlasForgeServiceStatus = widgets.updateAtlasForgeServiceStatus;
 window.updateInvestigationServiceStatus = widgets.updateInvestigationServiceStatus;
 window.updateTerminalServiceStatus = widgets.updateTerminalServiceStatus;
 window.refreshServiceStatuses = widgets.refreshServiceStatuses;
@@ -181,7 +181,7 @@ window.showRestartModal = widgets.showRestartModal;
 window.hideRestartModal = widgets.hideRestartModal;
 window.confirmRestart = widgets.confirmRestart;
 window.refresh = widgets.refresh;
-window.refreshRDEWidgets = widgets.refreshRDEWidgets;
+window.refreshAtlasForgeWidgets = widgets.refreshAtlasForgeWidgets;
 window.refreshAnalyticsWidget = widgets.refreshAnalyticsWidget;
 window.refreshFullAnalytics = widgets.refreshFullAnalytics;
 window.showMissionAnalytics = widgets.showMissionAnalytics;
@@ -255,7 +255,7 @@ window.quickAddToQueue = async function() {
 
 // =============================================================================
 // CRITICAL WIDGET FUNCTIONS - Available immediately (NOT lazy-loaded)
-// These are called during page initialization on RDE tab
+// These are called during page initialization on AtlasForge tab
 // =============================================================================
 
 window.refreshKBAnalyticsWidget = refreshKBAnalyticsWidget;
@@ -419,10 +419,10 @@ tabs.registerTabLoader('kb-analytics', () => lazyLoad('kb-analytics'));
 tabs.registerTabLoader('investigations', () => lazyLoad('investigation-history'));
 
 // =============================================================================
-// RDE SIDEBAR GLASSBOX DROPDOWN (loaded separately from lazy-loaded module)
+// ATLASFORGE SIDEBAR GLASSBOX DROPDOWN (loaded separately from lazy-loaded module)
 // =============================================================================
 
-async function populateRDESidebarGlassbox() {
+async function populateAtlasForgeSidebarGlassbox() {
     try {
         const response = await api.api('/api/glassbox/missions?limit=100');
         const missions = response.missions || [];
@@ -442,9 +442,9 @@ async function populateRDESidebarGlassbox() {
             });
         }
 
-        console.log(`RDE sidebar GlassBox populated with ${total} missions`);
+        console.log(`AtlasForge sidebar GlassBox populated with ${total} missions`);
     } catch (e) {
-        console.log('Could not populate RDE sidebar GlassBox:', e);
+        console.log('Could not populate AtlasForge sidebar GlassBox:', e);
     }
 }
 
@@ -502,8 +502,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initial data refresh
     await widgets.refresh();
 
-    // Populate RDE sidebar GlassBox dropdown (independent of lazy-loaded module)
-    populateRDESidebarGlassbox();
+    // Populate AtlasForge sidebar GlassBox dropdown (independent of lazy-loaded module)
+    populateAtlasForgeSidebarGlassbox();
 
     // Check for crash recovery
     recovery.checkForRecovery();
@@ -656,16 +656,16 @@ function initKeyboardShortcuts() {
  * Shows which column is currently in view and allows tapping to navigate
  */
 function initMobileScrollDots() {
-    // On mobile (<= 600px), the scroll container is #rde-tab, not .container
-    // because CSS sets overflow-x: scroll on #rde-tab
-    const rdeTab = document.getElementById('rde-tab');
-    const container = document.querySelector('#rde-tab .container');
+    // On mobile (<= 600px), the scroll container is #atlasforge-tab, not .container
+    // because CSS sets overflow-x: scroll on #atlasforge-tab
+    const atlasforgeTab = document.getElementById('atlasforge-tab');
+    const container = document.querySelector('#atlasforge-tab .container');
     const dotsContainer = document.getElementById('mobile-scroll-dots');
     const dots = document.querySelectorAll('#mobile-scroll-dots .scroll-dot');
 
-    if (!rdeTab || !container || !dotsContainer || dots.length === 0) {
+    if (!atlasforgeTab || !container || !dotsContainer || dots.length === 0) {
         console.log('Mobile scroll dots: missing elements', {
-            rdeTab: !!rdeTab,
+            atlasforgeTab: !!atlasforgeTab,
             container: !!container,
             dotsContainer: !!dotsContainer,
             dots: dots.length
@@ -673,9 +673,9 @@ function initMobileScrollDots() {
         return;
     }
 
-    // Get the scroll container - #rde-tab on mobile, .container on tablet
+    // Get the scroll container - #atlasforge-tab on mobile, .container on tablet
     function getScrollContainer() {
-        return window.innerWidth <= 600 ? rdeTab : container;
+        return window.innerWidth <= 600 ? atlasforgeTab : container;
     }
 
     // Only show dots on mobile (handled by CSS, but also check here)
@@ -717,7 +717,7 @@ function initMobileScrollDots() {
     };
 
     // Listen for scroll events on BOTH containers (handles resize/orientation change)
-    rdeTab.addEventListener('scroll', updateActiveDot, { passive: true });
+    atlasforgeTab.addEventListener('scroll', updateActiveDot, { passive: true });
     container.addEventListener('scroll', updateActiveDot, { passive: true });
 
     // Listen for resize events
@@ -784,8 +784,8 @@ function setupWebSocketHandlers() {
         }
     });
 
-    registerHandler('rde_stats', (data) => {
-        updateRDEWidgetsFromPush(data);
+    registerHandler('atlasforge_stats', (data) => {
+        updateAtlasForgeWidgetsFromPush(data);
     });
 
     registerHandler('analytics', (data) => {
@@ -802,7 +802,7 @@ function setupWebSocketHandlers() {
     });
 }
 
-function updateRDEWidgetsFromPush(data) {
+function updateAtlasForgeWidgetsFromPush(data) {
     if (data.exploration) {
         const setEl = (id, val) => {
             const el = document.getElementById(id);
@@ -810,15 +810,15 @@ function updateRDEWidgetsFromPush(data) {
         };
 
         const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
-        setEl('rde-files-count', fileCount);
-        setEl('rde-insights-count', data.exploration.total_insights || 0);
-        setEl('rde-edges-count', data.exploration.total_edges || 0);
+        setEl('atlasforge-files-count', fileCount);
+        setEl('atlasforge-insights-count', data.exploration.total_insights || 0);
+        setEl('atlasforge-edges-count', data.exploration.total_edges || 0);
     }
 
     if (data.coverage_pct !== undefined) {
         const coverage = data.coverage_pct;
-        const pctEl = document.getElementById('rde-coverage-pct');
-        const barEl = document.getElementById('rde-coverage-bar');
+        const pctEl = document.getElementById('atlasforge-coverage-pct');
+        const barEl = document.getElementById('atlasforge-coverage-bar');
         if (pctEl) pctEl.textContent = coverage + '%';
         if (barEl) barEl.style.width = coverage + '%';
     }

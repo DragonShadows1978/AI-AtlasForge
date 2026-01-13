@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Exploration Hooks - Callable functions for RDE exploration tracking.
+Exploration Hooks - Callable functions for AtlasForge exploration tracking.
 
 These can be invoked during exploration to record discoveries
 and query prior knowledge. Provides a simple API for Claude to
@@ -290,7 +290,7 @@ _cached_mission_id = None  # Track which mission the enhancer was created for
 
 def set_current_enhancer(enhancer):
     """
-    Manually set the current RDE enhancer.
+    Manually set the current AtlasForge enhancer.
 
     Used for testing or when manually managing enhancer lifecycle.
     """
@@ -321,10 +321,10 @@ def _get_mission_stage() -> Optional[str]:
 
 def get_current_enhancer(force_reload: bool = False):
     """
-    Get or create the RDE enhancer for the current mission.
+    Get or create the AtlasForge enhancer for the current mission.
 
     Lazily initializes the enhancer on first call and caches it.
-    Returns None if RDE enhancements are not available or mission
+    Returns None if AtlasForge enhancements are not available or mission
     is not properly configured.
 
     Args:
@@ -351,12 +351,12 @@ def get_current_enhancer(force_reload: bool = False):
         return _enhancer
 
     try:
-        from rde_enhancements import RDEEnhancer
+        from atlasforge_enhancements import AtlasForgeEnhancer
 
         if mission_id and workspace:
-            _enhancer = RDEEnhancer(
+            _enhancer = AtlasForgeEnhancer(
                 mission_id=mission_id,
-                storage_base=Path(workspace) / 'rde_data'
+                storage_base=Path(workspace) / 'atlasforge_data'
             )
             _cached_mission_id = mission_id
             return _enhancer
@@ -458,7 +458,7 @@ def record_exploration(
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
-    return {"status": "no_enhancer", "message": "RDE enhancements not available"}
+    return {"status": "no_enhancer", "message": "AtlasForge enhancements not available"}
 
 
 def record_concept(
@@ -698,7 +698,7 @@ def get_drift_history(force_reload: bool = True) -> List[Dict]:
     Returns:
         List of drift measurements with cycle, similarity, severity
     """
-    from rde_enhancements.fingerprint_extractor import measure_drift
+    from atlasforge_enhancements.fingerprint_extractor import measure_drift
 
     enhancer = get_current_enhancer(force_reload=force_reload)
     if enhancer:
@@ -748,7 +748,7 @@ def get_recent_explorations(limit: int = 10, force_reload: bool = True) -> List[
     Returns:
         List of recent explorations with timestamps
     """
-    from rde_enhancements import ExplorationGraph
+    from atlasforge_enhancements import ExplorationGraph
 
     # First try mission-specific enhancer
     enhancer = get_current_enhancer(force_reload=force_reload)
@@ -790,9 +790,9 @@ def get_recent_explorations(limit: int = 10, force_reload: bool = True) -> List[
     return []
 
 
-def get_rde_dashboard_data(force_reload: bool = True) -> Dict:
+def get_af_dashboard_data(force_reload: bool = True) -> Dict:
     """
-    Get all data needed for RDE dashboard widgets.
+    Get all data needed for AtlasForge dashboard widgets.
 
     Returns comprehensive data for visualization:
     - Exploration stats
@@ -806,7 +806,7 @@ def get_rde_dashboard_data(force_reload: bool = True) -> Dict:
     Returns:
         Dict with all dashboard data
     """
-    from rde_enhancements import ExplorationGraph
+    from atlasforge_enhancements import ExplorationGraph
     from datetime import datetime
 
     enhancer = get_current_enhancer(force_reload=force_reload)
@@ -896,7 +896,7 @@ def get_visualization_data(width: float = 800, height: float = 600, force_reload
     Returns:
         Dict with nodes, edges, and stats for visualization
     """
-    from rde_enhancements import ExplorationGraph
+    from atlasforge_enhancements import ExplorationGraph
 
     # First try mission-specific enhancer
     enhancer = get_current_enhancer(force_reload=force_reload)
@@ -1467,7 +1467,7 @@ def populate_exploration_from_transcripts(limit_missions: int = 10) -> Dict:
         Dict with population statistics
     """
     from pathlib import Path
-    from rde_enhancements import ExplorationGraph
+    from atlasforge_enhancements import ExplorationGraph
 
     archive_dir = ARTIFACTS_DIR / "transcripts"
     graph = ExplorationGraph(storage_path=EXPLORATION_DIR)

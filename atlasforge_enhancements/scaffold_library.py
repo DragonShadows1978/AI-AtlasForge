@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scaffold Library - RDE Enhancement Feature 3.2
+Scaffold Library - AtlasForge Enhancement Feature 3.2
 
 A collection of evidence-based scaffolding prompts that can correct or prevent
 cognitive bias patterns in Claude's responses.
@@ -422,7 +422,7 @@ def apply_multiple_scaffolds(
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Scaffold Library - RDE Enhancement")
+    print("Scaffold Library - AtlasForge Enhancement")
     print("=" * 50)
 
     print(f"\nTotal scaffolds: {len(ALL_SCAFFOLDS)}")

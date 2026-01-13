@@ -1,0 +1,83 @@
+# AI-AtlasForge Docker Compose Configuration
+# Usage: docker-compose up -d
+
+version: '3.8'
+
+services:
+  atlasforge-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: atlasforge:1.0.0
+    container_name: atlasforge-dashboard
+    restart: unless-stopped
+
+    # Port mapping
+    ports:
+      - "${ATLASFORGE_PORT:-5050}:5050"
+
+    # Environment configuration
+    environment:
+      - ATLASFORGE_ROOT=/app
+      - ATLASFORGE_PORT=5050
+      - ATLASFORGE_HOST=0.0.0.0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+
+    # Volume mounts for persistent data
+    volumes:
+      # State persistence (mission.json, checkpoints)
+      - atlasforge-state:/app/state
+
+      # Mission archives and logs
+      - atlasforge-missions:/app/missions
+
+      # Runtime logs
+      - atlasforge-logs:/app/logs
+
+      # Knowledge base persistence
+      - atlasforge-kb:/app/knowledge_base
+
+      # Optional: Mount config for customization
+      # Uncomment and create config.yaml to use:
+      # - ./config.yaml:/app/config.yaml:ro
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits (optional, adjust as needed)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Named volumes for data persistence
+volumes:
+  atlasforge-state:
+    driver: local
+  atlasforge-missions:
+    driver: local
+  atlasforge-logs:
+    driver: local
+  atlasforge-kb:
+    driver: local
+
+# Optional: Network configuration
+networks:
+  default:
+    name: atlasforge-network

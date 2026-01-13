@@ -15,8 +15,10 @@ watchdog>=3.0.0
 # Process management
 psutil>=5.9.0
 
-# Data processing
+# Data processing and ML
 numpy>=1.21.0
+scikit-learn>=1.0.0  # Used for TF-IDF in knowledge base
 
 # Optional: GUI system tray (Linux)
-# PyGObject>=3.42.0  # Uncomment if using rde_tray.py
+# Uncomment to enable system tray indicator:
+# PyGObject>=3.42.0

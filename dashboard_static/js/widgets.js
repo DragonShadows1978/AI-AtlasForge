@@ -1,6 +1,6 @@
 /**
  * Dashboard Widgets Module
- * RDE widgets, analytics, git status, file handling, collapsible cards, journal
+ * AtlasForge widgets, analytics, git status, file handling, collapsible cards, journal
  * Dependencies: core.js, api.js, modals.js
  */
 
@@ -320,8 +320,8 @@ async function refresh() {
     // Load files
     await loadFiles();
 
-    // Load RDE enhancement widgets
-    await refreshRDEWidgets();
+    // Load AtlasForge enhancement widgets
+    await refreshAtlasForgeWidgets();
 
     // Load KB Analytics widget (less frequently - every 3rd refresh)
     if (!window.lastKBRefresh || Date.now() - window.lastKBRefresh > 15000) {
@@ -333,29 +333,29 @@ async function refresh() {
 }
 
 // =============================================================================
-// RDE ENHANCEMENT WIDGETS
+// AtlasForge ENHANCEMENT WIDGETS
 // =============================================================================
 
-async function refreshRDEWidgets() {
+async function refreshAtlasForgeWidgets() {
     try {
-        const data = await api('/api/rde/exploration-stats');
+        const data = await api('/api/atlasforge/exploration-stats');
         if (data.error) {
-            console.log('RDE data not available:', data.error);
+            console.log('AtlasForge data not available:', data.error);
             return;
         }
 
         // Update exploration stats
         if (data.exploration) {
             const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
-            document.getElementById('rde-files-count').textContent = fileCount;
-            document.getElementById('rde-insights-count').textContent = data.exploration.total_insights || 0;
-            document.getElementById('rde-edges-count').textContent = data.exploration.total_edges || 0;
+            document.getElementById('af-files-count').textContent = fileCount;
+            document.getElementById('af-insights-count').textContent = data.exploration.total_insights || 0;
+            document.getElementById('af-edges-count').textContent = data.exploration.total_edges || 0;
         }
 
         // Update coverage
         const coverage = data.coverage_pct || 0;
-        document.getElementById('rde-coverage-pct').textContent = coverage + '%';
-        document.getElementById('rde-coverage-bar').style.width = coverage + '%';
+        document.getElementById('af-coverage-pct').textContent = coverage + '%';
+        document.getElementById('af-coverage-bar').style.width = coverage + '%';
 
         // Update drift chart
         updateDriftChart(data.drift_history || []);
@@ -371,14 +371,14 @@ async function refreshRDEWidgets() {
             window.lastGraphRefresh = Date.now();
         }
     } catch (e) {
-        console.log('Error loading RDE widgets:', e);
+        console.log('Error loading AtlasForge widgets:', e);
     }
 }
 
 function updateDriftChart(driftHistory) {
-    const chart = document.getElementById('rde-drift-chart');
-    const simEl = document.getElementById('rde-drift-similarity');
-    const sevEl = document.getElementById('rde-drift-severity');
+    const chart = document.getElementById('af-drift-chart');
+    const simEl = document.getElementById('af-drift-similarity');
+    const sevEl = document.getElementById('af-drift-severity');
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -396,7 +396,7 @@ function updateDriftChart(driftHistory) {
         if (h.alert === 'YELLOW') colorClass = 'yellow';
         else if (h.alert === 'RED' || h.alert === 'ORANGE') colorClass = 'red';
 
-        return `<div class="rde-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
+        return `<div class="af-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
     }).join('');
 
     chart.innerHTML = bars;
@@ -417,7 +417,7 @@ function getAlertColor(alert) {
 }
 
 function updateRecentExplorations(explorations) {
-    const list = document.getElementById('rde-recent-list');
+    const list = document.getElementById('af-recent-list');
 
     if (!explorations || explorations.length === 0) {
         list.innerHTML = '<div style="color: var(--text-dim); font-size: 0.85em;">No explorations yet</div>';
@@ -428,9 +428,9 @@ function updateRecentExplorations(explorations) {
         const name = e.name || e.path || 'Unknown';
         const type = e.type || 'file';
         return `
-            <div class="rde-exploration-item" title="${e.summary || ''}">
-                <span class="rde-exploration-name">${name}</span>
-                <span class="rde-exploration-type">${type}</span>
+            <div class="af-exploration-item" title="${e.summary || ''}">
+                <span class="af-exploration-name">${name}</span>
+                <span class="af-exploration-type">${type}</span>
             </div>
         `;
     }).join('');

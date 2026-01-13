@@ -1,0 +1,99 @@
+[project]
+name = "ai-atlasforge"
+version = "1.0.0"
+description = "Autonomous AI research and development platform powered by Claude"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+keywords = ["ai", "claude", "autonomous", "research", "development"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Code Generators",
+]
+
+dependencies = [
+    "flask>=2.0.0",
+    "flask-socketio>=5.0.0",
+    "simple-websocket>=0.5.0",
+    "anthropic>=0.18.0",
+    "watchdog>=3.0.0",
+    "psutil>=5.9.0",
+    "numpy>=1.21.0",
+    "scikit-learn>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+tray = [
+    "PyGObject>=3.42.0",
+]
+all = [
+    "ai-atlasforge[dev,tray]",
+]
+
+[project.scripts]
+atlasforge-dashboard = "dashboard_v2:main"
+atlasforge = "claude_autonomous:main"
+
+[project.urls]
+Homepage = "https://github.com/DragonShadows1978/AI-AtlasForge"
+Documentation = "https://github.com/DragonShadows1978/AI-AtlasForge#readme"
+Repository = "https://github.com/DragonShadows1978/AI-AtlasForge.git"
+Issues = "https://github.com/DragonShadows1978/AI-AtlasForge/issues"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "dashboard_modules*",
+    "atlasforge_enhancements*",
+    "adversarial_testing*",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.mypy_cache
+    | \.pytest_cache
+    | __pycache__
+    | venv
+    | workspace
+    | missions
+    | state
+    | logs
+)/
+'''
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["workspace/tests"]
+python_files = "test_*.py"
+python_functions = "test_*"

@@ -17,25 +17,25 @@ AI-AtlasForge is not a chatbot wrapper. It's an **autonomous research engine** t
 ### Prerequisites
 
 - Python 3.10+
-- Claude API access (via Claude Code CLI - `claude` command)
-- Linux environment (tested on Ubuntu/Linux Mint)
+- Anthropic API key (get one at https://console.anthropic.com/)
+- Linux environment (tested on Ubuntu 22.04+, Debian 12+)
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/AI-AtlasForge.git
+git clone https://github.com/DragonShadows1978/AI-AtlasForge.git
 cd AI-AtlasForge
 
-# Install Python dependencies
-pip install -r requirements.txt
+# Run the installer
+./install.sh
 
-# Install Node dependencies (for dashboard)
-npm install
-
-# Create required directories
-mkdir -p state logs workspace/{artifacts,research,tests} missions rde_data/knowledge_base
+# Configure your API key
+export ANTHROPIC_API_KEY='your-key-here'
+# Or edit config.yaml / .env
 ```
+
+For detailed installation options, see [INSTALL.md](INSTALL.md).
 
 ### Running Your First Mission
 
@@ -99,7 +99,7 @@ Missions can iterate through multiple cycles until success criteria are met.
 ### claude_autonomous.py
 Main execution loop. Spawns Claude instances, manages state, handles graceful shutdown.
 
-### rd_engine.py
+### af_engine.py
 State machine for mission execution. Manages stages, enforces constraints, tracks progress.
 
 ### dashboard_v2.py
@@ -146,10 +146,10 @@ Designed for unattended execution:
 ```
 AI-AtlasForge/
 +-- claude_autonomous.py    # Main entry point
-+-- rd_engine.py            # Stage state machine
++-- af_engine.py            # Stage state machine
 +-- dashboard_v2.py         # Web dashboard
 +-- adversarial_testing/    # Testing framework
-+-- rde_enhancements/       # Enhancement modules
++-- atlasforge_enhancements/  # Enhancement modules
 +-- workspace/              # Active workspace
 |   +-- glassbox/           # Introspection tools
 |   +-- artifacts/          # Plans, reports
@@ -159,7 +159,7 @@ AI-AtlasForge/
 |   +-- mission.json        # Current mission
 |   +-- claude_state.json   # Execution state
 +-- missions/               # Mission workspaces
-+-- rde_data/
++-- atlasforge_data/
 |   +-- knowledge_base/     # Accumulated learnings
 +-- logs/                   # Execution logs
 ```
@@ -198,20 +198,19 @@ The web dashboard provides real-time monitoring:
 ## Requirements
 
 - Python 3.10+
-- Node.js 18+ (for dashboard build)
-- Claude API access (via Claude Code CLI)
-- Linux environment
+- Node.js 18+ (optional, for dashboard JS modifications)
+- Anthropic API key
+- Linux environment (Ubuntu 22.04+, Debian 12+)
 
 ### Python Dependencies
 
-```
-flask
-flask-socketio
-simple-websocket
-anthropic
-```
+See `requirements.txt` or `pyproject.toml` for full list.
 
-See `requirements.txt` for full list.
+## Documentation
+
+- [INSTALL.md](INSTALL.md) - Detailed installation guide
+- [USAGE.md](USAGE.md) - How to use AI-AtlasForge
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
 
 ## License
 

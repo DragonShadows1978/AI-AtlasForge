@@ -1,6 +1,6 @@
 /**
  * Dashboard Widgets Module (ES6)
- * RDE widgets, analytics, file handling, collapsible cards, journal
+ * AtlasForge widgets, analytics, file handling, collapsible cards, journal
  * Dependencies: core.js, api.js
  */
 
@@ -239,8 +239,8 @@ export function updateStageIndicator(currentStage) {
 // =============================================================================
 
 export function updateStatusBar(data) {
-    // Update RDE service status indicator in header
-    updateRDEServiceStatus(data.running, data.mode);
+    // Update AtlasForge service status indicator in header
+    updateAtlasForgeServiceStatus(data.running, data.mode);
 
     const setEl = (id, val) => {
         const el = document.getElementById(id);
@@ -258,13 +258,13 @@ export function updateStatusBar(data) {
 }
 
 /**
- * Update the RDE service status indicator in the header
- * @param {boolean} running - Whether RDE is running
+ * Update the AtlasForge service status indicator in the header
+ * @param {boolean} running - Whether AtlasForge is running
  * @param {string} mode - Current mode (rd, free, etc.)
  */
-export function updateRDEServiceStatus(running, mode) {
-    const container = document.getElementById('rde-service-status');
-    const stateEl = document.getElementById('rde-service-state');
+export function updateAtlasForgeServiceStatus(running, mode) {
+    const container = document.getElementById('atlasforge-service-status');
+    const stateEl = document.getElementById('atlasforge-service-state');
 
     if (!container || !stateEl) return;
 
@@ -437,8 +437,8 @@ export async function confirmRestart() {
 export async function refresh() {
     const data = await api('/api/status');
 
-    // Update RDE service status in header
-    updateRDEServiceStatus(data.running, data.mode);
+    // Update AtlasForge service status in header
+    updateAtlasForgeServiceStatus(data.running, data.mode);
 
     // Also check Investigation status
     try {
@@ -503,7 +503,7 @@ export async function refresh() {
     }
 
     await loadFiles();
-    await refreshRDEWidgets();
+    await refreshAtlasForgeWidgets();
 
     if (!window.lastKBRefresh || Date.now() - window.lastKBRefresh > 15000) {
         if (typeof window.refreshKBAnalyticsWidget === 'function') {
@@ -523,27 +523,27 @@ export async function refresh() {
 }
 
 // =============================================================================
-// RDE ENHANCEMENT WIDGETS
+// ATLASFORGE ENHANCEMENT WIDGETS
 // =============================================================================
 
-export async function refreshRDEWidgets() {
+export async function refreshAtlasForgeWidgets() {
     try {
-        const data = await api('/api/rde/exploration-stats');
+        const data = await api('/api/atlasforge/exploration-stats');
         if (data.error) {
-            console.log('RDE data not available:', data.error);
+            console.log('AtlasForge data not available:', data.error);
             return;
         }
 
         if (data.exploration) {
             const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
-            document.getElementById('rde-files-count').textContent = fileCount;
-            document.getElementById('rde-insights-count').textContent = data.exploration.total_insights || 0;
-            document.getElementById('rde-edges-count').textContent = data.exploration.total_edges || 0;
+            document.getElementById('atlasforge-files-count').textContent = fileCount;
+            document.getElementById('atlasforge-insights-count').textContent = data.exploration.total_insights || 0;
+            document.getElementById('atlasforge-edges-count').textContent = data.exploration.total_edges || 0;
         }
 
         const coverage = data.coverage_pct || 0;
-        document.getElementById('rde-coverage-pct').textContent = coverage + '%';
-        document.getElementById('rde-coverage-bar').style.width = coverage + '%';
+        document.getElementById('atlasforge-coverage-pct').textContent = coverage + '%';
+        document.getElementById('atlasforge-coverage-bar').style.width = coverage + '%';
 
         updateDriftChart(data.drift_history || []);
         updateRecentExplorations(data.recent_explorations || []);
@@ -555,14 +555,14 @@ export async function refreshRDEWidgets() {
             window.lastGraphRefresh = Date.now();
         }
     } catch (e) {
-        console.log('Error loading RDE widgets:', e);
+        console.log('Error loading AtlasForge widgets:', e);
     }
 }
 
 function updateDriftChart(driftHistory) {
-    const chart = document.getElementById('rde-drift-chart');
-    const simEl = document.getElementById('rde-drift-similarity');
-    const sevEl = document.getElementById('rde-drift-severity');
+    const chart = document.getElementById('atlasforge-drift-chart');
+    const simEl = document.getElementById('atlasforge-drift-similarity');
+    const sevEl = document.getElementById('atlasforge-drift-severity');
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -579,7 +579,7 @@ function updateDriftChart(driftHistory) {
         if (h.alert === 'YELLOW') colorClass = 'yellow';
         else if (h.alert === 'RED' || h.alert === 'ORANGE') colorClass = 'red';
 
-        return `<div class="rde-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
+        return `<div class="atlasforge-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
     }).join('');
 
     chart.innerHTML = bars;
@@ -599,7 +599,7 @@ function getAlertColor(alert) {
 }
 
 function updateRecentExplorations(explorations) {
-    const list = document.getElementById('rde-recent-list');
+    const list = document.getElementById('atlasforge-recent-list');
 
     if (!explorations || explorations.length === 0) {
         list.innerHTML = '<div style="color: var(--text-dim); font-size: 0.85em;">No explorations yet</div>';
@@ -610,9 +610,9 @@ function updateRecentExplorations(explorations) {
         const name = e.name || e.path || 'Unknown';
         const type = e.type || 'file';
         return `
-            <div class="rde-exploration-item" title="${e.summary || ''}">
-                <span class="rde-exploration-name">${name}</span>
-                <span class="rde-exploration-type">${type}</span>
+            <div class="atlasforge-exploration-item" title="${e.summary || ''}">
+                <span class="atlasforge-exploration-name">${name}</span>
+                <span class="atlasforge-exploration-type">${type}</span>
             </div>
         `;
     }).join('');

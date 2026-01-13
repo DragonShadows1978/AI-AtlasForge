@@ -1,0 +1,31 @@
+[Unit]
+Description=AI-AtlasForge System Tray
+Documentation=https://github.com/DragonShadows1978/AI-AtlasForge
+After=graphical-session.target
+Wants=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+WorkingDirectory=/opt/ai-atlasforge
+ExecStart=/opt/ai-atlasforge/venv/bin/python atlasforge_tray.py
+Restart=on-failure
+RestartSec=10
+
+# Environment - use user's display
+Environment="DISPLAY=:0"
+Environment="PYTHONUNBUFFERED=1"
+Environment="ATLASFORGE_ROOT=/opt/ai-atlasforge"
+
+# GTK/GI requirements
+Environment="GI_TYPELIB_PATH=/usr/lib/x86_64-linux-gnu/girepository-1.0"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlasforge-tray
+
+[Install]
+WantedBy=graphical-session.target

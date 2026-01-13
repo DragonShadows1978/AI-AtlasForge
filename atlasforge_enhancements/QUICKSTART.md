@@ -1,6 +1,6 @@
-# RDE Enhancements Quick Start Guide
+# AtlasForge Enhancements Quick Start Guide
 
-Get started with the RDE enhancement suite in 5 minutes.
+Get started with the AtlasForge enhancement suite in 5 minutes.
 
 ## Installation
 
@@ -13,13 +13,13 @@ pip install numpy sentence-transformers torch
 ### 1. Initialize the Enhancer
 
 ```python
-from rde_enhancements import RDEEnhancer
+from atlasforge_enhancements import AtlasForgeEnhancer
 from pathlib import Path
 
 # Create an enhancer for your mission
-enhancer = RDEEnhancer(
+enhancer = AtlasForgeEnhancer(
     mission_id="build_api_v1",
-    storage_base=Path("./my_rde_data")
+    storage_base=Path("./my_atlasforge_data")
 )
 ```
 
@@ -231,7 +231,7 @@ if stats['needs_pruning']:
 ### Pattern 1: Exploration-First Development
 
 ```python
-enhancer = RDEEnhancer("feature_x")
+enhancer = AtlasForgeEnhancer("feature_x")
 enhancer.set_mission_baseline(mission_text)
 
 # Phase 1: Explore
@@ -248,7 +248,7 @@ knowledge = enhancer.what_do_we_know("relevant_topic")
 ### Pattern 2: Multi-Cycle Mission
 
 ```python
-enhancer = RDEEnhancer("multi_cycle_mission")
+enhancer = AtlasForgeEnhancer("multi_cycle_mission")
 enhancer.set_mission_baseline(mission_text)
 
 for cycle in range(1, max_cycles + 1):
@@ -268,7 +268,7 @@ for cycle in range(1, max_cycles + 1):
 
 ```python
 # New mission starting
-enhancer = RDEEnhancer("new_mission")
+enhancer = AtlasForgeEnhancer("new_mission")
 enhancer.enable_knowledge_transfer()
 
 # Check what we learned before
@@ -287,7 +287,7 @@ enhancer.import_prior_insights(max_imports=10)
 If semantic search falls back to keyword search:
 
 ```python
-from rde_enhancements.exploration_graph import EmbeddingModel
+from atlasforge_enhancements.exploration_graph import EmbeddingModel
 
 # Check availability
 print(f"Available: {EmbeddingModel.is_available()}")
@@ -318,7 +318,7 @@ All operations are thread-safe, but for best performance:
 
 ```python
 # Use a single enhancer instance
-enhancer = RDEEnhancer("shared_mission")
+enhancer = AtlasForgeEnhancer("shared_mission")
 
 # Safe from multiple threads
 with ThreadPoolExecutor(max_workers=5) as executor:
@@ -332,4 +332,4 @@ with ThreadPoolExecutor(max_workers=5) as executor:
 
 - Read the full [README.md](README.md) for complete API reference
 - Check the test suite for more examples: `workspace/tests/test_rde_integration.py`
-- Explore the source code in `rde_enhancements/*.py`
+- Explore the source code in `atlasforge_enhancements/*.py`

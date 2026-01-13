@@ -25,11 +25,27 @@ from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
 
-# Paths - use centralized configuration
+# Import paths from centralized config
 from atlasforge_config import BASE_DIR, STATE_DIR, MISSIONS_DIR
+
+# Paths
 RECOMMENDATIONS_PATH = STATE_DIR / "recommendations.json"
 MISSION_PATH = STATE_DIR / "mission.json"
 MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
+
+# SQLite storage backend (imported lazily to avoid circular imports)
+_storage_backend = None
+
+def _get_storage():
+    """Get the SQLite storage backend (lazy import)."""
+    global _storage_backend
+    if _storage_backend is None:
+        try:
+            from suggestion_storage import get_storage
+            _storage_backend = get_storage()
+        except ImportError:
+            _storage_backend = None
+    return _storage_backend
 
 
 # =============================================================================
@@ -540,7 +556,15 @@ class SuggestionAnalyzer:
         self.health_analyzer = HealthAnalyzer()
 
     def _load_recommendations(self) -> List[Dict[str, Any]]:
-        """Load recommendations from JSON file."""
+        """Load recommendations from storage backend (SQLite preferred, JSON fallback)."""
+        storage = _get_storage()
+        if storage:
+            try:
+                return storage.get_all()
+            except Exception as e:
+                logger.warning(f"SQLite load failed, falling back to JSON: {e}")
+
+        # Fallback to JSON file
         if not self.recommendations_path.exists():
             return []
 
@@ -553,7 +577,16 @@ class SuggestionAnalyzer:
             return []
 
     def _save_recommendations(self, items: List[Dict[str, Any]]) -> bool:
-        """Save recommendations back to JSON file."""
+        """Save recommendations to storage backend (SQLite preferred, JSON fallback)."""
+        storage = _get_storage()
+        if storage:
+            try:
+                storage.update_all(items)
+                return True
+            except Exception as e:
+                logger.warning(f"SQLite save failed, falling back to JSON: {e}")
+
+        # Fallback to JSON file
         try:
             with open(self.recommendations_path, 'w') as f:
                 json.dump({'items': items}, f, indent=2)

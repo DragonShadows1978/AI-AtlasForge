@@ -344,7 +344,7 @@ class QueueNotifier:
             msg = MIMEMultipart()
             msg['From'] = email_addr
             msg['To'] = ", ".join(config.email_recipients)
-            msg['Subject'] = f"[RDE Queue] {title}"
+            msg['Subject'] = f"[AtlasForge Queue] {title}"
 
             # Build body
             body = f"{message}\n\n"
@@ -416,7 +416,7 @@ class QueueNotifier:
             # Add signature if secret is configured
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "RDE-Queue-Notifier/1.0"
+                "User-Agent": "AtlasForge-Queue-Notifier/1.0"
             }
             if config.webhook_secret:
                 import hmac
@@ -426,7 +426,7 @@ class QueueNotifier:
                     json.dumps(payload).encode(),
                     hashlib.sha256
                 ).hexdigest()
-                headers["X-RDE-Signature"] = f"sha256={signature}"
+                headers["X-AtlasForge-Signature"] = f"sha256={signature}"
 
             # Send request
             data = json.dumps(payload).encode('utf-8')

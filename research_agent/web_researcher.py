@@ -111,7 +111,7 @@ class WebResearcher:
 
     NOTE: This module uses the Claude API's WebSearch capability
     through the experiment framework's fresh instance spawning.
-    In the RDE context, the main Claude instance has direct access
+    In the AtlasForge context, the main Claude instance has direct access
     to WebSearch - this module provides structured research patterns.
     """
 
@@ -267,7 +267,7 @@ Respond in JSON:
         """
         Execute a search query.
 
-        In the RDE context, this would use WebSearch directly.
+        In the AtlasForge context, this would use WebSearch directly.
         For testing, we can simulate or use the experiment framework.
 
         Args:
@@ -302,7 +302,7 @@ After searching, provide results in this JSON format:
 }}
 """
 
-        # Note: In actual RDE usage, the main Claude instance has direct
+        # Note: In actual AtlasForge usage, the main Claude instance has direct
         # WebSearch access. This is a structured way to organize searches.
         response, _ = invoke_fresh_claude(
             prompt=search_prompt,

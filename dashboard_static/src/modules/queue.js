@@ -27,7 +27,7 @@ import { registerHandler } from '../socket.js';
 let queueData = {
     missions: [],
     settings: {},
-    rde_running: false,
+    atlasforge_running: false,
     paused: false,
     paused_at: null,
     pause_reason: null
@@ -94,12 +94,12 @@ export async function initQueueWidget() {
 
     registerHandler('mission_status', (data) => {
         // Update running state when mission status changes
-        const wasRunning = queueData.rde_running;
-        queueData.rde_running = data.rd_stage && data.rd_stage !== 'COMPLETE';
-        if (wasRunning !== queueData.rde_running) {
+        const wasRunning = queueData.atlasforge_running;
+        queueData.atlasforge_running = data.rd_stage && data.rd_stage !== 'COMPLETE';
+        if (wasRunning !== queueData.atlasforge_running) {
             renderQueueItems();
             // Hide auto-start indicator if mission is now running
-            if (queueData.rde_running && autoStartProcessing) {
+            if (queueData.atlasforge_running && autoStartProcessing) {
                 hideAutoStartIndicator();
             }
         }
@@ -375,14 +375,14 @@ export async function startNextFromQueue() {
     // Always fetch fresh status before deciding (cache could be stale)
     try {
         const statusData = await api('/api/queue/status');
-        if (statusData.rde_running) {
-            showToast('RDE is currently running a mission', 'warning');
+        if (statusData.atlasforge_running) {
+            showToast('AtlasForge is currently running a mission', 'warning');
             return;
         }
         // Update our local cache with fresh data
         queueData = statusData;
     } catch (e) {
-        console.warn('Could not verify RDE status, proceeding anyway:', e);
+        console.warn('Could not verify AtlasForge status, proceeding anyway:', e);
     }
 
     // Check if there are missions in the queue

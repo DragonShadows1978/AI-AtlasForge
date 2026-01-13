@@ -6,14 +6,14 @@ Directory structure:
     <ATLASFORGE_ROOT>/backups/<module>/<file>.backup.<YYYY-MM-DD>.<ext>
 
 Examples:
-    backups/rd_engine/rd_engine.backup.2024-12-08.py
+    backups/atlasforge_engine/atlasforge_engine.backup.2024-12-08.py
     backups/init_guard/init_guard.backup.2024-12-08.py
 
 Usage:
     from backup_utils import create_backup, restore_backup, list_backups
 
     # Create a backup
-    backup_path = create_backup("rd_engine.py")
+    backup_path = create_backup("atlasforge_engine.py")
 
     # Restore from backup
     restore_backup(backup_path)
@@ -50,8 +50,8 @@ def create_backup(source_path: str | Path, module_name: Optional[str] = None) ->
         Path to the backup file, or None if backup failed
 
     Example:
-        backup_path = create_backup("rd_engine.py")
-        # Creates: backups/rd_engine/rd_engine.backup.2024-12-08.py
+        backup_path = create_backup("atlasforge_engine.py")
+        # Creates: backups/atlasforge_engine/atlasforge_engine.backup.2024-12-08.py
     """
     source = Path(source_path)
 
@@ -100,8 +100,8 @@ def restore_backup(backup_path: str | Path, target_path: Optional[str | Path] = 
         True if restore succeeded, False otherwise
 
     Example:
-        restore_backup("backups/rd_engine/rd_engine.backup.2024-12-08.py")
-        # Restores to: <ATLASFORGE_ROOT>/rd_engine.py
+        restore_backup("backups/atlasforge_engine/atlasforge_engine.backup.2024-12-08.py")
+        # Restores to: <ATLASFORGE_ROOT>/atlasforge_engine.py
     """
     backup = Path(backup_path)
 

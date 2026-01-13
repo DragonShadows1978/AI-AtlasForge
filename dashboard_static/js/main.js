@@ -57,7 +57,7 @@ if (widgetSocket) {
     // Subscribe to widget rooms
     widgetSocket.emit('subscribe', {room: 'mission_status'});
     widgetSocket.emit('subscribe', {room: 'journal'});
-    widgetSocket.emit('subscribe', {room: 'rde_stats'});
+    widgetSocket.emit('subscribe', {room: 'atlasforge_stats'});
     widgetSocket.emit('subscribe', {room: 'decision_graph'});
 });
 
@@ -271,7 +271,7 @@ function switchTab(tabName) {
 
 // Initialize tab from localStorage on page load
 function initTabs() {
-    const savedTab = localStorage.getItem('activeTab') || 'rde';
+    const savedTab = localStorage.getItem('activeTab') || 'atlasforge';
     switchTab(savedTab);
 }
 
@@ -1241,8 +1241,8 @@ async function refresh() {
     // Load files
     await loadFiles();
 
-    // Load RDE enhancement widgets
-    await refreshRDEWidgets();
+    // Load AtlasForge enhancement widgets
+    await refreshAFWidgets();
 
     // Load KB Analytics widget (less frequently - every 3rd refresh)
     if (!window.lastKBRefresh || Date.now() - window.lastKBRefresh > 15000) {
@@ -1251,27 +1251,27 @@ async function refresh() {
     }
 }
 
-// RDE Enhancement Widget Functions
-async function refreshRDEWidgets() {
+// AtlasForge Enhancement Widget Functions
+async function refreshAFWidgets() {
     try {
-        const data = await api('/api/rde/exploration-stats');
+        const data = await api('/api/atlasforge/exploration-stats');
         if (data.error) {
-            console.log('RDE data not available:', data.error);
+            console.log('AtlasForge data not available:', data.error);
             return;
         }
 
         // Update exploration stats
         if (data.exploration) {
             const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
-            document.getElementById('rde-files-count').textContent = fileCount;
-            document.getElementById('rde-insights-count').textContent = data.exploration.total_insights || 0;
-            document.getElementById('rde-edges-count').textContent = data.exploration.total_edges || 0;
+            document.getElementById('af-files-count').textContent = fileCount;
+            document.getElementById('af-insights-count').textContent = data.exploration.total_insights || 0;
+            document.getElementById('af-edges-count').textContent = data.exploration.total_edges || 0;
         }
 
         // Update coverage
         const coverage = data.coverage_pct || 0;
-        document.getElementById('rde-coverage-pct').textContent = coverage + '%';
-        document.getElementById('rde-coverage-bar').style.width = coverage + '%';
+        document.getElementById('af-coverage-pct').textContent = coverage + '%';
+        document.getElementById('af-coverage-bar').style.width = coverage + '%';
 
         // Update drift chart
         updateDriftChart(data.drift_history || []);
@@ -1285,14 +1285,14 @@ async function refreshRDEWidgets() {
             window.lastGraphRefresh = Date.now();
         }
     } catch (e) {
-        console.log('Error loading RDE widgets:', e);
+        console.log('Error loading AtlasForge widgets:', e);
     }
 }
 
 function updateDriftChart(driftHistory) {
-    const chart = document.getElementById('rde-drift-chart');
-    const simEl = document.getElementById('rde-drift-similarity');
-    const sevEl = document.getElementById('rde-drift-severity');
+    const chart = document.getElementById('af-drift-chart');
+    const simEl = document.getElementById('af-drift-similarity');
+    const sevEl = document.getElementById('af-drift-severity');
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -1310,7 +1310,7 @@ function updateDriftChart(driftHistory) {
         if (h.alert === 'YELLOW') colorClass = 'yellow';
         else if (h.alert === 'RED' || h.alert === 'ORANGE') colorClass = 'red';
 
-        return `<div class="rde-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
+        return `<div class="af-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
     }).join('');
 
     chart.innerHTML = bars;
@@ -1331,7 +1331,7 @@ function getAlertColor(alert) {
 }
 
 function updateRecentExplorations(explorations) {
-    const list = document.getElementById('rde-recent-list');
+    const list = document.getElementById('af-recent-list');
 
     if (!explorations || explorations.length === 0) {
         list.innerHTML = '<div style="color: var(--text-dim); font-size: 0.85em;">No explorations yet</div>';
@@ -1342,9 +1342,9 @@ function updateRecentExplorations(explorations) {
         const name = e.name || e.path || 'Unknown';
         const type = e.type || 'file';
         return `
-            <div class="rde-exploration-item" title="${e.summary || ''}">
-                <span class="rde-exploration-name">${name}</span>
-                <span class="rde-exploration-type">${type}</span>
+            <div class="af-exploration-item" title="${e.summary || ''}">
+                <span class="af-exploration-name">${name}</span>
+                <span class="af-exploration-type">${type}</span>
             </div>
         `;
     }).join('');
@@ -1674,7 +1674,7 @@ let graphRenderer = null;
 
 async function refreshGraphVisualization() {
     try {
-        const data = await api('/api/rde/exploration-graph?width=800&height=600');
+        const data = await api('/api/atlasforge/exploration-graph?width=800&height=600');
         if (data.error && data.nodes && data.nodes.length === 0) {
             console.log('No graph data:', data.error);
             return;
@@ -1707,7 +1707,7 @@ async function searchInsights() {
     }
 
     try {
-        const data = await api('/api/rde/search-insights?q=' + encodeURIComponent(query));
+        const data = await api('/api/atlasforge/search-insights?q=' + encodeURIComponent(query));
         if (data.error) {
             results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">${data.error}</div>`;
             return;
@@ -1720,14 +1720,14 @@ async function searchInsights() {
         }
 
         const html = insights.map(i => `
-            <div class="rde-exploration-item" title="${i.description || ''}">
+            <div class="af-exploration-item" title="${i.description || ''}">
                 <div>
                     <span style="font-weight: 500;">${i.title}</span>
                     <div style="font-size: 0.75em; color: var(--text-dim);">
                         ${i.type} | ${(i.similarity * 100).toFixed(0)}% match
                     </div>
                 </div>
-                <span class="rde-exploration-type">${(i.confidence * 100).toFixed(0)}%</span>
+                <span class="af-exploration-type">${(i.confidence * 100).toFixed(0)}%</span>
             </div>
         `).join('');
 
@@ -1764,7 +1764,7 @@ document.addEventListener('keydown', (e) => {
 
     // Tab shortcuts: 1-7 for tab switching
     if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        const tabs = ['rde', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'bugbounty', 'narrative'];
+        const tabs = ['atlasforge', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'bugbounty', 'narrative'];
         const idx = parseInt(e.key) - 1;
         if (tabs[idx]) {
             switchTab(tabs[idx]);
@@ -1775,12 +1775,12 @@ document.addEventListener('keydown', (e) => {
 
     // Other shortcuts
     if (e.key === 'e' || e.key === 'E') {
-        toggleCard('rde-exploration');
+        toggleCard('af-exploration');
     } else if (e.key === 'd' || e.key === 'D') {
-        toggleCard('rde-drift');
+        toggleCard('af-drift');
     } else if (e.key === 'r' || e.key === 'R') {
-        refreshRDEWidgets();
-        showToast('RDE widgets refreshed');
+        refreshAFWidgets();
+        showToast('AtlasForge widgets refreshed');
     } else if (e.key === 'g' || e.key === 'G') {
         switchTab('glassbox');
         showToast('Switched to GlassBox');
@@ -1796,7 +1796,7 @@ function showKeyboardShortcuts() {
             <p><span class="kbd">1-7</span> Switch tabs</p>
             <p><span class="kbd">E</span> Toggle exploration card</p>
             <p><span class="kbd">D</span> Toggle drift card</p>
-            <p><span class="kbd">R</span> Refresh RDE widgets</p>
+            <p><span class="kbd">R</span> Refresh AtlasForge widgets</p>
             <p><span class="kbd">G</span> Go to GlassBox tab</p>
             <p><span class="kbd">Esc</span> Close modals</p>
             <p><span class="kbd">?</span> Show this help</p>
@@ -5516,7 +5516,7 @@ function renderNarrativeSessionDetails(session) {
     `;
 }
 
-// Phase 4: Launch Mission - generates mission config and starts RDE
+// Phase 4: Launch Mission - generates mission config and starts AtlasForge
 async function launchNarrativeMission(sessionId) {
     try {
         showToast('Generating mission...', 'info');
@@ -5549,7 +5549,7 @@ async function launchNarrativeMission(sessionId) {
             return;
         }
 
-        // Launch mission via RDE API
+        // Launch mission via AtlasForge API
         const missionConfig = missionResult.mission;
         const launchResult = await api('/api/mission', {
             method: 'POST',

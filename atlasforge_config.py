@@ -24,7 +24,7 @@ WORKSPACE_DIR = BASE_DIR / "workspace"
 LOG_DIR = BASE_DIR / "logs"
 MISSIONS_DIR = BASE_DIR / "missions"
 INVESTIGATIONS_DIR = BASE_DIR / "investigations"
-RDE_DATA_DIR = BASE_DIR / "rde_data"
+AF_DATA_DIR = BASE_DIR / "atlasforge_data"
 BACKUPS_DIR = BASE_DIR / "backups"
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
 
@@ -34,9 +34,9 @@ RESEARCH_DIR = WORKSPACE_DIR / "research"
 TESTS_DIR = WORKSPACE_DIR / "tests"
 
 # Data directories
-KNOWLEDGE_BASE_DIR = RDE_DATA_DIR / "knowledge_base"
-ANALYTICS_DIR = RDE_DATA_DIR / "analytics"
-EXPLORATION_DIR = RDE_DATA_DIR / "exploration"
+KNOWLEDGE_BASE_DIR = AF_DATA_DIR / "knowledge_base"
+ANALYTICS_DIR = AF_DATA_DIR / "analytics"
+EXPLORATION_DIR = AF_DATA_DIR / "exploration"
 
 # Key files
 MISSION_PATH = STATE_DIR / "mission.json"
@@ -62,7 +62,7 @@ def ensure_directories():
         LOG_DIR,
         MISSIONS_DIR,
         INVESTIGATIONS_DIR,
-        RDE_DATA_DIR,
+        AF_DATA_DIR,
         BACKUPS_DIR,
         SCREENSHOTS_DIR,
         ARTIFACTS_DIR,

@@ -167,7 +167,7 @@ class InitGuard:
     """
     Guards against inappropriate tool usage in each R&D stage.
 
-    Usage in rd_engine.py:
+    Usage in atlasforge_engine.py:
         from init_guard import InitGuard
 
         guard = InitGuard()

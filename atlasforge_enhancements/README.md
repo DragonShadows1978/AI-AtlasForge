@@ -1,16 +1,16 @@
-# RDE Framework Enhancements - Production Hardened
+# AtlasForge Framework Enhancements - Production Hardened
 
-A comprehensive enhancement suite for the RDE (Research & Development Engine) framework, providing mission continuity tracking, exploration memory, and self-calibrating prompt scaffolding.
+A comprehensive enhancement suite for the AtlasForge (Research & Development Engine) framework, providing mission continuity tracking, exploration memory, and self-calibrating prompt scaffolding.
 
 **Version:** 1.0.0 (Production Hardened - Cycle 5)
 
 ## Quick Start
 
 ```python
-from rde_enhancements import RDEEnhancer
+from atlasforge_enhancements import AtlasForgeEnhancer
 
 # Initialize
-enhancer = RDEEnhancer(mission_id="my_mission")
+enhancer = AtlasForgeEnhancer(mission_id="my_mission")
 
 # Track mission continuity
 enhancer.set_mission_baseline("Build a REST API with authentication")
@@ -63,7 +63,7 @@ pip install faiss-cpu  # or faiss-gpu for CUDA
 Tracks "cognitive fingerprints" - ratio-based concept frequencies that persist across context windows.
 
 ```python
-from rde_enhancements import MissionContinuityTracker
+from atlasforge_enhancements import MissionContinuityTracker
 
 tracker = MissionContinuityTracker("my_mission")
 tracker.set_baseline(mission_statement)
@@ -82,7 +82,7 @@ if report.healing_recommended:
 Graph-based memory with semantic search using sentence-transformers.
 
 ```python
-from rde_enhancements import ExplorationGraph, ExplorationAdvisor
+from atlasforge_enhancements import ExplorationGraph, ExplorationAdvisor
 
 graph = ExplorationGraph("./exploration_data")
 
@@ -106,7 +106,7 @@ should, reason = advisor.should_explore("/src/db.py")
 Detects cognitive biases and applies targeted scaffolds, then calibrates based on outcomes.
 
 ```python
-from rde_enhancements import ScaffoldCalibrator
+from atlasforge_enhancements import ScaffoldCalibrator
 
 calibrator = ScaffoldCalibrator()
 
@@ -125,7 +125,7 @@ outcome = calibrator.record_outcome(analysis['application_id'], response)
 Transfer knowledge from prior missions to new ones.
 
 ```python
-enhancer = RDEEnhancer("new_mission")
+enhancer = AtlasForgeEnhancer("new_mission")
 enhancer.enable_knowledge_transfer(
     missions_base=Path("./missions"),  # Relative to your AtlasForge root
     current_mission_context="Building a REST API"
@@ -143,7 +143,7 @@ imported = enhancer.import_prior_insights(max_imports=20)
 
 ## API Reference
 
-### RDEEnhancer
+### AtlasForgeEnhancer
 
 Main unified interface. See [QUICKSTART.md](QUICKSTART.md) for examples.
 
@@ -276,7 +276,7 @@ node = enhancer.record_file_exploration("/test.py", "summary")  # Works even if 
 
 ```bash
 cd /path/to/atlasforge
-python3 -m pytest workspace/tests/test_rde_integration.py -v
+python3 -m pytest workspace/tests/test_atlasforge_integration.py -v
 ```
 
 29 tests covering:
@@ -291,7 +291,7 @@ python3 -m pytest workspace/tests/test_rde_integration.py -v
 ## File Structure
 
 ```
-rde_enhancements/
+atlasforge_enhancements/
 ├── __init__.py                    # Package exports
 ├── README.md                      # This file
 ├── QUICKSTART.md                  # Quick start guide
@@ -308,10 +308,10 @@ rde_enhancements/
 
 ## Integration Points
 
-### rd_engine.py
+### af_engine.py
 
 ```python
-enhancer = RDEEnhancer(mission_id)
+enhancer = AtlasForgeEnhancer(mission_id)
 report = enhancer.process_cycle_end(cycle, output, files_created, files_modified, summary)
 enhanced = enhancer.generate_enhanced_continuation(base_prompt, cycle_output)
 ```

@@ -4,7 +4,7 @@ Repository Router
 ==================
 Routes file changes to the correct Git repository based on configurable path mappings.
 
-This module provides intelligent multi-repository management for the RDE system,
+This module provides intelligent multi-repository management for the AtlasForge system,
 automatically directing code changes to their appropriate repositories based on
 path patterns defined in repo_routing.yaml.
 
@@ -273,7 +273,7 @@ class RoutingRule:
 @dataclass
 class RoutedFile:
     """A file that has been routed to a specific repository."""
-    file_path: str           # Path relative to RDE root
+    file_path: str           # Path relative to AtlasForge root
     absolute_path: str       # Absolute path
     repo_id: Optional[str]   # Target repo ID (None if untracked)
     repo_path: Optional[str] # Target repo path
@@ -326,7 +326,7 @@ class PathMatcher:
         Find the highest-priority rule that matches the path.
 
         Args:
-            path: File path relative to RDE root
+            path: File path relative to AtlasForge root
 
         Returns:
             Matching RoutingRule or None
@@ -411,10 +411,10 @@ class ChangeDispatcher:
     Manages staging, committing, and pushing operations.
     """
 
-    def __init__(self, registry: RepoRegistry, rde_root: str):
-        """Initialize with registry and RDE root path."""
+    def __init__(self, registry: RepoRegistry, atlasforge_root: str):
+        """Initialize with registry and AtlasForge root path."""
         self.registry = registry
-        self.rde_root = os.path.abspath(rde_root)
+        self.atlasforge_root = os.path.abspath(atlasforge_root)
 
     def _run_git(
         self,
@@ -900,26 +900,26 @@ class RepoRouter:
     def __init__(
         self,
         config_path: Optional[str] = None,
-        rde_root: Optional[str] = None
+        atlasforge_root: Optional[str] = None
     ):
         """
         Initialize the repo router.
 
         Args:
             config_path: Path to routing configuration file
-            rde_root: Root path of RDE installation
+            atlasforge_root: Root path of AtlasForge installation
         """
-        self.rde_root = rde_root or os.environ.get(
-            "RDE_REPO_PATH",
+        self.atlasforge_root = atlasforge_root or os.environ.get(
+            "ATLASFORGE_REPO_PATH",
             str(Path(__file__).resolve().parent)
         )
-        self.rde_root = os.path.abspath(self.rde_root)
+        self.atlasforge_root = os.path.abspath(self.atlasforge_root)
 
         # Determine config path
         if config_path:
             self.config_path = config_path
         else:
-            self.config_path = os.path.join(self.rde_root, self.DEFAULT_CONFIG_PATH)
+            self.config_path = os.path.join(self.atlasforge_root, self.DEFAULT_CONFIG_PATH)
 
         # Load configuration
         self.config = self._load_config()
@@ -927,7 +927,7 @@ class RepoRouter:
         # Initialize components
         self.registry = RepoRegistry(self.config["repos"])
         self.matcher = PathMatcher(self.config["rules"])
-        self.dispatcher = ChangeDispatcher(self.registry, self.rde_root)
+        self.dispatcher = ChangeDispatcher(self.registry, self.atlasforge_root)
         self.settings = self.config.get("settings", {})
 
     def _load_config(self) -> Dict:
@@ -1055,16 +1055,16 @@ class RepoRouter:
         """Return default configuration."""
         return {
             "repos": {
-                "rde_core": RepoConfig(
-                    id="rde_core",
-                    name="RDE Core",
-                    path=self.rde_root,
+                "atlasforge_core": RepoConfig(
+                    id="atlasforge_core",
+                    name="AtlasForge Core",
+                    path=self.atlasforge_root,
                     remote="origin",
                     is_primary=True
                 )
             },
             "rules": [
-                RoutingRule(pattern="**", repo_id="rde_core", priority=0)
+                RoutingRule(pattern="**", repo_id="atlasforge_core", priority=0)
             ],
             "settings": {}
         }
@@ -1074,14 +1074,14 @@ class RepoRouter:
         Find the repository for a given file path.
 
         Args:
-            file_path: Path relative to RDE root or absolute path
+            file_path: Path relative to AtlasForge root or absolute path
 
         Returns:
             RepoConfig for the matching repository, or None if untracked
         """
         # Normalize path
         if os.path.isabs(file_path):
-            file_path = os.path.relpath(file_path, self.rde_root)
+            file_path = os.path.relpath(file_path, self.atlasforge_root)
 
         rule = self.matcher.match(file_path)
 
@@ -1114,11 +1114,11 @@ class RepoRouter:
         for file_path in files:
             # Normalize path
             if os.path.isabs(file_path):
-                rel_path = os.path.relpath(file_path, self.rde_root)
+                rel_path = os.path.relpath(file_path, self.atlasforge_root)
                 abs_path = file_path
             else:
                 rel_path = file_path
-                abs_path = os.path.join(self.rde_root, file_path)
+                abs_path = os.path.join(self.atlasforge_root, file_path)
 
             # Find matching rule
             rule = self.matcher.match(rel_path)
@@ -1389,7 +1389,7 @@ build/
         """
         # Normalize path
         if os.path.isabs(file_path):
-            file_path = os.path.relpath(file_path, self.rde_root)
+            file_path = os.path.relpath(file_path, self.atlasforge_root)
 
         all_matches = self.matcher.match_all(file_path)
         winning_rule = self.matcher.match(file_path)
@@ -1437,7 +1437,7 @@ _router: Optional[RepoRouter] = None
 
 def get_router(
     config_path: Optional[str] = None,
-    rde_root: Optional[str] = None,
+    atlasforge_root: Optional[str] = None,
     force_reload: bool = False
 ) -> RepoRouter:
     """
@@ -1445,7 +1445,7 @@ def get_router(
 
     Args:
         config_path: Optional config file path
-        rde_root: Optional RDE root path
+        atlasforge_root: Optional AtlasForge root path
         force_reload: Force reload of configuration
 
     Returns:
@@ -1454,7 +1454,7 @@ def get_router(
     global _router
 
     if _router is None or force_reload:
-        _router = RepoRouter(config_path=config_path, rde_root=rde_root)
+        _router = RepoRouter(config_path=config_path, atlasforge_root=atlasforge_root)
 
     return _router
 
@@ -1472,13 +1472,13 @@ if __name__ == "__main__":
 
         # Test path matching
         test_paths = [
-            "rd_engine.py",
+            "atlasforge_engine.py",
             "dashboard_v2.py",
             "workspace/brotato_bot/main.py",
             "workspace/Narrative WorkFlow/CLAUDE.md",
             "workspace/glove/src/glove.py",
             "workspace/vision/capture.py",
-            "rde_enhancements/exploration_hooks.py",
+            "atlasforge_enhancements/exploration_hooks.py",
             "git_checkpoint.py",
             "workspace/some_random_file.txt",
             "repo_router.py"

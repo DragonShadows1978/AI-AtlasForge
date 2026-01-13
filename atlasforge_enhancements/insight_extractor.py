@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Insight Extractor - RDE Enhancement Feature 2.2
+Insight Extractor - AtlasForge Enhancement Feature 2.2
 
 Extracts structured insights from exploration results.
 Processes Claude's exploration output to identify:
@@ -747,7 +747,7 @@ class ExplorationAdvisor:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Insight Extractor - RDE Enhancement")
+    print("Insight Extractor - AtlasForge Enhancement")
     print("=" * 50)
 
     # Sample exploration output

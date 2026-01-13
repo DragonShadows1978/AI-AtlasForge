@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RDE Dashboard System Tray Indicator
+AtlasForge Dashboard System Tray Indicator
 Shows dashboard status in the system tray with quick actions.
 """
 
@@ -14,18 +14,18 @@ import urllib.request
 import json
 import os
 
-DASHBOARD_URL = "http://localhost:5000"
+DASHBOARD_URL = "http://localhost:5010"
 CHECK_INTERVAL = 10000  # 10 seconds
 
-class RDETrayIndicator:
+class AtlasForgeTrayIndicator:
     def __init__(self):
         self.indicator = AppIndicator3.Indicator.new(
-            "rde-dashboard",
-            "network-server",
+            "atlasforge-dashboard",
+            "applications-engineering",
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-        self.indicator.set_title("RDE Dashboard")
+        self.indicator.set_title("AtlasForge Dashboard")
 
         self.build_menu()
         self.update_status()
@@ -88,7 +88,7 @@ class RDETrayIndicator:
                 if running:
                     status_text += " (Running)"
                 self.status_item.set_label(f"Status: {status_text}")
-                self.indicator.set_icon("network-server")
+                self.indicator.set_icon("applications-engineering")
 
         except Exception as e:
             self.status_item.set_label("Status: Offline")
@@ -103,11 +103,11 @@ class RDETrayIndicator:
         subprocess.Popen(["xdg-open", "http://localhost:5002"])
 
     def restart_dashboard(self, _):
-        subprocess.run(["systemctl", "--user", "restart", "rde-dashboard"])
+        subprocess.run(["systemctl", "--user", "restart", "atlasforge-dashboard"])
         self.status_item.set_label("Status: Restarting...")
 
     def stop_dashboard(self, _):
-        subprocess.run(["systemctl", "--user", "stop", "rde-dashboard"])
+        subprocess.run(["systemctl", "--user", "stop", "atlasforge-dashboard"])
         self.status_item.set_label("Status: Stopped")
 
     def quit(self, _):
@@ -115,7 +115,7 @@ class RDETrayIndicator:
 
 
 def main():
-    indicator = RDETrayIndicator()
+    indicator = AtlasForgeTrayIndicator()
     Gtk.main()
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Mission Continuity Tracker - RDE Enhancement Feature 1.2
+Mission Continuity Tracker - AtlasForge Enhancement Feature 1.2
 
 Tracks concept fingerprints across multi-cycle missions to:
 1. Detect when Claude is "drifting off-mission"
 2. Enable context healing when resuming missions
 3. Provide continuity metrics across cycles
 
-Integrates with RDE's cycle system to checkpoint fingerprints at CYCLE_END.
+Integrates with AtlasForge's cycle system to checkpoint fingerprints at CYCLE_END.
 
 Inspired by identity fingerprinting patterns and RCFT theory
 """
@@ -469,10 +469,10 @@ class MissionContinuityTracker:
 
 def create_tracker_for_mission(mission_data: Dict) -> MissionContinuityTracker:
     """
-    Create a tracker from mission data (from rd_engine).
+    Create a tracker from mission data (from atlasforge_engine).
 
     Args:
-        mission_data: Mission dict from rd_engine.py
+        mission_data: Mission dict from atlasforge_engine.py
 
     Returns:
         Configured MissionContinuityTracker
@@ -524,7 +524,7 @@ def generate_continuation_with_healing(
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Mission Continuity Tracker - RDE Enhancement")
+    print("Mission Continuity Tracker - AtlasForge Enhancement")
     print("=" * 50)
 
     # Create a tracker

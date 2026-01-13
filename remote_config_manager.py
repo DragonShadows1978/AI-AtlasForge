@@ -2,7 +2,7 @@
 """
 Remote Configuration Manager
 =============================
-Handles Git remote configuration and credential management for the RDE system.
+Handles Git remote configuration and credential management for the AtlasForge system.
 
 Features:
 - Configure remote URLs for repositories
@@ -168,7 +168,7 @@ class CredentialManager:
     DEFAULT_SSH_KEY_PATHS = [
         "~/.ssh/id_ed25519",
         "~/.ssh/id_rsa",
-        "~/.ssh/rde_deploy_key"
+        "~/.ssh/atlasforge_deploy_key"
     ]
 
     def __init__(self):
@@ -350,8 +350,8 @@ class CredentialManager:
 
     def generate_ssh_key(
         self,
-        key_name: str = "rde_deploy_key",
-        email: str = "rde-bot@localhost"
+        key_name: str = "atlasforge_deploy_key",
+        email: str = "atlasforge-bot@localhost"
     ) -> Tuple[bool, str, Optional[str]]:
         """
         Generate a new SSH key for deployments.
@@ -569,18 +569,18 @@ class RemoteConfigManager:
         - Testing remote connectivity
     """
 
-    def __init__(self, rde_root: Optional[str] = None):
+    def __init__(self, atlasforge_root: Optional[str] = None):
         """
         Initialize the remote configuration manager.
 
         Args:
-            rde_root: Path to RDE root (default: from env or BASE_DIR from atlasforge_config)
+            atlasforge_root: Path to AtlasForge root (default: from env or BASE_DIR from atlasforge_config)
         """
-        self.rde_root = rde_root or os.environ.get(
-            "RDE_REPO_PATH",
+        self.atlasforge_root = atlasforge_root or os.environ.get(
+            "ATLASFORGE_REPO_PATH",
             str(BASE_DIR)
         )
-        self.config_path = os.path.join(self.rde_root, "repo_routing.yaml")
+        self.config_path = os.path.join(self.atlasforge_root, "repo_routing.yaml")
         self.credentials = CredentialManager()
 
     def _load_yaml_config(self) -> Dict:

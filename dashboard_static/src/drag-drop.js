@@ -16,9 +16,9 @@
 // CONSTANTS
 // =============================================================================
 
-const STORAGE_KEY = 'rdeWidgetLayout';
-const PRESETS_KEY = 'rdeLayoutPresets';
-const LOCK_STORAGE_KEY = 'rdeTilesLocked';
+const STORAGE_KEY = 'atlasforgeWidgetLayout';
+const PRESETS_KEY = 'atlasforgeLayoutPresets';
+const LOCK_STORAGE_KEY = 'atlasforgeTilesLocked';
 const COLUMN_SELECTORS = ['.widget-column-1', '.widget-column-2'];
 const CARD_SELECTOR = '.card[id]'; // Only cards with IDs can be dragged
 

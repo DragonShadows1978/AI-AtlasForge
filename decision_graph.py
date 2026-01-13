@@ -41,8 +41,8 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 # Paths - use centralized configuration
-from atlasforge_config import RDE_DATA_DIR
-DECISION_GRAPH_DIR = RDE_DATA_DIR / "decision_graphs"
+from atlasforge_config import AF_DATA_DIR
+DECISION_GRAPH_DIR = AF_DATA_DIR / "decision_graphs"
 DECISION_GRAPH_DIR.mkdir(parents=True, exist_ok=True)
 
 

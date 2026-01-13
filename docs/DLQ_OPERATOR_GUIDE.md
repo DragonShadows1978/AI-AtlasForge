@@ -6,7 +6,7 @@ The Email Dead Letter Queue (DLQ) system ensures that failed email deliveries ar
 
 ## Accessing the DLQ Dashboard
 
-1. Open the RDE Dashboard at `http://localhost:5000`
+1. Open the AtlasForge Dashboard at `http://localhost:5000`
 2. Click the **Email Monitor** tab
 3. Scroll down to the **Dead Letter Queue** section
 
@@ -191,7 +191,7 @@ All endpoints are prefixed with `/api/email/dlq/`
 1. Check if the worker is running (should show "Running" in green)
 2. Check the "Last Check" timestamp - should be recent
 3. Verify DLQ is enabled in configuration
-4. Check the logs: `tail -f /home/vader/mini-mind-v2/logs/dashboard.log`
+4. Check the logs: `tail -f $ATLASFORGE_ROOT/logs/dashboard.log`
 
 ### High Failure Rate
 
@@ -209,11 +209,11 @@ All endpoints are prefixed with `/api/email/dlq/`
 
 ### Database Issues
 
-The DLQ uses SQLite stored at `/home/vader/mini-mind-v2/state/email_dlq.db`
+The DLQ uses SQLite stored at `$ATLASFORGE_ROOT/state/email_dlq.db`
 
 To inspect directly:
 ```bash
-sqlite3 /home/vader/mini-mind-v2/state/email_dlq.db
+sqlite3 $ATLASFORGE_ROOT/state/email_dlq.db
 > SELECT * FROM dead_letter_queue WHERE status='pending';
 > SELECT * FROM dlq_events ORDER BY timestamp DESC LIMIT 20;
 ```
@@ -230,9 +230,9 @@ sqlite3 /home/vader/mini-mind-v2/state/email_dlq.db
 
 | File | Purpose |
 |------|---------|
-| `/home/vader/mini-mind-v2/email_dlq.py` | Core DLQ module |
-| `/home/vader/mini-mind-v2/email_dlq_worker.py` | Background retry worker |
-| `/home/vader/mini-mind-v2/dashboard_modules/dlq.py` | API endpoints |
-| `/home/vader/mini-mind-v2/dashboard_static/src/modules/dlq-monitor.js` | UI module |
-| `/home/vader/mini-mind-v2/state/email_dlq.db` | SQLite database |
-| `/home/vader/mini-mind-v2/state/email_config.json` | Email & DLQ configuration |
+| `$ATLASFORGE_ROOT/email_dlq.py` | Core DLQ module |
+| `$ATLASFORGE_ROOT/email_dlq_worker.py` | Background retry worker |
+| `$ATLASFORGE_ROOT/dashboard_modules/dlq.py` | API endpoints |
+| `$ATLASFORGE_ROOT/dashboard_static/src/modules/dlq-monitor.js` | UI module |
+| `$ATLASFORGE_ROOT/state/email_dlq.db` | SQLite database |
+| `$ATLASFORGE_ROOT/state/email_config.json` | Email & DLQ configuration |

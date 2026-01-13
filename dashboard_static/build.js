@@ -69,7 +69,7 @@ const jsBuildConfig = {
         'process.env.NODE_ENV': isDev ? '"development"' : '"production"'
     },
     banner: {
-        js: `/* RDE Dashboard - Built ${new Date().toISOString()} */`
+        js: `/* AtlasForge Dashboard - Built ${new Date().toISOString()} */`
     }
 };
 

@@ -34,14 +34,14 @@ from typing import Dict, Any, Optional, List
 import io_utils
 from init_guard import InitGuard, get_stage_restrictions
 
-# RDE Enhancement integration (optional - gracefully degrades if not available)
-RDE_ENHANCER_AVAILABLE = False
-RDEEnhancer = None
+# AtlasForge Enhancement integration (optional - gracefully degrades if not available)
+AtlasForge_ENHANCER_AVAILABLE = False
+AtlasForgeEnhancer = None
 try:
-    from rde_enhancements import RDEEnhancer
-    RDE_ENHANCER_AVAILABLE = True
+    from atlasforge_enhancements import AtlasForgeEnhancer
+    AtlasForge_ENHANCER_AVAILABLE = True
 except ImportError:
-    pass  # RDE enhancements not installed - features will be disabled
+    pass  # AtlasForge enhancements not installed - features will be disabled
 
 # Crash recovery integration (optional)
 RECOVERY_AVAILABLE = False
@@ -192,30 +192,18 @@ try:
 except ImportError:
     pass  # Queue notifications module not available
 
-# Paths - Determined from script location or environment
-import os as _os
-_SCRIPT_DIR = Path(__file__).resolve().parent
-BASE_DIR = Path(_os.environ.get("ATLASFORGE_ROOT", str(_SCRIPT_DIR)))
-STATE_DIR = BASE_DIR / "state"
-MISSION_PATH = STATE_DIR / "mission.json"
-GROUND_RULES_PATH = BASE_DIR / "GROUND_RULES.md"
-WORKSPACE_DIR = BASE_DIR / "workspace"
-ARTIFACTS_DIR = WORKSPACE_DIR / "artifacts"
-RESEARCH_DIR = WORKSPACE_DIR / "research"
+# Paths - Import from centralized config
+from atlasforge_config import (
+    BASE_DIR, STATE_DIR, WORKSPACE_DIR, ARTIFACTS_DIR, RESEARCH_DIR,
+    MISSION_PATH, GROUND_RULES_PATH, get_transcript_dir
+)
 
 # Auto-advance signaling (file-based IPC)
 AUTO_ADVANCE_SIGNAL_PATH = STATE_DIR / "auto_advance_signal.json"
 
-# Ensure directories exist
-WORKSPACE_DIR.mkdir(exist_ok=True)
-ARTIFACTS_DIR.mkdir(exist_ok=True)
-RESEARCH_DIR.mkdir(exist_ok=True)
-
 # Transcript archival paths
 CLAUDE_TRANSCRIPTS_BASE = Path.home() / ".claude" / "projects"
-# Dynamically compute transcript dir from BASE_DIR
-_transcript_dir_name = "-" + str(BASE_DIR).replace("/", "-").lstrip("-")
-CLAUDE_TRANSCRIPTS_DIR = CLAUDE_TRANSCRIPTS_BASE / _transcript_dir_name
+CLAUDE_TRANSCRIPTS_DIR = get_transcript_dir()
 TRANSCRIPTS_ARCHIVE_DIR = ARTIFACTS_DIR / "transcripts"
 
 
@@ -286,7 +274,7 @@ def _get_all_transcript_dirs_for_mission(mission: Dict) -> List[Path]:
 
     return dirs_to_check
 
-logger = logging.getLogger("rd_engine")
+logger = logging.getLogger("af_engine")
 
 # Valid stages (6-stage workflow with CYCLE_END)
 STAGES = ["PLANNING", "BUILDING", "TESTING", "ANALYZING", "CYCLE_END", "COMPLETE"]
@@ -747,26 +735,26 @@ class RDMissionController:
 
     def _get_enhancer(self):
         """
-        Lazy initialization of RDE enhancer.
+        Lazy initialization of AtlasForge enhancer.
 
-        Returns an RDEEnhancer instance if available and configured,
+        Returns an AtlasForgeEnhancer instance if available and configured,
         otherwise returns None. Safe to call even if enhancements
         are not installed.
         """
         if not hasattr(self, '_enhancer'):
             self._enhancer = None
-        if self._enhancer is None and RDE_ENHANCER_AVAILABLE:
+        if self._enhancer is None and AtlasForge_ENHANCER_AVAILABLE:
             mission_id = self.mission.get('mission_id')
             workspace = self.mission.get('mission_workspace')
             if mission_id and workspace:
                 try:
-                    self._enhancer = RDEEnhancer(
+                    self._enhancer = AtlasForgeEnhancer(
                         mission_id=mission_id,
-                        storage_base=Path(workspace) / 'rde_data'
+                        storage_base=Path(workspace) / 'af_data'
                     )
-                    logger.info(f"RDE Enhancer initialized for mission {mission_id}")
+                    logger.info(f"AtlasForge Enhancer initialized for mission {mission_id}")
                 except Exception as e:
-                    logger.warning(f"Could not initialize RDEEnhancer: {e}")
+                    logger.warning(f"Could not initialize AtlasForgeEnhancer: {e}")
         return self._enhancer
 
     def update_stage(self, new_stage: str):
@@ -1207,7 +1195,7 @@ IMPORTANT: After executing your tasks, respond with a JSON object. Your response
             except Exception as e:
                 logger.warning(f"Could not add recovery context: {e}")
 
-        # RDE Enhancement: Add exploration context if available
+        # AtlasForge Enhancement: Add exploration context if available
         enhancer = self._get_enhancer()
         if enhancer:
             try:
@@ -1985,7 +1973,7 @@ Respond with JSON:
             self.mission["cycle_history"] = []
         self.mission["cycle_history"].append(cycle_entry)
 
-        # RDE Enhancement: Process cycle end for fingerprinting and drift detection
+        # AtlasForge Enhancement: Process cycle end for fingerprinting and drift detection
         enhancer = self._get_enhancer()
         if enhancer:
             try:
@@ -1996,7 +1984,7 @@ Respond with JSON:
                     files_modified=cycle_report.get('files_modified', []),
                     cycle_summary=cycle_report.get('summary', '')
                 )
-                # Add RDE data to cycle entry
+                # Add AtlasForge data to cycle entry
                 cycle_entry['rde_enhancement'] = {
                     'drift_similarity': rde_report.get('drift', {}).get('similarity'),
                     'drift_severity': rde_report.get('drift', {}).get('severity'),
@@ -2004,11 +1992,11 @@ Respond with JSON:
                     'exploration_added': rde_report.get('exploration', {}).get('added', {}),
                     'bias_score': rde_report.get('bias_analysis', {}).get('score')
                 }
-                # Update cycle_history with RDE data
+                # Update cycle_history with AtlasForge data
                 self.mission["cycle_history"][-1] = cycle_entry
-                logger.info(f"RDE cycle processing: drift_similarity={rde_report.get('drift', {}).get('similarity', 'N/A'):.2%}" if rde_report.get('drift', {}).get('similarity') else "RDE cycle processing complete")
+                logger.info(f"AtlasForge cycle processing: drift_similarity={rde_report.get('drift', {}).get('similarity', 'N/A'):.2%}" if rde_report.get('drift', {}).get('similarity') else "AtlasForge cycle processing complete")
             except Exception as e:
-                logger.warning(f"RDE cycle processing failed: {e}")
+                logger.warning(f"AtlasForge cycle processing failed: {e}")
 
         # Analytics: Ingest transcripts mid-mission for running totals
         if ANALYTICS_AVAILABLE:
@@ -2379,7 +2367,7 @@ Respond with JSON:
         if not self.mission.get("original_problem_statement"):
             self.mission["original_problem_statement"] = self.mission.get("problem_statement", "")
 
-        # RDE Enhancement: Apply healing to continuation prompt if drift detected
+        # AtlasForge Enhancement: Apply healing to continuation prompt if drift detected
         enhanced_prompt = continuation_prompt
         enhancer = self._get_enhancer()
         if enhancer:
@@ -2394,7 +2382,7 @@ Respond with JSON:
                     recent_output
                 )
                 if enhanced_prompt != continuation_prompt:
-                    logger.info("RDE: Applied continuation healing due to detected drift")
+                    logger.info("AtlasForge: Applied continuation healing due to detected drift")
                     # Store both versions for transparency
                     self.mission['rde_healing_applied'] = {
                         'cycle': current_cycle,
@@ -2402,7 +2390,7 @@ Respond with JSON:
                         'healing_applied': True
                     }
             except Exception as e:
-                logger.warning(f"RDE continuation healing failed: {e}")
+                logger.warning(f"AtlasForge continuation healing failed: {e}")
 
         # Update mission for next cycle
         self.mission["current_cycle"] = current_cycle + 1
@@ -2580,7 +2568,7 @@ Respond with JSON:
         source_type: str = "successful_completion",
         drift_context: dict = None
     ):
-        """Save a mission recommendation to the recommendations state file.
+        """Save a mission recommendation to the storage backend (SQLite preferred, JSON fallback).
 
         Args:
             recommendation: Dict with mission_title, mission_description, suggested_cycles, rationale
@@ -2590,8 +2578,6 @@ Respond with JSON:
             drift_context: Optional dict with drift analysis data (for drift_halt recommendations)
         """
         import uuid
-
-        recommendations_path = STATE_DIR / "recommendations.json"
 
         rec_entry = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
@@ -2609,13 +2595,22 @@ Respond with JSON:
         if drift_context:
             rec_entry["drift_context"] = drift_context
 
-        # Load existing recommendations
+        # Try SQLite storage first
+        try:
+            from suggestion_storage import get_storage
+            storage = get_storage()
+            storage.add(rec_entry)
+            logger.info(f"Saved mission recommendation to SQLite ({source_type}): {rec_entry['mission_title']}")
+            return
+        except Exception as e:
+            logger.warning(f"SQLite save failed, falling back to JSON: {e}")
+
+        # Fallback to JSON file
+        recommendations_path = STATE_DIR / "recommendations.json"
         recs = io_utils.atomic_read_json(recommendations_path, {"items": []})
         recs.setdefault("items", []).append(rec_entry)
-
-        # Save updated recommendations
         io_utils.atomic_write_json(recommendations_path, recs)
-        logger.info(f"Saved mission recommendation ({source_type}): {rec_entry['mission_title']}")
+        logger.info(f"Saved mission recommendation to JSON ({source_type}): {rec_entry['mission_title']}")
 
     def reset_mission(self):
         """Reset mission to initial state (keeps problem statement)."""
@@ -2690,7 +2685,7 @@ Respond with JSON:
 
         logger.info(f"New mission set with {cycle_budget} cycles: {problem_statement[:100]}...")
 
-        # RDE Enhancement: Set baseline fingerprint for mission continuity tracking
+        # AtlasForge Enhancement: Set baseline fingerprint for mission continuity tracking
         # Clear any existing enhancer to force re-initialization with new mission
         if hasattr(self, '_enhancer'):
             self._enhancer = None
@@ -2698,9 +2693,9 @@ Respond with JSON:
         if enhancer:
             try:
                 enhancer.set_mission_baseline(problem_statement, source="initial_mission")
-                logger.info("RDE baseline fingerprint set for mission continuity tracking")
+                logger.info("AtlasForge baseline fingerprint set for mission continuity tracking")
             except Exception as e:
-                logger.warning(f"Failed to set RDE baseline fingerprint: {e}")
+                logger.warning(f"Failed to set AtlasForge baseline fingerprint: {e}")
 
         # Analytics: Track mission start
         if ANALYTICS_AVAILABLE:

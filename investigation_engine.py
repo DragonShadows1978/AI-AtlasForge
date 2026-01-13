@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Investigation Engine - Parallel Research Mode for RDE Missions
+Investigation Engine - Parallel Research Mode for AtlasForge Missions
 
 This module provides a simplified, single-cycle investigation workflow that:
 1. Takes an investigation query

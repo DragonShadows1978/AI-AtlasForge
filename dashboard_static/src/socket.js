@@ -30,7 +30,7 @@ const CONFIG = {
         endpoints: {
             mission_status: '/api/status',
             journal: '/api/journal',
-            rde_stats: '/api/rde/exploration-stats',
+            atlasforge_stats: '/api/atlasforge/exploration-stats',
             analytics: '/api/analytics/current',
             chat_history: '/api/chat-history'  // Chat fallback polling
         }
@@ -71,7 +71,7 @@ let connectionState = {
 const eventHandlers = {
     mission_status: [],
     journal: [],
-    rde_stats: [],
+    atlasforge_stats: [],
     glassbox: [],
     analytics: [],
     exploration: [],
@@ -560,7 +560,7 @@ function resubscribeToRooms() {
         // Subscribe to default rooms
         subscribeToRoom('mission_status');
         subscribeToRoom('journal');
-        subscribeToRoom('rde_stats');
+        subscribeToRoom('atlasforge_stats');
         subscribeToRoom('analytics');
     } else {
         // Resubscribe to previously subscribed rooms

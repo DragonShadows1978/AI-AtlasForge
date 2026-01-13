@@ -329,7 +329,7 @@ let graphRenderer = null;
 
 async function refreshGraphVisualization() {
     try {
-        const data = await api('/api/rde/exploration-graph?width=800&height=600');
+        const data = await api('/api/atlasforge/exploration-graph?width=800&height=600');
         if (data.error && data.nodes && data.nodes.length === 0) {
             console.log('No graph data:', data.error);
             return;
@@ -362,7 +362,7 @@ async function searchInsights() {
     }
 
     try {
-        const data = await api('/api/rde/search-insights?q=' + encodeURIComponent(query));
+        const data = await api('/api/atlasforge/search-insights?q=' + encodeURIComponent(query));
         if (data.error) {
             results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">${data.error}</div>`;
             return;
@@ -375,14 +375,14 @@ async function searchInsights() {
         }
 
         const html = insights.map(i => `
-            <div class="rde-exploration-item" title="${i.description || ''}">
+            <div class="af-exploration-item" title="${i.description || ''}">
                 <div>
                     <span style="font-weight: 500;">${i.title}</span>
                     <div style="font-size: 0.75em; color: var(--text-dim);">
                         ${i.type} | ${(i.similarity * 100).toFixed(0)}% match
                     </div>
                 </div>
-                <span class="rde-exploration-type">${(i.confidence * 100).toFixed(0)}%</span>
+                <span class="af-exploration-type">${(i.confidence * 100).toFixed(0)}%</span>
             </div>
         `).join('');
 

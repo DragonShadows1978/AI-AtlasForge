@@ -1378,8 +1378,8 @@ class MissionKnowledgeBase:
                 ("benchmark", 3), ("comparison", 2), ("evaluation", 2),
                 ("spike", 3), ("discovery", 2)
             ],
-            "rde_improvement": [
-                ("rde", 5), ("autonomous", 4), ("mission", 3), ("engine", 2),
+            "atlasforge_improvement": [
+                ("atlasforge", 5), ("autonomous", 4), ("mission", 3), ("engine", 2),
                 ("dashboard", 2), ("knowledge base", 4), ("learning", 2),
                 ("extraction", 2), ("workflow", 2), ("stage", 2),
                 ("cycle", 2), ("planning", 2), ("building", 2), ("testing", 1),
@@ -2919,7 +2919,7 @@ if __name__ == "__main__":
     print(f"  By source: {stats.get('learnings_by_source', {})}")
 
     # Demo query
-    test_problem = "Improve the RDE system by adding GPU acceleration for embeddings"
+    test_problem = "Improve the AtlasForge system by adding GPU acceleration for embeddings"
     context = kb.generate_planning_context(test_problem)
     print(f"\nPlanning context for '{test_problem[:50]}...':")
     print(context if context else "  (No relevant learnings found)")

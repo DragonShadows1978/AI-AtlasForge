@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Scaffold Calibrator - RDE Enhancement Feature 3.3
+Scaffold Calibrator - AtlasForge Enhancement Feature 3.3
 
 Self-calibrating system that tests scaffold effectiveness and adjusts
 scaffold selection based on measured outcomes.
@@ -577,7 +577,7 @@ def quick_bias_check(text: str) -> Dict:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Scaffold Calibrator - RDE Enhancement")
+    print("Scaffold Calibrator - AtlasForge Enhancement")
     print("=" * 50)
 
     # Create calibrator

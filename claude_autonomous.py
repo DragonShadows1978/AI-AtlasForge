@@ -29,7 +29,7 @@ from typing import Optional, Dict, Any, List
 
 # Import local modules
 import io_utils
-import rd_engine
+import atlasforge_engine
 
 # =============================================================================
 # CONFIGURATION
@@ -678,7 +678,7 @@ def run_rd_mode():
     send_to_chat(f"Claude R&D Mode starting (Boot #{state['boot_count']})")
 
     # Initialize R&D controller
-    controller = rd_engine.RDMissionController()
+    controller = atlasforge_engine.RDMissionController()
 
     cycle_count = 0
 
@@ -708,7 +708,7 @@ def run_rd_mode():
                     send_to_chat("Mission reset to PLANNING stage.")
                     continue
                 elif human_prompt.lower() == "status":
-                    status = rd_engine.get_mission_status()
+                    status = atlasforge_engine.get_mission_status()
                     send_to_chat(f"Status: Stage={status['stage']}, Iteration={status['iteration']}")
                     continue
                 else:

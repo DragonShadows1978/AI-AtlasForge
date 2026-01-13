@@ -44,8 +44,8 @@ def register_interactive_graph_routes(app):
     Call this from dashboard_v2.py after creating the app.
     """
 
-    @app.route('/api/rde/exploration-graph-enhanced')
-    def api_rde_exploration_graph_enhanced():
+    @app.route('/api/atlasforge/exploration-graph-enhanced')
+    def api_atlasforge_exploration_graph_enhanced():
         """
         Get exploration graph with enhanced filtering and D3 visualization data.
 
@@ -60,7 +60,7 @@ def register_interactive_graph_routes(app):
         """
         try:
             import exploration_hooks
-            from rde_enhancements import ExplorationGraph
+            from atlasforge_enhancements import ExplorationGraph
 
             # Parse parameters
             width = request.args.get('width', 800, type=float)
@@ -119,8 +119,8 @@ def register_interactive_graph_routes(app):
                 "metadata": {"total_nodes": 0, "total_edges": 0}
             })
 
-    @app.route('/api/rde/exploration-journey')
-    def api_rde_exploration_journey():
+    @app.route('/api/atlasforge/exploration-journey')
+    def api_atlasforge_exploration_journey():
         """
         Get chronologically ordered exploration events for playback.
 
@@ -182,8 +182,8 @@ def register_interactive_graph_routes(app):
                 "total_events": 0
             })
 
-    @app.route('/api/rde/export/<format>')
-    def api_rde_export(format):
+    @app.route('/api/atlasforge/export/<format>')
+    def api_atlasforge_export(format):
         """
         Export exploration graph to DOT or GraphML format.
 
@@ -196,7 +196,7 @@ def register_interactive_graph_routes(app):
         """
         try:
             import exploration_hooks
-            from rde_enhancements import ExplorationGraph
+            from atlasforge_enhancements import ExplorationGraph
 
             # Get graph data
             enhancer = exploration_hooks.get_current_enhancer(force_reload=True)
@@ -261,16 +261,16 @@ def register_interactive_graph_routes(app):
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
-    @app.route('/api/rde/edge-types')
-    def api_rde_edge_types():
+    @app.route('/api/atlasforge/edge-types')
+    def api_atlasforge_edge_types():
         """Get available edge types with their configuration."""
         return jsonify({
             "edge_types": EDGE_TYPES,
             "node_types": NODE_TYPES
         })
 
-    @app.route('/api/rde/subgraph')
-    def api_rde_subgraph():
+    @app.route('/api/atlasforge/subgraph')
+    def api_atlasforge_subgraph():
         """
         Extract a subgraph centered on a specific node.
 
@@ -280,7 +280,7 @@ def register_interactive_graph_routes(app):
         """
         try:
             import exploration_hooks
-            from rde_enhancements import ExplorationGraph
+            from atlasforge_enhancements import ExplorationGraph
 
             node_id = request.args.get('node_id', '')
             depth = min(request.args.get('depth', 1, type=int), 3)
@@ -344,8 +344,8 @@ def register_interactive_graph_routes(app):
                 "metadata": {"total_nodes": 0, "total_edges": 0}
             })
 
-    @app.route('/api/rde/file-preview')
-    def api_rde_file_preview():
+    @app.route('/api/atlasforge/file-preview')
+    def api_atlasforge_file_preview():
         """
         Get a preview of a file's content (first N lines).
 
@@ -407,12 +407,12 @@ def register_interactive_graph_routes(app):
         except Exception as e:
             return jsonify({"error": str(e), "content": "", "total_lines": 0})
 
-    @app.route('/api/rde/graph-stats')
-    def api_rde_graph_stats():
+    @app.route('/api/atlasforge/graph-stats')
+    def api_atlasforge_graph_stats():
         """Get detailed graph statistics."""
         try:
             import exploration_hooks
-            from rde_enhancements import ExplorationGraph
+            from atlasforge_enhancements import ExplorationGraph
             from collections import Counter
 
             enhancer = exploration_hooks.get_current_enhancer(force_reload=True)
@@ -469,8 +469,8 @@ def register_interactive_graph_routes(app):
         except Exception as e:
             return jsonify({"error": str(e)})
 
-    @app.route('/api/rde/streaming/status')
-    def api_rde_streaming_status():
+    @app.route('/api/atlasforge/streaming/status')
+    def api_atlasforge_streaming_status():
         """
         Get real-time streaming status.
 
@@ -500,8 +500,8 @@ def register_interactive_graph_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)})
 
-    @app.route('/api/rde/streaming/toggle', methods=['POST'])
-    def api_rde_streaming_toggle():
+    @app.route('/api/atlasforge/streaming/toggle', methods=['POST'])
+    def api_atlasforge_streaming_toggle():
         """
         Toggle real-time streaming on/off.
 
@@ -559,8 +559,8 @@ def register_interactive_graph_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/rde/streaming/recent-events')
-    def api_rde_streaming_recent_events():
+    @app.route('/api/atlasforge/streaming/recent-events')
+    def api_atlasforge_streaming_recent_events():
         """Get recent streaming events."""
         try:
             from realtime_graph_streaming import get_stream_manager
@@ -588,8 +588,8 @@ def register_interactive_graph_routes(app):
 
 INTERACTIVE_GRAPH_HTML = '''
 <!-- Enhanced Exploration Graph Widget -->
-<div class="card" id="rde-enhanced-graph-card">
-    <div class="card-header" onclick="toggleCard('rde-enhanced-graph')">
+<div class="card" id="atlasforge-enhanced-graph-card">
+    <div class="card-header" onclick="toggleCard('atlasforge-enhanced-graph')">
         <h3>Exploration Graph</h3>
         <span class="collapse-toggle">▼</span>
     </div>
@@ -701,11 +701,11 @@ INTERACTIVE_GRAPH_HTML = '''
 
         <!-- Stats -->
         <div style="margin-top: 10px; display: flex; gap: 15px;">
-            <div class="rde-drift-status">
+            <div class="atlasforge-drift-status">
                 <span class="label">Nodes</span>
                 <span class="value" id="graph-node-count">0</span>
             </div>
-            <div class="rde-drift-status">
+            <div class="atlasforge-drift-status">
                 <span class="label">Edges</span>
                 <span class="value" id="graph-edge-count">0</span>
             </div>
@@ -933,7 +933,7 @@ async function refreshEnhancedGraph() {
     }
 
     try {
-        const response = await fetch('/api/rde/exploration-graph-enhanced?width=800&height=600');
+        const response = await fetch('/api/atlasforge/exploration-graph-enhanced?width=800&height=600');
         const data = await response.json();
 
         if (data.error && (!data.nodes || data.nodes.length === 0)) {
@@ -953,7 +953,7 @@ async function extractSubgraph(nodeId, depth) {
     if (!enhancedGraphRenderer) return;
 
     try {
-        const response = await fetch(`/api/rde/subgraph?node_id=${encodeURIComponent(nodeId)}&depth=${depth}`);
+        const response = await fetch(`/api/atlasforge/subgraph?node_id=${encodeURIComponent(nodeId)}&depth=${depth}`);
         const data = await response.json();
 
         if (data.error) {
@@ -973,7 +973,7 @@ function updateSubgraphIndicator(isActive, nodeId = null, depth = 0, nodeCount =
     let indicator = document.getElementById('subgraph-indicator');
     if (!indicator) {
         // Create indicator if it doesn't exist
-        const graphCard = document.getElementById('rde-enhanced-graph-card');
+        const graphCard = document.getElementById('atlasforge-enhanced-graph-card');
         if (!graphCard) return;
         indicator = document.createElement('div');
         indicator.id = 'subgraph-indicator';
@@ -1075,7 +1075,7 @@ function exportGraph(format) {
         exportCanvasImage(format);
     } else {
         // Export via API (DOT, GraphML, JSON)
-        window.location.href = '/api/rde/export/' + format;
+        window.location.href = '/api/atlasforge/export/' + format;
     }
 }
 
@@ -1672,7 +1672,7 @@ class EnhancedGraphRenderer {
         if (previewLang) previewLang.textContent = '';
 
         try {
-            const response = await fetch(`/api/rde/file-preview?path=${encodeURIComponent(filePath)}&lines=50`);
+            const response = await fetch(`/api/atlasforge/file-preview?path=${encodeURIComponent(filePath)}&lines=50`);
             const data = await response.json();
 
             if (data.error) {
@@ -1751,7 +1751,7 @@ class JourneyPlayback {
 
     async loadJourney(missionId = null) {
         try {
-            const url = missionId ? `/api/rde/exploration-journey?mission_id=${missionId}` : '/api/rde/exploration-journey';
+            const url = missionId ? `/api/atlasforge/exploration-journey?mission_id=${missionId}` : '/api/atlasforge/exploration-journey';
             const response = await fetch(url);
             const data = await response.json();
             this.events = data.events || [];
@@ -1899,7 +1899,7 @@ class GraphFilterController {
         if (this.activeFilters.minExplorationCount > 0) params.set('min_count', this.activeFilters.minExplorationCount);
 
         try {
-            const response = await fetch(`/api/rde/exploration-graph-enhanced?${params}`);
+            const response = await fetch(`/api/atlasforge/exploration-graph-enhanced?${params}`);
             const data = await response.json();
             this.graph.loadData(data);
         } catch (e) { console.error('Failed to apply filters:', e); }
@@ -1939,8 +1939,8 @@ if __name__ == "__main__":
     print("  from interactive_graph_api import register_interactive_graph_routes")
     print("  register_interactive_graph_routes(app)")
     print("\nAvailable endpoints:")
-    print("  /api/rde/exploration-graph-enhanced")
-    print("  /api/rde/exploration-journey")
-    print("  /api/rde/export/<format>")
-    print("  /api/rde/edge-types")
-    print("  /api/rde/graph-stats")
+    print("  /api/atlasforge/exploration-graph-enhanced")
+    print("  /api/atlasforge/exploration-journey")
+    print("  /api/atlasforge/export/<format>")
+    print("  /api/atlasforge/edge-types")
+    print("  /api/atlasforge/graph-stats")

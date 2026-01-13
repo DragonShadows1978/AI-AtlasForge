@@ -362,12 +362,12 @@ adversarial_testing/
 └── README.md                # This file
 ```
 
-## Integration with RDE
+## Integration with AtlasForge
 
 The adversarial testing framework is integrated into the R&D Engine's TESTING stage.
 
 ```python
-# In rd_engine.py TESTING prompt:
+# In af_engine.py TESTING prompt:
 from adversarial_testing import AdversarialRunner, AdversarialConfig
 from experiment_framework import ModelType
 

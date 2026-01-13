@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fingerprint Extractor - RDE Enhancement Feature 1.1
+Fingerprint Extractor - AtlasForge Enhancement Feature 1.1
 
 Extracts concept/pattern fingerprints from Claude's outputs during missions.
 Targets mission-relevant concepts (problem domain terms, architectural decisions,
@@ -500,7 +500,7 @@ def load_fingerprint(filepath: Path) -> ConceptFingerprint:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Fingerprint Extractor - RDE Enhancement")
+    print("Fingerprint Extractor - AtlasForge Enhancement")
     print("=" * 50)
 
     # Example: Extract fingerprint from a sample mission response

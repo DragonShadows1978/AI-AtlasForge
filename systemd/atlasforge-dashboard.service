@@ -1,0 +1,37 @@
+[Unit]
+Description=AI-AtlasForge Dashboard
+Documentation=https://github.com/DragonShadows1978/AI-AtlasForge
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+WorkingDirectory=/opt/ai-atlasforge
+ExecStart=/opt/ai-atlasforge/venv/bin/python dashboard_v2.py
+Restart=on-failure
+RestartSec=5
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+Environment="ATLASFORGE_ROOT=/opt/ai-atlasforge"
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/ai-atlasforge/state
+ReadWritePaths=/opt/ai-atlasforge/logs
+ReadWritePaths=/opt/ai-atlasforge/workspace
+ReadWritePaths=/opt/ai-atlasforge/missions
+ReadWritePaths=/opt/ai-atlasforge/backups
+ReadWritePaths=/opt/ai-atlasforge/atlasforge_data
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlasforge-dashboard
+
+[Install]
+WantedBy=multi-user.target

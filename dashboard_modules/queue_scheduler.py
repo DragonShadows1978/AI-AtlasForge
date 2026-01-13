@@ -122,7 +122,7 @@ def queue_status():
         with _queue_lock:
             queue = _load_queue()
 
-        # Check if RDE is currently running a mission
+        # Check if AtlasForge is currently running a mission
         from io_utils import atomic_read_json
         mission = atomic_read_json(STATE_DIR / "mission.json") or {}
         current_stage = mission.get("current_stage", "COMPLETE")
@@ -133,7 +133,7 @@ def queue_status():
             "missions": queue.get("missions", []),
             "settings": queue.get("settings", {}),
             "last_updated": queue.get("last_updated"),
-            "rde_running": is_running,
+            "af_running": is_running,
             "current_stage": current_stage
         })
     except Exception as e:
@@ -275,16 +275,16 @@ def reorder_queue():
 
 @queue_scheduler_bp.route('/next', methods=['POST'])
 def start_next_mission():
-    """Start the next mission in the queue (if RDE is not busy)."""
+    """Start the next mission in the queue (if AtlasForge is not busy)."""
     try:
-        # Check if RDE is currently running
+        # Check if AtlasForge is currently running
         from io_utils import atomic_read_json
         mission = atomic_read_json(STATE_DIR / "mission.json") or {}
         current_stage = mission.get("current_stage", "COMPLETE")
 
         if current_stage not in ["COMPLETE", None, ""]:
             return jsonify({
-                "error": "RDE is currently busy",
+                "error": "AtlasForge is currently busy",
                 "current_stage": current_stage
             }), 409
 

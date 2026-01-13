@@ -11,10 +11,10 @@
  */
 
 const CACHE_VERSION = 'v3';
-const CACHE_NAME = `rde-dashboard-${CACHE_VERSION}`;
-const STATIC_CACHE = `rde-static-${CACHE_VERSION}`;
-const API_CACHE = `rde-api-${CACHE_VERSION}`;
-const CDN_CACHE = `rde-cdn-${CACHE_VERSION}`;
+const CACHE_NAME = `atlasforge-dashboard-${CACHE_VERSION}`;
+const STATIC_CACHE = `atlasforge-static-${CACHE_VERSION}`;
+const API_CACHE = `atlasforge-api-${CACHE_VERSION}`;
+const CDN_CACHE = `atlasforge-cdn-${CACHE_VERSION}`;
 
 // Critical assets - pre-cache on install (required for app to function)
 const CRITICAL_ASSETS = [
@@ -97,8 +97,8 @@ self.addEventListener('activate', (event) => {
                 return Promise.all(
                     cacheNames
                         .filter((name) => {
-                            // Delete any cache that starts with 'rde-' but isn't in our valid list
-                            return name.startsWith('rde-') && !VALID_CACHES.includes(name);
+                            // Delete any cache that starts with 'atlasforge-' but isn't in our valid list
+                            return name.startsWith('atlasforge-') && !VALID_CACHES.includes(name);
                         })
                         .map((name) => {
                             console.log('[SW] Deleting old cache:', name);
@@ -296,7 +296,7 @@ async function handlePageRequest(request) {
             <html>
             <head>
                 <meta charset="UTF-8">
-                <title>Offline - RDE Dashboard</title>
+                <title>Offline - AtlasForge Dashboard</title>
                 <style>
                     body {
                         font-family: system-ui, sans-serif;
@@ -328,7 +328,7 @@ async function handlePageRequest(request) {
             <body>
                 <div class="offline-message">
                     <h1>You're Offline</h1>
-                    <p>The RDE Dashboard requires a network connection.</p>
+                    <p>The AtlasForge Dashboard requires a network connection.</p>
                     <p>Please check your connection and try again.</p>
                     <button onclick="location.reload()">Retry</button>
                 </div>

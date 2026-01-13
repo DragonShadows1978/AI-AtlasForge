@@ -297,7 +297,7 @@ As of 2026-01-12, all dashboard infrastructure is **compliant**:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | 2025-12-23 | RDE Mission | Initial policy document |
+| 1.0 | 2025-12-23 | AtlasForge Mission | Initial policy document |
 | 2.0 | 2026-01-12 | AI-AtlasForge | Updated for public release, removed hardcoded paths |
 
 ---

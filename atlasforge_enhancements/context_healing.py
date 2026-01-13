@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Context Healing - RDE Enhancement Feature 1.3
+Context Healing - AtlasForge Enhancement Feature 1.3
 
 Generates "healing prompts" to restore mission alignment when drift is detected.
 Uses fingerprint comparison to identify what's been lost and what needs reinforcement.
@@ -417,7 +417,7 @@ def merge_diverged_branches(
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Context Healing - RDE Enhancement")
+    print("Context Healing - AtlasForge Enhancement")
     print("=" * 50)
 
     from fingerprint_extractor import extract_fingerprint

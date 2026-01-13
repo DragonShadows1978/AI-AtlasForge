@@ -9,6 +9,7 @@ checkpoints/
 
 # State/runtime data (critical for operation, not versioned)
 state/
+atlasforge_data/
 rde_data/
 backups/
 experiments/
@@ -71,6 +72,7 @@ workspace/
 .env.*.local
 .env.production
 .env.development
+config.yaml
 *.pem
 *.key
 credentials.json

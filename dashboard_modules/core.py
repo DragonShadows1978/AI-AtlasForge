@@ -32,6 +32,20 @@ PROPOSALS_PATH = None
 RECOMMENDATIONS_PATH = None
 MISSION_LOGS_DIR = None
 
+# SQLite storage backend for suggestions
+_suggestion_storage = None
+
+def _get_suggestion_storage():
+    """Get the SQLite suggestion storage backend (lazy import)."""
+    global _suggestion_storage
+    if _suggestion_storage is None:
+        try:
+            from suggestion_storage import get_storage
+            _suggestion_storage = get_storage()
+        except ImportError:
+            _suggestion_storage = None
+    return _suggestion_storage
+
 # Function references - will be set by init function
 io_utils = None
 get_claude_status = None
@@ -40,7 +54,13 @@ stop_claude = None
 send_message_to_claude = None
 get_recent_journal = None
 
-# NOTE: Narrative feature removed from AtlasForge public release
+# Narrative-specific functions
+get_narrative_status = None
+start_narrative = None
+stop_narrative = None
+send_message_to_narrative = None
+get_narrative_chat_history = None
+NARRATIVE_MISSION_PATH = None
 
 # Mission queue
 MISSION_QUEUE_PATH = None
@@ -51,13 +71,16 @@ def init_core_blueprint(
     mission_path, proposals_path, recommendations_path,
     io_utils_module,
     status_fn, start_fn, stop_fn, send_msg_fn, journal_fn,
-    mission_queue_path=None,
-    **kwargs  # Accept but ignore legacy narrative parameters
+    narrative_status_fn=None, narrative_start_fn=None, narrative_stop_fn=None,
+    narrative_send_msg_fn=None, narrative_chat_fn=None, narrative_mission_path=None,
+    mission_queue_path=None
 ):
     """Initialize the core blueprint with required dependencies."""
     global BASE_DIR, STATE_DIR, WORKSPACE_DIR, MISSION_PATH, PROPOSALS_PATH, RECOMMENDATIONS_PATH
     global MISSION_LOGS_DIR, io_utils, MISSION_QUEUE_PATH
     global get_claude_status, start_claude, stop_claude, send_message_to_claude, get_recent_journal
+    global get_narrative_status, start_narrative, stop_narrative, send_message_to_narrative
+    global get_narrative_chat_history, NARRATIVE_MISSION_PATH
 
     BASE_DIR = base_dir
     STATE_DIR = state_dir
@@ -73,6 +96,14 @@ def init_core_blueprint(
     stop_claude = stop_fn
     send_message_to_claude = send_msg_fn
     get_recent_journal = journal_fn
+
+    # Narrative functions (optional)
+    get_narrative_status = narrative_status_fn
+    start_narrative = narrative_start_fn
+    stop_narrative = narrative_stop_fn
+    send_message_to_narrative = narrative_send_msg_fn
+    get_narrative_chat_history = narrative_chat_fn
+    NARRATIVE_MISSION_PATH = narrative_mission_path
 
     # Mission queue (optional)
     MISSION_QUEUE_PATH = mission_queue_path
@@ -161,6 +192,170 @@ def api_start(mode):
 def api_stop():
     success, message = stop_claude()
     return jsonify({"success": success, "message": message})
+
+
+# =============================================================================
+# NARRATIVE AUTONOMOUS ROUTES
+# =============================================================================
+
+@core_bp.route('/api/narrative-autonomous/status')
+def api_narrative_status():
+    """Get status of the narrative autonomous workflow."""
+    if get_narrative_status:
+        return jsonify(get_narrative_status())
+    return jsonify({"error": "Narrative not available"}), 503
+
+
+@core_bp.route('/api/narrative-autonomous/start', methods=['POST'])
+def api_narrative_start():
+    """Start narrative autonomous workflow."""
+    if start_narrative:
+        success, message = start_narrative()
+        return jsonify({"success": success, "message": message})
+    return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+
+@core_bp.route('/api/narrative-autonomous/stop', methods=['POST'])
+def api_narrative_stop():
+    """Stop narrative autonomous workflow."""
+    if stop_narrative:
+        success, message = stop_narrative()
+        return jsonify({"success": success, "message": message})
+    return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+
+@core_bp.route('/api/narrative-autonomous/chat', methods=['GET', 'POST'])
+def api_narrative_chat():
+    """Get or send chat messages to narrative workflow."""
+    if request.method == 'POST':
+        if send_message_to_narrative:
+            data = request.get_json()
+            message = data.get('message', '')
+            if message:
+                send_message_to_narrative(message)
+                return jsonify({"success": True, "message": "Message sent to narrative workflow"})
+            return jsonify({"success": False, "message": "No message provided"})
+        return jsonify({"success": False, "message": "Narrative not available"}), 503
+    else:
+        if get_narrative_chat_history:
+            return jsonify(get_narrative_chat_history(50))
+        return jsonify([])
+
+
+@core_bp.route('/api/narrative-autonomous/mission', methods=['GET', 'POST'])
+def api_narrative_mission():
+    """Get or set the narrative mission."""
+    if not NARRATIVE_MISSION_PATH:
+        return jsonify({"error": "Narrative not available"}), 503
+
+    if request.method == 'POST':
+        data = request.get_json()
+        story_number = data.get('story_number')
+        story_title = data.get('story_title')
+        story_genre = data.get('story_genre')
+        story_logline = data.get('story_logline')
+
+        if not story_number or not story_title:
+            return jsonify({"success": False, "message": "story_number and story_title required"})
+
+        import uuid
+        safe_title = story_title.replace(" ", "_").replace("/", "-")[:50]
+        project_base = Path("/media/vader/TIE-FIGHTER/RCFT - Narrative Project/01 - Narrative Research/Completed")
+        story_workspace = project_base / f"{story_number:03d}_{safe_title}"
+        story_workspace.mkdir(parents=True, exist_ok=True)
+
+        new_mission = {
+            "mission_id": f"narrative_{uuid.uuid4().hex[:8]}",
+            "story_number": story_number,
+            "story_title": story_title,
+            "story_genre": story_genre,
+            "story_logline": story_logline,
+            "current_step": "INIT",
+            "status": "running",
+            "step_results": [],
+            "files_created": [],
+            "story_workspace": str(story_workspace),
+            "created_at": datetime.now().isoformat(),
+            "last_updated": datetime.now().isoformat(),
+            "history": [],
+            "approval_pending": None,
+        }
+        io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, new_mission)
+
+        return jsonify({
+            "success": True,
+            "message": f"Narrative mission set for '{story_title}'",
+            "mission": new_mission
+        })
+    else:
+        mission = io_utils.atomic_read_json(NARRATIVE_MISSION_PATH, {})
+        return jsonify(mission)
+
+
+@core_bp.route('/api/narrative-autonomous/approve', methods=['POST'])
+def api_narrative_approve():
+    """Approve a step waiting for user approval."""
+    if not NARRATIVE_MISSION_PATH:
+        return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+    mission = io_utils.atomic_read_json(NARRATIVE_MISSION_PATH, {})
+    if mission.get("status") != "waiting_approval":
+        return jsonify({"success": False, "message": "No step waiting for approval"})
+
+    mission["status"] = "running"
+    mission["approval_pending"] = None
+    io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, mission)
+
+    if send_message_to_narrative:
+        send_message_to_narrative("approve")
+
+    return jsonify({"success": True, "message": "Step approved"})
+
+
+@core_bp.route('/api/narrative-autonomous/pause', methods=['POST'])
+def api_narrative_pause():
+    """Pause the narrative workflow."""
+    if send_message_to_narrative:
+        send_message_to_narrative("pause")
+        return jsonify({"success": True, "message": "Pause command sent"})
+    return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+
+@core_bp.route('/api/narrative-autonomous/resume', methods=['POST'])
+def api_narrative_resume():
+    """Resume the narrative workflow."""
+    if send_message_to_narrative:
+        send_message_to_narrative("resume")
+        return jsonify({"success": True, "message": "Resume command sent"})
+    return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+
+@core_bp.route('/api/narrative-autonomous/reset', methods=['POST'])
+def api_narrative_reset():
+    """Reset the narrative mission to initial state."""
+    if not NARRATIVE_MISSION_PATH:
+        return jsonify({"success": False, "message": "Narrative not available"}), 503
+
+    default_mission = {
+        "mission_id": "narrative_default",
+        "story_number": None,
+        "story_title": None,
+        "story_genre": None,
+        "story_logline": None,
+        "current_step": "INIT",
+        "status": "pending",
+        "step_results": [],
+        "files_created": [],
+        "story_workspace": None,
+        "created_at": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
+        "history": [],
+        "approval_pending": None,
+    }
+    io_utils.atomic_write_json(NARRATIVE_MISSION_PATH, default_mission)
+    if send_message_to_narrative:
+        send_message_to_narrative("reset")
+    return jsonify({"success": True, "message": "Narrative mission reset"})
 
 
 # =============================================================================
@@ -313,10 +508,22 @@ def api_recommendations():
     Returns:
         JSON with filtered or all recommendations
     """
-    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-
-    # Support source_type filtering
+    storage = _get_suggestion_storage()
     source_type_filter = request.args.get('source_type')
+
+    if storage:
+        try:
+            if source_type_filter:
+                items = storage.get_filtered(source_type=source_type_filter)
+            else:
+                items = storage.get_all()
+            return jsonify({"items": items})
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite read failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
+    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
     if source_type_filter:
         recommendations['items'] = [
             r for r in recommendations.get('items', [])
@@ -340,7 +547,8 @@ def api_add_recommendation():
         "source_mission_id": data.get("source_mission_id"),
         "source_mission_summary": data.get("source_mission_summary", ""),
         "rationale": data.get("rationale", ""),
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now().isoformat(),
+        "source_type": data.get("source_type", "manual")
     }
 
     # Auto-tag and check for similar suggestions
@@ -354,6 +562,21 @@ def api_add_recommendation():
         import logging
         logging.warning(f"Auto-tagging failed: {e}")
 
+    # Try SQLite storage first
+    storage = _get_suggestion_storage()
+    if storage:
+        try:
+            storage.add(recommendation)
+            response = {"success": True, "recommendation": recommendation}
+            if similar_to:
+                response["merge_candidates"] = similar_to
+                response["has_similar"] = True
+            return jsonify(response)
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite add failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
     def update_fn(recs):
         recs.setdefault("items", []).append(recommendation)
         return recs
@@ -470,7 +693,44 @@ def api_merge_recommendations():
     if len(source_ids) < 2:
         return jsonify({"success": False, "error": "Need at least 2 recommendations to merge"}), 400
 
-    # Read current recommendations to extract source descriptions before merge
+    # Try SQLite storage first
+    storage = _get_suggestion_storage()
+    source_descriptions = []
+
+    if storage:
+        try:
+            # Get source descriptions from database
+            for source_id in source_ids:
+                rec = storage.get_by_id(source_id)
+                if rec:
+                    source_descriptions.append({
+                        "id": rec.get("id"),
+                        "title": rec.get("mission_title", ""),
+                        "description": rec.get("mission_description", "")
+                    })
+
+            new_rec = {
+                "id": f"rec_{uuid.uuid4().hex[:8]}",
+                "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
+                "mission_description": merged_data.get("mission_description", ""),
+                "suggested_cycles": int(merged_data.get("suggested_cycles", 3)),
+                "rationale": merged_data.get("rationale", ""),
+                "source_type": "merged",
+                "merged_from": source_ids,
+                "merged_source_descriptions": source_descriptions,
+                "created_at": datetime.now().isoformat()
+            }
+
+            # Delete sources and add new merged record
+            if delete_sources:
+                storage.delete_multiple(source_ids)
+            storage.add(new_rec)
+            return jsonify({"success": True, "new_recommendation": new_rec})
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite merge failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
     current_recs = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
     source_descriptions = []
     for rec in current_recs.get("items", []):
@@ -562,6 +822,18 @@ def api_health_report():
 @core_bp.route('/api/recommendations/<rec_id>', methods=['GET'])
 def api_get_recommendation(rec_id):
     """Get a specific recommendation."""
+    storage = _get_suggestion_storage()
+    if storage:
+        try:
+            rec = storage.get_by_id(rec_id)
+            if rec:
+                return jsonify(rec)
+            return jsonify({"error": "Recommendation not found"}), 404
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite get failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
     recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
     for rec in recommendations.get("items", []):
         if rec.get("id") == rec_id:
@@ -572,6 +844,16 @@ def api_get_recommendation(rec_id):
 @core_bp.route('/api/recommendations/<rec_id>', methods=['DELETE'])
 def api_delete_recommendation(rec_id):
     """Delete a recommendation."""
+    storage = _get_suggestion_storage()
+    if storage:
+        try:
+            storage.delete(rec_id)
+            return jsonify({"success": True})
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite delete failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
     def update_fn(recs):
         items = recs.get("items", [])
         recs["items"] = [r for r in items if r.get("id") != rec_id]
@@ -609,6 +891,37 @@ def api_update_recommendation(rec_id):
                 "error": "Mission title must be at least 3 characters"
             }), 400
 
+    # Try SQLite storage first
+    storage = _get_suggestion_storage()
+    if storage:
+        try:
+            # Get current record to preserve originals
+            current = storage.get_by_id(rec_id)
+            if current:
+                updates = {}
+                # Preserve originals if first edit
+                if "original_mission_title" not in current:
+                    updates["original_mission_title"] = current.get("mission_title")
+                    updates["original_mission_description"] = current.get("mission_description")
+                    updates["original_rationale"] = current.get("rationale")
+                    updates["original_suggested_cycles"] = current.get("suggested_cycles")
+                # Update fields
+                if "mission_title" in data:
+                    updates["mission_title"] = str(data["mission_title"]).strip()
+                if "mission_description" in data:
+                    updates["mission_description"] = data["mission_description"]
+                if "suggested_cycles" in data:
+                    updates["suggested_cycles"] = int(data["suggested_cycles"])
+                if "rationale" in data:
+                    updates["rationale"] = data["rationale"]
+                updates["last_edited_at"] = datetime.now().isoformat()
+                storage.update(rec_id, updates)
+                return jsonify({"success": True})
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite update failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file
     def update_fn(recs):
         for rec in recs.get("items", []):
             if rec.get("id") == rec_id:
@@ -641,12 +954,24 @@ def api_set_mission_from_recommendation(rec_id):
     data = request.get_json() or {}
     cycle_budget = int(data.get("cycle_budget", 3))
 
-    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+    # Try SQLite storage first
+    storage = _get_suggestion_storage()
     target_rec = None
-    for rec in recommendations.get("items", []):
-        if rec.get("id") == rec_id:
-            target_rec = rec
-            break
+
+    if storage:
+        try:
+            target_rec = storage.get_by_id(rec_id)
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite get failed, falling back to JSON: {e}")
+
+    # Fallback to JSON file if needed
+    if target_rec is None:
+        recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+        for rec in recommendations.get("items", []):
+            if rec.get("id") == rec_id:
+                target_rec = rec
+                break
 
     if not target_rec:
         return jsonify({"success": False, "error": "Recommendation not found"}), 404
@@ -722,6 +1047,16 @@ def api_set_mission_from_recommendation(rec_id):
         import logging
         logging.warning(f"Analytics: Failed to register mission: {e}")
 
+    # Remove recommendation from storage
+    if storage:
+        try:
+            storage.delete(rec_id)
+        except Exception as e:
+            import logging
+            logging.warning(f"SQLite delete failed, falling back to JSON: {e}")
+            # Fall through to JSON deletion
+
+    # Also delete from JSON for safety (in case SQLite failed)
     def update_fn(recs):
         items = recs.get("items", [])
         recs["items"] = [r for r in items if r.get("id") != rec_id]

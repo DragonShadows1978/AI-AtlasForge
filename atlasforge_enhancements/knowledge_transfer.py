@@ -135,7 +135,7 @@ class KnowledgeTransfer:
         """
         Find all missions with exploration data.
 
-        Scans the missions directory for missions with RDE exploration data.
+        Scans the missions directory for missions with AtlasForge exploration data.
 
         Args:
             limit: Maximum number of missions to return
@@ -159,7 +159,7 @@ class KnowledgeTransfer:
                 continue
 
             # Check for exploration data
-            exploration_path = mission_dir / "workspace" / "rde_data" / "exploration"
+            exploration_path = mission_dir / "workspace" / "atlasforge_data" / "exploration"
             nodes_file = exploration_path / "nodes.json"
 
             if not nodes_file.exists():
@@ -244,7 +244,7 @@ class KnowledgeTransfer:
 
         # Find mission path
         mission_dir = self.missions_base / mission_id
-        exploration_path = mission_dir / "workspace" / "rde_data" / "exploration"
+        exploration_path = mission_dir / "workspace" / "atlasforge_data" / "exploration"
 
         if not exploration_path.exists():
             return None

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RDE Enhancer - Unified Interface for RDE Framework Enhancements
+AtlasForge Enhancer - Unified Interface for AtlasForge Framework Enhancements
 
 This module provides a single, easy-to-use interface that combines all three
 enhancement features:
@@ -16,7 +16,7 @@ Production Hardened (Cycle 5):
 - Retry logic for component initialization
 
 Usage:
-    enhancer = RDEEnhancer(mission_id="my_mission")
+    enhancer = AtlasForgeEnhancer(mission_id="my_mission")
 
     # Feature 1: Mission Continuity
     enhancer.set_mission_baseline(mission_text)
@@ -79,9 +79,9 @@ except ImportError:
     from bias_detector import analyze_response
 
 
-class RDEEnhancer:
+class AtlasForgeEnhancer:
     """
-    Unified interface for all RDE enhancement features.
+    Unified interface for all AtlasForge enhancement features.
 
     Provides easy-to-use methods that combine the three features:
     - Mission continuity tracking
@@ -106,11 +106,11 @@ class RDEEnhancer:
         storage_base: Optional[Path] = None
     ):
         """
-        Initialize the RDE Enhancer.
+        Initialize the AtlasForge Enhancer.
 
         Args:
             mission_id: Unique identifier for the current mission
-            storage_base: Base path for storing data (default: ./rde_data/)
+            storage_base: Base path for storing data (default: ./atlasforge_data/)
 
         Raises:
             ValueError: If mission_id is empty or invalid
@@ -128,11 +128,11 @@ class RDEEnhancer:
 
         # Set up storage path with fallback
         try:
-            self.storage_base = Path(storage_base) if storage_base else Path("./rde_data")
+            self.storage_base = Path(storage_base) if storage_base else Path("./atlasforge_data")
             self.storage_base.mkdir(parents=True, exist_ok=True)
         except Exception as e:
             logger.error(f"Failed to create storage path: {e}")
-            self.storage_base = Path(f"/tmp/rde_data_{mission_id}")
+            self.storage_base = Path(f"/tmp/atlasforge_data_{mission_id}")
             self.storage_base.mkdir(parents=True, exist_ok=True)
 
         # Initialize sub-components with error handling
@@ -183,7 +183,7 @@ class RDEEnhancer:
             logger.error(f"Failed to initialize scaffold calibrator: {e}")
 
         if errors:
-            logger.warning(f"RDEEnhancer initialized with {len(errors)} errors: {errors}")
+            logger.warning(f"AtlasForgeEnhancer initialized with {len(errors)} errors: {errors}")
 
     def _ensure_initialized(self, component: str) -> bool:
         """Check if a component is initialized."""
@@ -938,11 +938,11 @@ class RDEEnhancer:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("RDE Enhancer - Unified Interface Demo")
+    print("AtlasForge Enhancer - Unified Interface Demo")
     print("=" * 60)
 
     # Create enhancer
-    enhancer = RDEEnhancer("demo_mission", Path("/tmp/rde_demo"))
+    enhancer = AtlasForgeEnhancer("demo_mission", Path("/tmp/af_demo"))
 
     # Set mission baseline
     mission = """

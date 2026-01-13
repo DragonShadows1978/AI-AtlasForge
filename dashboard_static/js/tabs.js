@@ -57,7 +57,7 @@ function switchTab(tabName) {
  * Initialize tabs from localStorage on page load
  */
 function initTabs() {
-    const savedTab = localStorage.getItem('activeTab') || 'rde';
+    const savedTab = localStorage.getItem('activeTab') || 'atlasforge';
     switchTab(savedTab);
 }
 
@@ -81,7 +81,7 @@ document.addEventListener('keydown', (e) => {
 
     // Tab shortcuts: 1-7 for tab switching
     if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        const tabs = ['rde', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'bugbounty', 'narrative'];
+        const tabs = ['atlasforge', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'bugbounty', 'narrative'];
         const idx = parseInt(e.key) - 1;
         if (tabs[idx]) {
             switchTab(tabs[idx]);
@@ -92,13 +92,13 @@ document.addEventListener('keydown', (e) => {
 
     // Other shortcuts
     if (e.key === 'e' || e.key === 'E') {
-        if (typeof toggleCard === 'function') toggleCard('rde-exploration');
+        if (typeof toggleCard === 'function') toggleCard('af-exploration');
     } else if (e.key === 'd' || e.key === 'D') {
-        if (typeof toggleCard === 'function') toggleCard('rde-drift');
+        if (typeof toggleCard === 'function') toggleCard('af-drift');
     } else if (e.key === 'r' || e.key === 'R') {
-        if (typeof refreshRDEWidgets === 'function') {
-            refreshRDEWidgets();
-            showToast('RDE widgets refreshed');
+        if (typeof refreshAtlasForgeWidgets === 'function') {
+            refreshAtlasForgeWidgets();
+            showToast('AtlasForge widgets refreshed');
         }
     } else if (e.key === 'g' || e.key === 'G') {
         switchTab('glassbox');
@@ -117,7 +117,7 @@ function showKeyboardShortcuts() {
             <p><span class="kbd">1-7</span> Switch tabs</p>
             <p><span class="kbd">E</span> Toggle exploration card</p>
             <p><span class="kbd">D</span> Toggle drift card</p>
-            <p><span class="kbd">R</span> Refresh RDE widgets</p>
+            <p><span class="kbd">R</span> Refresh AtlasForge widgets</p>
             <p><span class="kbd">G</span> Go to GlassBox tab</p>
             <p><span class="kbd">Esc</span> Close modals</p>
             <p><span class="kbd">?</span> Show this help</p>

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Exploration Graph - RDE Enhancement Feature 2.1
+Exploration Graph - AtlasForge Enhancement Feature 2.1
 
 A graph-based memory that records what Claude explored during missions.
 Nodes represent files/concepts, edges represent discovered relationships.
@@ -2068,7 +2068,7 @@ class ExplorationGraph:
 # =============================================================================
 
 if __name__ == "__main__":
-    print("Exploration Graph - RDE Enhancement")
+    print("Exploration Graph - AtlasForge Enhancement")
     print("=" * 50)
 
     # Create a graph

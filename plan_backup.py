@@ -15,7 +15,7 @@ Features:
 Usage:
     from plan_backup import backup_planned_files
 
-    # In rd_engine.py when transitioning PLANNING -> BUILDING:
+    # In atlasforge_engine.py when transitioning PLANNING -> BUILDING:
     result = backup_planned_files(mission)
     # Returns: {"files_backed_up": 3, "skipped": 1, "errors": [], ...}
 """
@@ -93,7 +93,7 @@ def parse_plan_for_files(plan_path: Path) -> List[str]:
             found_paths.add(resolved)
 
     # Pattern 4: Files to Modify table rows (markdown tables)
-    # Match table rows like | `rd_engine.py` | ... or | rd_engine.py | ...
+    # Match table rows like | `atlasforge_engine.py` | ... or | atlasforge_engine.py | ...
     table_pattern = r'\|\s*[`\*]?([^\|\`\*\s]+\.(?:py|ts|tsx|js|jsx|json|md|yaml|yml|toml|sh|sql|css|html))[`\*]?\s*\|'
     for match in re.finditer(table_pattern, content):
         path = match.group(1)
@@ -140,7 +140,7 @@ def get_backup_filename(original_path: str, version: int) -> str:
         version: Version number (1-10)
 
     Returns:
-        Backup filename like "rd_engine.py.v3.bak"
+        Backup filename like "atlasforge_engine.py.v3.bak"
     """
     filename = Path(original_path).name
     return f"{filename}.v{version}.bak"
@@ -152,7 +152,7 @@ def get_existing_versions(backup_dir: Path, filename: str) -> List[int]:
 
     Args:
         backup_dir: Mission backup directory
-        filename: Original filename (e.g., "rd_engine.py")
+        filename: Original filename (e.g., "atlasforge_engine.py")
 
     Returns:
         Sorted list of version numbers
@@ -257,7 +257,7 @@ def backup_planned_files(mission: Dict) -> Dict[str, Any]:
     """
     Backup all files mentioned in the mission's implementation plan.
 
-    This is the main entry point for rd_engine.py integration.
+    This is the main entry point for atlasforge_engine.py integration.
 
     Args:
         mission: Mission dict with mission_id, mission_workspace, etc.
@@ -475,7 +475,7 @@ if __name__ == "__main__":
 
 | File | Purpose |
 |------|---------|
-| `rd_engine.py` | Add backup trigger |
+| `atlasforge_engine.py` | Add backup trigger |
 | `dashboard_v2.py` | Add API endpoint |
 
 ## Implementation

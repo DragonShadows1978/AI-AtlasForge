@@ -1,0 +1,98 @@
+# AI-AtlasForge Docker Ignore
+# Excludes files from Docker build context
+
+# Git
+.git
+.gitignore
+
+# Runtime data (not needed in image)
+state/
+missions/
+logs/
+workspace/
+checkpoints/
+backups/
+experiments/
+screenshots/
+investigations/
+predictive_drift/
+
+# Environment and secrets
+.env
+.env.*
+config.yaml
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Node modules (if any)
+node_modules/
+
+# Documentation not needed in runtime
+docs/internal/
+*.personal.md
+
+# Large ML files (would bloat image)
+*.onnx
+*.pth
+*.pt
+*.pkl
+*.model
+*.weights
+*.h5
+*.ckpt
+*.safetensors
+*.bin
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temp files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Docker files (prevent recursion)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Claude hooks (local paths)
+.claude/
+
+# Testing artifacts
+test_output/
+coverage.xml
+.tox/
+.nox/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -43,7 +43,7 @@ The Predictive Drift Prevention System uses ML models to predict when an agent i
 
 ## Modules
 
-### Core Modules (`/home/vader/mini-mind-v2/predictive_drift/`)
+### Core Modules (`$ATLASFORGE_ROOT/predictive_drift/`)
 
 | Module | Purpose |
 |--------|---------|
@@ -61,8 +61,8 @@ The Predictive Drift Prevention System uses ML models to predict when an agent i
 
 | Component | Path |
 |-----------|------|
-| API Blueprint | `/home/vader/mini-mind-v2/dashboard_modules/drift_prevention.py` |
-| Widget Module | `/home/vader/mini-mind-v2/dashboard_static/src/modules/drift-prevention.js` |
+| API Blueprint | `$ATLASFORGE_ROOT/dashboard_modules/drift_prevention.py` |
+| Widget Module | `$ATLASFORGE_ROOT/dashboard_static/src/modules/drift-prevention.js` |
 
 ## API Reference
 
@@ -299,7 +299,7 @@ The widget receives live updates via WebSocket:
 
 ```bash
 # Model storage
-RDE_DATA_DIR=/home/vader/mini-mind-v2/rde_data
+AtlasForge_DATA_DIR=$ATLASFORGE_ROOT/atlasforge_data
 
 # Feature engineering
 DRIFT_NUDGE_THRESHOLD=0.5
@@ -309,9 +309,9 @@ DRIFT_ENABLE_RECOMMENDATIONS=true
 
 ### Model Files
 
-- Model: `/home/vader/mini-mind-v2/rde_data/drift_models/drift_predictor_model.pkl`
-- Scaler: `/home/vader/mini-mind-v2/rde_data/drift_models/drift_predictor_scaler.pkl`
-- Features: `/home/vader/mini-mind-v2/rde_data/drift_models/drift_predictor_features.json`
+- Model: `$ATLASFORGE_ROOT/atlasforge_data/drift_models/drift_predictor_model.pkl`
+- Scaler: `$ATLASFORGE_ROOT/atlasforge_data/drift_models/drift_predictor_scaler.pkl`
+- Features: `$ATLASFORGE_ROOT/atlasforge_data/drift_models/drift_predictor_features.json`
 
 ## Training Data Collection
 
@@ -325,8 +325,8 @@ samples = collector.collect_from_mission_logs()
 ```
 
 Data sources:
-- Mission logs (`/home/vader/mini-mind-v2/missions/mission_logs/`)
-- Decision graphs (`/home/vader/mini-mind-v2/rde_data/decision_graph.db`)
+- Mission logs (`$ATLASFORGE_ROOT/missions/mission_logs/`)
+- Decision graphs (`$ATLASFORGE_ROOT/atlasforge_data/decision_graph.db`)
 - Exploration history
 
 ## Integration with Exploration Hooks
@@ -379,6 +379,6 @@ Verify:
 
 ## References
 
-- Exploration Hooks: `/home/vader/mini-mind-v2/exploration_hooks.py`
-- Dashboard Blueprint: `/home/vader/mini-mind-v2/dashboard_modules/drift_prevention.py`
-- Knowledge Base: `/home/vader/mini-mind-v2/mission_knowledge_base.py`
+- Exploration Hooks: `$ATLASFORGE_ROOT/exploration_hooks.py`
+- Dashboard Blueprint: `$ATLASFORGE_ROOT/dashboard_modules/drift_prevention.py`
+- Knowledge Base: `$ATLASFORGE_ROOT/mission_knowledge_base.py`

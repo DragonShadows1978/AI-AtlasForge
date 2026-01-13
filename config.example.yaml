@@ -1,0 +1,93 @@
+# AI-AtlasForge Configuration
+# Copy this file to config.yaml and modify as needed
+#
+# Most settings can also be overridden via environment variables.
+# Environment variables take precedence over this file.
+
+# Required: Anthropic API Key
+# Can also be set via ANTHROPIC_API_KEY environment variable
+anthropic_api_key: "your-api-key-here"
+
+# Dashboard settings
+dashboard:
+  # Port to run the dashboard on (env: ATLASFORGE_PORT)
+  port: 5050
+  # Host to bind to (use 0.0.0.0 for all interfaces)
+  host: "127.0.0.1"
+  # Enable debug mode (env: ATLASFORGE_DEBUG)
+  debug: false
+
+# Ollama integration (optional - for local LLM support)
+ollama:
+  # Enable Ollama integration
+  enabled: false
+  # Ollama server URL (env: OLLAMA_URL)
+  url: "http://localhost:11434"
+  # Default model to use (env: OLLAMA_MODEL)
+  model: "llama3.1:8b"
+
+# Display settings (for virtual framebuffer)
+# Used for headless operation and screen capture
+display: ":99"
+
+# Directories (relative to ATLASFORGE_ROOT)
+# Usually you don't need to change these
+directories:
+  workspace: "workspace"
+  state: "state"
+  logs: "logs"
+  missions: "missions"
+  backups: "backups"
+  atlasforge_data: "atlasforge_data"
+
+# Mission defaults
+missions:
+  # Default cycle budget for new missions
+  default_cycle_budget: 3
+  # Maximum allowed cycles per mission
+  max_cycle_budget: 10
+  # Default timeout per cycle (seconds)
+  default_cycle_timeout: 3600
+
+# Knowledge Base settings
+knowledge_base:
+  # Enable automatic knowledge extraction after missions
+  auto_extract: true
+  # Similarity threshold for KB queries (0.0 - 1.0)
+  similarity_threshold: 0.3
+  # Maximum learnings to inject into planning prompts
+  max_learnings_per_query: 5
+
+# Analytics settings
+analytics:
+  # Enable token usage tracking
+  enabled: true
+  # Cost per 1K input tokens (USD) - update based on your API tier
+  cost_per_1k_input: 0.003
+  # Cost per 1K output tokens (USD)
+  cost_per_1k_output: 0.015
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # Log to file in addition to console
+  file_logging: true
+  # Maximum log file size in MB before rotation
+  max_file_size: 10
+  # Number of backup log files to keep
+  backup_count: 5
+
+# Backup settings
+backups:
+  # Enable automatic backups before file modifications
+  enabled: true
+  # Maximum age of backups in days (older are deleted)
+  max_age_days: 30
+  # Protected files that are always backed up
+  protected_patterns:
+    - "dashboard_v2.py"
+    - "af_engine.py"
+    - "claude_autonomous.py"
+    - "atlasforge_config.py"
+    - "GROUND_RULES.md"

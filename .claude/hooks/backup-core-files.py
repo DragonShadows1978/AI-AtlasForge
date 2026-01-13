@@ -24,17 +24,17 @@ ATLASFORGE_ROOT = Path(__file__).resolve().parent.parent.parent
 CORE_FILES = [
     # AI-AtlasForge Core
     str(ATLASFORGE_ROOT / "dashboard_v2.py"),
-    str(ATLASFORGE_ROOT / "rd_engine.py"),
+    str(ATLASFORGE_ROOT / "atlasforge_engine.py"),
     str(ATLASFORGE_ROOT / "claude_autonomous.py"),
     str(ATLASFORGE_ROOT / "exploration_hooks.py"),
     str(ATLASFORGE_ROOT / "io_utils.py"),
     str(ATLASFORGE_ROOT / "GROUND_RULES.md"),
 
-    # RDE Enhancements
-    str(ATLASFORGE_ROOT / "rde_enhancements" / "rde_enhancer.py"),
-    str(ATLASFORGE_ROOT / "rde_enhancements" / "exploration_graph.py"),
-    str(ATLASFORGE_ROOT / "rde_enhancements" / "fingerprint_extractor.py"),
-    str(ATLASFORGE_ROOT / "rde_enhancements" / "mission_continuity_tracker.py"),
+    # AtlasForge Enhancements
+    str(ATLASFORGE_ROOT / "atlasforge_enhancements" / "atlasforge_enhancer.py"),
+    str(ATLASFORGE_ROOT / "atlasforge_enhancements" / "exploration_graph.py"),
+    str(ATLASFORGE_ROOT / "atlasforge_enhancements" / "fingerprint_extractor.py"),
+    str(ATLASFORGE_ROOT / "atlasforge_enhancements" / "mission_continuity_tracker.py"),
 
     # GlassBox
     str(ATLASFORGE_ROOT / "workspace" / "glassbox" / "dashboard_routes.py"),

@@ -275,7 +275,7 @@ function renderInvestigationCards() {
             <div class="inv-empty-state">
                 <div class="icon">🔍</div>
                 <p>No investigations found</p>
-                <button class="btn primary" onclick="switchTab('rde'); document.getElementById('investigation-mode-checkbox').checked = true; toggleInvestigationMode();">
+                <button class="btn primary" onclick="switchTab('atlasforge'); document.getElementById('investigation-mode-checkbox').checked = true; toggleInvestigationMode();">
                     Start an Investigation
                 </button>
             </div>
@@ -1128,9 +1128,9 @@ window.rerunInvestigation = async function(investigationId) {
         // Close the detail modal if open
         closeInvestigationDetailModal();
 
-        // Switch to RDE tab
+        // Switch to AtlasForge tab
         if (typeof window.switchTab === 'function') {
-            window.switchTab('rde');
+            window.switchTab('atlasforge');
         }
 
         // Enable investigation mode and populate the form

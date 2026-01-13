@@ -2,7 +2,7 @@
 """
 Mission Analytics & Cost Tracking System
 
-This module provides comprehensive analytics for RDE missions by:
+This module provides comprehensive analytics for AtlasForge missions by:
 1. Tracking token usage (input, output, cache read, cache write)
 2. Estimating API costs based on current model pricing
 3. Recording stage-by-stage timing metrics
@@ -145,7 +145,7 @@ class MissionMetrics:
 
 class MissionAnalytics:
     """
-    Comprehensive analytics tracking for RDE missions.
+    Comprehensive analytics tracking for AtlasForge missions.
 
     Uses SQLite for persistent storage and provides methods for:
     - Tracking stage timing and token usage
