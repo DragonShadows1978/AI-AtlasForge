@@ -124,6 +124,7 @@ VALID_WS_ROOMS = [
     'exploration',       # Exploration graph updates
     'investigation',     # Investigation mode updates
     'backup_status',     # Backup health and stale alerts
+    'recommendations',   # Mission recommendations (next mission suggestions)
 ]
 
 # =============================================================================
@@ -931,6 +932,35 @@ def check_and_emit_widget_updates():
             if _widget_state.get('atlasforge_key') != atlasforge_key:
                 _widget_state['atlasforge_key'] = atlasforge_key
                 emit_widget_update('atlasforge_stats', atlasforge_data)
+    except Exception:
+        pass
+
+    # Recommendations check - detect new mission recommendations
+    try:
+        recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+        items = recommendations_data.get("items", [])
+        rec_count = len(items)
+        latest_rec_id = items[-1].get("id") if items else None
+        rec_key = f"{rec_count}:{latest_rec_id}"
+
+        if _widget_state.get('recommendations_key') != rec_key and rec_count > 0:
+            # New recommendation detected
+            prev_count = int(_widget_state.get('recommendations_key', '0:').split(':')[0]) if _widget_state.get('recommendations_key') else 0
+            if rec_count > prev_count and items:
+                # There's a new recommendation - emit notification
+                latest = items[-1]
+                emit_widget_update('recommendations', {
+                    'event': 'new_recommendation',
+                    'recommendation': {
+                        'id': latest.get('id'),
+                        'title': latest.get('mission_title', 'New Mission'),
+                        'description': latest.get('mission_description', '')[:200],
+                        'source_mission': latest.get('source_mission_id'),
+                        'source_type': latest.get('source_type', 'successful_completion')
+                    },
+                    'total_count': rec_count
+                })
+            _widget_state['recommendations_key'] = rec_key
     except Exception:
         pass
 
