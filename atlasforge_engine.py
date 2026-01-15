@@ -2526,12 +2526,21 @@ Respond with JSON:
             ftype = f.get("file_type", "unknown")
             final_report["statistics"]["file_types"][ftype] = final_report["statistics"]["file_types"].get(ftype, 0) + 1
 
-        # Save to mission_logs
-        report_path = MISSION_LOGS_DIR / f"{mission_id}_report.json"
-        with open(report_path, 'w') as f:
-            json.dump(final_report, f, indent=2)
+        # Save to mission_logs (with defensive checks)
+        try:
+            # Ensure directory exists (defensive - should already exist)
+            MISSION_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Saved final mission report to {report_path}")
+            report_path = MISSION_LOGS_DIR / f"{mission_id}_report.json"
+            with open(report_path, 'w') as f:
+                json.dump(final_report, f, indent=2)
+
+            logger.info(f"Saved final mission report to {report_path}")
+        except Exception as e:
+            logger.error(f"FAILED to save mission report to mission_logs: {e}")
+            logger.error(f"  MISSION_LOGS_DIR: {MISSION_LOGS_DIR}")
+            logger.error(f"  mission_id: {mission_id}")
+            # Don't raise - continue with other cleanup
 
         # Also save a copy to the mission directory if it exists
         if mission_dir:
@@ -2610,12 +2619,18 @@ Respond with JSON:
             rec_entry["drift_context"] = drift_context
 
         # Load existing recommendations
-        recs = io_utils.atomic_read_json(recommendations_path, {"items": []})
-        recs.setdefault("items", []).append(rec_entry)
+        try:
+            recs = io_utils.atomic_read_json(recommendations_path, {"items": []})
+            recs.setdefault("items", []).append(rec_entry)
 
-        # Save updated recommendations
-        io_utils.atomic_write_json(recommendations_path, recs)
-        logger.info(f"Saved mission recommendation ({source_type}): {rec_entry['mission_title']}")
+            # Save updated recommendations
+            io_utils.atomic_write_json(recommendations_path, recs)
+            logger.info(f"Saved mission recommendation ({source_type}): {rec_entry['mission_title']}")
+            logger.info(f"  Recommendation ID: {rec_entry['id']}")
+        except Exception as e:
+            logger.error(f"FAILED to save mission recommendation: {e}")
+            logger.error(f"  recommendations_path: {recommendations_path}")
+            logger.error(f"  rec_entry: {rec_entry}")
 
     def reset_mission(self):
         """Reset mission to initial state (keeps problem statement)."""
