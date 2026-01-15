@@ -43,6 +43,11 @@ async function loadRecommendations() {
     updateRecCount();
 }
 
+// Alias for socket.js to call when new recommendation is received
+async function refreshRecommendations() {
+    await loadRecommendations();
+}
+
 function renderRecommendations() {
     const container = document.getElementById('recommendations-list');
     if (!container) return;

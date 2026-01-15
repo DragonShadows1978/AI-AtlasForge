@@ -1,0 +1,19 @@
+{
+  "problem_statement": "Create a simple Python script called 'hello_atlasforge.py' in the workspace directory that prints 'Hello from AtlasForge!' to the console. The script should also print the current date and time. This is a sample mission to verify your AtlasForge installation is working correctly.",
+  "success_criteria": [
+    "hello_atlasforge.py exists in the workspace directory",
+    "Running the script prints 'Hello from AtlasForge!'",
+    "The script prints the current date and time",
+    "No errors occur when running the script"
+  ],
+  "preferences": {
+    "language": "python",
+    "style": "simple and clear"
+  },
+  "cycle_budget": 1,
+  "metadata": {
+    "type": "sample_mission",
+    "purpose": "Installation verification and onboarding",
+    "estimated_duration": "5 minutes"
+  }
+}

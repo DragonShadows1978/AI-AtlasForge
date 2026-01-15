@@ -20,7 +20,11 @@ AI-AtlasForge is not a chatbot wrapper. It's an **autonomous research engine** t
 - Anthropic API key (get one at https://console.anthropic.com/)
 - Linux environment (tested on Ubuntu 22.04+, Debian 12+)
 
-### Installation
+> **Platform Notes:**
+> - **Windows:** Use WSL2 (Windows Subsystem for Linux)
+> - **macOS:** Should work but is untested. Please report issues.
+
+### Option 1: Standard Installation
 
 ```bash
 # Clone the repository
@@ -33,26 +37,60 @@ cd AI-AtlasForge
 # Configure your API key
 export ANTHROPIC_API_KEY='your-key-here'
 # Or edit config.yaml / .env
+
+# Verify installation
+./verify.sh
 ```
 
-For detailed installation options, see [INSTALL.md](INSTALL.md).
+### Option 2: One-Liner Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/DragonShadows1978/AI-AtlasForge/main/quick_install.sh | bash
+```
+
+### Option 3: Docker Installation
+
+```bash
+git clone https://github.com/DragonShadows1978/AI-AtlasForge.git
+cd AI-AtlasForge
+docker compose up -d
+# Dashboard at http://localhost:5050
+```
+
+For detailed installation options, see [INSTALL.md](INSTALL.md) or [QUICKSTART.md](QUICKSTART.md).
 
 ### Running Your First Mission
 
 1. **Start the Dashboard** (optional, for monitoring):
    ```bash
-   python3 dashboard_v2.py
+   make dashboard
+   # Or: python3 dashboard_v2.py
    # Access at http://localhost:5050
    ```
 
 2. **Create a Mission**:
    - Via Dashboard: Click "Create Mission" and enter your objectives
+   - Via Sample: Run `make sample-mission` to load a hello-world mission
    - Via JSON: Create `state/mission.json` manually
 
 3. **Start the Engine**:
    ```bash
-   python3 atlasforge.py --mode=rd
+   make run
+   # Or: python3 claude_autonomous.py --mode=rd
    ```
+
+### Development Commands
+
+Run `make help` to see all available commands:
+
+```bash
+make install      # Full installation
+make verify       # Verify installation
+make dashboard    # Start dashboard
+make run          # Start autonomous agent
+make docker       # Start with Docker
+make sample-mission  # Load sample mission
+```
 
 ## Architecture
 
@@ -208,6 +246,7 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Documentation
 
+- [QUICKSTART.md](QUICKSTART.md) - Get started in 5 minutes
 - [INSTALL.md](INSTALL.md) - Detailed installation guide
 - [USAGE.md](USAGE.md) - How to use AI-AtlasForge
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture

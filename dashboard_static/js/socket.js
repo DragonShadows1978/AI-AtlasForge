@@ -56,6 +56,7 @@ if (widgetSocket) {
         widgetSocket.emit('subscribe', {room: 'journal'});
         widgetSocket.emit('subscribe', {room: 'atlasforge_stats'});
         widgetSocket.emit('subscribe', {room: 'decision_graph'});
+        widgetSocket.emit('subscribe', {room: 'recommendations'});
     });
 
     widgetSocket.on('subscribed', (data) => {
@@ -77,6 +78,18 @@ if (widgetSocket) {
             // Update journal entries from WebSocket
             if (payload.entries && Array.isArray(payload.entries) && typeof renderJournalEntries === 'function') {
                 renderJournalEntries(payload.entries);
+            }
+        } else if (room === 'recommendations') {
+            // New mission recommendation notification
+            if (payload.event === 'new_recommendation' && payload.recommendation) {
+                const rec = payload.recommendation;
+                const toastMsg = `New Mission Recommendation: <strong>${escapeHtml(rec.title)}</strong>`;
+                showToast(toastMsg, 5000);
+                console.log('New recommendation:', rec);
+                // Optionally refresh recommendations UI if function exists
+                if (typeof refreshRecommendations === 'function') {
+                    refreshRecommendations();
+                }
             }
         }
     });
