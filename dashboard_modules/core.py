@@ -511,18 +511,22 @@ def api_recommendations():
     storage = _get_suggestion_storage()
     source_type_filter = request.args.get('source_type')
 
+    # Try SQLite storage first
     if storage:
         try:
             if source_type_filter:
                 items = storage.get_filtered(source_type=source_type_filter)
             else:
                 items = storage.get_all()
-            return jsonify({"items": items})
+
+            # If SQLite has data, return it; otherwise fall through to JSON
+            if items:
+                return jsonify({"items": items})
         except Exception as e:
             import logging
             logging.warning(f"SQLite read failed, falling back to JSON: {e}")
 
-    # Fallback to JSON file
+    # Fallback to JSON file (or primary if SQLite is empty/unavailable)
     recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
     if source_type_filter:
         recommendations['items'] = [
@@ -1124,8 +1128,26 @@ def api_mission_log_detail(mission_id):
 
 @core_bp.route('/api/download/<path:filepath>')
 def download_file(filepath):
-    """Serve files from workspace for download."""
-    full_path = WORKSPACE_DIR / filepath
+    """Serve files from workspace for download.
+
+    Supports both global workspace and mission-specific paths:
+    - /api/download/artifacts/file.txt - global workspace
+    - /api/download/mission/{mission_id}/artifacts/file.txt - mission workspace
+    """
+    # Check if this is a mission-specific path
+    if filepath.startswith('mission/'):
+        parts = filepath.split('/', 2)
+        if len(parts) >= 3:
+            mission_id = parts[1]
+            relative_path = parts[2]
+            mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+            full_path = mission_workspace / relative_path
+            allowed_base = mission_workspace
+        else:
+            abort(404)
+    else:
+        full_path = WORKSPACE_DIR / filepath
+        allowed_base = WORKSPACE_DIR
 
     try:
         full_path = full_path.resolve()
@@ -1133,7 +1155,7 @@ def download_file(filepath):
         abort(404)
 
     try:
-        full_path.relative_to(WORKSPACE_DIR.resolve())
+        full_path.relative_to(allowed_base.resolve())
     except ValueError:
         abort(403)
 
@@ -1152,40 +1174,55 @@ def download_file(filepath):
 
 @core_bp.route('/api/files')
 def list_files():
-    """List all downloadable files in workspace."""
+    """List files in current mission workspace (or global workspace if no mission)."""
     files = []
 
+    # Get mission workspace if an active mission exists
+    mission = io_utils.atomic_read_json(MISSION_PATH, {})
+    mission_workspace = mission.get('mission_workspace')
+    mission_id = mission.get('mission_id')
+
+    # Use mission-specific workspace when available
+    workspace_base = Path(mission_workspace) if mission_workspace else WORKSPACE_DIR
+
     scan_dirs = [
-        WORKSPACE_DIR / "artifacts",
-        WORKSPACE_DIR / "research",
-        WORKSPACE_DIR / "tests",
-        WORKSPACE_DIR
+        workspace_base / "artifacts",
+        workspace_base / "research",
+        workspace_base / "tests",
+        workspace_base
     ]
 
     seen_paths = set()
 
     for dir_path in scan_dirs:
         if dir_path.exists():
-            pattern = "*" if dir_path == WORKSPACE_DIR else "**/*"
+            pattern = "*" if dir_path == workspace_base else "**/*"
             for f in dir_path.glob(pattern):
                 if f.is_file():
-                    rel_path = f.relative_to(WORKSPACE_DIR)
-                    path_str = str(rel_path)
-
-                    if path_str in seen_paths:
-                        continue
-                    seen_paths.add(path_str)
-
                     try:
+                        rel_path = f.relative_to(workspace_base)
+                        path_str = str(rel_path)
+
+                        if path_str in seen_paths:
+                            continue
+                        seen_paths.add(path_str)
+
                         stat = f.stat()
+                        # Build download URL with mission context if needed
+                        if mission_workspace:
+                            download_path = f"mission/{mission_id}/{path_str}"
+                        else:
+                            download_path = path_str
+
                         files.append({
                             "name": f.name,
                             "path": path_str,
                             "size": stat.st_size,
                             "modified": stat.st_mtime,
-                            "download_url": f"/api/download/{path_str}"
+                            "download_url": f"/api/download/{download_path}",
+                            "mission_id": mission_id if mission_workspace else None
                         })
-                    except (OSError, IOError):
+                    except (OSError, IOError, ValueError):
                         continue
 
     files.sort(key=lambda x: x["modified"], reverse=True)

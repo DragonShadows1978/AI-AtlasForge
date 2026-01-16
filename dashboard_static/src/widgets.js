@@ -435,31 +435,42 @@ export async function confirmRestart() {
 // =============================================================================
 
 export async function refresh() {
-    const data = await api('/api/status');
-
-    // Update AtlasForge service status in header
-    updateAtlasForgeServiceStatus(data.running, data.mode);
-
-    // Also check Investigation status
     try {
-        const invStatus = await api('/api/investigation/status');
-        const isInvRunning = invStatus && invStatus.investigation_id &&
-            invStatus.status !== 'completed' && invStatus.status !== 'failed' && invStatus.status !== 'idle';
-        updateInvestigationServiceStatus(isInvRunning, invStatus?.status);
-    } catch (e) {
-        // Investigation API not available or error
-        updateInvestigationServiceStatus(false, null);
-    }
+        const data = await api('/api/status');
 
-    // Update external service statuses (terminal server, etc.)
-    refreshServiceStatuses();
+        // Update AtlasForge service status in header
+        updateAtlasForgeServiceStatus(data.running, data.mode);
 
-    document.getElementById('stat-mode').textContent = data.mode || '-';
-    document.getElementById('stat-stage').textContent = data.rd_stage || '-';
-    document.getElementById('stat-iteration').textContent = data.rd_iteration;
-    document.getElementById('stat-mission-cycle').textContent = `${data.current_cycle || 1}/${data.cycle_budget || 1}`;
-    document.getElementById('stat-cycles').textContent = data.total_cycles;
-    document.getElementById('stat-boots').textContent = data.boot_count;
+        // Also check Investigation status
+        try {
+            const invStatus = await api('/api/investigation/status');
+            const isInvRunning = invStatus && invStatus.investigation_id &&
+                invStatus.status !== 'completed' && invStatus.status !== 'failed' && invStatus.status !== 'idle';
+            updateInvestigationServiceStatus(isInvRunning, invStatus?.status);
+        } catch (e) {
+            // Investigation API not available or error
+            updateInvestigationServiceStatus(false, null);
+        }
+
+        // Update external service statuses (terminal server, etc.)
+        refreshServiceStatuses();
+
+        // Helper function for safe DOM updates
+        const setEl = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = value;
+            } else {
+                console.warn(`[Widgets] Element not found: ${id}`);
+            }
+        };
+
+        setEl('stat-mode', data.mode || '-');
+        setEl('stat-stage', data.rd_stage || '-');
+        setEl('stat-iteration', data.rd_iteration);
+        setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
+        setEl('stat-cycles', data.total_cycles);
+        setEl('stat-boots', data.boot_count);
 
     fullMissionText = data.mission || 'No mission set';
     setFullMissionText(fullMissionText);
@@ -475,7 +486,8 @@ export async function refresh() {
     updateStageIndicator(data.rd_stage);
 
     const journal = await api('/api/journal');
-    document.getElementById('journal').innerHTML = journal.map(j => {
+    const journalEl = document.getElementById('journal');
+    if (journalEl) journalEl.innerHTML = journal.map(j => {
         if (j.is_truncated) {
             return `
                 <div class="journal-entry expandable" data-entry-id="${j.timestamp}" onclick="window.toggleJournalEntry(this)">
@@ -520,6 +532,9 @@ export async function refresh() {
     } else if (typeof window.refreshRecommendations === 'function') {
         await window.refreshRecommendations();
     }
+    } catch (e) {
+        console.error('[Widgets] refresh() error:', e);
+    }
 }
 
 // =============================================================================
@@ -536,14 +551,19 @@ export async function refreshAtlasForgeWidgets() {
 
         if (data.exploration) {
             const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
-            document.getElementById('atlasforge-files-count').textContent = fileCount;
-            document.getElementById('atlasforge-insights-count').textContent = data.exploration.total_insights || 0;
-            document.getElementById('atlasforge-edges-count').textContent = data.exploration.total_edges || 0;
+            const filesEl = document.getElementById('atlasforge-files-count');
+            const insightsEl = document.getElementById('atlasforge-insights-count');
+            const edgesEl = document.getElementById('atlasforge-edges-count');
+            if (filesEl) filesEl.textContent = fileCount;
+            if (insightsEl) insightsEl.textContent = data.exploration.total_insights || 0;
+            if (edgesEl) edgesEl.textContent = data.exploration.total_edges || 0;
         }
 
         const coverage = data.coverage_pct || 0;
-        document.getElementById('atlasforge-coverage-pct').textContent = coverage + '%';
-        document.getElementById('atlasforge-coverage-bar').style.width = coverage + '%';
+        const coveragePctEl = document.getElementById('atlasforge-coverage-pct');
+        const coverageBarEl = document.getElementById('atlasforge-coverage-bar');
+        if (coveragePctEl) coveragePctEl.textContent = coverage + '%';
+        if (coverageBarEl) coverageBarEl.style.width = coverage + '%';
 
         updateDriftChart(data.drift_history || []);
         updateRecentExplorations(data.recent_explorations || []);
@@ -563,6 +583,8 @@ function updateDriftChart(driftHistory) {
     const chart = document.getElementById('atlasforge-drift-chart');
     const simEl = document.getElementById('atlasforge-drift-similarity');
     const sevEl = document.getElementById('atlasforge-drift-severity');
+    // Guard against missing DOM elements to prevent TypeError
+    if (!chart || !simEl || !sevEl) return;
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -626,27 +648,39 @@ function updateRecentExplorations(explorations) {
 
 export async function refreshAnalyticsWidget() {
     try {
+        console.log('[Analytics] refreshAnalyticsWidget called');
         const current = await api('/api/analytics/current');
+        console.log('[Analytics] Current data:', current);
         if (!current.error) {
-            document.getElementById('analytics-tokens').textContent = formatNumber(current.tokens || 0);
-            document.getElementById('analytics-cost').textContent = '$' + (current.cost || 0).toFixed(4);
+            const tokensEl = document.getElementById('analytics-tokens');
+            const costEl = document.getElementById('analytics-cost');
+            console.log('[Analytics] Elements found:', { tokensEl: !!tokensEl, costEl: !!costEl });
+            if (tokensEl) tokensEl.textContent = formatNumber(current.tokens || 0);
+            if (costEl) costEl.textContent = '$' + (current.cost || 0).toFixed(4);
+            console.log('[Analytics] Updated current:', { tokens: current.tokens, cost: current.cost });
         }
 
         const summary = await api('/api/analytics/summary');
+        console.log('[Analytics] Summary data:', summary ? 'received' : 'null');
         if (!summary.error && summary.aggregate_30d) {
             const agg30d = summary.aggregate_30d.totals || summary.aggregate_30d;
-            document.getElementById('analytics-30d-tokens').textContent = formatNumber(agg30d.total_tokens || 0);
-            document.getElementById('analytics-30d-cost').textContent = '$' + (agg30d.total_cost_usd || agg30d.total_cost || 0).toFixed(2);
+            const tokens30dEl = document.getElementById('analytics-30d-tokens');
+            const cost30dEl = document.getElementById('analytics-30d-cost');
+            if (tokens30dEl) tokens30dEl.textContent = formatNumber(agg30d.total_tokens || 0);
+            if (cost30dEl) cost30dEl.textContent = '$' + (agg30d.total_cost_usd || agg30d.total_cost || 0).toFixed(2);
+            console.log('[Analytics] Updated 30d:', { tokens: agg30d.total_tokens, cost: agg30d.total_cost_usd });
 
             updateAnalyticsTrendWidget(summary.recent_missions || []);
         }
     } catch (e) {
-        console.error('Analytics widget error:', e);
+        console.error('[Analytics] Widget error:', e);
     }
 }
 
 function updateAnalyticsTrendWidget(missions) {
     const chart = document.getElementById('analytics-trend-chart');
+    if (!chart) return;
+
     if (!missions || missions.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.75em; width: 100%; text-align: center;">No trend data</div>';
         return;

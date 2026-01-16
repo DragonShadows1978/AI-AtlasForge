@@ -757,12 +757,12 @@ function setupPeriodicRefreshes() {
 
     // Monitor connection state changes
     registerHandler('connection_status', (status) => {
-        if (status.status === 'connected' && wsPollingMode === false) {
+        if (status.status === 'connected' && wsPollingMode === true) {
             console.log('WebSocket connected - switching to push mode');
             clearPollingIntervals();
             setupMinimalPolling();
             wsPollingMode = false;
-        } else if (status.status !== 'connected' && wsPollingMode === true) {
+        } else if (status.status !== 'connected' && wsPollingMode === false) {
             console.log('WebSocket disconnected - switching to polling mode');
             clearPollingIntervals();
             setupFullPolling();

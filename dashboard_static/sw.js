@@ -10,7 +10,7 @@
  * - Background sync for failed requests
  */
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `atlasforge-dashboard-${CACHE_VERSION}`;
 const STATIC_CACHE = `atlasforge-static-${CACHE_VERSION}`;
 const API_CACHE = `atlasforge-api-${CACHE_VERSION}`;

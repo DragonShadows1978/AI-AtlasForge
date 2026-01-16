@@ -25,8 +25,8 @@
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-S7GSMTBL.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-YVT5J62T.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-RPG4P5WJ.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-XWZFCXPN.js" as="script">
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->
@@ -173,6 +173,11 @@
         h3 .ws-indicator.ws-error{background:var(--red);animation:pulse 0.5s infinite}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 
+        /* Port Indicator */
+        .port-indicator{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border);margin-left:8px}
+        .port-label{color:var(--text-dim);font-weight:500}
+        .port-value{color:var(--accent);font-weight:600;font-family:monospace}
+
         /* Service Status Indicators (AtlasForge + Investigation) */
         .service-status-group{display:flex;align-items:center;gap:12px}
         .service-status{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border)}
@@ -273,6 +278,12 @@
                 <span class="ws-dot"></span>
                 <span id="ws-connection-status" class="ws-status-text">Connecting...</span>
             </div>
+            <!-- Port Indicator -->
+            <div class="port-indicator" title="Dashboard running on this port">
+                <span class="port-label">Port:</span>
+                <span id="dashboard-port" class="port-value"></span>
+            </div>
+            <script>document.getElementById('dashboard-port').textContent = location.port || '80';</script>
             <!-- Service Status Indicators -->
             <div class="service-status-group">
                 <div id="atlasforge-service-status" class="service-status offline" title="R&D Engine status">
@@ -1088,6 +1099,25 @@
             </div>
 
             <!-- AtlasForge: Drift Monitor Widget -->
+            <div class="card" id="atlasforge-drift-card">
+                <div class="card-header" onclick="toggleCard('atlasforge-drift')">
+                    <h3>Drift Monitor</h3>
+                    <span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div class="atlasforge-drift-status">
+                        <span class="label">Similarity</span>
+                        <span class="value" id="atlasforge-drift-similarity">N/A</span>
+                    </div>
+                    <div class="atlasforge-drift-status">
+                        <span class="label">Severity</span>
+                        <span class="value" id="atlasforge-drift-severity">N/A</span>
+                    </div>
+                    <div id="atlasforge-drift-chart" class="atlasforge-drift-chart" style="display: flex; gap: 2px; align-items: flex-end; height: 60px;">
+                        <div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>
+                    </div>
+                </div>
+            </div>
             <!-- AtlasForge: Recent Explorations Widget -->
             <div class="card" id="atlasforge-recent-card">
                 <div class="card-header" onclick="toggleCard('atlasforge-recent')">

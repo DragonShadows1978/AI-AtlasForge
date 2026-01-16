@@ -84,9 +84,11 @@ export function copyMission() {
 // =============================================================================
 
 export async function loadRecommendations() {
+    console.log('[DEBUG] loadRecommendations called');
     // Use analyze endpoint to get auto-tagged, prioritized, health-checked suggestions
     try {
         const data = await api('/api/recommendations/analyze');
+        console.log('[DEBUG] Got data from analyze:', data?.items?.length, 'items');
         recommendations = data.items || [];
         // Store health report for potential UI display
         if (data.health_report) {
@@ -98,13 +100,16 @@ export async function loadRecommendations() {
         const data = await api('/api/recommendations');
         recommendations = data.items || [];
     }
+    console.log('[DEBUG] recommendations array length:', recommendations.length);
     // Store all recommendations for filtering
     allRecommendations = [...recommendations];
     // Reset pagination on reload
     currentPage = 1;
     // Apply current sort before rendering
     applySortToRecommendations();
+    console.log('[DEBUG] About to call renderRecommendations');
     renderRecommendations();
+    console.log('[DEBUG] About to call updateRecCount');
     updateRecCount();
     // Update health summary bar
     updateHealthSummaryBar();
@@ -760,9 +765,10 @@ function updateHealthSummaryBar() {
 
     // Get health report from window or calculate from recommendations
     const healthReport = window._recHealthReport;
-    if (healthReport && healthReport.counts) {
-        const counts = healthReport.counts;
-        summaryEl.style.display = counts.total > 0 ? 'flex' : 'none';
+    // API returns counts directly on health_report, not nested under .counts
+    const counts = healthReport?.counts || healthReport;
+    if (counts && (counts.total > 0 || counts.hot > 0 || counts.healthy > 0)) {
+        summaryEl.style.display = 'flex';
 
         const hotEl = document.getElementById('health-hot-count');
         const staleEl = document.getElementById('health-stale-count');
