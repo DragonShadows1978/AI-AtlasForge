@@ -118,14 +118,23 @@ _ws_state_cache = {
 VALID_WS_ROOMS = [
     'mission_status',    # Mission stage, iteration, running status
     'journal',           # Journal entries
-    'atlasforge_stats',         # AtlasForge exploration stats, drift, coverage
+    'atlasforge_stats',  # AtlasForge exploration stats, drift, coverage
     'glassbox',          # GlassBox introspection data
     'analytics',         # Cost/token analytics
     'exploration',       # Exploration graph updates
     'investigation',     # Investigation mode updates
     'backup_status',     # Backup health and stale alerts
     'recommendations',   # Mission recommendations (next mission suggestions)
+    'file_events',       # File creation/modification events during missions
+    'glassbox_archive',  # GlassBox transcript archival events
 ]
+
+# Register websocket_events module with socketio reference
+try:
+    from websocket_events import set_socketio
+    set_socketio(socketio)
+except ImportError:
+    pass
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -767,6 +776,12 @@ def get_initial_room_data(room: str) -> dict:
             return get_exploration_data()
         elif room == 'backup_status':
             return get_backup_status_data()
+        elif room == 'file_events':
+            return get_recent_file_events()
+        elif room == 'glassbox_archive':
+            return get_glassbox_archive_status()
+        elif room == 'recommendations':
+            return get_recommendations_summary()
     except Exception as e:
         return {'error': str(e)}
     return {}
@@ -846,6 +861,89 @@ def get_backup_status_data() -> dict:
         return {'error': 'Snapshot module not available'}
     except Exception as e:
         return {'error': str(e)}
+
+
+def get_recent_file_events() -> dict:
+    """Get recent file events for the current mission."""
+    try:
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        mission_workspace = mission.get('mission_workspace')
+        if not mission_workspace:
+            return {'files': [], 'mission_id': None}
+
+        workspace_path = Path(mission_workspace)
+        if not workspace_path.exists():
+            return {'files': [], 'mission_id': mission.get('mission_id')}
+
+        # Get recently modified files in the workspace
+        recent_files = []
+        for f in workspace_path.rglob('*'):
+            if f.is_file() and not f.name.startswith('.'):
+                try:
+                    stat = f.stat()
+                    recent_files.append({
+                        'name': f.name,
+                        'path': str(f.relative_to(workspace_path)),
+                        'modified': stat.st_mtime,
+                        'size': stat.st_size
+                    })
+                except OSError:
+                    pass
+
+        # Sort by modification time, most recent first
+        recent_files.sort(key=lambda x: x['modified'], reverse=True)
+
+        return {
+            'files': recent_files[:20],
+            'mission_id': mission.get('mission_id'),
+            'workspace': str(mission_workspace)
+        }
+    except Exception as e:
+        return {'error': str(e), 'files': []}
+
+
+def get_glassbox_archive_status() -> dict:
+    """Get GlassBox archive status for current mission."""
+    try:
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        mission_id = mission.get('mission_id')
+        if not mission_id:
+            return {'archived': False, 'mission_id': None}
+
+        # Check if archive exists
+        archive_dir = BASE_DIR / 'artifacts' / 'transcripts' / mission_id
+        if archive_dir.exists():
+            manifest_path = archive_dir / 'manifest.json'
+            if manifest_path.exists():
+                manifest = io_utils.atomic_read_json(manifest_path, {})
+                return {
+                    'archived': True,
+                    'mission_id': mission_id,
+                    'transcript_count': manifest.get('transcript_count', 0),
+                    'archive_path': str(archive_dir),
+                    'archived_at': manifest.get('archived_at')
+                }
+
+        return {
+            'archived': False,
+            'mission_id': mission_id
+        }
+    except Exception as e:
+        return {'error': str(e), 'archived': False}
+
+
+def get_recommendations_summary() -> dict:
+    """Get recommendations summary for WebSocket push."""
+    try:
+        recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+        items = recommendations_data.get("items", [])
+        return {
+            'count': len(items),
+            'recent': items[-5:] if items else [],
+            'has_new': len(items) > 0
+        }
+    except Exception as e:
+        return {'error': str(e), 'count': 0, 'recent': []}
 
 
 def emit_widget_update(room: str, data: dict):

@@ -55,6 +55,14 @@ try:
 except ImportError:
     pass
 
+# WebSocket Events Integration (for real-time dashboard push)
+WEBSOCKET_EVENTS_AVAILABLE = False
+try:
+    from websocket_events import emit_file_created, emit_file_modified
+    WEBSOCKET_EVENTS_AVAILABLE = True
+except ImportError:
+    pass
+
 # Predictive Drift Prevention Integration
 PREDICTIVE_DRIFT_AVAILABLE = False
 _drift_predictor = None
@@ -1098,8 +1106,8 @@ def log_read_tool(file_path: str, lines_read: int = 0, success: bool = True, err
 
 
 def log_write_tool(file_path: str, content_length: int = 0, success: bool = True, error: str = "", duration_ms: int = 0) -> Optional[str]:
-    """Log a Write tool invocation."""
-    return log_tool_invocation(
+    """Log a Write tool invocation and emit WebSocket event for real-time dashboard updates."""
+    result = log_tool_invocation(
         tool_name="Write",
         input_summary={"file_path": file_path, "content_length": content_length},
         output_summary={"success": success},
@@ -1108,10 +1116,30 @@ def log_write_tool(file_path: str, content_length: int = 0, success: bool = True
         duration_ms=duration_ms
     )
 
+    # Emit WebSocket event for real-time dashboard updates during BUILDING stage
+    if success and WEBSOCKET_EVENTS_AVAILABLE:
+        try:
+            mission_id, workspace = _get_mission_info()
+            stage = _get_mission_stage()
+            if mission_id and stage == "BUILDING":
+                # Determine file type based on path
+                file_type = "code"
+                if "/artifacts/" in file_path or file_path.endswith(".md"):
+                    file_type = "artifact"
+                elif "/tests/" in file_path or "test_" in file_path:
+                    file_type = "test"
+                elif "/research/" in file_path:
+                    file_type = "research"
+                emit_file_created(file_path, file_type, mission_id, {"content_length": content_length})
+        except Exception:
+            pass  # Silent failure - don't block file writes
+
+    return result
+
 
 def log_edit_tool(file_path: str, old_string_preview: str = "", new_string_preview: str = "", replace_all: bool = False, success: bool = True, error: str = "", duration_ms: int = 0) -> Optional[str]:
-    """Log an Edit tool invocation."""
-    return log_tool_invocation(
+    """Log an Edit tool invocation and emit WebSocket event for real-time dashboard updates."""
+    result = log_tool_invocation(
         tool_name="Edit",
         input_summary={
             "file_path": file_path,
@@ -1124,6 +1152,18 @@ def log_edit_tool(file_path: str, old_string_preview: str = "", new_string_previ
         error_message=error,
         duration_ms=duration_ms
     )
+
+    # Emit WebSocket event for real-time dashboard updates during BUILDING stage
+    if success and WEBSOCKET_EVENTS_AVAILABLE:
+        try:
+            mission_id, _ = _get_mission_info()
+            stage = _get_mission_stage()
+            if mission_id and stage == "BUILDING":
+                emit_file_modified(file_path, mission_id, "modified")
+        except Exception:
+            pass  # Silent failure - don't block file edits
+
+    return result
 
 
 def log_bash_tool(command: str, exit_code: int = 0, output_preview: str = "", success: bool = True, error: str = "", duration_ms: int = 0) -> Optional[str]:
