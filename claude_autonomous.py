@@ -770,7 +770,14 @@ def run_rd_mode():
                     continue  # Don't break - continue with the new mission
 
                 # No new mission, truly shut down
-                send_to_chat(f"R&D Mission complete after {total_cycles} cycle(s). A_Claude shutting down. Set a new mission and restart to continue.")
+                # Check if mission was halted due to drift
+                halted_due_to_drift = controller.mission.get("halted_due_to_drift", False)
+                halted_at_cycle = controller.mission.get("halted_at_cycle", total_cycles)
+
+                if halted_due_to_drift:
+                    send_to_chat(f"R&D Mission complete due to drift after {halted_at_cycle} cycle(s). AtlasForge shutting down. Set a new mission and restart to continue.")
+                else:
+                    send_to_chat(f"R&D Mission complete after {total_cycles} cycle(s). AtlasForge shutting down. Set a new mission and restart to continue.")
                 break  # Exit the loop - don't waste resources polling
 
             # Build prompt for current stage

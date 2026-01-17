@@ -1787,6 +1787,9 @@ Respond with JSON:
                     if should_halt:
                         # Mission halted due to excessive drift
                         logger.warning(f"Mission halted at cycle {current_cycle} due to drift")
+                        self.mission["halted_due_to_drift"] = True
+                        self.mission["halted_at_cycle"] = current_cycle
+                        self.save_mission()
                         self._generate_drift_halt_report(response)
                         return "COMPLETE"
 
@@ -2361,6 +2364,9 @@ Respond with JSON:
             )
             logger.info(f"Generated follow-up recommendation from drift-halted mission {mission_id}")
 
+            # Auto-queue the drift suggestion if queue auto-start is enabled
+            self._auto_queue_drift_suggestion(drift_recommendation, mission_id)
+
         # Knowledge Base: Auto-ingest drift-halted mission for learning extraction
         if KB_AVAILABLE and report_path.exists():
             try:
@@ -2370,6 +2376,61 @@ Respond with JSON:
                 logger.info(f"Knowledge Base: Ingested drift-halted mission - {learnings_count} learnings extracted")
             except Exception as e:
                 logger.warning(f"Knowledge Base: Failed to ingest drift-halted mission: {e}")
+
+    def _auto_queue_drift_suggestion(self, drift_recommendation: dict, source_mission_id: str):
+        """Auto-queue the drift suggestion if queue auto-start is enabled.
+
+        This ensures that when a mission is halted due to drift, the suggested
+        refined mission is automatically queued for execution, providing
+        continuity in the R&D workflow.
+        """
+        if not QUEUE_SCHEDULER_AVAILABLE:
+            logger.debug("Queue scheduler not available - skipping auto-queue")
+            return
+
+        try:
+            scheduler = get_queue_scheduler()
+            queue_state = scheduler.get_queue()
+            settings = queue_state.settings
+
+            # Check if auto-start is enabled
+            auto_start_enabled = settings.get("auto_start", False)
+            if not auto_start_enabled:
+                logger.debug("Queue auto-start not enabled - suggestion saved but not queued")
+                return
+
+            # Add the drift suggestion to the queue with high priority
+            mission_title = drift_recommendation.get("mission_title", "Refined Mission")
+            mission_description = drift_recommendation.get("mission_description", "")
+            suggested_cycles = drift_recommendation.get("suggested_cycles", 3)
+
+            item, position = scheduler.add_to_queue(
+                mission_title=mission_title,
+                mission_description=mission_description,
+                cycle_budget=suggested_cycles,
+                priority="high",  # High priority since it's a refinement of halted work
+                tags=["drift_refinement", f"from_{source_mission_id}"],
+                created_by="drift_halt_auto_queue"
+            )
+
+            logger.info(
+                f"Auto-queued drift suggestion at position {position}: {mission_title}"
+            )
+
+            # Write auto-start signal so dashboard's queue_auto_start_watcher starts Claude
+            signal_path = STATE_DIR / "queue_auto_start_signal.json"
+            auto_start_signal = {
+                "triggered_at": datetime.now().isoformat(),
+                "queue_item_id": item.id,
+                "mission_title": mission_title,
+                "source": "drift_halt_auto_queue",
+                "source_mission_id": source_mission_id
+            }
+            io_utils.atomic_write_json(signal_path, auto_start_signal)
+            logger.info("Wrote auto-start signal for drift suggestion")
+
+        except Exception as e:
+            logger.warning(f"Failed to auto-queue drift suggestion: {e}")
 
     def _advance_to_next_cycle(self, continuation_prompt: str):
         """Advance to the next cycle with the continuation prompt."""

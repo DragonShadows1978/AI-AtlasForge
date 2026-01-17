@@ -47,6 +47,29 @@ You have FULL control of this Linux system:
   - API: `curl $OLLAMA_URL/api/generate -d '{"model":"$OLLAMA_MODEL","prompt":"..."}'`
   - Configure via `config.yaml` or environment variables (`OLLAMA_URL`, `OLLAMA_MODEL`)
 
+## Dependency Installation - MANDATORY
+**If your task requires a dependency that is not installed, YOU MUST INSTALL IT.**
+
+This is non-negotiable. Do NOT:
+- Skip functionality because a package is missing
+- Report that something "cannot be done" because a library isn't available
+- Leave tasks incomplete due to missing dependencies
+
+DO:
+- Install system packages with `sudo apt install <package>` or `sudo apt-get install <package>`
+- Install Python packages with `pip install <package>` or `pip3 install <package>`
+- Install Node packages with `npm install <package>`
+- Install any other dependencies using the appropriate package manager
+
+**The only exception** is if the dependency is behind a paywall, requires paid licensing, or is otherwise legally restricted. Free and open-source dependencies MUST be installed.
+
+Examples of correct behavior:
+- Need `pywinpty` for Windows terminal support? → `pip install pywinpty`
+- Need `xvfb` for virtual display? → `sudo apt install xvfb`
+- Need a Node library for UI? → `npm install <library>`
+
+**Failure to install available dependencies is a mission failure.**
+
 ## Virtual Display (IMPORTANT)
 **Use display :99 for ALL graphical operations.** A virtual framebuffer (Xvfb) is running:
 - Set `DISPLAY=:99` before launching graphical applications

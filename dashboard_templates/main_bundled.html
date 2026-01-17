@@ -300,29 +300,6 @@
         </div>
     </header>
 
-    <!-- Service Status Bar -->
-    <div class="service-status-bar">
-        <span class="bar-label">Services:</span>
-        <div id="terminal-service" class="service-item offline" onclick="showRestartModal('terminal')" title="Click to restart">
-            <span class="svc-dot"></span>
-            <span class="svc-name">Web Terminal</span>
-            <span class="svc-port">:5002</span>
-            <span class="restart-hint">(click to restart)</span>
-        </div>
-        <!-- Additional services can be added here -->
-    </div>
-
-    <!-- Restart Confirmation Modal -->
-    <div id="restart-modal-overlay" class="restart-modal-overlay">
-        <div class="restart-modal">
-            <h3>Restart Service?</h3>
-            <p id="restart-modal-text">Are you sure you want to restart the Web Terminal service on port 5002?</p>
-            <div class="modal-btns">
-                <button class="btn" onclick="hideRestartModal()">Cancel</button>
-                <button class="btn danger" id="restart-confirm-btn" onclick="confirmRestart()">Restart</button>
-            </div>
-        </div>
-    </div>
 
     <nav class="main-tabs">
         <div class="main-tab active" data-tab="atlasforge" onclick="switchTab('atlasforge')">AtlasForge</div>
