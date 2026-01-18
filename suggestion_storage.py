@@ -523,8 +523,79 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
     # Bulk Operations
     # =========================================================================
 
+    def upsert(self, suggestion: Dict[str, Any]) -> str:
+        """Insert or update a suggestion safely.
+
+        Uses INSERT OR REPLACE to avoid race conditions.
+        Returns the suggestion ID.
+        """
+        # Generate ID if not provided
+        suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
+        suggestion['id'] = suggestion_id
+
+        # Ensure required fields have defaults
+        now = datetime.now().isoformat()
+        if 'created_at' not in suggestion:
+            suggestion['created_at'] = now
+        if 'mission_title' not in suggestion:
+            suggestion['mission_title'] = 'Untitled'
+
+        row = self._dict_to_row(suggestion)
+
+        with self._get_connection() as conn:
+            columns = ', '.join(row.keys())
+            placeholders = ', '.join(['?' for _ in row])
+            conn.execute(
+                f"INSERT OR REPLACE INTO mission_suggestions ({columns}) VALUES ({placeholders})",
+                list(row.values())
+            )
+
+        return suggestion_id
+
+    def upsert_batch(self, suggestions: List[Dict[str, Any]]) -> int:
+        """Upsert multiple suggestions safely.
+
+        Unlike update_all(), this does NOT delete existing records.
+        Only updates/inserts the provided records.
+        Returns count of upserted records.
+        """
+        count = 0
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            for suggestion in suggestions:
+                if 'id' not in suggestion:
+                    suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
+                if 'created_at' not in suggestion:
+                    suggestion['created_at'] = now
+                if 'mission_title' not in suggestion:
+                    suggestion['mission_title'] = 'Untitled'
+
+                row = self._dict_to_row(suggestion)
+                columns = ', '.join(row.keys())
+                placeholders = ', '.join(['?' for _ in row])
+                conn.execute(
+                    f"INSERT OR REPLACE INTO mission_suggestions ({columns}) VALUES ({placeholders})",
+                    list(row.values())
+                )
+                count += 1
+
+        logger.info(f"Upserted {count} suggestions (safe batch)")
+        return count
+
     def update_all(self, suggestions: List[Dict[str, Any]]) -> int:
-        """Replace all suggestions with the provided list."""
+        """Replace all suggestions with the provided list.
+
+        WARNING: This method is DEPRECATED due to race condition risks.
+        Use upsert_batch() instead for safe updates that don't lose concurrent inserts.
+        """
+        import warnings
+        warnings.warn(
+            "update_all() is deprecated due to race condition risks. "
+            "Use upsert_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         now = datetime.now().isoformat()
         with self._get_connection() as conn:
             # Clear existing
