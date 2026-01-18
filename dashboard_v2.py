@@ -121,6 +121,7 @@ VALID_WS_ROOMS = [
     'atlasforge_stats',  # AtlasForge exploration stats, drift, coverage
     'glassbox',          # GlassBox introspection data
     'analytics',         # Cost/token analytics
+    'semantic_updates',  # Semantic search alerts (drift, quality warnings)
     'exploration',       # Exploration graph updates
     'investigation',     # Investigation mode updates
     'backup_status',     # Backup health and stale alerts
@@ -302,6 +303,7 @@ from dashboard_modules import (
     cache_bp,
     url_handlers_bp,
     queue_scheduler_bp, init_queue_scheduler_blueprint,
+    semantic_bp, init_semantic_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -331,6 +333,16 @@ init_analytics_blueprint(MISSION_PATH, io_utils)
 init_recovery_blueprint(MISSION_PATH, io_utils)
 init_investigation_blueprint(BASE_DIR, STATE_DIR, io_utils, socketio)
 init_queue_scheduler_blueprint(socketio)
+# Semantic blueprint needs the mission workspace to find semantic_search_engine
+# Default to the current mission workspace if available
+current_mission_workspace = None
+try:
+    mission_data = io_utils.read_json(MISSION_PATH)
+    if mission_data and 'mission_id' in mission_data:
+        current_mission_workspace = str(BASE_DIR / 'missions' / mission_data['mission_id'] / 'workspace')
+except Exception:
+    pass
+init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -343,6 +355,7 @@ app.register_blueprint(services_bp)
 app.register_blueprint(cache_bp)
 app.register_blueprint(url_handlers_bp)
 app.register_blueprint(queue_scheduler_bp)
+app.register_blueprint(semantic_bp)
 
 # Register non-prefixed routes
 register_archival_routes(app)
