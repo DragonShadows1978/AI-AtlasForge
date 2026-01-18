@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 queue_scheduler_bp = Blueprint('queue_scheduler', __name__, url_prefix='/api/queue')
 
 # Base paths - use centralized configuration
-from atlasforge_config import MISSION_QUEUE_PATH
+from atlasforge_config import MISSION_QUEUE_PATH, STATE_DIR, BASE_DIR
 
 # Queue lock for thread safety
 _queue_lock = threading.Lock()

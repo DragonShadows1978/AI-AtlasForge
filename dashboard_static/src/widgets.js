@@ -158,6 +158,8 @@ export async function setMission() {
     if (!mission) return;
 
     const cycleBudget = parseInt(document.getElementById('cycle-budget-input').value) || 1;
+    const projectNameInput = document.getElementById('project-name-input');
+    const projectName = projectNameInput ? projectNameInput.value.trim() : '';
 
     const currentMission = await api('/api/mission', 'GET');
     const currentStage = currentMission.current_stage || 'COMPLETE';
@@ -179,9 +181,15 @@ export async function setMission() {
         if (!confirm2) return;
     }
 
-    const data = await api('/api/mission', 'POST', {mission, cycle_budget: cycleBudget});
+    const payload = {mission, cycle_budget: cycleBudget};
+    if (projectName) {
+        payload.project_name = projectName;
+    }
+
+    const data = await api('/api/mission', 'POST', payload);
     showToast(data.message);
     document.getElementById('mission-input').value = '';
+    if (projectNameInput) projectNameInput.value = '';
     refresh();
 }
 
@@ -189,6 +197,58 @@ export async function resetMission() {
     const data = await api('/api/mission/reset', 'POST');
     showToast(data.message);
     refresh();
+}
+
+// =============================================================================
+// PROJECT NAME SUGGESTION
+// =============================================================================
+
+let projectSuggestTimeout = null;
+
+/**
+ * Initialize project name suggestion on mission input
+ * Call this after DOM is ready
+ */
+export function initProjectNameSuggestion() {
+    const missionInput = document.getElementById('mission-input');
+    const projectInput = document.getElementById('project-name-input');
+
+    if (!missionInput || !projectInput) return;
+
+    missionInput.addEventListener('input', function() {
+        clearTimeout(projectSuggestTimeout);
+
+        const text = this.value.trim();
+        if (text.length < 15) {
+            projectInput.placeholder = 'Auto-detect from mission';
+            return;
+        }
+
+        // Debounce - wait 500ms after typing stops
+        projectSuggestTimeout = setTimeout(async () => {
+            try {
+                const result = await api('/api/suggest-project-name', 'POST', {
+                    problem_statement: text
+                });
+
+                if (result.suggested_name && !projectInput.value) {
+                    projectInput.placeholder = `Suggested: ${result.suggested_name}`;
+                    // Store suggestion for use if field left empty
+                    projectInput.dataset.suggested = result.suggested_name;
+                }
+            } catch (e) {
+                console.log('Project name suggestion failed:', e);
+            }
+        }, 500);
+    });
+
+    // Clear suggestion when user types in project name field
+    projectInput.addEventListener('input', function() {
+        if (this.value) {
+            this.placeholder = 'Auto-detect from mission';
+            delete this.dataset.suggested;
+        }
+    });
 }
 
 // =============================================================================
@@ -247,8 +307,9 @@ export function updateStatusBar(data) {
         if (el) el.textContent = val;
     };
 
-    setEl('stat-mode', data.mode || '-');
+    // stat-mode removed - only R&D mode exists
     setEl('stat-stage', data.rd_stage || '-');
+    setEl('stat-project-name', data.project_name || '-');
     setEl('stat-iteration', data.rd_iteration);
     setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
     setEl('stat-cycles', data.total_cycles);
@@ -465,8 +526,9 @@ export async function refresh() {
             }
         };
 
-        setEl('stat-mode', data.mode || '-');
+        // stat-mode removed - only R&D mode exists
         setEl('stat-stage', data.rd_stage || '-');
+        setEl('stat-project-name', data.project_name || '-');
         setEl('stat-iteration', data.rd_iteration);
         setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
         setEl('stat-cycles', data.total_cycles);

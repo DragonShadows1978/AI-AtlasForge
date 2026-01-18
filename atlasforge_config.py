@@ -76,8 +76,27 @@ def ensure_directories():
 
 
 def get_mission_workspace(mission_id: str) -> Path:
-    """Get the workspace path for a specific mission."""
+    """Get the workspace path for a specific mission (legacy).
+
+    Note: With project-based workspaces, prefer using get_project_workspace()
+    or reading the 'mission_workspace' field from mission state/config.
+    """
     return MISSIONS_DIR / mission_id / "workspace"
+
+
+def get_project_workspace(project_name: str) -> Path:
+    """Get the workspace path for a project.
+
+    This returns the shared workspace folder for missions working on the same project.
+    Multiple missions can share the same project workspace.
+
+    Args:
+        project_name: The project name (e.g., "WindowsAtlasForge", "emotion_model")
+
+    Returns:
+        Path to workspace/<project_name>/
+    """
+    return WORKSPACE_DIR / project_name
 
 
 def get_transcript_dir() -> Path:

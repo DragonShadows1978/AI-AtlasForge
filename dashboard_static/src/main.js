@@ -530,6 +530,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize mission queue widget
     queue.initQueueWidget();
 
+    // Initialize project name suggestion on mission input
+    if (typeof widgets.initProjectNameSuggestion === 'function') {
+        widgets.initProjectNameSuggestion();
+    }
+
     // Initialize backup status widget
     backupStatus.initBackupStatus();
 

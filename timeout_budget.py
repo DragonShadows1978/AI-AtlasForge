@@ -26,10 +26,11 @@ logger = logging.getLogger("timeout_budget")
 
 class TimeoutPolicy(Enum):
     """Policies for allocating timeouts to child agents."""
-    EQUAL = "equal"           # Split equally among children
+    EQUAL = "equal"           # Split equally among children (for sequential execution)
     WEIGHTED = "weighted"     # Split by provided weights
-    FIRST_COME = "first_come" # Each child gets full remaining budget
+    FIRST_COME = "first_come" # Each child gets full remaining budget (sequential)
     FIXED = "fixed"           # Each child gets a fixed amount
+    PARALLEL = "parallel"     # Each child gets full timeout (parallel execution)
 
 
 @dataclass
@@ -166,7 +167,13 @@ class TimeoutBudget:
         available = self.unallocated
         allocations = {}
 
-        if self.policy == TimeoutPolicy.FIXED and fixed_seconds:
+        if self.policy == TimeoutPolicy.PARALLEL:
+            # PARALLEL: Each child gets the full usable timeout (for concurrent execution)
+            # Since agents run in parallel, they don't consume each other's time
+            for agent_id in agent_ids:
+                allocations[agent_id] = self.usable_seconds
+
+        elif self.policy == TimeoutPolicy.FIXED and fixed_seconds:
             # Each child gets fixed amount (if available)
             per_child = min(fixed_seconds, available / n)
             for agent_id in agent_ids:
@@ -366,40 +373,46 @@ class TimeoutPresets:
     ) -> TimeoutBudget:
         """
         For parallel multi-agent work.
-        Total is per_agent_minutes (since parallel) + 20% overhead.
+        Each agent gets per_agent_minutes since they run concurrently.
+        Total budget is per_agent_minutes + 20% overhead for coordination.
         """
         total = per_agent_minutes * 60 * 1.2  # 20% overhead
         return TimeoutBudget(
             total_seconds=total,
-            policy=TimeoutPolicy.EQUAL
+            policy=TimeoutPolicy.PARALLEL  # Each agent gets full timeout
         )
 
     @staticmethod
     def hierarchical(
         max_agents: int = 5,
         max_subagents: int = 10,
-        per_subagent_minutes: int = 3
+        per_agent_minutes: int = 10
     ) -> TimeoutBudget:
         """
         For hierarchical multi-agent work.
 
-        Calculates total based on:
-        - Each subagent gets per_subagent_minutes
-        - Agents run in parallel (use max subagent time)
-        - Add overhead for coordination
+        Since agents AND subagents run in PARALLEL, each agent gets per_agent_minutes.
+        The total budget = per_agent_minutes + overhead for coordination.
+
+        Args:
+            max_agents: Maximum parallel agents (for info/logging, doesn't affect budget)
+            max_subagents: Maximum subagents per agent (for info/logging)
+            per_agent_minutes: Time budget for EACH agent (not divided by count!)
+
+        Returns:
+            TimeoutBudget configured for parallel execution
         """
-        # Max depth path: agent with most subagents
-        max_agent_time = max_subagents * per_subagent_minutes * 60
-        # Add 30% for coordination overhead
-        total = max_agent_time * 1.3
-        # Add reserve
-        total = total / 0.9  # Account for 10% reserve
+        # Each agent gets per_agent_minutes since they run in parallel
+        # Add 30% overhead for coordination/synthesis
+        total = per_agent_minutes * 60 * 1.3
+        # Account for 10% reserve
+        total = total / 0.9
 
         return TimeoutBudget(
             total_seconds=total,
             reserve_ratio=0.10,
             min_child_timeout=60.0,  # At least 1 minute per child
-            policy=TimeoutPolicy.EQUAL
+            policy=TimeoutPolicy.PARALLEL  # Each agent gets full timeout (parallel execution)
         )
 
 
@@ -409,7 +422,8 @@ if __name__ == "__main__":
     print("=" * 50)
 
     # Create a hierarchical budget
-    budget = TimeoutPresets.hierarchical(max_agents=5, max_subagents=10, per_subagent_minutes=3)
+    # per_agent_minutes=10 means each parallel agent gets 10 minutes
+    budget = TimeoutPresets.hierarchical(max_agents=5, max_subagents=10, per_agent_minutes=10)
     print(f"Created budget: {budget.total_seconds:.0f}s ({budget.total_seconds/60:.1f} minutes)")
     print(f"Usable: {budget.usable_seconds:.0f}s, Reserve: {budget.reserve_seconds:.0f}s")
 

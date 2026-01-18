@@ -1516,10 +1516,12 @@ class InvestigationRunner:
         """Run subagents in parallel."""
         results = []
 
-        timeout_per_agent = int(
-            self.config.timeout_minutes * 60 * 0.5 / max(1, len(research_directions))
-        )
-        timeout_per_agent = min(timeout_per_agent, 180)  # Cap at 3 minutes each
+        # Since subagents run in PARALLEL, each agent gets the full time budget
+        # (not divided by agent count). We use 50% of total budget for subagent work,
+        # leaving 50% for lead agent coordination and synthesis.
+        timeout_per_agent = int(self.config.timeout_minutes * 60 * 0.5)
+        # Cap at 5 minutes to prevent runaway agents, but no artificial floor
+        timeout_per_agent = min(timeout_per_agent, 300)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(research_directions)) as executor:
             futures = {}

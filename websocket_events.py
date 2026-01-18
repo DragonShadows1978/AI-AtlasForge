@@ -40,6 +40,12 @@ _emit_lock = threading.Lock()
 # Cached socketio reference (lazy loaded)
 _socketio = None
 
+# Event queue for events generated before socketio is available
+# This ensures no recommendations are lost if generated during dashboard startup
+_event_queue: list = []
+_event_queue_lock = threading.Lock()
+MAX_QUEUED_EVENTS = 100  # Prevent memory bloat
+
 
 # =============================================================================
 # SOCKETIO ACCESS (LAZY LOADING)
@@ -87,6 +93,62 @@ def set_socketio(socketio_instance):
     """
     global _socketio
     _socketio = socketio_instance
+    # Flush any queued events now that socketio is available
+    flush_queued_events()
+
+
+def flush_queued_events():
+    """
+    Flush any events that were queued before socketio was available.
+
+    Call this after socketio is initialized to deliver pending events.
+    Thread-safe with locking.
+    """
+    global _event_queue
+
+    socketio = _get_socketio()
+    if socketio is None:
+        return 0
+
+    flushed = 0
+    with _event_queue_lock:
+        events_to_flush = _event_queue.copy()
+        _event_queue = []
+
+    for event in events_to_flush:
+        try:
+            socketio.emit(event['event'], {
+                'room': event['room'],
+                'data': event['data'],
+                'timestamp': event.get('timestamp', datetime.now().isoformat()),
+                'queued': True  # Mark as previously queued
+            }, room=event['room'], namespace=event.get('namespace', '/widgets'))
+            flushed += 1
+        except Exception:
+            pass  # Silent failure
+
+    return flushed
+
+
+def _queue_event(room: str, event: str, data: Dict[str, Any], namespace: str = '/widgets'):
+    """
+    Queue an event for later delivery when socketio becomes available.
+
+    Args:
+        room: The room to emit to
+        event: Event name
+        data: Event data
+        namespace: WebSocket namespace
+    """
+    with _event_queue_lock:
+        if len(_event_queue) < MAX_QUEUED_EVENTS:
+            _event_queue.append({
+                'room': room,
+                'event': event,
+                'data': data,
+                'namespace': namespace,
+                'timestamp': datetime.now().isoformat()
+            })
 
 
 # =============================================================================
@@ -123,7 +185,7 @@ def _should_emit(event_key: str) -> bool:
         return True
 
 
-def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/widgets'):
+def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/widgets', queue_if_unavailable: bool = False):
     """
     Safely emit a WebSocket event with error handling.
 
@@ -132,9 +194,12 @@ def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/w
         event: Event name
         data: Event data
         namespace: WebSocket namespace
+        queue_if_unavailable: If True, queue the event when socketio is not available
     """
     socketio = _get_socketio()
     if socketio is None:
+        if queue_if_unavailable:
+            _queue_event(room, event, data, namespace)
         return
 
     try:
@@ -250,12 +315,14 @@ def emit_transcript_archived(
 # RECOMMENDATION EVENTS
 # =============================================================================
 
-def emit_recommendation_added(recommendation: Dict):
+def emit_recommendation_added(recommendation: Dict, queue_if_unavailable: bool = True):
     """
     Emit event when a new mission recommendation is added.
 
     Args:
         recommendation: The recommendation dict with id, mission_title, etc.
+        queue_if_unavailable: If True, queue the event if socketio is not available.
+                             This ensures recommendations are not lost during startup.
     """
     rec_id = recommendation.get('id', 'unknown')
     event_key = f'recommendation_added:{rec_id}'
@@ -275,7 +342,7 @@ def emit_recommendation_added(recommendation: Dict):
         }
     }
 
-    _safe_emit('recommendations', 'update', data)
+    _safe_emit('recommendations', 'update', data, queue_if_unavailable=queue_if_unavailable)
 
 
 # =============================================================================

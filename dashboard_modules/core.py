@@ -378,6 +378,7 @@ def api_mission():
         problem_statement = data.get('mission', '')
         cycle_budget = int(data.get('cycle_budget', 1))
         metadata = data.get('metadata', {})
+        user_project_name = data.get('project_name')  # Optional user-specified project name
 
         if problem_statement:
             import uuid
@@ -385,7 +386,23 @@ def api_mission():
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
             missions_dir = BASE_DIR / "missions"
             mission_dir = missions_dir / mission_id
-            mission_workspace = mission_dir / "workspace"
+
+            # Resolve project name for shared workspace
+            resolved_project_name = None
+            try:
+                from project_name_resolver import resolve_project_name
+                resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
+                # Use shared workspace under workspace/<project_name>/
+                workspace_dir = BASE_DIR / "workspace"
+                mission_workspace = workspace_dir / resolved_project_name
+            except ImportError:
+                # Fallback to legacy per-mission workspace
+                mission_workspace = mission_dir / "workspace"
+
+            # Create mission directory (for config, analytics, drift validation)
+            mission_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create workspace directories (may already exist if shared project)
             (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
@@ -409,18 +426,24 @@ def api_mission():
                 "cycle_history": [],
                 "mission_workspace": str(mission_workspace),
                 "mission_dir": str(mission_dir),
+                "project_name": resolved_project_name,
                 "metadata": metadata
             }
             io_utils.atomic_write_json(MISSION_PATH, new_mission)
 
+            config_data = {
+                "mission_id": mission_id,
+                "problem_statement": problem_statement,
+                "cycle_budget": max(1, cycle_budget),
+                "created_at": new_mission["created_at"]
+            }
+            if resolved_project_name:
+                config_data["project_name"] = resolved_project_name
+                config_data["project_workspace"] = str(mission_workspace)
+
             mission_config_path = mission_dir / "mission_config.json"
             with open(mission_config_path, 'w') as f:
-                json.dump({
-                    "mission_id": mission_id,
-                    "problem_statement": problem_statement,
-                    "cycle_budget": max(1, cycle_budget),
-                    "created_at": new_mission["created_at"]
-                }, f, indent=2)
+                json.dump(config_data, f, indent=2)
 
             # Register mission with analytics system
             try:
@@ -431,11 +454,17 @@ def api_mission():
                 import logging
                 logging.warning(f"Analytics: Failed to register mission: {e}")
 
+            response_msg = f"Mission saved with {cycle_budget} cycle(s)."
+            if resolved_project_name:
+                response_msg += f" Project: {resolved_project_name}."
+            response_msg += " Click 'Start R&D' to begin."
+
             return jsonify({
                 "success": True,
-                "message": f"Mission saved with {cycle_budget} cycle(s). Workspace: {mission_workspace}. Click 'Start R&D' to begin.",
+                "message": response_msg,
                 "mission_id": mission_id,
-                "mission_workspace": str(mission_workspace)
+                "mission_workspace": str(mission_workspace),
+                "project_name": resolved_project_name
             })
         return jsonify({"success": False, "message": "No mission provided"})
     else:
@@ -447,6 +476,28 @@ def api_mission():
 def api_mission_reset():
     send_message_to_claude("reset")
     return jsonify({"success": True, "message": "Reset command sent"})
+
+
+@core_bp.route('/api/suggest-project-name', methods=['POST'])
+def api_suggest_project_name():
+    """
+    Suggest a project name based on problem statement text.
+    Returns suggested name, strategies tried, and existing projects.
+    """
+    data = request.get_json() or {}
+    problem_statement = data.get('problem_statement', '')
+
+    if not problem_statement or len(problem_statement) < 5:
+        return jsonify({"error": "Problem statement too short"}), 400
+
+    try:
+        from project_name_resolver import suggest_project_name
+        result = suggest_project_name(problem_statement)
+        return jsonify(result)
+    except ImportError:
+        return jsonify({"error": "project_name_resolver module not found"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # =============================================================================
@@ -506,51 +557,33 @@ def api_recommendations():
         source_type: Filter by source type ('drift_halt' or 'successful_completion')
 
     Returns:
-        JSON with filtered or all recommendations (merged from SQLite + JSON for safety)
+        JSON with filtered or all recommendations from SQLite storage
     """
     storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"items": [], "error": "Storage not available"}), 503
+
     source_type_filter = request.args.get('source_type')
 
-    # Gather items from both sources and merge (SQLite is authoritative)
-    sqlite_items = []
-    json_items = []
-
-    # Try SQLite storage first
-    if storage:
-        try:
-            if source_type_filter:
-                sqlite_items = storage.get_filtered(source_type=source_type_filter)
-            else:
-                sqlite_items = storage.get_all()
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite read failed: {e}")
-
-    # Always check JSON file for any items not yet in SQLite
     try:
-        recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-        json_items = recommendations.get('items', [])
         if source_type_filter:
-            json_items = [r for r in json_items if r.get('source_type') == source_type_filter]
+            items = storage.get_filtered(source_type=source_type_filter)
+        else:
+            items = storage.get_all()
+        return jsonify({"items": items})
     except Exception as e:
         import logging
-        logging.warning(f"JSON read failed: {e}")
-
-    # Merge: SQLite is authoritative, JSON fills gaps
-    if sqlite_items and json_items:
-        sqlite_ids = {item.get('id') for item in sqlite_items if item.get('id')}
-        merged = sqlite_items + [item for item in json_items if item.get('id') not in sqlite_ids]
-    elif sqlite_items:
-        merged = sqlite_items
-    else:
-        merged = json_items
-
-    return jsonify({"items": merged})
+        logging.error(f"SQLite read failed: {e}")
+        return jsonify({"items": [], "error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations', methods=['POST'])
 def api_add_recommendation():
     """Add a new mission recommendation with auto-tagging and similarity check."""
+    storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"success": False, "error": "Storage not available"}), 503
+
     data = request.get_json()
     import uuid
 
@@ -577,32 +610,17 @@ def api_add_recommendation():
         import logging
         logging.warning(f"Auto-tagging failed: {e}")
 
-    # Try SQLite storage first
-    storage = _get_suggestion_storage()
-    if storage:
-        try:
-            storage.add(recommendation)
-            response = {"success": True, "recommendation": recommendation}
-            if similar_to:
-                response["merge_candidates"] = similar_to
-                response["has_similar"] = True
-            return jsonify(response)
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite add failed, falling back to JSON: {e}")
-
-    # Fallback to JSON file
-    def update_fn(recs):
-        recs.setdefault("items", []).append(recommendation)
-        return recs
-
-    io_utils.atomic_update_json(RECOMMENDATIONS_PATH, update_fn, {"items": []})
-
-    response = {"success": True, "recommendation": recommendation}
-    if similar_to:
-        response["merge_candidates"] = similar_to
-        response["has_similar"] = True
-    return jsonify(response)
+    try:
+        storage.add(recommendation)
+        response = {"success": True, "recommendation": recommendation}
+        if similar_to:
+            response["merge_candidates"] = similar_to
+            response["has_similar"] = True
+        return jsonify(response)
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite add failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations/similarity-analysis', methods=['GET'])
@@ -699,6 +717,10 @@ def api_similarity_analysis():
 @core_bp.route('/api/recommendations/merge', methods=['POST'])
 def api_merge_recommendations():
     """Merge multiple recommendations into one, preserving source descriptions."""
+    storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"success": False, "error": "Storage not available"}), 503
+
     import uuid
     data = request.get_json()
     source_ids = data.get("source_ids", [])
@@ -708,76 +730,39 @@ def api_merge_recommendations():
     if len(source_ids) < 2:
         return jsonify({"success": False, "error": "Need at least 2 recommendations to merge"}), 400
 
-    # Try SQLite storage first
-    storage = _get_suggestion_storage()
-    source_descriptions = []
+    try:
+        # Get source descriptions from database
+        source_descriptions = []
+        for source_id in source_ids:
+            rec = storage.get_by_id(source_id)
+            if rec:
+                source_descriptions.append({
+                    "id": rec.get("id"),
+                    "title": rec.get("mission_title", ""),
+                    "description": rec.get("mission_description", "")
+                })
 
-    if storage:
-        try:
-            # Get source descriptions from database
-            for source_id in source_ids:
-                rec = storage.get_by_id(source_id)
-                if rec:
-                    source_descriptions.append({
-                        "id": rec.get("id"),
-                        "title": rec.get("mission_title", ""),
-                        "description": rec.get("mission_description", "")
-                    })
+        new_rec = {
+            "id": f"rec_{uuid.uuid4().hex[:8]}",
+            "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
+            "mission_description": merged_data.get("mission_description", ""),
+            "suggested_cycles": int(merged_data.get("suggested_cycles", 3)),
+            "rationale": merged_data.get("rationale", ""),
+            "source_type": "merged",
+            "merged_from": source_ids,
+            "merged_source_descriptions": source_descriptions,
+            "created_at": datetime.now().isoformat()
+        }
 
-            new_rec = {
-                "id": f"rec_{uuid.uuid4().hex[:8]}",
-                "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
-                "mission_description": merged_data.get("mission_description", ""),
-                "suggested_cycles": int(merged_data.get("suggested_cycles", 3)),
-                "rationale": merged_data.get("rationale", ""),
-                "source_type": "merged",
-                "merged_from": source_ids,
-                "merged_source_descriptions": source_descriptions,
-                "created_at": datetime.now().isoformat()
-            }
-
-            # Delete sources and add new merged record
-            if delete_sources:
-                storage.delete_multiple(source_ids)
-            storage.add(new_rec)
-            return jsonify({"success": True, "new_recommendation": new_rec})
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite merge failed, falling back to JSON: {e}")
-
-    # Fallback to JSON file
-    current_recs = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-    source_descriptions = []
-    for rec in current_recs.get("items", []):
-        if rec.get("id") in source_ids:
-            source_descriptions.append({
-                "id": rec.get("id"),
-                "title": rec.get("mission_title", ""),
-                "description": rec.get("mission_description", "")
-            })
-
-    new_rec = {
-        "id": f"rec_{uuid.uuid4().hex[:8]}",
-        "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
-        "mission_description": merged_data.get("mission_description", ""),
-        "suggested_cycles": int(merged_data.get("suggested_cycles", 3)),
-        "rationale": merged_data.get("rationale", ""),
-        "source_type": "merged",
-        "merged_from": source_ids,
-        "merged_source_descriptions": source_descriptions,
-        "created_at": datetime.now().isoformat()
-    }
-
-    def update_fn(recs):
-        items = recs.get("items", [])
+        # Delete sources and add new merged record
         if delete_sources:
-            items = [r for r in items if r.get("id") not in source_ids]
-        items.append(new_rec)
-        recs["items"] = items
-        return recs
-
-    io_utils.atomic_update_json(RECOMMENDATIONS_PATH, update_fn, {"items": []})
-    return jsonify({"success": True, "new_recommendation": new_rec})
+            storage.delete_multiple(source_ids)
+        storage.add(new_rec)
+        return jsonify({"success": True, "new_recommendation": new_rec})
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite merge failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations/analyze', methods=['GET'])
@@ -838,49 +823,43 @@ def api_health_report():
 def api_get_recommendation(rec_id):
     """Get a specific recommendation."""
     storage = _get_suggestion_storage()
-    if storage:
-        try:
-            rec = storage.get_by_id(rec_id)
-            if rec:
-                return jsonify(rec)
-            return jsonify({"error": "Recommendation not found"}), 404
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite get failed, falling back to JSON: {e}")
+    if not storage:
+        return jsonify({"error": "Storage not available"}), 503
 
-    # Fallback to JSON file
-    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-    for rec in recommendations.get("items", []):
-        if rec.get("id") == rec_id:
+    try:
+        rec = storage.get_by_id(rec_id)
+        if rec:
             return jsonify(rec)
-    return jsonify({"error": "Recommendation not found"}), 404
+        return jsonify({"error": "Recommendation not found"}), 404
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite get failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>', methods=['DELETE'])
 def api_delete_recommendation(rec_id):
     """Delete a recommendation."""
     storage = _get_suggestion_storage()
-    if storage:
-        try:
-            storage.delete(rec_id)
-            return jsonify({"success": True})
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite delete failed, falling back to JSON: {e}")
+    if not storage:
+        return jsonify({"success": False, "error": "Storage not available"}), 503
 
-    # Fallback to JSON file
-    def update_fn(recs):
-        items = recs.get("items", [])
-        recs["items"] = [r for r in items if r.get("id") != rec_id]
-        return recs
-
-    io_utils.atomic_update_json(RECOMMENDATIONS_PATH, update_fn, {"items": []})
-    return jsonify({"success": True})
+    try:
+        deleted = storage.delete(rec_id)
+        return jsonify({"success": True, "deleted": deleted})
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite delete failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>', methods=['PUT'])
 def api_update_recommendation(rec_id):
     """Update a recommendation (edit mode)."""
+    storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"success": False, "error": "Storage not available"}), 503
+
     data = request.get_json()
 
     # Input validation
@@ -906,87 +885,53 @@ def api_update_recommendation(rec_id):
                 "error": "Mission title must be at least 3 characters"
             }), 400
 
-    # Try SQLite storage first
-    storage = _get_suggestion_storage()
-    if storage:
-        try:
-            # Get current record to preserve originals
-            current = storage.get_by_id(rec_id)
-            if current:
-                updates = {}
-                # Preserve originals if first edit
-                if "original_mission_title" not in current:
-                    updates["original_mission_title"] = current.get("mission_title")
-                    updates["original_mission_description"] = current.get("mission_description")
-                    updates["original_rationale"] = current.get("rationale")
-                    updates["original_suggested_cycles"] = current.get("suggested_cycles")
-                # Update fields
-                if "mission_title" in data:
-                    updates["mission_title"] = str(data["mission_title"]).strip()
-                if "mission_description" in data:
-                    updates["mission_description"] = data["mission_description"]
-                if "suggested_cycles" in data:
-                    updates["suggested_cycles"] = int(data["suggested_cycles"])
-                if "rationale" in data:
-                    updates["rationale"] = data["rationale"]
-                updates["last_edited_at"] = datetime.now().isoformat()
-                storage.update(rec_id, updates)
-                return jsonify({"success": True})
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite update failed, falling back to JSON: {e}")
+    try:
+        # Get current record to preserve originals
+        current = storage.get_by_id(rec_id)
+        if not current:
+            return jsonify({"success": False, "error": "Recommendation not found"}), 404
 
-    # Fallback to JSON file
-    def update_fn(recs):
-        for rec in recs.get("items", []):
-            if rec.get("id") == rec_id:
-                # Preserve originals if first edit
-                if "original_mission_title" not in rec:
-                    rec["original_mission_title"] = rec.get("mission_title")
-                    rec["original_mission_description"] = rec.get("mission_description")
-                    rec["original_rationale"] = rec.get("rationale")
-                    rec["original_suggested_cycles"] = rec.get("suggested_cycles")
-                # Update fields
-                if "mission_title" in data:
-                    rec["mission_title"] = str(data["mission_title"]).strip()
-                if "mission_description" in data:
-                    rec["mission_description"] = data["mission_description"]
-                if "suggested_cycles" in data:
-                    rec["suggested_cycles"] = int(data["suggested_cycles"])
-                if "rationale" in data:
-                    rec["rationale"] = data["rationale"]
-                rec["last_edited_at"] = datetime.now().isoformat()
-                break
-        return recs
-
-    io_utils.atomic_update_json(RECOMMENDATIONS_PATH, update_fn, {"items": []})
-    return jsonify({"success": True})
+        updates = {}
+        # Preserve originals if first edit
+        if "original_mission_title" not in current:
+            updates["original_mission_title"] = current.get("mission_title")
+            updates["original_mission_description"] = current.get("mission_description")
+            updates["original_rationale"] = current.get("rationale")
+            updates["original_suggested_cycles"] = current.get("suggested_cycles")
+        # Update fields
+        if "mission_title" in data:
+            updates["mission_title"] = str(data["mission_title"]).strip()
+        if "mission_description" in data:
+            updates["mission_description"] = data["mission_description"]
+        if "suggested_cycles" in data:
+            updates["suggested_cycles"] = int(data["suggested_cycles"])
+        if "rationale" in data:
+            updates["rationale"] = data["rationale"]
+        updates["last_edited_at"] = datetime.now().isoformat()
+        storage.update(rec_id, updates)
+        return jsonify({"success": True})
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite update failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>/set-mission', methods=['POST'])
 def api_set_mission_from_recommendation(rec_id):
     """Set a mission from a recommendation and remove it from the list."""
+    storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"success": False, "error": "Storage not available"}), 503
+
     data = request.get_json() or {}
     cycle_budget = int(data.get("cycle_budget", 3))
 
-    # Try SQLite storage first
-    storage = _get_suggestion_storage()
-    target_rec = None
-
-    if storage:
-        try:
-            target_rec = storage.get_by_id(rec_id)
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite get failed, falling back to JSON: {e}")
-
-    # Fallback to JSON file if needed
-    if target_rec is None:
-        recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-        for rec in recommendations.get("items", []):
-            if rec.get("id") == rec_id:
-                target_rec = rec
-                break
+    try:
+        target_rec = storage.get_by_id(rec_id)
+    except Exception as e:
+        import logging
+        logging.error(f"SQLite get failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
     if not target_rec:
         return jsonify({"success": False, "error": "Recommendation not found"}), 404
@@ -1062,22 +1007,13 @@ def api_set_mission_from_recommendation(rec_id):
         import logging
         logging.warning(f"Analytics: Failed to register mission: {e}")
 
-    # Remove recommendation from storage
-    if storage:
-        try:
-            storage.delete(rec_id)
-        except Exception as e:
-            import logging
-            logging.warning(f"SQLite delete failed, falling back to JSON: {e}")
-            # Fall through to JSON deletion
-
-    # Also delete from JSON for safety (in case SQLite failed)
-    def update_fn(recs):
-        items = recs.get("items", [])
-        recs["items"] = [r for r in items if r.get("id") != rec_id]
-        return recs
-
-    io_utils.atomic_update_json(RECOMMENDATIONS_PATH, update_fn, {"items": []})
+    # Remove recommendation from SQLite storage
+    try:
+        storage.delete(rec_id)
+    except Exception as e:
+        import logging
+        logging.warning(f"SQLite delete failed: {e}")
+        # Continue anyway - mission was created successfully
 
     return jsonify({
         "success": True,

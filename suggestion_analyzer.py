@@ -556,53 +556,30 @@ class SuggestionAnalyzer:
         self.health_analyzer = HealthAnalyzer()
 
     def _load_recommendations(self) -> List[Dict[str, Any]]:
-        """Load recommendations from storage backend (SQLite + JSON merged for safety)."""
-        sqlite_items = []
-        json_items = []
-
-        # Try SQLite storage first
+        """Load recommendations from SQLite storage (single source of truth)."""
         storage = _get_storage()
-        if storage:
-            try:
-                sqlite_items = storage.get_all()
-            except Exception as e:
-                logger.warning(f"SQLite load failed: {e}")
+        if not storage:
+            logger.error("SQLite storage not available")
+            return []
 
-        # Also load from JSON file to catch any items not migrated
-        if self.recommendations_path.exists():
-            try:
-                with open(self.recommendations_path, 'r') as f:
-                    data = json.load(f)
-                json_items = data.get('items', [])
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"JSON load failed: {e}")
-
-        # Merge: SQLite is authoritative, JSON fills gaps
-        if sqlite_items and json_items:
-            sqlite_ids = {item.get('id') for item in sqlite_items if item.get('id')}
-            return sqlite_items + [item for item in json_items if item.get('id') not in sqlite_ids]
-        elif sqlite_items:
-            return sqlite_items
-        else:
-            return json_items
+        try:
+            return storage.get_all()
+        except Exception as e:
+            logger.error(f"SQLite load failed: {e}")
+            return []
 
     def _save_recommendations(self, items: List[Dict[str, Any]]) -> bool:
-        """Save recommendations to storage backend (SQLite preferred, JSON fallback)."""
+        """Save recommendations to SQLite storage (single source of truth)."""
         storage = _get_storage()
-        if storage:
-            try:
-                storage.update_all(items)
-                return True
-            except Exception as e:
-                logger.warning(f"SQLite save failed, falling back to JSON: {e}")
+        if not storage:
+            logger.error("SQLite storage not available")
+            return False
 
-        # Fallback to JSON file
         try:
-            with open(self.recommendations_path, 'w') as f:
-                json.dump({'items': items}, f, indent=2)
+            storage.update_all(items)
             return True
-        except IOError as e:
-            logger.error(f"Error saving recommendations: {e}")
+        except Exception as e:
+            logger.error(f"SQLite save failed: {e}")
             return False
 
     def _load_recent_missions(self, limit: int = 10) -> List[Dict[str, Any]]:

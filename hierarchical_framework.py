@@ -189,10 +189,11 @@ class HierarchicalExperiment:
     def __init__(self, config: HierarchicalConfig):
         self.config = config
         self.checkpoint_mgr = CheckpointManager(config.mission_id)
+        # Use PARALLEL policy: each agent gets the full timeout since they run concurrently
         self.timeout_budget = TimeoutBudget(
             total_seconds=config.total_timeout,
             reserve_ratio=config.timeout_reserve_ratio,
-            policy=TimeoutPolicy.EQUAL
+            policy=TimeoutPolicy.PARALLEL
         )
         self.started_at: Optional[str] = None
         self.agent_results: List[AgentResult] = []

@@ -32,7 +32,7 @@ from typing import Dict, Any, Optional, List, Set
 logger = logging.getLogger(__name__)
 
 # Configuration - use centralized configuration
-from atlasforge_config import BACKUPS_DIR
+from atlasforge_config import BACKUPS_DIR, BASE_DIR
 BACKUP_DIR = BACKUPS_DIR / "plan_backups"
 MAX_VERSIONS_PER_FILE = 10
 MAX_FILE_SIZE_MB = 10  # Skip files larger than this

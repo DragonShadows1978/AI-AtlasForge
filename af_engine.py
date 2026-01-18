@@ -34,6 +34,15 @@ from typing import Dict, Any, Optional, List
 import io_utils
 from init_guard import InitGuard, get_stage_restrictions
 
+# Project name resolver for workspace deduplication
+PROJECT_NAME_RESOLVER_AVAILABLE = False
+resolve_project_name = None
+try:
+    from project_name_resolver import resolve_project_name
+    PROJECT_NAME_RESOLVER_AVAILABLE = True
+except ImportError:
+    pass  # Project name resolver not available - will use legacy workspace paths
+
 # AtlasForge Enhancement integration (optional - gracefully degrades if not available)
 AtlasForge_ENHANCER_AVAILABLE = False
 AtlasForgeEnhancer = None
@@ -941,6 +950,10 @@ class RDMissionController:
                 except Exception as e:
                     logger.error(f"Post-mission hooks failed: {e}")
 
+            # Explicitly emit recommendation event on mission completion
+            # This ensures real-time push even if the initial emit failed
+            self._emit_latest_recommendation_on_complete()
+
             # Process mission queue - start next queued mission if available
             self._process_mission_queue()
 
@@ -1024,7 +1037,7 @@ class RDMissionController:
         Create a new mission from a queue item and signal for auto-start.
 
         Args:
-            queue_item: Dict with mission_title, mission_description, cycle_budget, etc.
+            queue_item: Dict with mission_title, mission_description, cycle_budget, project_name, etc.
         """
         import uuid
 
@@ -1032,16 +1045,30 @@ class RDMissionController:
             # Generate mission ID
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
-            # Create mission workspace
-            mission_dir = MISSIONS_DIR / mission_id
-            mission_workspace = mission_dir / "workspace"
-            (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
-            (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
-            (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
-
             # Get mission details from queue item
             problem_statement = queue_item.get("mission_description") or queue_item.get("mission_title", "")
             cycle_budget = queue_item.get("cycle_budget", 3)
+            user_project_name = queue_item.get("project_name")
+
+            # Resolve project name for shared workspace
+            resolved_project_name = None
+            if PROJECT_NAME_RESOLVER_AVAILABLE:
+                resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
+                # Use shared workspace under workspace/<project_name>/
+                mission_workspace = WORKSPACE_DIR / resolved_project_name
+                logger.info(f"Queue mission resolved project name: {resolved_project_name}")
+            else:
+                # Legacy: per-mission workspace
+                mission_workspace = MISSIONS_DIR / mission_id / "workspace"
+
+            # Create mission directory (for config, analytics, drift validation)
+            mission_dir = MISSIONS_DIR / mission_id
+            mission_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create workspace directories (may already exist if shared project)
+            (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+            (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
+            (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
             # Create the mission
             new_mission = {
@@ -1063,6 +1090,7 @@ class RDMissionController:
                 "cycle_history": [],
                 "mission_workspace": str(mission_workspace),
                 "mission_dir": str(mission_dir),
+                "project_name": resolved_project_name,
                 "source_queue_item_id": queue_item.get("id"),
                 "source_recommendation_id": queue_item.get("recommendation_id"),
                 "metadata": {"queued": True, "queued_at": queue_item.get("queued_at")}
@@ -1073,14 +1101,18 @@ class RDMissionController:
 
             # Save mission config
             mission_config_path = mission_dir / "mission_config.json"
+            config_data = {
+                "mission_id": mission_id,
+                "problem_statement": problem_statement,
+                "cycle_budget": max(1, cycle_budget),
+                "created_at": new_mission["created_at"],
+                "source_queue_item_id": queue_item.get("id")
+            }
+            if resolved_project_name:
+                config_data["project_name"] = resolved_project_name
+                config_data["project_workspace"] = str(mission_workspace)
             with open(mission_config_path, 'w') as f:
-                json.dump({
-                    "mission_id": mission_id,
-                    "problem_statement": problem_statement,
-                    "cycle_budget": max(1, cycle_budget),
-                    "created_at": new_mission["created_at"],
-                    "source_queue_item_id": queue_item.get("id")
-                }, f, indent=2)
+                json.dump(config_data, f, indent=2)
 
             # Register with analytics if available
             if ANALYTICS_AVAILABLE:
@@ -2379,6 +2411,20 @@ Respond with JSON:
             # Auto-queue the drift suggestion if queue auto-start is enabled
             self._auto_queue_drift_suggestion(drift_recommendation, mission_id)
 
+            # Explicitly re-emit recommendation as fallback (in case initial emit failed)
+            try:
+                from suggestion_storage import get_storage
+                from websocket_events import emit_recommendation_added
+                storage = get_storage()
+                all_recs = storage.get_all()
+                drift_recs = [r for r in all_recs if r.get("source_mission_id") == mission_id and r.get("source_type") == "drift_halt"]
+                if drift_recs:
+                    latest = max(drift_recs, key=lambda x: x.get("created_at", ""))
+                    emit_recommendation_added(latest, queue_if_unavailable=True)
+                    logger.info(f"Emitted drift recommendation for real-time push")
+            except Exception as e:
+                logger.debug(f"Could not emit drift recommendation: {e}")
+
         # Knowledge Base: Auto-ingest drift-halted mission for learning extraction
         if KB_AVAILABLE and report_path.exists():
             try:
@@ -2680,28 +2726,15 @@ Respond with JSON:
         if drift_context:
             rec_entry["drift_context"] = drift_context
 
-        # Try SQLite storage first
+        # Save to SQLite storage (single source of truth)
         try:
             from suggestion_storage import get_storage
             storage = get_storage()
             storage.add(rec_entry)
             logger.info(f"Saved mission recommendation to SQLite ({source_type}): {rec_entry['mission_title']}")
-            # Emit WebSocket event for new recommendation
-            try:
-                from websocket_events import emit_recommendation_added
-                emit_recommendation_added(rec_entry)
-            except ImportError:
-                pass
-            return
         except Exception as e:
-            logger.warning(f"SQLite save failed, falling back to JSON: {e}")
-
-        # Fallback to JSON file
-        recommendations_path = STATE_DIR / "recommendations.json"
-        recs = io_utils.atomic_read_json(recommendations_path, {"items": []})
-        recs.setdefault("items", []).append(rec_entry)
-        io_utils.atomic_write_json(recommendations_path, recs)
-        logger.info(f"Saved mission recommendation to JSON ({source_type}): {rec_entry['mission_title']}")
+            logger.error(f"SQLite save failed: {e}")
+            return
 
         # Emit WebSocket event for new recommendation
         try:
@@ -2709,6 +2742,36 @@ Respond with JSON:
             emit_recommendation_added(rec_entry)
         except ImportError:
             pass
+
+    def _emit_latest_recommendation_on_complete(self):
+        """
+        Emit WebSocket event for the latest recommendation on mission completion.
+
+        This acts as a fallback to ensure recommendations are pushed in real-time
+        even if the initial emit in _save_recommendation failed (e.g., socketio
+        wasn't available). Called explicitly when transitioning to COMPLETE stage.
+        """
+        mission_id = self.mission.get("mission_id")
+        if not mission_id:
+            return
+
+        try:
+            from suggestion_storage import get_storage
+            storage = get_storage()
+
+            # Get all recommendations from this mission
+            all_recs = storage.get_all()
+            mission_recs = [r for r in all_recs if r.get("source_mission_id") == mission_id]
+
+            if mission_recs:
+                # Find the most recently created recommendation from this mission
+                latest = max(mission_recs, key=lambda x: x.get("created_at", ""))
+
+                from websocket_events import emit_recommendation_added
+                emit_recommendation_added(latest, queue_if_unavailable=True)
+                logger.info(f"Emitted recommendation on COMPLETE: {latest.get('mission_title')}")
+        except Exception as e:
+            logger.debug(f"Could not emit recommendation on complete: {e}")
 
     def reset_mission(self):
         """Reset mission to initial state (keeps problem statement)."""
@@ -2729,24 +2792,39 @@ Respond with JSON:
 
     def set_mission(self, problem_statement: str, preferences: dict = None,
                     success_criteria: list = None, mission_id: str = None,
-                    cycle_budget: int = 1):
+                    cycle_budget: int = 1, project_name: str = None):
         """Set a new mission with optional cycle budget for multi-cycle execution.
 
-        Creates mission-specific workspace folder under missions/mission_<UUID>/
+        If PROJECT_NAME_RESOLVER_AVAILABLE, workspace is created under workspace/<project_name>/
+        to enable workspace sharing across missions working on the same project.
+        Otherwise falls back to missions/mission_<UUID>/workspace/ for backwards compatibility.
         """
         import uuid
 
         # Generate mission ID
         mid = mission_id or f"mission_{uuid.uuid4().hex[:8]}"
 
-        # Create mission-specific workspace folder
+        # Resolve project name for shared workspace
+        resolved_project_name = None
+        if PROJECT_NAME_RESOLVER_AVAILABLE:
+            resolved_project_name = resolve_project_name(problem_statement, mid, project_name)
+            # Use shared workspace under workspace/<project_name>/
+            mission_workspace = WORKSPACE_DIR / resolved_project_name
+            logger.info(f"Resolved project name: {resolved_project_name}")
+        else:
+            # Legacy: per-mission workspace
+            mission_workspace = MISSIONS_DIR / mid / "workspace"
+
+        # Create mission directory (for config, analytics, drift validation)
         mission_dir = MISSIONS_DIR / mid
-        mission_workspace = mission_dir / "workspace"
+        mission_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create workspace directories (may already exist if shared project)
         (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
         (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
         (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Created mission workspace at {mission_workspace}")
+        logger.info(f"Mission workspace at {mission_workspace}")
 
         self.mission = {
             "mission_id": mid,
@@ -2767,19 +2845,26 @@ Respond with JSON:
             "cycle_history": [],
             # Mission workspace path
             "mission_workspace": str(mission_workspace),
-            "mission_dir": str(mission_dir)
+            "mission_dir": str(mission_dir),
+            # Project name for workspace deduplication
+            "project_name": resolved_project_name,
+            "metadata": {}
         }
         self.save_mission()
 
         # Also save a copy of the mission config in the mission directory
         mission_config_path = mission_dir / "mission_config.json"
+        config_data = {
+            "mission_id": mid,
+            "problem_statement": problem_statement,
+            "cycle_budget": max(1, cycle_budget),
+            "created_at": self.mission["created_at"]
+        }
+        if resolved_project_name:
+            config_data["project_name"] = resolved_project_name
+            config_data["project_workspace"] = str(mission_workspace)
         with open(mission_config_path, 'w') as f:
-            json.dump({
-                "mission_id": mid,
-                "problem_statement": problem_statement,
-                "cycle_budget": max(1, cycle_budget),
-                "created_at": self.mission["created_at"]
-            }, f, indent=2)
+            json.dump(config_data, f, indent=2)
 
         logger.info(f"New mission set with {cycle_budget} cycles: {problem_statement[:100]}...")
 

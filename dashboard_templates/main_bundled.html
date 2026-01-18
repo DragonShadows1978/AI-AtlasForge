@@ -320,12 +320,12 @@
                 <h3>Status</h3>
                 <div id="status-info">
                     <div class="stat-row">
-                        <span class="stat-label">Mode</span>
-                        <span class="stat-value" id="stat-mode">-</span>
-                    </div>
-                    <div class="stat-row">
                         <span class="stat-label">Stage</span>
                         <span class="stat-value highlight" id="stat-stage">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Project</span>
+                        <span class="stat-value highlight" id="stat-project-name" title="Click to view workspace">-</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Iteration</span>
@@ -340,7 +340,7 @@
                         <span class="stat-value" id="stat-cycles">-</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Boots</span>
+                        <span class="stat-label">User Launches</span>
                         <span class="stat-value" id="stat-boots">-</span>
                     </div>
                     <div class="stat-row" id="backup-age-row">
@@ -378,25 +378,28 @@
 
                 <!-- Standard R&D Controls (shown when investigation mode is OFF) -->
                 <div id="rd-mode-controls">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                        <label style="font-size: 0.85em; color: var(--text-dim);">Cycle Budget:</label>
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Project:</label>
+                        <input type="text" id="project-name-input" placeholder="Auto-detect from mission" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 180px; font-size: 0.85em;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Cycles:</label>
                         <select id="cycle-budget-input" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
-                            <option value="1">1 cycle</option>
-                            <option value="2">2 cycles</option>
-                            <option value="3">3 cycles</option>
-                            <option value="5" selected>5 cycles</option>
-                            <option value="10">10 cycles</option>
-                            <option value="20">20 cycles</option>
-                            <option value="30">30 cycles</option>
-                            <option value="40">40 cycles</option>
-                            <option value="50">50 cycles</option>
-                            <option value="100">100 cycles</option>
+                            <option value="1">1</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="5" selected>5</option>
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="30">30</option>
+                            <option value="40">40</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
                         </select>
                     </div>
                     <div class="btn-group">
                         <button class="btn primary" onclick="setMission()">Set Mission</button>
                         <button class="btn" onclick="resetMission()">Reset</button>
                         <button class="btn success" onclick="startClaude('rd')">Start Mission</button>
+                        <button class="btn danger" onclick="stopClaude()" id="stop-mission-btn">Stop Mission</button>
                     </div>
                 </div>
 
@@ -1971,9 +1974,9 @@
                 setTimeout(function() {
                     // Check if service status is still showing "Offline" and we haven't had an update
                     var atlasforgeStatus = document.getElementById('atlasforge-service-state');
-                    var mode = document.getElementById('stat-mode');
+                    var stage = document.getElementById('stat-stage');
 
-                    if (atlasforgeStatus && atlasforgeStatus.textContent === 'Offline' && mode && mode.textContent === '-') {
+                    if (atlasforgeStatus && atlasforgeStatus.textContent === 'Offline' && stage && stage.textContent === '-') {
                         console.log('[FALLBACK] Widgets still at initial state, triggering fallback refresh');
                         fallbackStatusRefresh();
                     } else {
@@ -1994,7 +1997,7 @@
 
                         // Update stat fields
                         var fields = {
-                            'stat-mode': data.mode || '-',
+                            // stat-mode removed - only one mode exists
                             'stat-stage': data.rd_stage || '-',
                             'stat-iteration': data.rd_iteration || 0,
                             'stat-mission-cycle': (data.current_cycle || 1) + '/' + (data.cycle_budget || 1),
