@@ -178,7 +178,9 @@ def get_claude_status() -> dict:
         "mission_preview": full_mission[:100] + "..." if len(full_mission) > 100 else full_mission,
         "current_cycle": mission.get("current_cycle", 1),
         "cycle_budget": mission.get("cycle_budget", 1),
-        "original_mission": mission.get("original_problem_statement", "")
+        "original_mission": mission.get("original_problem_statement", ""),
+        "project_name": mission.get("project_name", ""),
+        "project_workspace": mission.get("project_workspace", "")
     }
 
 
