@@ -1166,6 +1166,7 @@ if __name__ == '__main__':
             if embedder_path.exists():
                 env = os.environ.copy()
                 env['PYTHONPATH'] = str(embedder_path) + ':' + env.get('PYTHONPATH', '')
+                env['EMBEDDER_WEB_DASHBOARD_ENABLED'] = 'true'
                 subprocess.Popen(
                     [sys.executable, '-m', 'afterimage_embedder'],
                     cwd=str(embedder_path),
@@ -1174,7 +1175,7 @@ if __name__ == '__main__':
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-                print("[AfterImage] Started embedder daemon")
+                print("[AfterImage] Started embedder daemon (dashboard on :8080)")
             else:
                 print("[AfterImage] Embedder path not found, skipping")
     except ImportError:
