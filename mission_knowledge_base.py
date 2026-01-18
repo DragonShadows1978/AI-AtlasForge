@@ -34,7 +34,7 @@ from sklearn.cluster import AgglomerativeClustering
 logger = logging.getLogger(__name__)
 
 # Paths - use centralized configuration
-from atlasforge_config import KNOWLEDGE_BASE_DIR, MISSIONS_DIR
+from atlasforge_config import BASE_DIR, KNOWLEDGE_BASE_DIR, MISSIONS_DIR
 KNOWLEDGE_DIR = KNOWLEDGE_BASE_DIR
 MISSION_LOGS_DIR = MISSIONS_DIR / "mission_logs"
 

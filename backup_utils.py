@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Optional, List, Dict
 
 # Base paths - use centralized configuration
-from atlasforge_config import BACKUPS_DIR
+from atlasforge_config import BASE_DIR, BACKUPS_DIR
 
 
 def get_backup_dir() -> Path:

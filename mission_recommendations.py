@@ -39,7 +39,7 @@ from dataclasses import dataclass, field, asdict
 logger = logging.getLogger(__name__)
 
 # Paths - use centralized configuration
-from atlasforge_config import KNOWLEDGE_BASE_DIR
+from atlasforge_config import BASE_DIR, KNOWLEDGE_BASE_DIR
 RECOMMENDATIONS_DB = KNOWLEDGE_BASE_DIR / "recommendations.db"
 
 
