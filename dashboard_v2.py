@@ -1034,11 +1034,20 @@ def check_and_emit_widget_updates():
         pass
 
     # Recommendations check - detect new mission recommendations
+    # Uses SQLite storage (primary) with JSON fallback for consistency with af_engine
     try:
-        recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-        items = recommendations_data.get("items", [])
+        items = []
+        try:
+            from suggestion_storage import get_storage
+            storage = get_storage()
+            items = storage.get_all()
+        except Exception:
+            # Fallback to JSON if SQLite fails
+            recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+            items = recommendations_data.get("items", [])
+
         rec_count = len(items)
-        latest_rec_id = items[-1].get("id") if items else None
+        latest_rec_id = items[0].get("id") if items else None  # SQLite returns sorted by priority
         rec_key = f"{rec_count}:{latest_rec_id}"
 
         if _widget_state.get('recommendations_key') != rec_key and rec_count > 0:
@@ -1046,13 +1055,14 @@ def check_and_emit_widget_updates():
             prev_count = int(_widget_state.get('recommendations_key', '0:').split(':')[0]) if _widget_state.get('recommendations_key') else 0
             if rec_count > prev_count and items:
                 # There's a new recommendation - emit notification
-                latest = items[-1]
+                # Find most recently created item (not highest priority)
+                latest = max(items, key=lambda x: x.get('created_at', ''))
                 emit_widget_update('recommendations', {
                     'event': 'new_recommendation',
                     'recommendation': {
                         'id': latest.get('id'),
                         'title': latest.get('mission_title', 'New Mission'),
-                        'description': latest.get('mission_description', '')[:200],
+                        'description': (latest.get('mission_description', '') or '')[:200],
                         'source_mission': latest.get('source_mission_id'),
                         'source_type': latest.get('source_type', 'successful_completion')
                     },
