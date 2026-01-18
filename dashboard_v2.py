@@ -1142,6 +1142,46 @@ if __name__ == '__main__':
     # Start background watcher
     threading.Thread(target=watch_chat, daemon=True).start()
 
+    # Auto-start AfterImage Embedder Daemon
+    # This indexes code for episodic memory retrieval
+    try:
+        import subprocess
+        import psutil
+
+        # Check if embedder is already running
+        embedder_running = False
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmdline = proc.info.get('cmdline') or []
+                if any('afterimage_embedder' in str(arg) for arg in cmdline):
+                    embedder_running = True
+                    print(f"[AfterImage] Embedder daemon already running (PID {proc.pid})")
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        if not embedder_running:
+            # Launch the embedder daemon
+            embedder_path = Path("/home/vader/Shared/AI-AfterImage")
+            if embedder_path.exists():
+                env = os.environ.copy()
+                env['PYTHONPATH'] = str(embedder_path) + ':' + env.get('PYTHONPATH', '')
+                subprocess.Popen(
+                    [sys.executable, '-m', 'afterimage_embedder'],
+                    cwd=str(embedder_path),
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                print("[AfterImage] Started embedder daemon")
+            else:
+                print("[AfterImage] Embedder path not found, skipping")
+    except ImportError:
+        print("[AfterImage] psutil not available, skipping embedder check")
+    except Exception as e:
+        print(f"[AfterImage] Failed to start embedder: {e}")
+
     # Start snapshot scheduler for hourly backups during active missions
     try:
         from mission_snapshot_manager import (
