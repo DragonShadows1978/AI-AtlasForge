@@ -418,36 +418,70 @@ def queue_auto_start_watcher():
     This file is written by atlasforge_engine.py when a queued mission is ready.
     When detected, this watcher:
     1. Reads the signal file
-    2. Starts Claude in R&D mode if not already running
-    3. Deletes the signal file
+    2. Waits for old process to terminate (grace period)
+    3. Starts Claude in R&D mode if not already running
+    4. Deletes the signal file ONLY on success
     """
     print("[QueueWatcher] Started watching for queue auto-start signals")
     idle_check_counter = 0
     IDLE_CHECK_INTERVAL = 6  # Check idle state every 30 seconds (6 * 5s)
+    SIGNAL_STALE_SECONDS = 120  # Signals older than 2 minutes are stale
+    MAX_RETRIES = 5  # Maximum retry attempts before giving up
+    PROCESS_GRACE_PERIOD = 3  # Seconds to wait for old process to terminate
 
     while True:
         try:
             time.sleep(5)  # Check every 5 seconds
 
-            # === Signal file detection (existing logic) ===
+            # === Signal file detection (fixed logic) ===
             if QUEUE_AUTO_START_SIGNAL_PATH.exists():
                 # Read the signal file
                 signal_data = io_utils.atomic_read_json(QUEUE_AUTO_START_SIGNAL_PATH, {})
                 if signal_data and signal_data.get("action") == "start_rd":
                     mission_id = signal_data.get("mission_id", "unknown")
                     mission_title = signal_data.get("mission_title", "Queued Mission")
-                    print(f"[QueueWatcher] Queue auto-start signal detected for {mission_id}")
+                    retry_count = signal_data.get("retry_count", 0)
+                    signaled_at = signal_data.get("signaled_at", "")
 
-                    # Delete signal file first to prevent duplicate starts
-                    try:
-                        QUEUE_AUTO_START_SIGNAL_PATH.unlink()
-                    except FileNotFoundError:
-                        pass
+                    print(f"[QueueWatcher] Queue auto-start signal detected for {mission_id} (retry {retry_count})")
 
-                    # Check if Claude is already running
-                    if find_process("claude_autonomous.py"):
-                        print(f"[QueueWatcher] Claude already running, skipping auto-start")
+                    # Check if signal is stale (older than SIGNAL_STALE_SECONDS)
+                    if signaled_at:
+                        try:
+                            signal_time = datetime.fromisoformat(signaled_at)
+                            signal_age = (datetime.now() - signal_time).total_seconds()
+                            if signal_age > SIGNAL_STALE_SECONDS:
+                                print(f"[QueueWatcher] Signal is stale ({signal_age:.0f}s old), deleting")
+                                try:
+                                    QUEUE_AUTO_START_SIGNAL_PATH.unlink()
+                                except FileNotFoundError:
+                                    pass
+                                continue
+                        except (ValueError, TypeError):
+                            pass  # Can't parse timestamp, proceed anyway
+
+                    # Check if max retries exceeded
+                    if retry_count >= MAX_RETRIES:
+                        print(f"[QueueWatcher] Max retries ({MAX_RETRIES}) exceeded for {mission_id}, giving up")
+                        try:
+                            QUEUE_AUTO_START_SIGNAL_PATH.unlink()
+                        except FileNotFoundError:
+                            pass
                         continue
+
+                    # Check if Claude is already running - with grace period
+                    if find_process("claude_autonomous.py"):
+                        # Wait for grace period to allow old process to terminate
+                        print(f"[QueueWatcher] Claude detected running, waiting {PROCESS_GRACE_PERIOD}s grace period...")
+                        time.sleep(PROCESS_GRACE_PERIOD)
+
+                        # Check again after grace period
+                        if find_process("claude_autonomous.py"):
+                            print(f"[QueueWatcher] Claude still running after grace period, incrementing retry count")
+                            # Increment retry count and save back (don't delete signal)
+                            signal_data["retry_count"] = retry_count + 1
+                            io_utils.atomic_write_json(QUEUE_AUTO_START_SIGNAL_PATH, signal_data)
+                            continue
 
                     # Start Claude in RD mode
                     print(f"[QueueWatcher] Starting Claude in RD mode for: {mission_title}")
@@ -455,6 +489,11 @@ def queue_auto_start_watcher():
 
                     if success:
                         print(f"[QueueWatcher] Successfully started queued mission: {mission_id}")
+                        # Delete signal file ONLY after successful start
+                        try:
+                            QUEUE_AUTO_START_SIGNAL_PATH.unlink()
+                        except FileNotFoundError:
+                            pass
                         # Broadcast to clients via socketio
                         try:
                             socketio.emit('queue_mission_started', {
@@ -466,6 +505,10 @@ def queue_auto_start_watcher():
                             pass
                     else:
                         print(f"[QueueWatcher] Failed to start queued mission: {msg}")
+                        # Keep signal file for retry, increment retry count
+                        signal_data["retry_count"] = retry_count + 1
+                        signal_data["last_error"] = msg
+                        io_utils.atomic_write_json(QUEUE_AUTO_START_SIGNAL_PATH, signal_data)
                     continue
 
             # === Idle-state auto-start (NEW) ===
