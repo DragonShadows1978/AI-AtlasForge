@@ -506,35 +506,46 @@ def api_recommendations():
         source_type: Filter by source type ('drift_halt' or 'successful_completion')
 
     Returns:
-        JSON with filtered or all recommendations
+        JSON with filtered or all recommendations (merged from SQLite + JSON for safety)
     """
     storage = _get_suggestion_storage()
     source_type_filter = request.args.get('source_type')
+
+    # Gather items from both sources and merge (SQLite is authoritative)
+    sqlite_items = []
+    json_items = []
 
     # Try SQLite storage first
     if storage:
         try:
             if source_type_filter:
-                items = storage.get_filtered(source_type=source_type_filter)
+                sqlite_items = storage.get_filtered(source_type=source_type_filter)
             else:
-                items = storage.get_all()
-
-            # If SQLite has data, return it; otherwise fall through to JSON
-            if items:
-                return jsonify({"items": items})
+                sqlite_items = storage.get_all()
         except Exception as e:
             import logging
-            logging.warning(f"SQLite read failed, falling back to JSON: {e}")
+            logging.warning(f"SQLite read failed: {e}")
 
-    # Fallback to JSON file (or primary if SQLite is empty/unavailable)
-    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-    if source_type_filter:
-        recommendations['items'] = [
-            r for r in recommendations.get('items', [])
-            if r.get('source_type') == source_type_filter
-        ]
+    # Always check JSON file for any items not yet in SQLite
+    try:
+        recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+        json_items = recommendations.get('items', [])
+        if source_type_filter:
+            json_items = [r for r in json_items if r.get('source_type') == source_type_filter]
+    except Exception as e:
+        import logging
+        logging.warning(f"JSON read failed: {e}")
 
-    return jsonify(recommendations)
+    # Merge: SQLite is authoritative, JSON fills gaps
+    if sqlite_items and json_items:
+        sqlite_ids = {item.get('id') for item in sqlite_items if item.get('id')}
+        merged = sqlite_items + [item for item in json_items if item.get('id') not in sqlite_ids]
+    elif sqlite_items:
+        merged = sqlite_items
+    else:
+        merged = json_items
+
+    return jsonify({"items": merged})
 
 
 @core_bp.route('/api/recommendations', methods=['POST'])

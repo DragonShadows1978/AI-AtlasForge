@@ -164,6 +164,16 @@ Post-mission introspection system:
 
 ## Key Features
 
+### Display Layer (Windows)
+Visual environment for graphical application testing:
+- Screenshot capture from virtual display
+- Web-accessible display via noVNC (localhost:6080)
+- Web terminal via ttyd (localhost:7681)
+- Browser support for OAuth flows and web testing
+- Automatic GPU detection with software fallback
+
+See [docs/DISPLAY_LAYER.md](workspace/docs/DISPLAY_LAYER.md) for the user guide.
+
 ### Mission Continuity
 Missions survive context window limits through:
 - Persistent mission.json state
@@ -250,6 +260,8 @@ See `requirements.txt` or `pyproject.toml` for full list.
 - [INSTALL.md](INSTALL.md) - Detailed installation guide
 - [USAGE.md](USAGE.md) - How to use AI-AtlasForge
 - [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
+- [DISPLAY_LAYER.md](workspace/docs/DISPLAY_LAYER.md) - Display Layer user guide (Windows)
+- [TROUBLESHOOTING.md](workspace/docs/TROUBLESHOOTING.md) - Display Layer troubleshooting
 
 ## License
 

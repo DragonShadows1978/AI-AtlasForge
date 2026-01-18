@@ -1,6 +1,6 @@
 # Environment Profile
 
-Auto-generated on 2026-01-13 14:33:16
+Auto-generated on 2026-01-17 13:51:10
 
 This file documents the hardware profile of this installation.
 The autonomous agent uses this information for resource-aware planning.
@@ -26,7 +26,7 @@ The autonomous agent uses this information for resource-aware planning.
 | Property | Value |
 |----------|-------|
 | Total RAM | 62Gi |
-| Available | 55Gi |
+| Available | 51Gi |
 | Swap | 2.0Gi |
 
 ## GPU
@@ -36,7 +36,7 @@ The autonomous agent uses this information for resource-aware planning.
 | Available | Yes |
 | Model | NVIDIA GeForce RTX 3070 |
 | VRAM Total | 8192 MiB |
-| VRAM Free | 6586 MiB |
+| VRAM Free | 4773 MiB |
 | CUDA Available | Yes |
 | CUDA Version | 12.8 |
 
@@ -44,7 +44,7 @@ The autonomous agent uses this information for resource-aware planning.
 
 | Path | Total | Available |
 |------|-------|-----------|
-| / | 457G | 209G |
+| / | 457G | 196G |
 
 ## Services
 

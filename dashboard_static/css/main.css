@@ -1384,6 +1384,44 @@ h1 { color: var(--accent); font-size: 1.3em; }
     animation: save-flash 0.8s ease-out;
 }
 
+/* WebSocket real-time update flash animations */
+@keyframes ws-update-flash {
+    0% { background-color: inherit; box-shadow: none; }
+    20% { background-color: rgba(88, 166, 255, 0.15); box-shadow: inset 0 0 0 1px var(--accent); }
+    100% { background-color: inherit; box-shadow: none; }
+}
+@keyframes ws-new-item-slide {
+    0% { opacity: 0; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+.ws-updated {
+    animation: ws-update-flash 1s ease-out;
+}
+.ws-new-item {
+    animation: ws-new-item-slide 0.4s ease-out, ws-update-flash 1.2s ease-out;
+}
+/* Badge for new items count */
+.ws-new-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 0.7em;
+    font-weight: 600;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    margin-left: 6px;
+    animation: badge-pop 0.3s ease-out;
+}
+@keyframes badge-pop {
+    0% { transform: scale(0); }
+    70% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
 /* Edit mode container smooth transition */
 .rec-edit-container,
 .rec-view-container {

@@ -544,6 +544,18 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
 
         logger.info(f"Archived {len(copied_files)} transcripts to {archive_dir}")
 
+        # Emit WebSocket event for transcript archival
+        try:
+            from websocket_events import emit_transcript_archived
+            emit_transcript_archived(
+                mission_id=mission_id,
+                archive_path=str(archive_dir),
+                transcript_count=len(copied_files),
+                stats=manifest
+            )
+        except ImportError:
+            pass
+
     except Exception as e:
         error_msg = f"Transcript archival failed: {e}"
         logger.error(error_msg)
@@ -768,6 +780,18 @@ class RDMissionController:
         self.mission["last_updated"] = datetime.now().isoformat()
         self.save_mission()
         logger.info(f"R&D Stage: {old_stage} -> {new_stage}")
+
+        # Emit WebSocket event for stage change
+        try:
+            from websocket_events import emit_stage_change
+            emit_stage_change(
+                mission_id=self.mission.get("mission_id", "unknown"),
+                old_stage=old_stage,
+                new_stage=new_stage,
+                iteration=self.mission.get("iteration", 0)
+            )
+        except ImportError:
+            pass
 
         # Analytics: Track stage transitions
         if ANALYTICS_AVAILABLE:
@@ -2662,6 +2686,12 @@ Respond with JSON:
             storage = get_storage()
             storage.add(rec_entry)
             logger.info(f"Saved mission recommendation to SQLite ({source_type}): {rec_entry['mission_title']}")
+            # Emit WebSocket event for new recommendation
+            try:
+                from websocket_events import emit_recommendation_added
+                emit_recommendation_added(rec_entry)
+            except ImportError:
+                pass
             return
         except Exception as e:
             logger.warning(f"SQLite save failed, falling back to JSON: {e}")
@@ -2672,6 +2702,13 @@ Respond with JSON:
         recs.setdefault("items", []).append(rec_entry)
         io_utils.atomic_write_json(recommendations_path, recs)
         logger.info(f"Saved mission recommendation to JSON ({source_type}): {rec_entry['mission_title']}")
+
+        # Emit WebSocket event for new recommendation
+        try:
+            from websocket_events import emit_recommendation_added
+            emit_recommendation_added(rec_entry)
+        except ImportError:
+            pass
 
     def reset_mission(self):
         """Reset mission to initial state (keeps problem statement)."""

@@ -1290,3 +1290,178 @@ export async function exportAnalyticsCSV() {
         showToast('Export failed: ' + e.message);
     }
 }
+
+// =============================================================================
+// WEBSOCKET EVENT HANDLERS FOR REAL-TIME UPDATES
+// =============================================================================
+
+/**
+ * Handle file creation events from WebSocket
+ * @param {object} data - Event data with file info
+ */
+export function handleFileEvent(data) {
+    const eventData = data.data || data;
+    const event = eventData.event;
+
+    if (event === 'file_created') {
+        const fileName = eventData.file_name || 'Unknown file';
+        const fileType = eventData.file_type || 'file';
+        showToast(`New ${fileType}: ${fileName}`, 'info');
+        // Refresh files list and highlight the files card
+        loadFiles();
+        // Add visual feedback to files card
+        const filesCard = document.getElementById('files-card');
+        if (filesCard) {
+            filesCard.classList.add('ws-updated');
+            setTimeout(() => filesCard.classList.remove('ws-updated'), 1000);
+        }
+    } else if (event === 'file_modified') {
+        // Refresh files list for modifications with subtle feedback
+        loadFiles();
+        const filesCard = document.getElementById('files-card');
+        if (filesCard) {
+            filesCard.classList.add('ws-updated');
+            setTimeout(() => filesCard.classList.remove('ws-updated'), 1000);
+        }
+    }
+}
+
+/**
+ * Handle GlassBox archive events from WebSocket
+ * @param {object} data - Event data with archive info
+ */
+export function handleGlassboxArchiveEvent(data) {
+    const eventData = data.data || data;
+
+    if (eventData.event === 'transcript_archived') {
+        const count = eventData.transcript_count || 0;
+        const missionId = eventData.mission_id || 'Unknown';
+        showToast(`Archived ${count} transcripts for ${missionId}`, 'success');
+
+        // Refresh GlassBox widget if the function exists
+        if (typeof window.refreshGlassboxWidget === 'function') {
+            window.refreshGlassboxWidget();
+        }
+    }
+}
+
+/**
+ * Handle recommendation events from WebSocket
+ * @param {object} data - Event data with recommendation info
+ */
+export function handleRecommendationEvent(data) {
+    const eventData = data.data || data;
+
+    if (eventData.event === 'new_recommendation') {
+        const rec = eventData.recommendation || {};
+        const title = rec.title || 'New Mission Recommendation';
+        showToast(`New recommendation: ${title}`, 'info');
+
+        // Refresh recommendations widget
+        if (typeof window.loadRecommendations === 'function') {
+            window.loadRecommendations();
+        }
+        if (typeof window.refreshRecommendations === 'function') {
+            window.refreshRecommendations();
+        }
+
+        // Add visual feedback to recommendations card
+        const recCard = document.getElementById('recommendations-card');
+        if (recCard) {
+            recCard.classList.add('ws-updated');
+            setTimeout(() => recCard.classList.remove('ws-updated'), 1000);
+        }
+    }
+}
+
+/**
+ * Handle mission status events from WebSocket
+ * @param {object} data - Event data with mission status
+ */
+export function handleMissionStatusEvent(data) {
+    const eventData = data.data || data;
+
+    // Update stage indicator and status bar
+    if (eventData.current_stage) {
+        updateStageIndicator(eventData.current_stage);
+    }
+
+    // Update status bar elements
+    if (eventData.iteration !== undefined) {
+        const iterEl = document.getElementById('stat-iteration');
+        if (iterEl) iterEl.textContent = eventData.iteration;
+    }
+
+    if (eventData.current_cycle && eventData.cycle_budget) {
+        const cycleEl = document.getElementById('stat-mission-cycle');
+        if (cycleEl) cycleEl.textContent = `${eventData.current_cycle}/${eventData.cycle_budget}`;
+    }
+
+    // Show toast for stage changes with visual feedback
+    if (eventData.event === 'stage_change' && eventData.new_stage) {
+        showToast(`Stage: ${eventData.old_stage || '?'} → ${eventData.new_stage}`, 'info');
+        // Add visual feedback to status card
+        const statusCard = document.getElementById('status-card');
+        if (statusCard) {
+            statusCard.classList.add('ws-updated');
+            setTimeout(() => statusCard.classList.remove('ws-updated'), 1000);
+        }
+    }
+}
+
+/**
+ * Handle journal events from WebSocket
+ * @param {object} data - Event data with journal entry
+ */
+export function handleJournalEvent(data) {
+    const eventData = data.data || data;
+
+    if (eventData.event === 'new_entry' && eventData.entry) {
+        const entry = eventData.entry;
+        const journalEl = document.getElementById('journal');
+
+        if (journalEl) {
+            // Prepend new entry to journal
+            const entryHtml = `
+                <div class="journal-entry" data-entry-id="${entry.timestamp}">
+                    <span class="journal-type">${escapeHtml(entry.type || 'unknown')}</span>
+                    <span class="journal-time">${entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ''}</span>
+                    <div>${escapeHtml(entry.message || '')}</div>
+                </div>
+            `;
+            journalEl.insertAdjacentHTML('afterbegin', entryHtml);
+
+            // Keep only last 20 entries visible
+            const entries = journalEl.querySelectorAll('.journal-entry');
+            if (entries.length > 20) {
+                for (let i = 20; i < entries.length; i++) {
+                    entries[i].remove();
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Initialize WebSocket event handlers
+ * Call this after socket.js is initialized
+ */
+export function initWebSocketHandlers() {
+    // Import registerHandler from socket module if available
+    if (typeof window.registerSocketHandler === 'function') {
+        window.registerSocketHandler('file_events', handleFileEvent);
+        window.registerSocketHandler('glassbox_archive', handleGlassboxArchiveEvent);
+        window.registerSocketHandler('recommendations', handleRecommendationEvent);
+        window.registerSocketHandler('mission_status', handleMissionStatusEvent);
+        window.registerSocketHandler('journal', handleJournalEvent);
+        console.log('[Widgets] WebSocket event handlers registered');
+    }
+}
+
+// Make handlers available globally for socket.js integration
+window.handleFileEvent = handleFileEvent;
+window.handleGlassboxArchiveEvent = handleGlassboxArchiveEvent;
+window.handleRecommendationEvent = handleRecommendationEvent;
+window.handleMissionStatusEvent = handleMissionStatusEvent;
+window.handleJournalEvent = handleJournalEvent;
+window.initWebSocketHandlers = initWebSocketHandlers;

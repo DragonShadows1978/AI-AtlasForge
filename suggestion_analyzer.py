@@ -556,25 +556,35 @@ class SuggestionAnalyzer:
         self.health_analyzer = HealthAnalyzer()
 
     def _load_recommendations(self) -> List[Dict[str, Any]]:
-        """Load recommendations from storage backend (SQLite preferred, JSON fallback)."""
+        """Load recommendations from storage backend (SQLite + JSON merged for safety)."""
+        sqlite_items = []
+        json_items = []
+
+        # Try SQLite storage first
         storage = _get_storage()
         if storage:
             try:
-                return storage.get_all()
+                sqlite_items = storage.get_all()
             except Exception as e:
-                logger.warning(f"SQLite load failed, falling back to JSON: {e}")
+                logger.warning(f"SQLite load failed: {e}")
 
-        # Fallback to JSON file
-        if not self.recommendations_path.exists():
-            return []
+        # Also load from JSON file to catch any items not migrated
+        if self.recommendations_path.exists():
+            try:
+                with open(self.recommendations_path, 'r') as f:
+                    data = json.load(f)
+                json_items = data.get('items', [])
+            except (json.JSONDecodeError, IOError) as e:
+                logger.warning(f"JSON load failed: {e}")
 
-        try:
-            with open(self.recommendations_path, 'r') as f:
-                data = json.load(f)
-            return data.get('items', [])
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"Error loading recommendations: {e}")
-            return []
+        # Merge: SQLite is authoritative, JSON fills gaps
+        if sqlite_items and json_items:
+            sqlite_ids = {item.get('id') for item in sqlite_items if item.get('id')}
+            return sqlite_items + [item for item in json_items if item.get('id') not in sqlite_ids]
+        elif sqlite_items:
+            return sqlite_items
+        else:
+            return json_items
 
     def _save_recommendations(self, items: List[Dict[str, Any]]) -> bool:
         """Save recommendations to storage backend (SQLite preferred, JSON fallback)."""

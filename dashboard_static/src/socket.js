@@ -77,7 +77,10 @@ const eventHandlers = {
     exploration: [],
     connection_status: [],
     backup_status: [],
-    backup_stale_alert: []
+    backup_stale_alert: [],
+    file_events: [],
+    glassbox_archive: [],
+    recommendations: []
 };
 
 // =============================================================================
@@ -562,6 +565,10 @@ function resubscribeToRooms() {
         subscribeToRoom('journal');
         subscribeToRoom('atlasforge_stats');
         subscribeToRoom('analytics');
+        // Subscribe to new real-time push rooms
+        subscribeToRoom('file_events');
+        subscribeToRoom('glassbox_archive');
+        subscribeToRoom('recommendations');
     } else {
         // Resubscribe to previously subscribed rooms
         connectionState.subscribedRooms.forEach(room => {
@@ -756,6 +763,17 @@ document.addEventListener('visibilitychange', () => {
         }
     }
 });
+
+// =============================================================================
+// GLOBAL REGISTRATION FOR CROSS-MODULE ACCESS
+// =============================================================================
+
+// Make registerHandler available globally for widgets.js integration
+window.registerSocketHandler = registerHandler;
+window.unregisterSocketHandler = unregisterHandler;
+window.subscribeToSocketRoom = subscribeToRoom;
+window.unsubscribeFromSocketRoom = unsubscribeFromRoom;
+window.getSocketConnectionState = getConnectionState;
 
 // =============================================================================
 // EXPORTS

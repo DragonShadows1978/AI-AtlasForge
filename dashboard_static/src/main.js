@@ -484,6 +484,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize sockets
     socket.initializeSockets();
 
+    // Initialize WebSocket event handlers for widgets (real-time push updates)
+    if (typeof widgets.initWebSocketHandlers === 'function') {
+        widgets.initWebSocketHandlers();
+        console.log('WebSocket handlers initialized for widget updates');
+    }
+
     // Load initial chat history (handles race condition with WebSocket)
     socket.loadInitialChatHistory();
 
