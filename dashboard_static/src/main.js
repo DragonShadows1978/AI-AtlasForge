@@ -24,6 +24,7 @@ import * as dragDrop from './drag-drop.js';
 import * as queue from './modules/queue.js';
 import * as backupStatus from './modules/backup-status.js';
 import * as activityFeed from './modules/activity-feed.js';
+import * as semantic from './modules/semantic.js';
 
 // Import new socket functions for WebSocket push
 import {
@@ -246,6 +247,43 @@ window.moveQueueItem = queue.moveQueueItem;
 window.initActivityFeed = activityFeed.initActivityFeed;
 window.refreshActivityFeed = activityFeed.refreshActivityFeed;
 window.startNextFromQueue = queue.startNextFromQueue;
+
+// Semantic Search Widgets
+window.initSemanticWidgets = semantic.initSemanticWidgets;
+window.refreshSemanticWidgets = semantic.refreshSemanticWidgets;
+window.refreshSemanticMiniWidgets = semantic.refreshSemanticMiniWidgets;
+window.initSemanticWebSocketHandlers = semantic.initSemanticWebSocketHandlers;
+window.showSemanticToast = semantic.showSemanticToast;
+window.performSemanticSearch = async function(event) {
+    if (event) event.preventDefault();
+    const queryInput = document.getElementById('semantic-search-query');
+    const resultsContainer = document.getElementById('semantic-search-results');
+    if (!queryInput || !resultsContainer) return;
+
+    const query = queryInput.value.trim();
+    if (!query) {
+        resultsContainer.innerHTML = '<div class="empty-state">Enter a search query</div>';
+        return;
+    }
+
+    resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
+    try {
+        const results = await semantic.SemanticAPI.search(query, 10);
+        if (!results || results.length === 0) {
+            resultsContainer.innerHTML = '<div class="empty-state">No results found</div>';
+            return;
+        }
+        resultsContainer.innerHTML = results.map(r => `
+            <div class="search-result-item">
+                <div class="result-title">${window.escapeHtml(r.title || r.id || 'Untitled')}</div>
+                <div class="result-score">Score: ${(r.score || 0).toFixed(3)}</div>
+                <div class="result-snippet">${window.escapeHtml(r.snippet || r.content?.substring(0, 200) || '')}</div>
+            </div>
+        `).join('');
+    } catch (err) {
+        resultsContainer.innerHTML = `<div class="error">Search failed: ${err.message}</div>`;
+    }
+};
 window.quickAddToQueue = async function() {
     const input = document.getElementById('queue-add-input');
     if (!input || !input.value.trim()) return;
@@ -417,6 +455,7 @@ tabs.registerTabLoader('lessons', () => lazyLoad('lessons'));
 tabs.registerTabLoader('git-analytics', () => lazyLoad('git-analytics'));
 tabs.registerTabLoader('kb-analytics', () => lazyLoad('kb-analytics'));
 tabs.registerTabLoader('investigations', () => lazyLoad('investigation-history'));
+tabs.registerTabLoader('semantic', () => Promise.resolve(semantic));
 
 // =============================================================================
 // ATLASFORGE SIDEBAR GLASSBOX DROPDOWN (loaded separately from lazy-loaded module)

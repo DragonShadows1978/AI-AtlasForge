@@ -47,7 +47,7 @@ export function markTabLoaded(tabName) {
 // VALID TAB NAMES (for URL hash validation)
 // =============================================================================
 
-const VALID_TABS = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
+const VALID_TABS = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'semantic'];
 
 /**
  * Get tab name from URL hash
@@ -157,6 +157,11 @@ function fireTabRefresh(tabName) {
                 window.initInvestigationHistory();
             }
             break;
+        case 'semantic':
+            if (typeof window.initSemanticWidgets === 'function') {
+                window.initSemanticWidgets();
+            }
+            break;
     }
 }
 
@@ -219,9 +224,9 @@ function setupKeyboardShortcuts() {
             return;
         }
 
-        // Tab shortcuts: 1-6 for tab switching
-        if (e.key >= '1' && e.key <= '6' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            const tabs = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
+        // Tab shortcuts: 1-7 for tab switching
+        if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            const tabs = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'semantic'];
             const idx = parseInt(e.key) - 1;
             if (tabs[idx]) {
                 switchTab(tabs[idx]);
@@ -255,7 +260,7 @@ function setupKeyboardShortcuts() {
 export function showKeyboardShortcuts() {
     const shortcuts = `
         <div style="text-align: left; font-size: 0.9em;">
-            <p><span class="kbd">1-6</span> Switch tabs</p>
+            <p><span class="kbd">1-7</span> Switch tabs</p>
             <p><span class="kbd">E</span> Toggle exploration card</p>
             <p><span class="kbd">R</span> Refresh widgets</p>
             <p><span class="kbd">G</span> Go to GlassBox tab</p>

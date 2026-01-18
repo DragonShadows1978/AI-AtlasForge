@@ -50,6 +50,12 @@
       "priority": "low",
       "type": "script",
       "original_url": "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"
+    },
+    "plotly.min.js": {
+      "path": "/static/vendor/plotly.min.js",
+      "priority": "low",
+      "type": "script",
+      "original_url": "https://cdn.plot.ly/plotly-2.27.0.min.js"
     }
   }
 }

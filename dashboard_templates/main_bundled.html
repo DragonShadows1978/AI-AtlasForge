@@ -40,7 +40,8 @@
         window.lazyLibs = {
             chart: { loaded: false, loading: false, src: '/static/vendor/chart.umd.min.js', callbacks: [] },
             vis: { loaded: false, loading: false, src: '/static/vendor/vis-timeline-graph2d.min.js', css: '/static/vendor/vis-timeline-graph2d.min.css', callbacks: [] },
-            xterm: { loaded: false, loading: false, src: '/static/vendor/xterm.min.js', addon: '/static/vendor/xterm-addon-fit.min.js', css: '/static/vendor/xterm.min.css', callbacks: [] }
+            xterm: { loaded: false, loading: false, src: '/static/vendor/xterm.min.js', addon: '/static/vendor/xterm-addon-fit.min.js', css: '/static/vendor/xterm.min.css', callbacks: [] },
+            plotly: { loaded: false, loading: false, src: '/static/vendor/plotly.min.js', callbacks: [] }
         };
         window.loadLib = function(name) {
             return new Promise(function(resolve, reject) {
@@ -120,6 +121,30 @@
         .card h3{color:var(--accent);font-size:0.9em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
         .tab-content{display:none}
         .tab-content.active{display:block}
+
+        /* Semantic Search Styles */
+        .cluster-item{padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;cursor:pointer;transition:all 0.2s}
+        .cluster-item:hover{border-color:var(--accent);background:rgba(88,166,255,0.1)}
+        .cluster-item.selected{border-color:var(--accent);background:rgba(88,166,255,0.15)}
+        .cluster-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+        .cluster-name{font-weight:500;color:var(--text)}
+        .cluster-members{display:flex;flex-wrap:wrap;gap:4px}
+        .member-tag{font-size:0.75em;padding:2px 6px;background:var(--bg);border-radius:3px;color:var(--text-dim)}
+        .member-more{font-size:0.75em;color:var(--accent)}
+        .quality-good{color:var(--green)}
+        .quality-warning{color:var(--yellow)}
+        .quality-bad{color:var(--red)}
+        .cache-indicator{font-size:0.7em;color:var(--text-dim);margin-top:5px;text-align:right}
+        .text-red{color:var(--red)}
+        .text-yellow{color:var(--yellow)}
+        .feedback-buttons{display:flex;gap:5px}
+        .btn-icon{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;cursor:pointer;transition:all 0.2s}
+        .btn-icon:hover{background:var(--bg);border-color:var(--accent)}
+        .btn-icon.active{background:rgba(88,166,255,0.2);border-color:var(--accent)}
+        .search-result-item{padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px}
+        .search-result-item .result-name{font-weight:500;color:var(--accent)}
+        .search-result-item .result-path{font-size:0.8em;color:var(--text-dim)}
+        .search-result-item .result-score{font-size:0.75em;color:var(--green)}
 
         /* Buttons */
         .btn{padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);cursor:pointer;font-size:0.85em;transition:all 0.2s}
@@ -308,6 +333,7 @@
         <div class="main-tab" data-tab="lessons" onclick="switchTab('lessons')">Lessons Learned</div>
         <div class="main-tab" data-tab="glassbox" onclick="switchTab('glassbox')">GlassBox</div>
         <div class="main-tab" data-tab="missionlogs" onclick="switchTab('missionlogs')">Mission Logs</div>
+        <div class="main-tab" data-tab="semantic" onclick="switchTab('semantic')">Semantic</div>
         </nav>
 
     <div id="atlasforge-tab" class="tab-content active">
@@ -1098,6 +1124,43 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Semantic Search Mini Widget -->
+            <div class="card" id="semantic-mini-widget-card">
+                <div class="card-header" onclick="toggleCard('semantic-mini-widget')">
+                    <h3>Semantic Health</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="atlasforge-stat-grid">
+                        <div class="atlasforge-stat-box">
+                            <div class="atlasforge-stat-value" id="semantic-total-embeddings">0</div>
+                            <div class="atlasforge-stat-label">Embeddings</div>
+                        </div>
+                        <div class="atlasforge-stat-box">
+                            <div class="atlasforge-stat-value" id="semantic-cluster-count">0</div>
+                            <div class="atlasforge-stat-label">Clusters</div>
+                        </div>
+                        <div class="atlasforge-stat-box">
+                            <div class="atlasforge-stat-value" id="semantic-quality-score">-</div>
+                            <div class="atlasforge-stat-label">Quality</div>
+                        </div>
+                    </div>
+                    <div class="atlasforge-drift-status">
+                        <span class="label">Drift Status</span>
+                        <span class="value" id="semantic-drift-status">N/A</span>
+                    </div>
+                    <div class="atlasforge-drift-status">
+                        <span class="label">Stale Embeddings</span>
+                        <span class="value" id="semantic-stale-count">0</span>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <button class="btn btn-small" onclick="switchTab('semantic')">View Full Dashboard</button>
+                        <button class="btn btn-small" onclick="refreshSemanticMiniWidgets()" title="Refresh semantic metrics">Refresh</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- AtlasForge: Recent Explorations Widget -->
             <div class="card" id="atlasforge-recent-card">
                 <div class="card-header" onclick="toggleCard('atlasforge-recent')">
@@ -1710,6 +1773,95 @@
             </div>
         </div>
     </div><!-- End of lessons-tab -->
+
+    <!-- Semantic Search Tab Content -->
+    <div id="semantic-tab" class="tab-content">
+        <div class="semantic-full-page" style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px; padding: 15px; height: calc(100vh - 140px);">
+            <!-- Left Panel: Stats & Controls -->
+            <div class="semantic-sidebar" style="display: flex; flex-direction: column; gap: 15px; overflow-y: auto;">
+                <!-- Quality Overview Card -->
+                <div class="card">
+                    <h3>Embedding Quality</h3>
+                    <div id="semantic-quality-stats">
+                        <div style="color: var(--text-dim);">Loading...</div>
+                    </div>
+                    <div class="btn-group" style="margin-top: 10px;">
+                        <button class="btn" onclick="showAnomalyList()">View Anomalies</button>
+                        <button class="btn primary" onclick="triggerRevalidation()">Re-embed</button>
+                    </div>
+                </div>
+
+                <!-- Drift Monitor Card -->
+                <div class="card">
+                    <h3>Drift Monitor</h3>
+                    <div id="drift-timeline-container" style="height: 150px;">
+                        <div style="color: var(--text-dim);">Loading drift history...</div>
+                    </div>
+                    <div class="btn-group" style="margin-top: 10px;">
+                        <button class="btn" onclick="captureSnapshot()">Capture Snapshot</button>
+                    </div>
+                </div>
+
+                <!-- Cluster Explorer -->
+                <div class="card">
+                    <h3>Clusters <span id="cluster-count" class="badge">0</span></h3>
+                    <div id="cluster-list" style="max-height: 250px; overflow-y: auto;">
+                        <div style="color: var(--text-dim);">Loading clusters...</div>
+                    </div>
+                </div>
+
+                <!-- Feedback Stats -->
+                <div class="card">
+                    <h3>Feedback Stats</h3>
+                    <div id="feedback-stats">
+                        <div style="color: var(--text-dim);">No feedback data</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Visualization -->
+            <div class="semantic-main" style="display: flex; flex-direction: column; gap: 15px;">
+                <!-- Visualization Controls -->
+                <div class="card" style="padding: 10px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+                        <span style="color: var(--text-dim); font-size: 0.85em;">Visualization:</span>
+                        <select id="viz-dimension-select" onchange="toggleVizDimension()" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="3d" selected>3D</option>
+                            <option value="2d">2D</option>
+                        </select>
+                        <select id="viz-method-select" onchange="refreshVisualization()" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="umap" selected>UMAP</option>
+                            <option value="tsne">t-SNE</option>
+                        </select>
+                        <button class="btn" onclick="refreshSemanticWidgets()">Refresh All</button>
+                        <button class="btn" onclick="SemanticAPI.invalidateVizCache().then(() => refreshVisualization())">Clear Cache</button>
+                    </div>
+                </div>
+
+                <!-- Embedding Visualization -->
+                <div class="card" style="flex: 1; min-height: 400px;">
+                    <h3>Embedding Visualization</h3>
+                    <div id="embedding-viz-container" style="height: calc(100% - 40px);">
+                        <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim);">
+                            Loading visualization...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Semantic Search -->
+                <div class="card">
+                    <h3>Semantic Search</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" id="semantic-search-input" placeholder="Search code semantically..." style="flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <button class="btn primary" onclick="performSemanticSearch()">Search</button>
+                    </div>
+                    <div id="semantic-search-results" style="max-height: 200px; overflow-y: auto;">
+                        <div style="color: var(--text-dim); font-size: 0.85em;">Enter a query to search semantically</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div><!-- End of semantic-tab -->
 
     <!-- Batch Delete Confirmation Modal -->
     <div id="batch-delete-modal" class="modal">

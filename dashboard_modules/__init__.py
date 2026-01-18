@@ -66,6 +66,7 @@ from .services import services_bp
 from .cache import cache_bp
 from .url_handlers import url_handlers_bp
 from .queue_scheduler import queue_scheduler_bp, init_queue_scheduler_blueprint
+from .semantic import semantic_bp, init_semantic_blueprint
 
 __all__ = [
     # Blueprints
@@ -79,12 +80,14 @@ __all__ = [
     'cache_bp',
     'url_handlers_bp',
     'queue_scheduler_bp',
+    'semantic_bp',
     # Initialization functions
     'init_core_blueprint',
     'init_analytics_blueprint',
     'init_recovery_blueprint',
     'init_investigation_blueprint',
     'init_queue_scheduler_blueprint',
+    'init_semantic_blueprint',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]
