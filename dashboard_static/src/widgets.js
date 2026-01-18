@@ -142,9 +142,73 @@ export function collapseAllJournal() {
 // =============================================================================
 
 export async function startClaude(mode) {
-    const data = await api(`/api/start/${mode}`, 'POST');
-    showToast(data.message);
-    refresh();
+    // Get mission input text
+    const missionInput = document.getElementById('mission-input');
+    const missionText = missionInput ? missionInput.value.trim() : '';
+
+    // Get current mission state
+    let currentMission = {};
+    try {
+        currentMission = await api('/api/mission', 'GET');
+    } catch (e) {
+        console.error('Failed to get current mission:', e);
+    }
+    const currentStage = currentMission.current_stage || 'COMPLETE';
+    const isComplete = (currentStage === 'COMPLETE' || currentStage === '' || !currentStage);
+
+    if (missionText) {
+        // Case 1: Text box has content - create new mission and start
+        const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+        const projectNameInput = document.getElementById('project-name-input');
+        const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+
+        // If replacing an active mission, ask for confirmation
+        if (!isComplete) {
+            const confirm1 = confirm(
+                `Current mission is in stage: ${currentStage}\n\n` +
+                `This will OVERWRITE the current mission and start the new one!\n\n` +
+                `Are you sure?`
+            );
+            if (!confirm1) return;
+
+            const confirm2 = confirm(
+                `SECOND CONFIRMATION\n\n` +
+                `You are about to PERMANENTLY overwrite:\n` +
+                `"${(currentMission.problem_statement || '').substring(0, 100)}..."\n\n` +
+                `This cannot be undone. Proceed?`
+            );
+            if (!confirm2) return;
+        }
+
+        // Create the new mission
+        const payload = { mission: missionText, cycle_budget: cycleBudget };
+        if (projectName) payload.project_name = projectName;
+
+        const setResult = await api('/api/mission', 'POST', payload);
+        if (!setResult.success) {
+            showToast(`Failed to set mission: ${setResult.message}`, 'error');
+            return;
+        }
+
+        // Clear inputs
+        missionInput.value = '';
+        if (projectNameInput) projectNameInput.value = '';
+
+        // Now start Claude
+        const startResult = await api(`/api/start/${mode}`, 'POST');
+        showToast(`Mission set and started: ${startResult.message}`, 'success');
+        refresh();
+
+    } else if (!isComplete) {
+        // Case 2: Empty text box, mission in progress - restart/resume
+        const data = await api(`/api/start/${mode}`, 'POST');
+        showToast(data.message);
+        refresh();
+
+    } else {
+        // Case 3: Empty text box, no active mission - error
+        showToast('No mission to start. Enter a mission description first.', 'error');
+    }
 }
 
 export async function stopClaude() {
@@ -197,6 +261,50 @@ export async function resetMission() {
     const data = await api('/api/mission/reset', 'POST');
     showToast(data.message);
     refresh();
+}
+
+export async function queueMission() {
+    // Get mission input text
+    const missionInput = document.getElementById('mission-input');
+    const missionText = missionInput ? missionInput.value.trim() : '';
+
+    if (!missionText) {
+        showToast('Enter a mission description to queue.', 'error');
+        return;
+    }
+
+    const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+    const projectNameInput = document.getElementById('project-name-input');
+    const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+
+    // Add to queue via API
+    try {
+        const payload = {
+            problem_statement: missionText,
+            cycle_budget: cycleBudget,
+            priority: 0,
+            source: 'dashboard'
+        };
+        if (projectName) payload.project_name = projectName;
+
+        const data = await api('/api/queue/add', 'POST', payload);
+        if (data.status === 'added') {
+            showToast(`Mission queued at position ${data.queue_length}`, 'success');
+            // Clear inputs
+            missionInput.value = '';
+            if (projectNameInput) projectNameInput.value = '';
+            // Immediately refresh queue widget (WebSocket may have delay)
+            if (typeof window.refreshQueueWidget === 'function') {
+                await window.refreshQueueWidget();
+            }
+            refresh();
+        } else if (data.error) {
+            showToast(`Failed to queue: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        console.error('Failed to queue mission:', e);
+        showToast('Failed to queue mission', 'error');
+    }
 }
 
 // =============================================================================

@@ -541,3 +541,70 @@ def emit_backup_created(mission_id: str, snapshot_id: str, snapshot_type: str = 
     }
 
     _safe_emit('backup_status', 'update', data)
+
+
+# =============================================================================
+# QUEUE EVENTS
+# =============================================================================
+
+def emit_queue_updated(queue_data: Dict, change_type: str = 'updated'):
+    """
+    Emit event when queue is modified (mission added/removed/reordered).
+
+    Args:
+        queue_data: Queue data dict with missions, settings, etc.
+        change_type: Type of change ('added', 'removed', 'reordered', 'updated')
+    """
+    event_key = f'queue_updated:{change_type}'
+    if not _should_emit(event_key):
+        return
+
+    data = {
+        'event': 'queue_updated',
+        'missions': queue_data.get('missions', []),
+        'settings': queue_data.get('settings', {}),
+        'queue_length': len(queue_data.get('missions', [])),
+        'last_updated': queue_data.get('last_updated'),
+        'change_type': change_type
+    }
+
+    _safe_emit('queue_updated', 'update', data)
+
+
+def emit_queue_paused(paused: bool, paused_at: str = None, reason: str = None):
+    """
+    Emit event when queue is paused.
+
+    Args:
+        paused: Whether queue is now paused
+        paused_at: Timestamp when paused
+        reason: Reason for pause
+    """
+    event_key = 'queue_paused'
+    if not _should_emit(event_key):
+        return
+
+    data = {
+        'event': 'queue_paused',
+        'paused': paused,
+        'paused_at': paused_at,
+        'pause_reason': reason
+    }
+
+    _safe_emit('queue_paused', 'update', data)
+
+
+def emit_queue_resumed():
+    """
+    Emit event when queue is resumed.
+    """
+    event_key = 'queue_resumed'
+    if not _should_emit(event_key):
+        return
+
+    data = {
+        'event': 'queue_resumed',
+        'paused': False
+    }
+
+    _safe_emit('queue_resumed', 'update', data)

@@ -1087,7 +1087,27 @@ def download_file(filepath):
         if len(parts) >= 3:
             mission_id = parts[1]
             relative_path = parts[2]
-            mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+
+            # Read mission config to get actual workspace location
+            mission_config_path = BASE_DIR / "missions" / mission_id / "mission_config.json"
+            if mission_config_path.exists():
+                try:
+                    with open(mission_config_path, 'r') as f:
+                        config = json.load(f)
+                    # Use project_workspace if available (shared workspace)
+                    project_workspace = config.get('project_workspace')
+                    if project_workspace and Path(project_workspace).exists():
+                        mission_workspace = Path(project_workspace)
+                    else:
+                        # Fallback to legacy path
+                        mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+                except (json.JSONDecodeError, IOError):
+                    # On error, use legacy path
+                    mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+            else:
+                # No config file, use legacy path
+                mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+
             full_path = mission_workspace / relative_path
             allowed_base = mission_workspace
         else:

@@ -41,18 +41,29 @@ def init_queue_scheduler_blueprint(socketio=None):
     logger.info("Queue scheduler blueprint initialized")
 
 
-def _emit_queue_update(queue_data):
+def _emit_queue_update(queue_data, change_type='updated'):
     """Emit queue update event via WebSocket if available."""
+    # Use centralized websocket_events for proper room-based emission
+    try:
+        from websocket_events import emit_queue_updated
+        emit_queue_updated(queue_data, change_type)
+    except ImportError:
+        pass  # websocket_events not available
+    except Exception as e:
+        logger.error(f"Error emitting queue update via websocket_events: {e}")
+
+    # Also emit via local socketio for backward compatibility
     if _socketio:
         try:
             _socketio.emit('queue_updated', {
                 'queue_length': len(queue_data.get("missions", [])),
                 'missions': queue_data.get("missions", []),
                 'settings': queue_data.get("settings", {}),
-                'last_updated': queue_data.get("last_updated")
+                'last_updated': queue_data.get("last_updated"),
+                'change_type': change_type
             })
         except Exception as e:
-            logger.error(f"Error emitting queue update: {e}")
+            logger.error(f"Error emitting queue update via local socketio: {e}")
 
 
 def _load_queue() -> Dict[str, Any]:
@@ -160,6 +171,7 @@ def add_to_queue():
             "priority": data.get("priority", 0),  # 0 = normal, higher = more urgent
             "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
             "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
+            "project_name": data.get("project_name"),  # Optional project name for workspace
             "added_at": datetime.now().isoformat(),
             "status": "pending"
         }
@@ -168,8 +180,14 @@ def add_to_queue():
             queue = _load_queue()
             queue["missions"].append(entry)
             # Sort by priority (higher first), then by added_at
+            # Handle both numeric (legacy) and string priorities
+            priority_weights = {"critical": 100, "high": 50, "normal": 0, "low": -50}
+            def get_priority_weight(p):
+                if isinstance(p, int):
+                    return p
+                return priority_weights.get(str(p).lower(), 0)
             queue["missions"].sort(
-                key=lambda x: (-x.get("priority", 0), x.get("added_at", ""))
+                key=lambda x: (-get_priority_weight(x.get("priority", 0)), x.get("added_at", ""))
             )
             _save_queue(queue)
 
@@ -306,6 +324,16 @@ def start_next_mission():
         from datetime import datetime
 
         mission_id = f"mission_{uuid.uuid4().hex[:8]}"
+
+        # Determine workspace based on project_name
+        project_name = next_mission.get("project_name")
+        if project_name:
+            # Use project-specific workspace in the main workspace directory
+            mission_workspace = str(BASE_DIR / "workspace" / project_name)
+        else:
+            # Use mission-specific workspace
+            mission_workspace = str(BASE_DIR / "missions" / mission_id / "workspace")
+
         new_mission = {
             "mission_id": mission_id,
             "problem_statement": next_mission["problem_statement"],
@@ -323,8 +351,9 @@ def start_next_mission():
             "cycle_budget": next_mission.get("cycle_budget", 3),
             "current_cycle": 1,
             "cycle_history": [],
-            "mission_workspace": str(BASE_DIR / "missions" / mission_id / "workspace"),
+            "mission_workspace": mission_workspace,
             "mission_dir": str(BASE_DIR / "missions" / mission_id),
+            "project_name": project_name,  # Preserve project name in mission
             "metadata": {
                 "source": next_mission.get("source", "queue"),
                 "source_id": next_mission.get("source_id"),
@@ -793,6 +822,7 @@ def add_to_queue_enhanced():
             "estimated_minutes": estimated_minutes,
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),
+            "project_name": data.get("project_name"),  # Optional project name for workspace
             "added_at": datetime.now().isoformat(),
             "status": "pending",
             "tags": data.get("tags", [])

@@ -513,6 +513,9 @@ h1 { color: var(--accent); font-size: 1.3em; }
     z-index: 1000;
 }
 .toast.show { display: block; }
+.toast.toast-success { border-color: var(--green, #3fb950); background: rgba(63, 185, 80, 0.15); }
+.toast.toast-error { border-color: var(--red, #f85149); background: rgba(248, 81, 73, 0.15); }
+.toast.toast-warning { border-color: var(--yellow, #d29922); background: rgba(210, 153, 34, 0.15); }
 
 /* Modal */
 .modal {
@@ -10326,6 +10329,16 @@ body.modal-open {
 /* Dependency Badge in Queue Items */
 .queue-dep-badge {
     font-size: 0.85em;
+    cursor: help;
+}
+
+/* Project Badge in Queue Items */
+.queue-project-badge {
+    font-size: 0.75em;
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    padding: 2px 6px;
+    border-radius: 3px;
     cursor: help;
 }
 

@@ -675,7 +675,7 @@ def run_rd_mode():
     state["last_boot"] = datetime.now().isoformat()
     save_state(state)
 
-    send_to_chat(f"Claude R&D Mode starting (Boot #{state['boot_count']})")
+    send_to_chat(f"AtlasForge starting Mission Launch #{state['boot_count']}")
 
     # Initialize R&D controller
     controller = atlasforge_engine.RDMissionController()

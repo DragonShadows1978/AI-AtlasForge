@@ -171,6 +171,7 @@ window.startClaude = widgets.startClaude;
 window.stopClaude = widgets.stopClaude;
 window.setMission = widgets.setMission;
 window.resetMission = widgets.resetMission;
+window.queueMission = widgets.queueMission;
 window.loadFiles = widgets.loadFiles;
 window.updateStageIndicator = widgets.updateStageIndicator;
 window.updateStatusBar = widgets.updateStatusBar;

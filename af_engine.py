@@ -968,6 +968,9 @@ class RDMissionController:
         - Mission dependencies
 
         Falls back to simple FIFO queue if scheduler not available.
+
+        IMPORTANT: Queue item is only removed AFTER successful mission creation
+        to prevent mission loss if creation fails.
         """
         queue_path = STATE_DIR / "mission_queue.json"
 
@@ -990,9 +993,9 @@ class RDMissionController:
                         logger.debug("No ready items - all waiting on schedule/dependencies")
                         return
 
-                # Remove the item from queue
-                scheduler.remove_item(next_item_obj.id)
+                # DON'T remove the item yet - wait for successful mission creation
                 next_item = next_item_obj.to_dict()
+                next_item_id = next_item_obj.id
                 queue = scheduler.get_queue().queue
             else:
                 # Fallback to simple queue processing
@@ -1007,10 +1010,9 @@ class RDMissionController:
                     logger.debug("Queue empty - no next mission")
                     return
 
-                next_item = queue.pop(0)
-                queue_data["queue"] = queue
-                queue_data["last_processed_at"] = datetime.now().isoformat()
-                io_utils.atomic_write_json(queue_path, queue_data)
+                # DON'T pop yet - just peek at the first item
+                next_item = queue[0]
+                next_item_id = next_item.get("id")
 
             logger.info(f"Processing queued mission: {next_item.get('mission_title', 'Untitled')}")
 
@@ -1026,18 +1028,57 @@ class RDMissionController:
                     len(queue)
                 )
 
-            # Create the new mission
-            self._create_mission_from_queue_item(next_item)
+            # Create the new mission - returns True on success
+            success = self._create_mission_from_queue_item(next_item)
+
+            # Only remove from queue AFTER successful mission creation
+            if success:
+                if QUEUE_SCHEDULER_AVAILABLE:
+                    scheduler.remove_item(next_item_id)
+                    logger.info(f"Removed item {next_item_id} from queue after successful mission creation")
+                else:
+                    # Fallback: remove from simple queue
+                    queue_data = io_utils.atomic_read_json(queue_path, {"queue": [], "enabled": True})
+                    queue = queue_data.get("queue", [])
+                    # Remove the first item (the one we processed)
+                    if queue and queue[0].get("id") == next_item_id:
+                        queue.pop(0)
+                    else:
+                        # Fallback: remove by matching ID
+                        queue = [q for q in queue if q.get("id") != next_item_id]
+                    queue_data["queue"] = queue
+                    queue_data["last_processed_at"] = datetime.now().isoformat()
+                    io_utils.atomic_write_json(queue_path, queue_data)
+                    logger.info(f"Removed item {next_item_id} from queue after successful mission creation")
+
+                # Emit queue update event
+                try:
+                    from websocket_events import emit_queue_updated
+                    if QUEUE_SCHEDULER_AVAILABLE:
+                        updated_queue = scheduler.get_queue()
+                        emit_queue_updated({
+                            "missions": [q.to_dict() for q in updated_queue.queue],
+                            "settings": updated_queue.settings
+                        }, 'mission_started')
+                    else:
+                        emit_queue_updated(queue_data, 'mission_started')
+                except Exception as e:
+                    logger.warning(f"Failed to emit queue update: {e}")
+            else:
+                logger.error(f"Mission creation failed - keeping item {next_item_id} in queue")
 
         except Exception as e:
             logger.error(f"Queue processing failed: {e}")
 
-    def _create_mission_from_queue_item(self, queue_item: dict):
+    def _create_mission_from_queue_item(self, queue_item: dict) -> bool:
         """
         Create a new mission from a queue item and signal for auto-start.
 
         Args:
             queue_item: Dict with mission_title, mission_description, cycle_budget, project_name, etc.
+
+        Returns:
+            bool: True if mission was created successfully, False otherwise
         """
         import uuid
 
@@ -1140,8 +1181,18 @@ class RDMissionController:
                 {"new_mission_id": mission_id, "queue_item_id": queue_item.get("id")}
             )
 
+            # Verify mission was created successfully
+            verify_mission = io_utils.atomic_read_json(MISSION_PATH, {})
+            if verify_mission.get("mission_id") == mission_id and verify_mission.get("current_stage") == "PLANNING":
+                logger.info(f"Verified mission {mission_id} created with PLANNING stage")
+                return True
+            else:
+                logger.error(f"Mission verification failed: expected {mission_id} in PLANNING stage")
+                return False
+
         except Exception as e:
             logger.error(f"Failed to create mission from queue item: {e}")
+            return False
 
     def increment_iteration(self):
         """Increment iteration counter (for retry loops)."""

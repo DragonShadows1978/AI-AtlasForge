@@ -29,14 +29,38 @@ export function escapeHtml(text) {
 /**
  * Show a toast notification
  * @param {string} msg - Message to display
- * @param {number} duration - Duration in milliseconds (default 3000)
+ * @param {string|number} typeOrDuration - Either 'success'|'error'|'info'|'warning' or duration in ms
+ * @param {number} duration - Duration in milliseconds (default 3000) if type was specified
  */
-export function showToast(msg, duration = 3000) {
+export function showToast(msg, typeOrDuration = 3000, duration = 3000) {
     const t = document.getElementById('toast');
     if (!t) return;
+
+    // Handle backwards compatibility: if second arg is number, treat as duration
+    let toastType = 'info';
+    let toastDuration = 3000;
+
+    if (typeof typeOrDuration === 'number') {
+        toastDuration = typeOrDuration;
+    } else if (typeof typeOrDuration === 'string') {
+        toastType = typeOrDuration;
+        toastDuration = duration;
+    }
+
+    // Remove any previous type classes
+    t.classList.remove('toast-success', 'toast-error', 'toast-info', 'toast-warning');
+
+    // Add type class if not default info
+    if (toastType !== 'info') {
+        t.classList.add(`toast-${toastType}`);
+    }
+
     t.innerHTML = msg;
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), duration);
+    setTimeout(() => {
+        t.classList.remove('show');
+        t.classList.remove('toast-success', 'toast-error', 'toast-info', 'toast-warning');
+    }, toastDuration);
 }
 
 /**

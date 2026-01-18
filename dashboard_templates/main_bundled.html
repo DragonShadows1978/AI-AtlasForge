@@ -387,7 +387,7 @@
 
             <!-- Mission -->
             <div class="card" id="mission-card">
-                <h3>Mission</h3>
+                <h3>Mission Control Panel</h3>
                 <div id="current-mission" style="font-size: 0.85em; color: var(--text-dim); margin-bottom: 10px;">
                     No mission set
                 </div>
@@ -426,6 +426,7 @@
                         <button class="btn" onclick="resetMission()">Reset</button>
                         <button class="btn success" onclick="startClaude('rd')">Start Mission</button>
                         <button class="btn danger" onclick="stopClaude()" id="stop-mission-btn">Stop Mission</button>
+                        <button class="btn" onclick="queueMission()" title="Add mission to the queue without starting">Queue Mission</button>
                     </div>
                 </div>
 

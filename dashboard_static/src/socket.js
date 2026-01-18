@@ -80,7 +80,10 @@ const eventHandlers = {
     backup_stale_alert: [],
     file_events: [],
     glassbox_archive: [],
-    recommendations: []
+    recommendations: [],
+    queue_updated: [],
+    queue_paused: [],
+    queue_resumed: []
 };
 
 // =============================================================================
@@ -569,6 +572,8 @@ function resubscribeToRooms() {
         subscribeToRoom('file_events');
         subscribeToRoom('glassbox_archive');
         subscribeToRoom('recommendations');
+        // Subscribe to queue events
+        subscribeToRoom('queue_updated');
     } else {
         // Resubscribe to previously subscribed rooms
         connectionState.subscribedRooms.forEach(room => {

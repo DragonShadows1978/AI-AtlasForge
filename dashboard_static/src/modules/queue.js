@@ -215,6 +215,7 @@ function renderQueueItems() {
         const scheduledInfo = getScheduledInfo(m);
         const isSelected = selectedItems.has(m.id);
         const dependencyBadge = m.depends_on ? `<span class="queue-dep-badge" title="Depends on: ${m.depends_on}">🔗</span>` : '';
+        const projectBadge = m.project_name ? `<span class="queue-project-badge" title="Project: ${escapeHtml(m.project_name)}">📁 ${escapeHtml(m.project_name)}</span>` : '';
 
         return `
             <div class="queue-item ${priorityClass} ${isSelected ? 'selected' : ''}" data-queue-id="${m.id}" draggable="true">
@@ -229,6 +230,7 @@ function renderQueueItems() {
                         <span class="queue-item-source" title="Source: ${m.source}">${sourceIcon}</span>
                         ${scheduledInfo ? `<span class="queue-item-scheduled" title="${scheduledInfo.title}">${scheduledInfo.icon}</span>` : ''}
                         ${dependencyBadge}
+                        ${projectBadge}
                         <span class="queue-item-time">${timeAgo}</span>
                     </div>
                     <div class="queue-item-content" title="${escapeHtml(m.problem_statement)}">
@@ -1141,16 +1143,27 @@ export async function quickAddEnhanced() {
 
     const priority = prioritySelect?.value || 'normal';
 
+    // Get project name from main project input (carries over to queued missions)
+    const projectNameInput = document.getElementById('project-name-input');
+    const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+
     try {
-        const data = await api('/api/queue/add-enhanced', 'POST', {
+        const payload = {
             problem_statement: input.value.trim(),
             priority: priority,
             cycle_budget: 3,
             source: 'dashboard'
-        });
+        };
+        // Include project_name if specified
+        if (projectName) {
+            payload.project_name = projectName;
+        }
+
+        const data = await api('/api/queue/add-enhanced', 'POST', payload);
 
         if (data.status === 'added') {
-            showToast(`Mission added at position ${data.position} (est. ${formatEstimatedTime(data.estimated_minutes)})`);
+            const projectInfo = projectName ? ` [${projectName}]` : '';
+            showToast(`Mission added at position ${data.position}${projectInfo} (est. ${formatEstimatedTime(data.estimated_minutes)})`);
             input.value = '';
             if (prioritySelect) prioritySelect.value = 'normal';
             await refreshQueueWidget();

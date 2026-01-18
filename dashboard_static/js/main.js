@@ -855,11 +855,35 @@ function refreshMissionLogs() {
 }
 
 // Toast
-function showToast(msg) {
+function showToast(msg, typeOrDuration = 3000, duration = 3000) {
     const t = document.getElementById('toast');
+    if (!t) return;
+
+    // Handle backwards compatibility: if second arg is number, treat as duration
+    let toastType = 'info';
+    let toastDuration = 3000;
+
+    if (typeof typeOrDuration === 'number') {
+        toastDuration = typeOrDuration;
+    } else if (typeof typeOrDuration === 'string') {
+        toastType = typeOrDuration;
+        toastDuration = duration;
+    }
+
+    // Remove any previous type classes
+    t.classList.remove('toast-success', 'toast-error', 'toast-info', 'toast-warning');
+
+    // Add type class if not default info
+    if (toastType !== 'info') {
+        t.classList.add(`toast-${toastType}`);
+    }
+
     t.textContent = msg;
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 3000);
+    setTimeout(() => {
+        t.classList.remove('show');
+        t.classList.remove('toast-success', 'toast-error', 'toast-info', 'toast-warning');
+    }, toastDuration);
 }
 
 // Recommendations Management Functions
@@ -978,9 +1002,73 @@ async function api(endpoint, method = 'GET', body = null) {
 
 // Controls
 async function startClaude(mode) {
-    const data = await api(`/api/start/${mode}`, 'POST');
-    showToast(data.message);
-    refresh();
+    // Get mission input text
+    const missionInput = document.getElementById('mission-input');
+    const missionText = missionInput ? missionInput.value.trim() : '';
+
+    // Get current mission state
+    let currentMission = {};
+    try {
+        currentMission = await api('/api/mission', 'GET');
+    } catch (e) {
+        console.error('Failed to get current mission:', e);
+    }
+    const currentStage = currentMission.current_stage || 'COMPLETE';
+    const isComplete = (currentStage === 'COMPLETE' || currentStage === '' || !currentStage);
+
+    if (missionText) {
+        // Case 1: Text box has content - create new mission and start
+        const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+        const projectNameInput = document.getElementById('project-name-input');
+        const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+
+        // If replacing an active mission, ask for confirmation
+        if (!isComplete) {
+            const confirm1 = confirm(
+                `Current mission is in stage: ${currentStage}\n\n` +
+                `This will OVERWRITE the current mission and start the new one!\n\n` +
+                `Are you sure?`
+            );
+            if (!confirm1) return;
+
+            const confirm2 = confirm(
+                `SECOND CONFIRMATION\n\n` +
+                `You are about to PERMANENTLY overwrite:\n` +
+                `"${(currentMission.problem_statement || '').substring(0, 100)}..."\n\n` +
+                `This cannot be undone. Proceed?`
+            );
+            if (!confirm2) return;
+        }
+
+        // Create the new mission
+        const payload = { mission: missionText, cycle_budget: cycleBudget };
+        if (projectName) payload.project_name = projectName;
+
+        const setResult = await api('/api/mission', 'POST', payload);
+        if (!setResult.success) {
+            showToast(`Failed to set mission: ${setResult.message}`, 'error');
+            return;
+        }
+
+        // Clear inputs
+        missionInput.value = '';
+        if (projectNameInput) projectNameInput.value = '';
+
+        // Now start Claude
+        const startResult = await api(`/api/start/${mode}`, 'POST');
+        showToast(`Mission set and started: ${startResult.message}`, 'success');
+        refresh();
+
+    } else if (!isComplete) {
+        // Case 2: Empty text box, mission in progress - restart/resume
+        const data = await api(`/api/start/${mode}`, 'POST');
+        showToast(data.message);
+        refresh();
+
+    } else {
+        // Case 3: Empty text box, no active mission - error
+        showToast('No mission to start. Enter a mission description first.', 'error');
+    }
 }
 
 async function stopClaude() {
