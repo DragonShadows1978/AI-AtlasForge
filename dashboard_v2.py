@@ -1167,6 +1167,7 @@ if __name__ == '__main__':
                 env = os.environ.copy()
                 env['PYTHONPATH'] = str(embedder_path) + ':' + env.get('PYTHONPATH', '')
                 env['EMBEDDER_WEB_DASHBOARD_ENABLED'] = 'true'
+                env['EMBEDDER_WEB_DASHBOARD_HOST'] = '0.0.0.0'
                 subprocess.Popen(
                     [sys.executable, '-m', 'afterimage_embedder'],
                     cwd=str(embedder_path),
