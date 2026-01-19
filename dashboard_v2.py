@@ -334,12 +334,21 @@ init_recovery_blueprint(MISSION_PATH, io_utils)
 init_investigation_blueprint(BASE_DIR, STATE_DIR, io_utils, socketio)
 init_queue_scheduler_blueprint(socketio)
 # Semantic blueprint needs the mission workspace to find semantic_search_engine
-# Default to the current mission workspace if available
+# Default to the current mission workspace if available, using centralized resolver
 current_mission_workspace = None
 try:
     mission_data = io_utils.read_json(MISSION_PATH)
     if mission_data and 'mission_id' in mission_data:
-        current_mission_workspace = str(BASE_DIR / 'missions' / mission_data['mission_id'] / 'workspace')
+        # Use centralized workspace resolver for correct path with shared/legacy support
+        from dashboard_modules.workspace_resolver import resolve_mission_workspace
+        missions_dir = BASE_DIR / 'missions'
+        current_mission_workspace = str(resolve_mission_workspace(
+            mission_data['mission_id'],
+            missions_dir,
+            WORKSPACE_DIR,
+            io_utils,
+            mission_data
+        ))
 except Exception:
     pass
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
