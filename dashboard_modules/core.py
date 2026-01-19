@@ -918,13 +918,17 @@ def api_update_recommendation(rec_id):
 
 @core_bp.route('/api/recommendations/<rec_id>/set-mission', methods=['POST'])
 def api_set_mission_from_recommendation(rec_id):
-    """Set a mission from a recommendation and remove it from the list."""
+    """Set a mission from a recommendation and remove it from the list.
+
+    Supports shared workspaces via project_name resolution.
+    """
     storage = _get_suggestion_storage()
     if not storage:
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
     data = request.get_json() or {}
     cycle_budget = int(data.get("cycle_budget", 3))
+    user_project_name = data.get("project_name")  # Optional user-specified project name
 
     try:
         target_rec = storage.get_by_id(rec_id)
@@ -939,14 +943,8 @@ def api_set_mission_from_recommendation(rec_id):
     import uuid
     mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
-    missions_dir = BASE_DIR / "missions"
-    mission_dir = missions_dir / mission_id
-    mission_workspace = mission_dir / "workspace"
-    (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
-    (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
-    (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
-
-    # Build problem statement - special handling for merged recommendations
+    # Build problem statement first (needed for project name resolution)
+    # Special handling for merged recommendations
     if target_rec.get("source_type") == "merged" and target_rec.get("merged_source_descriptions"):
         # For merged recommendations, combine user summary with original source descriptions
         parts = []
@@ -964,6 +962,28 @@ def api_set_mission_from_recommendation(rec_id):
     else:
         # Standard: use mission_description if non-empty, otherwise fall back to mission_title
         problem_statement = target_rec.get("mission_description") or target_rec.get("mission_title") or ""
+
+    missions_dir = BASE_DIR / "missions"
+    mission_dir = missions_dir / mission_id
+
+    # Resolve project name for shared workspace (same logic as api_mission)
+    resolved_project_name = None
+    try:
+        from project_name_resolver import resolve_project_name
+        resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
+        # Use shared workspace under workspace/<project_name>/
+        mission_workspace = WORKSPACE_DIR / resolved_project_name
+    except ImportError:
+        # Fallback to legacy per-mission workspace
+        mission_workspace = mission_dir / "workspace"
+
+    # Create mission directory (for config, analytics, drift validation)
+    mission_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create workspace directories (may already exist if shared project)
+    (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+    (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
+    (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
     new_mission = {
         "mission_id": mission_id,
@@ -984,19 +1004,26 @@ def api_set_mission_from_recommendation(rec_id):
         "cycle_history": [],
         "mission_workspace": str(mission_workspace),
         "mission_dir": str(mission_dir),
+        "project_name": resolved_project_name,
         "source_recommendation_id": rec_id
     }
     io_utils.atomic_write_json(MISSION_PATH, new_mission)
 
+    # Build mission config with shared workspace info
+    config_data = {
+        "mission_id": mission_id,
+        "problem_statement": problem_statement,
+        "cycle_budget": max(1, cycle_budget),
+        "created_at": new_mission["created_at"],
+        "source_recommendation_id": rec_id
+    }
+    if resolved_project_name:
+        config_data["project_name"] = resolved_project_name
+        config_data["project_workspace"] = str(mission_workspace)
+
     mission_config_path = mission_dir / "mission_config.json"
     with open(mission_config_path, 'w') as f:
-        json.dump({
-            "mission_id": mission_id,
-            "problem_statement": problem_statement,
-            "cycle_budget": max(1, cycle_budget),
-            "created_at": new_mission["created_at"],
-            "source_recommendation_id": rec_id
-        }, f, indent=2)
+        json.dump(config_data, f, indent=2)
 
     # Register mission with analytics system
     try:
@@ -1015,11 +1042,17 @@ def api_set_mission_from_recommendation(rec_id):
         logging.warning(f"SQLite delete failed: {e}")
         # Continue anyway - mission was created successfully
 
+    response_msg = f"Mission set with {cycle_budget} cycle(s)."
+    if resolved_project_name:
+        response_msg += f" Project: {resolved_project_name}."
+    response_msg += " Click 'Start Mission' to begin."
+
     return jsonify({
         "success": True,
-        "message": f"Mission set with {cycle_budget} cycle(s). Click 'Start Mission' to begin.",
+        "message": response_msg,
         "mission_id": mission_id,
-        "mission_workspace": str(mission_workspace)
+        "mission_workspace": str(mission_workspace),
+        "project_name": resolved_project_name
     })
 
 
@@ -1080,6 +1113,9 @@ def download_file(filepath):
     Supports both global workspace and mission-specific paths:
     - /api/download/artifacts/file.txt - global workspace
     - /api/download/mission/{mission_id}/artifacts/file.txt - mission workspace
+
+    Uses centralized workspace resolver for correct path resolution
+    with both shared and legacy workspaces.
     """
     # Check if this is a mission-specific path
     if filepath.startswith('mission/'):
@@ -1088,25 +1124,12 @@ def download_file(filepath):
             mission_id = parts[1]
             relative_path = parts[2]
 
-            # Read mission config to get actual workspace location
-            mission_config_path = BASE_DIR / "missions" / mission_id / "mission_config.json"
-            if mission_config_path.exists():
-                try:
-                    with open(mission_config_path, 'r') as f:
-                        config = json.load(f)
-                    # Use project_workspace if available (shared workspace)
-                    project_workspace = config.get('project_workspace')
-                    if project_workspace and Path(project_workspace).exists():
-                        mission_workspace = Path(project_workspace)
-                    else:
-                        # Fallback to legacy path
-                        mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
-                except (json.JSONDecodeError, IOError):
-                    # On error, use legacy path
-                    mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
-            else:
-                # No config file, use legacy path
-                mission_workspace = BASE_DIR / "missions" / mission_id / "workspace"
+            # Use centralized workspace resolver
+            from .workspace_resolver import resolve_mission_workspace
+            missions_dir = BASE_DIR / "missions"
+            mission_workspace = resolve_mission_workspace(
+                mission_id, missions_dir, WORKSPACE_DIR, io_utils
+            )
 
             full_path = mission_workspace / relative_path
             allowed_base = mission_workspace

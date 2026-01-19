@@ -21,19 +21,28 @@ url_handlers_bp = Blueprint('url_handlers', __name__)
 from atlasforge_config import BASE_DIR, MISSIONS_DIR, WORKSPACE_DIR
 INVESTIGATIONS_DIR = BASE_DIR / "investigations"
 
+# Import io_utils for workspace resolution
+import io_utils
+
 
 @url_handlers_bp.route('/missions/<mission_id>/artifacts/<path:filename>')
 def serve_mission_artifact(mission_id, filename):
-    """Serve mission artifacts."""
+    """Serve mission artifacts.
+
+    Supports both shared workspaces (project_workspace) and legacy per-mission workspaces.
+    """
     try:
         # Security: prevent directory traversal
         if '..' in mission_id or '..' in filename:
             abort(400, "Invalid path")
 
-        artifact_path = MISSIONS_DIR / mission_id / "workspace" / "artifacts" / filename
+        # Use centralized workspace resolver for correct path
+        from .workspace_resolver import resolve_mission_workspace
+        workspace = resolve_mission_workspace(mission_id, MISSIONS_DIR, WORKSPACE_DIR, io_utils)
+        artifact_path = workspace / "artifacts" / filename
 
         if not artifact_path.exists():
-            # Try without workspace subfolder
+            # Try without workspace subfolder (fallback for legacy direct artifacts)
             artifact_path = MISSIONS_DIR / mission_id / "artifacts" / filename
 
         if not artifact_path.exists():

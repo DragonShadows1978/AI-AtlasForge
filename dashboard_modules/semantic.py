@@ -448,7 +448,10 @@ def init_semantic_blueprint(mission_workspace: str = None, socketio=None, io_uti
 
 
 def _get_semantic_engine():
-    """Get the semantic search engine instance."""
+    """Get the semantic search engine instance.
+
+    Uses centralized workspace resolver to handle both shared and legacy workspaces.
+    """
     try:
         import sys
         workspace = _config.get('mission_workspace')
@@ -457,16 +460,25 @@ def _get_semantic_engine():
         if not workspace:
             try:
                 from pathlib import Path
-                import json
+                import io_utils
                 base_dir = Path(__file__).parent.parent
                 mission_path = base_dir / 'state' / 'mission.json'
                 if mission_path.exists():
-                    with open(mission_path) as f:
-                        mission_data = json.load(f)
+                    mission_data = io_utils.atomic_read_json(str(mission_path), {})
                     if mission_data.get('mission_workspace'):
                         workspace = mission_data['mission_workspace']
                     elif mission_data.get('mission_id'):
-                        workspace = str(base_dir / 'missions' / mission_data['mission_id'] / 'workspace')
+                        # Use centralized workspace resolver
+                        from .workspace_resolver import resolve_mission_workspace
+                        missions_dir = base_dir / 'missions'
+                        workspace_dir = base_dir / 'workspace'
+                        workspace = str(resolve_mission_workspace(
+                            mission_data['mission_id'],
+                            missions_dir,
+                            workspace_dir,
+                            io_utils,
+                            mission_data
+                        ))
             except Exception as e:
                 logger.debug(f"Could not read mission.json: {e}")
 
