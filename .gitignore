@@ -75,6 +75,9 @@ workspace/
 config.yaml
 *.pem
 *.key
+
+# SSL Certificates (do not commit private keys)
+certs/
 credentials.json
 secrets.json
 config.local.json

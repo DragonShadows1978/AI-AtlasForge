@@ -15,6 +15,7 @@ RestartSec=5
 # Environment
 Environment="PYTHONUNBUFFERED=1"
 Environment="ATLASFORGE_ROOT=/opt/ai-atlasforge"
+Environment="DASHBOARD_SSL=true"
 
 # Security hardening
 NoNewPrivileges=true
