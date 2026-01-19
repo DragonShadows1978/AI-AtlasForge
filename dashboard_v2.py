@@ -44,6 +44,11 @@ LOG_DIR = BASE_DIR / "logs"
 TEMPLATES_DIR = BASE_DIR / "dashboard_templates"
 STATIC_DIR = BASE_DIR / "dashboard_static"
 
+# SSL Configuration
+CERTS_DIR = BASE_DIR / "certs"
+SSL_CERT = CERTS_DIR / "cert.pem"
+SSL_KEY = CERTS_DIR / "key.pem"
+
 # State files
 CLAUDE_STATE_PATH = STATE_DIR / "claude_state.json"
 CLAUDE_JOURNAL_PATH = STATE_DIR / "claude_journal.jsonl"
@@ -269,6 +274,22 @@ def send_message_to_claude(message: str) -> bool:
         "timestamp": datetime.now().isoformat()
     })
     return True
+
+
+def get_ssl_context():
+    """Get SSL context if certificates exist and SSL is enabled.
+
+    Returns:
+        Tuple of (cert_path, key_path) if SSL is enabled and certs exist,
+        None otherwise (falls back to HTTP).
+
+    Environment:
+        DASHBOARD_SSL: Set to 'false' to disable HTTPS (default: 'true')
+    """
+    ssl_enabled = os.environ.get('DASHBOARD_SSL', 'true').lower() == 'true'
+    if ssl_enabled and SSL_CERT.exists() and SSL_KEY.exists():
+        return (str(SSL_CERT), str(SSL_KEY))
+    return None
 
 
 # =============================================================================
@@ -1288,7 +1309,18 @@ if __name__ == '__main__':
     print(f"Modules: dashboard_modules/")
     print("=" * 50)
     PORT = int(os.environ.get('PORT', 5010))
-    print(f"Access at: http://localhost:{PORT}")
+
+    # Get SSL context if available
+    ssl_ctx = get_ssl_context()
+    protocol = "https" if ssl_ctx else "http"
+
+    if ssl_ctx:
+        print(f"SSL: Enabled (certificates in {CERTS_DIR})")
+    else:
+        ssl_reason = "disabled via DASHBOARD_SSL=false" if os.environ.get('DASHBOARD_SSL', 'true').lower() == 'false' else "certificates not found"
+        print(f"SSL: Disabled ({ssl_reason})")
+
+    print(f"Access at: {protocol}://localhost:{PORT}")
     print("=" * 50)
 
-    socketio.run(app, host='::', port=PORT, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='::', port=PORT, ssl_context=ssl_ctx, allow_unsafe_werkzeug=True)
