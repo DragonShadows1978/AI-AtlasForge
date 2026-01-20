@@ -188,7 +188,7 @@ def register_archival_routes(app):
     def api_rearchive_mission(mission_id):
         """Re-archive a specific mission's transcripts."""
         try:
-            from atlasforge_engine import rearchive_mission
+            from af_engine import rearchive_mission
             result = rearchive_mission(mission_id)
             return jsonify(result)
         except Exception as e:
@@ -198,7 +198,7 @@ def register_archival_routes(app):
     def api_rearchive_all():
         """Re-archive all missions with empty/missing transcript data."""
         try:
-            from atlasforge_engine import rearchive_all_missions
+            from af_engine import rearchive_all_missions
             result = rearchive_all_missions()
             return jsonify(result)
         except Exception as e:

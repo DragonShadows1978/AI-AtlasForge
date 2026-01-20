@@ -80,23 +80,23 @@ dashboard: ## Start the dashboard server (http://localhost:5050)
 run: ## Start the autonomous agent in R&D mode
 	@echo "$(BLUE)[AtlasForge]$(NC) Starting autonomous agent..."
 	@if [ -f "$(VENV)/bin/activate" ]; then \
-		. $(VENV)/bin/activate && python3 claude_autonomous.py --mode=rd; \
+		. $(VENV)/bin/activate && python3 atlasforge_conductor.py --mode=rd; \
 	else \
-		python3 claude_autonomous.py --mode=rd; \
+		python3 atlasforge_conductor.py --mode=rd; \
 	fi
 
 run-free: ## Start the autonomous agent in free exploration mode
 	@echo "$(BLUE)[AtlasForge]$(NC) Starting agent in free mode..."
 	@if [ -f "$(VENV)/bin/activate" ]; then \
-		. $(VENV)/bin/activate && python3 claude_autonomous.py --mode=free; \
+		. $(VENV)/bin/activate && python3 atlasforge_conductor.py --mode=free; \
 	else \
-		python3 claude_autonomous.py --mode=free; \
+		python3 atlasforge_conductor.py --mode=free; \
 	fi
 
 stop: ## Stop all AtlasForge processes
 	@echo "$(BLUE)[AtlasForge]$(NC) Stopping all processes..."
 	@pkill -f "python3 dashboard_v2.py" 2>/dev/null || true
-	@pkill -f "python3 claude_autonomous.py" 2>/dev/null || true
+	@pkill -f "python3 atlasforge_conductor.py" 2>/dev/null || true
 	@echo "$(GREEN)All processes stopped$(NC)"
 
 ##@ Docker

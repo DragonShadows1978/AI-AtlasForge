@@ -1,6 +1,6 @@
 [project]
 name = "ai-atlasforge"
-version = "1.3.7"
+version = "1.4.0"
 description = "Autonomous AI research and development platform powered by Claude"
 readme = "README.md"
 license = {text = "MIT"}
@@ -49,7 +49,7 @@ all = [
 
 [project.scripts]
 atlasforge-dashboard = "dashboard_v2:main"
-atlasforge = "claude_autonomous:main"
+atlasforge = "atlasforge_conductor:main"
 
 [project.urls]
 Homepage = "https://github.com/DragonShadows1978/AI-AtlasForge"

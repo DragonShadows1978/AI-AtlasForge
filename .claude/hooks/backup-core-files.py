@@ -25,7 +25,7 @@ CORE_FILES = [
     # AI-AtlasForge Core
     str(ATLASFORGE_ROOT / "dashboard_v2.py"),
     str(ATLASFORGE_ROOT / "atlasforge_engine.py"),
-    str(ATLASFORGE_ROOT / "claude_autonomous.py"),
+    str(ATLASFORGE_ROOT / "atlasforge_conductor.py"),
     str(ATLASFORGE_ROOT / "exploration_hooks.py"),
     str(ATLASFORGE_ROOT / "io_utils.py"),
     str(ATLASFORGE_ROOT / "GROUND_RULES.md"),

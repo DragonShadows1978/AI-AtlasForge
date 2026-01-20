@@ -1413,6 +1413,12 @@ class InvestigationRunner:
             except Exception as kb_error:
                 logger.warning(f"KB ingestion failed (non-fatal): {kb_error}")
 
+            # Extract code blocks and inject to AI-AfterImage Code DB
+            try:
+                self._extract_and_inject_code_to_afterimage()
+            except Exception as code_error:
+                logger.warning(f"Code extraction/injection failed (non-fatal): {code_error}")
+
             return InvestigationResult(
                 investigation_id=self.config.investigation_id,
                 query=self.config.query,
@@ -1815,6 +1821,56 @@ Previous attempt errors: {previous_issues}
         except Exception as e:
             logger.error(f"Failed to ingest investigation to KB: {e}")
             raise
+
+    def _extract_and_inject_code_to_afterimage(self):
+        """
+        Extract code blocks from investigation outputs and inject to AI-AfterImage.
+
+        This method:
+        1. Scans investigation artifacts for code blocks
+        2. Extracts code with semantic context
+        3. Injects to AI-AfterImage Code DB
+
+        The semantic connection between research context and code is preserved.
+        """
+        try:
+            # Import the code extraction pipeline
+            import sys
+            investigation_module_path = str(BASE_DIR / "workspace" / "Investigation")
+            if investigation_module_path not in sys.path:
+                sys.path.insert(0, investigation_module_path)
+
+            from afterimage_injector import ResearchCodePipeline, InjectionConfig
+
+            # Configure the pipeline
+            config = InjectionConfig(
+                min_confidence=0.4,
+                session_id=self.config.investigation_id,
+            )
+
+            pipeline = ResearchCodePipeline(injector_config=config)
+
+            # Process the investigation
+            result = pipeline.process_investigation(
+                investigation_dir=self.config.workspace_dir,
+                investigation_id=self.config.investigation_id,
+                query=self.config.query
+            )
+
+            if result.injected_count > 0:
+                self._log(f"Injected {result.injected_count} code blocks to AI-AfterImage Code DB")
+            elif result.total_blocks > 0:
+                self._log(f"Found {result.total_blocks} code blocks, {result.skipped_count} skipped")
+            # No log if no code blocks found (common case)
+
+            pipeline.close()
+
+        except ImportError as e:
+            # AI-AfterImage or extraction module not available - this is non-fatal
+            logger.debug(f"Code extraction skipped (module not available): {e}")
+        except Exception as e:
+            # Log but don't fail the investigation
+            logger.warning(f"Code extraction/injection failed (non-fatal): {e}")
 
 
 # =============================================================================

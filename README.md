@@ -76,7 +76,7 @@ For detailed installation options, see [INSTALL.md](INSTALL.md) or [QUICKSTART.m
 3. **Start the Engine**:
    ```bash
    make run
-   # Or: python3 claude_autonomous.py --mode=rd
+   # Or: python3 atlasforge_conductor.py --mode=rd
    ```
 
 ### Development Commands

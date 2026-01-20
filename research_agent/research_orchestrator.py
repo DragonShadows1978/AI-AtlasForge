@@ -300,6 +300,12 @@ Respond in JSON:
             except Exception as e:
                 findings.errors.append(f"Synthesis failed: {e}")
 
+        # Extract and inject code to AI-AfterImage
+        try:
+            self._extract_and_inject_code(findings, mission, log_progress)
+        except Exception as e:
+            findings.errors.append(f"Code extraction failed (non-fatal): {e}")
+
         # Finalize
         end_time = datetime.now()
         findings.duration_ms = (end_time - start_time).total_seconds() * 1000
@@ -368,6 +374,70 @@ Respond in JSON:
         """
         result = self.research_topic(topic, context)
         return self.synthesizer.synthesize_single(topic, result, context)
+
+    def _extract_and_inject_code(
+        self,
+        findings: ResearchFindings,
+        mission: str,
+        log_progress: Callable[[str], None]
+    ):
+        """
+        Extract code blocks from research findings and inject to AI-AfterImage.
+
+        This enables code discovered during the Planning Stage research to be
+        stored in the Code DB for future reference.
+
+        Args:
+            findings: The research findings containing potential code
+            mission: The mission/query being researched
+            log_progress: Callback for progress updates
+        """
+        try:
+            # Import the code extraction pipeline
+            import sys
+            from pathlib import Path
+
+            # Add Investigation module to path
+            investigation_path = Path(__file__).parent.parent / "workspace" / "Investigation"
+            if str(investigation_path) not in sys.path:
+                sys.path.insert(0, str(investigation_path))
+
+            from afterimage_injector import ResearchCodePipeline, InjectionConfig
+            import uuid
+
+            # Generate a research session ID
+            research_id = f"research_{uuid.uuid4().hex[:8]}"
+
+            # Configure the pipeline
+            config = InjectionConfig(
+                min_confidence=0.4,
+                session_id=research_id,
+            )
+
+            pipeline = ResearchCodePipeline(injector_config=config)
+
+            # Convert findings to dict format for extraction
+            findings_dict = findings.to_dict()
+
+            # Process the research findings
+            result = pipeline.process_research_findings(
+                findings=findings_dict,
+                research_id=research_id,
+                query=mission
+            )
+
+            if result.injected_count > 0:
+                log_progress(f"Injected {result.injected_count} code blocks to AI-AfterImage")
+
+            pipeline.close()
+
+        except ImportError:
+            # AI-AfterImage or extraction module not available - silent skip
+            pass
+        except Exception as e:
+            # Log but don't fail the research
+            import logging
+            logging.getLogger(__name__).debug(f"Code extraction skipped: {e}")
 
 
 def research_for_mission(

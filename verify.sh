@@ -201,7 +201,7 @@ info "Checking core files..."
 echo ""
 
 CORE_FILES=(
-    "claude_autonomous.py"
+    "atlasforge_conductor.py"
     "dashboard_v2.py"
     "af_engine.py"
     "requirements.txt"

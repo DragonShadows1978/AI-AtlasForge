@@ -77,6 +77,23 @@ Examples of correct behavior:
 - Your screen capture code should connect to display :99
 - The virtual display is 1920x1080x24
 
+## Browser Constraint - MANDATORY
+**ALL web-related research, coding, and testing MUST use Firefox ONLY.**
+
+- **DO NOT use Chrome, Chromium, or any Chrome-based browsers**
+- Web automation: Use Selenium with Firefox/geckodriver
+- Web testing: Launch Firefox for manual or automated testing
+- Web development: Test in Firefox browser only
+- Research/browsing: Use Firefox if browser interaction is needed
+
+**Why Firefox only:**
+- The human user uses Chrome for their own work
+- AtlasForge opening/closing Chrome tabs would interfere with active human browsing
+- Firefox is dedicated for autonomous agent use only
+- This creates clean separation: Chrome = human, Firefox = machine
+
+If your task involves web browsers, use Firefox. No exceptions.
+
 ## Vision Tool - Screen Capture
 **You have a high-performance screen capture tool available:** `vision_tool.py` in the project root.
 

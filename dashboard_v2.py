@@ -58,7 +58,7 @@ MISSION_PATH = STATE_DIR / "mission.json"
 PROPOSALS_PATH = STATE_DIR / "proposals.json"
 RECOMMENDATIONS_PATH = STATE_DIR / "recommendations.json"
 MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
-PID_PATH = BASE_DIR / "claude_autonomous.pid"
+PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 
 # Ensure directories exist
 STATE_DIR.mkdir(exist_ok=True)
@@ -165,7 +165,7 @@ def find_process(script_name: str) -> dict | None:
 
 def get_claude_status() -> dict:
     """Get Claude autonomous status."""
-    proc = find_process("claude_autonomous.py")
+    proc = find_process("atlasforge_conductor.py")
     state = io_utils.atomic_read_json(CLAUDE_STATE_PATH, {})
     mission = io_utils.atomic_read_json(MISSION_PATH, {})
 
@@ -219,15 +219,15 @@ def get_recent_journal(n: int = 10) -> list:
 
 def start_claude(mode: str = "rd") -> tuple[bool, str]:
     """Start Claude autonomous."""
-    if find_process("claude_autonomous.py"):
+    if find_process("atlasforge_conductor.py"):
         return False, "Already running"
 
-    script_path = BASE_DIR / "claude_autonomous.py"
+    script_path = BASE_DIR / "atlasforge_conductor.py"
     if not script_path.exists():
         return False, "Script not found"
 
     try:
-        log_file = LOG_DIR / "claude_autonomous.log"
+        log_file = LOG_DIR / "atlasforge_conductor.log"
         subprocess.Popen(
             ["python3", str(script_path), f"--mode={mode}"],
             cwd=str(BASE_DIR),
@@ -237,7 +237,7 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
         )
         time.sleep(2)
 
-        if find_process("claude_autonomous.py"):
+        if find_process("atlasforge_conductor.py"):
             return True, f"Started in {mode} mode"
         return False, "Failed to start"
     except Exception as e:
@@ -246,7 +246,7 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
 
 def stop_claude() -> tuple[bool, str]:
     """Stop Claude autonomous."""
-    proc = find_process("claude_autonomous.py")
+    proc = find_process("atlasforge_conductor.py")
     if not proc:
         return False, "Not running"
 
@@ -254,7 +254,7 @@ def stop_claude() -> tuple[bool, str]:
         os.kill(proc["pid"], signal.SIGTERM)
         time.sleep(2)
 
-        if find_process("claude_autonomous.py"):
+        if find_process("atlasforge_conductor.py"):
             os.kill(proc["pid"], signal.SIGKILL)
             time.sleep(1)
 
@@ -500,13 +500,13 @@ def queue_auto_start_watcher():
                         continue
 
                     # Check if Claude is already running - with grace period
-                    if find_process("claude_autonomous.py"):
+                    if find_process("atlasforge_conductor.py"):
                         # Wait for grace period to allow old process to terminate
                         print(f"[QueueWatcher] Claude detected running, waiting {PROCESS_GRACE_PERIOD}s grace period...")
                         time.sleep(PROCESS_GRACE_PERIOD)
 
                         # Check again after grace period
-                        if find_process("claude_autonomous.py"):
+                        if find_process("atlasforge_conductor.py"):
                             print(f"[QueueWatcher] Claude still running after grace period, incrementing retry count")
                             # Increment retry count and save back (don't delete signal)
                             signal_data["retry_count"] = retry_count + 1
@@ -547,7 +547,7 @@ def queue_auto_start_watcher():
                 idle_check_counter = 0
 
                 # Check if Claude is already running
-                if find_process("claude_autonomous.py"):
+                if find_process("atlasforge_conductor.py"):
                     continue  # Already running
 
                 # Check mission state
