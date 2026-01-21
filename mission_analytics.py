@@ -576,15 +576,29 @@ class MissionAnalytics:
         Returns:
             Estimated cost in USD
         """
-        # Get pricing for model, fall back to default
-        pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
+        # Try to get pricing from provider_config first (multi-provider support)
+        pricing = None
+        try:
+            import provider_config
+            # Check all providers for this model
+            for provider, models in provider_config.PRICING_MAP.items():
+                if model in models:
+                    pricing = models[model]
+                    break
+        except Exception as e:
+            logger.debug(f"Could not load provider_config pricing: {e}")
+
+        # Fall back to legacy MODEL_PRICING
+        if not pricing:
+            pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
 
         # Calculate cost (pricing is per 1M tokens)
+        # Handle both new format (input/output only) and legacy format (with cache fields)
         cost = (
-            (input_tokens / 1_000_000) * pricing["input"] +
-            (output_tokens / 1_000_000) * pricing["output"] +
-            (cache_read / 1_000_000) * pricing["cache_read"] +
-            (cache_write / 1_000_000) * pricing["cache_write"]
+            (input_tokens / 1_000_000) * pricing.get("input", 0) +
+            (output_tokens / 1_000_000) * pricing.get("output", 0) +
+            (cache_read / 1_000_000) * pricing.get("cache_read", 0) +
+            (cache_write / 1_000_000) * pricing.get("cache_write", 0)
         )
 
         return round(cost, 6)
