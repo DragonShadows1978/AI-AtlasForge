@@ -465,6 +465,16 @@ def queue_auto_start_watcher():
 
             # === Signal file detection (fixed logic) ===
             if QUEUE_AUTO_START_SIGNAL_PATH.exists():
+                # Check queue processing lock before proceeding
+                try:
+                    from queue_processing_lock import is_queue_locked, get_queue_lock_info
+                    if is_queue_locked():
+                        lock_info = get_queue_lock_info()
+                        print(f"[QueueWatcher] Queue locked by {lock_info.get('locked_by')}, waiting...")
+                        continue
+                except ImportError:
+                    pass  # Lock module not available, proceed
+
                 # Read the signal file
                 signal_data = io_utils.atomic_read_json(QUEUE_AUTO_START_SIGNAL_PATH, {})
                 if signal_data and signal_data.get("action") == "start_rd":
@@ -545,6 +555,14 @@ def queue_auto_start_watcher():
             idle_check_counter += 1
             if idle_check_counter >= IDLE_CHECK_INTERVAL:
                 idle_check_counter = 0
+
+                # Check queue processing lock before proceeding
+                try:
+                    from queue_processing_lock import is_queue_locked
+                    if is_queue_locked():
+                        continue  # Queue is being processed elsewhere
+                except ImportError:
+                    pass  # Lock module not available, proceed
 
                 # Check if Claude is already running
                 if find_process("atlasforge_conductor.py"):
