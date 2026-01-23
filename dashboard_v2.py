@@ -325,6 +325,7 @@ from dashboard_modules import (
     url_handlers_bp,
     queue_scheduler_bp, init_queue_scheduler_blueprint,
     semantic_bp, init_semantic_blueprint,
+    version_bp, init_version_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -373,6 +374,7 @@ try:
 except Exception:
     pass
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
+init_version_blueprint(BASE_DIR)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -386,6 +388,7 @@ app.register_blueprint(cache_bp)
 app.register_blueprint(url_handlers_bp)
 app.register_blueprint(queue_scheduler_bp)
 app.register_blueprint(semantic_bp)
+app.register_blueprint(version_bp)
 
 # Register non-prefixed routes
 register_archival_routes(app)
