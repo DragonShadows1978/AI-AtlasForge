@@ -211,6 +211,16 @@
         .port-label{color:var(--text-dim);font-weight:500}
         .port-value{color:var(--accent);font-weight:600;font-family:monospace}
 
+        /* Version Indicators */
+        .version-indicator{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border)}
+        .version-label{color:var(--text-dim);font-weight:500}
+        .version-status{font-weight:600}
+        .version-status.checking{color:var(--text-dim)}
+        .version-status.up-to-date{color:var(--green)}
+        .version-status.update-available{color:var(--red)}
+        .version-status.error{color:var(--yellow)}
+        .version-status.not-installed{color:var(--text-dim);font-style:italic}
+
         /* Service Status Indicators (AtlasForge + Investigation) */
         .service-status-group{display:flex;align-items:center;gap:12px}
         .service-status{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border)}
@@ -277,6 +287,17 @@
                     <span id="dashboard-port" class="port-value"></span>
                 </div>
                 <script>document.getElementById('dashboard-port').textContent = location.port || '80';</script>
+                <!-- Version Status Indicators -->
+                <div class="version-indicators" style="display: flex; align-items: center; gap: 12px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border);">
+                    <div id="atlasforge-version" class="version-indicator" title="AtlasForge version status">
+                        <span class="version-label">AtlasForge:</span>
+                        <span id="atlasforge-version-status" class="version-status checking">Checking...</span>
+                    </div>
+                    <div id="afterimage-version" class="version-indicator" title="AI-AfterImage version status" style="display: none;">
+                        <span class="version-label">AI-AfterImage:</span>
+                        <span id="afterimage-version-status" class="version-status checking">Checking...</span>
+                    </div>
+                </div>
             </div>
         </div>
         <!-- Row 2: Service Status (left) | Layout Controls (right) -->
@@ -2127,6 +2148,105 @@
             var loader = document.getElementById('loading-indicator');
             if (loader) loader.style.display = 'none';
         });
+    </script>
+
+    <!-- Version Status Checker -->
+    <script>
+        (function() {
+            'use strict';
+
+            var VERSION_CHECK_INTERVAL = 300000; // 5 minutes
+            var versionCheckTimer = null;
+
+            function updateVersionIndicator(project, data) {
+                var container = document.getElementById(project + '-version');
+                var statusEl = document.getElementById(project + '-version-status');
+
+                if (!statusEl) return;
+
+                // Remove all status classes
+                statusEl.className = 'version-status';
+
+                if (!data.installed) {
+                    // Project not installed - hide the indicator
+                    if (container) container.style.display = 'none';
+                    return;
+                }
+
+                // Show the indicator
+                if (container) container.style.display = 'flex';
+
+                // Set the status class and text
+                if (data.status === 'up_to_date') {
+                    statusEl.classList.add('up-to-date');
+                    statusEl.textContent = 'Up To Date';
+                    if (data.version) {
+                        statusEl.title = 'Version: ' + data.version;
+                    }
+                } else if (data.status === 'update_available') {
+                    statusEl.classList.add('update-available');
+                    statusEl.textContent = data.message || 'Update Required';
+                    if (data.commits_behind) {
+                        statusEl.title = data.commits_behind + ' commits behind. Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
+                    }
+                } else if (data.status === 'error') {
+                    statusEl.classList.add('error');
+                    statusEl.textContent = 'Error';
+                    statusEl.title = data.error || 'Unknown error';
+                } else {
+                    statusEl.classList.add('checking');
+                    statusEl.textContent = 'Unknown';
+                }
+            }
+
+            function checkVersions() {
+                fetch('/api/version/status')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.atlasforge) {
+                            updateVersionIndicator('atlasforge', data.atlasforge);
+                        }
+                        if (data.afterimage) {
+                            updateVersionIndicator('afterimage', data.afterimage);
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error('[VersionCheck] Failed to check versions:', err);
+                        // Show error state
+                        var atlasforgeStatus = document.getElementById('atlasforge-version-status');
+                        if (atlasforgeStatus) {
+                            atlasforgeStatus.className = 'version-status error';
+                            atlasforgeStatus.textContent = 'Error';
+                        }
+                    });
+            }
+
+            // Initial check on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                // Delay initial check slightly to not block page load
+                setTimeout(checkVersions, 1000);
+
+                // Set up periodic checks
+                versionCheckTimer = setInterval(checkVersions, VERSION_CHECK_INTERVAL);
+            });
+
+            // Expose refresh function globally for manual refresh
+            window.refreshVersionStatus = function() {
+                fetch('/api/version/refresh', { method: 'POST' })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.atlasforge) {
+                            updateVersionIndicator('atlasforge', data.atlasforge);
+                        }
+                        if (data.afterimage) {
+                            updateVersionIndicator('afterimage', data.afterimage);
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error('[VersionCheck] Failed to refresh versions:', err);
+                    });
+            };
+        })();
     </script>
 
     <!-- Fallback status updater - ensures widgets always update even if bundle has issues -->

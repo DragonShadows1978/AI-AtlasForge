@@ -67,6 +67,7 @@ from .cache import cache_bp
 from .url_handlers import url_handlers_bp
 from .queue_scheduler import queue_scheduler_bp, init_queue_scheduler_blueprint
 from .semantic import semantic_bp, init_semantic_blueprint
+from .version_checker import version_bp, init_version_blueprint
 
 __all__ = [
     # Blueprints
@@ -88,6 +89,8 @@ __all__ = [
     'init_investigation_blueprint',
     'init_queue_scheduler_blueprint',
     'init_semantic_blueprint',
+    'version_bp',
+    'init_version_blueprint',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]
