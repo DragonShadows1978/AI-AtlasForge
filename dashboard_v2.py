@@ -326,6 +326,7 @@ from dashboard_modules import (
     queue_scheduler_bp, init_queue_scheduler_blueprint,
     semantic_bp, init_semantic_blueprint,
     version_bp, init_version_blueprint,
+    get_bundle_version, init_bundle_version,
 )
 
 # Initialize blueprints with dependencies
@@ -375,6 +376,7 @@ except Exception:
     pass
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
 init_version_blueprint(BASE_DIR)
+init_bundle_version(STATIC_DIR, BASE_DIR)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -632,7 +634,13 @@ def index():
     # Use bundled template in production (USE_BUNDLED=true)
     # Use legacy template in development (USE_BUNDLED=false)
     template_name = "main_bundled" if app.config['USE_BUNDLED'] else "main"
-    return render_template_string(load_template(template_name))
+    # Get bundle version for cache-busting
+    bundle_version = get_bundle_version()
+    return render_template_string(
+        load_template(template_name),
+        bundle_js_version=bundle_version['js'],
+        bundle_css_version=bundle_version['css']
+    )
 
 
 @app.route('/favicon.ico')
