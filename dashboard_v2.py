@@ -548,6 +548,16 @@ def queue_auto_start_watcher():
                             })
                         except:
                             pass
+                        # Emit auto-start notification for browser notifications
+                        try:
+                            from websocket_events import emit_mission_auto_started
+                            emit_mission_auto_started(
+                                mission_id=mission_id,
+                                mission_title=mission_title,
+                                source=signal_data.get("source", "queue_auto")
+                            )
+                        except ImportError:
+                            pass
                     else:
                         print(f"[QueueWatcher] Failed to start queued mission: {msg}")
                         # Keep signal file for retry, increment retry count
@@ -611,7 +621,18 @@ def queue_auto_start_watcher():
                     resp = requests.post("http://localhost:5000/api/queue/next", timeout=10)
                     if resp.status_code == 200:
                         data = resp.json()
-                        print(f"[QueueWatcher] Idle auto-start triggered: {data.get('mission_id', 'unknown')}")
+                        started_id = data.get('mission_id', 'unknown')
+                        print(f"[QueueWatcher] Idle auto-start triggered: {started_id}")
+                        # Emit auto-start notification for browser notifications
+                        try:
+                            from websocket_events import emit_mission_auto_started
+                            emit_mission_auto_started(
+                                mission_id=started_id,
+                                mission_title=mission_title,
+                                source="idle_auto_start"
+                            )
+                        except ImportError:
+                            pass
                     else:
                         print(f"[QueueWatcher] Idle auto-start failed: {resp.text}")
                 except Exception as e:
