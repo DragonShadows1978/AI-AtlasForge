@@ -161,6 +161,44 @@ export function triggerDownload(blob, filename) {
 }
 
 /**
+ * Download a file via fetch + blob (bypasses Chrome's strict cert checks for native downloads)
+ * This is the preferred method for self-signed SSL certificates
+ * @param {string} url - URL to download from
+ * @param {string} [filename] - Optional filename (extracted from URL if not provided)
+ * @returns {Promise<void>}
+ */
+export async function downloadFileViaFetch(url, filename = null) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+        }
+
+        // Extract filename from Content-Disposition header or URL
+        if (!filename) {
+            const contentDisposition = response.headers.get('Content-Disposition');
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                if (match && match[1]) {
+                    filename = match[1].replace(/['"]/g, '');
+                }
+            }
+            // Fallback: extract from URL
+            if (!filename) {
+                filename = url.split('/').pop().split('?')[0] || 'download';
+            }
+        }
+
+        const blob = await response.blob();
+        triggerDownload(blob, filename);
+    } catch (error) {
+        console.error('Download error:', error);
+        showToast(`Download failed: ${error.message}`, 'error');
+        throw error;
+    }
+}
+
+/**
  * Download data as JSON file
  * @param {object} data - Data to download
  * @param {string} filename - File name

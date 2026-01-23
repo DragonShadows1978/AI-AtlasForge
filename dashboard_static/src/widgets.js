@@ -4,7 +4,7 @@
  * Dependencies: core.js, api.js
  */
 
-import { showToast, escapeHtml, formatBytes, formatNumber, formatTimeAgo, stages } from './core.js';
+import { showToast, escapeHtml, formatBytes, formatNumber, formatTimeAgo, stages, downloadFileViaFetch } from './core.js';
 import { api } from './api.js';
 import { setFullMissionText } from './modals.js';
 
@@ -377,11 +377,25 @@ export async function loadFiles() {
         container.innerHTML = files.slice(0, 20).map(f => `
             <div class="file-item">
                 <div class="file-info">
-                    <a href="${f.download_url}" class="download-link file-name" download title="${f.path}">${f.name}</a>
+                    <a href="#" class="download-link file-name" data-download-url="${f.download_url}" data-filename="${f.name}" title="${f.path}">${f.name}</a>
                     <span class="file-meta">${formatBytes(f.size)} - ${formatTimeAgo(f.modified)}</span>
                 </div>
             </div>
         `).join('');
+
+        // Attach click handlers for fetch-based downloads (bypasses Chrome's strict cert checks)
+        container.querySelectorAll('.download-link[data-download-url]').forEach(link => {
+            link.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const url = link.dataset.downloadUrl;
+                const filename = link.dataset.filename;
+                try {
+                    await downloadFileViaFetch(url, filename);
+                } catch (err) {
+                    // Error already shown via toast in downloadFileViaFetch
+                }
+            });
+        });
     } catch (e) {
         console.error('Error loading files:', e);
     }

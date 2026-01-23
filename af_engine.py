@@ -971,7 +971,19 @@ class RDMissionController:
 
         IMPORTANT: Queue item is only removed AFTER successful mission creation
         to prevent mission loss if creation fails.
+
+        Uses file-based locking to prevent race conditions with
+        dashboard_v2.queue_auto_start_watcher().
         """
+        # Acquire queue processing lock to prevent race conditions
+        try:
+            from queue_processing_lock import acquire_queue_lock, release_queue_lock
+            if not acquire_queue_lock(source="af_engine", timeout=2, blocking=False):
+                logger.info("Queue processing locked by another process, skipping")
+                return
+        except ImportError:
+            logger.warning("queue_processing_lock module not available, proceeding without lock")
+
         queue_path = STATE_DIR / "mission_queue.json"
 
         try:
@@ -1056,9 +1068,16 @@ class RDMissionController:
                     from websocket_events import emit_queue_updated
                     if QUEUE_SCHEDULER_AVAILABLE:
                         updated_queue = scheduler.get_queue()
+                        # QueueState.queue is already a list of dicts
+                        # Build settings dict from individual QueueState attributes
                         emit_queue_updated({
-                            "missions": [q.to_dict() for q in updated_queue.queue],
-                            "settings": updated_queue.settings
+                            "missions": updated_queue.queue,
+                            "settings": {
+                                "enabled": updated_queue.enabled,
+                                "paused": updated_queue.paused,
+                                "auto_estimate_time": updated_queue.auto_estimate_time,
+                                "default_priority": updated_queue.default_priority
+                            }
                         }, 'mission_started')
                     else:
                         emit_queue_updated(queue_data, 'mission_started')
@@ -1069,6 +1088,13 @@ class RDMissionController:
 
         except Exception as e:
             logger.error(f"Queue processing failed: {e}")
+        finally:
+            # Release queue processing lock
+            try:
+                from queue_processing_lock import release_queue_lock
+                release_queue_lock()
+            except ImportError:
+                pass
 
     def _create_mission_from_queue_item(self, queue_item: dict) -> bool:
         """
@@ -1087,7 +1113,12 @@ class RDMissionController:
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
             # Get mission details from queue item
-            problem_statement = queue_item.get("mission_description") or queue_item.get("mission_title", "")
+            # Handle both dashboard format (problem_statement) and core format (mission_description)
+            problem_statement = (
+                queue_item.get("mission_description") or
+                queue_item.get("problem_statement") or
+                queue_item.get("mission_title", "")
+            )
             cycle_budget = queue_item.get("cycle_budget", 3)
             user_project_name = queue_item.get("project_name")
 

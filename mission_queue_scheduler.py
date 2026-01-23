@@ -39,8 +39,27 @@ class Priority(Enum):
     LOW = "low"            # Run after high/normal are complete
 
     @classmethod
-    def from_string(cls, value: str) -> "Priority":
-        """Convert string to Priority enum, defaulting to NORMAL."""
+    def from_string(cls, value) -> "Priority":
+        """Convert string or numeric value to Priority enum, defaulting to NORMAL.
+
+        Handles both string priorities ('normal', 'high', 'critical', 'low') and
+        numeric priorities that may be sent from dashboard (0, 50, 100).
+
+        Numeric mapping:
+          0 = low, 25 = normal, 50 = high, 75+ = critical
+        """
+        # Handle numeric values (dashboard may send these)
+        if isinstance(value, (int, float)):
+            if value <= 0:
+                return cls.LOW
+            elif value <= 25:
+                return cls.NORMAL
+            elif value <= 50:
+                return cls.HIGH
+            else:
+                return cls.CRITICAL
+
+        # Handle string values
         value_lower = value.lower() if value else "normal"
         for p in cls:
             if p.value == value_lower:
@@ -131,16 +150,47 @@ class QueueItem:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "QueueItem":
-        """Create QueueItem from dictionary."""
+        """Create QueueItem from dictionary.
+
+        Handles format normalization between dashboard and core scheduler:
+        - Dashboard uses: problem_statement, added_at
+        - Core uses: mission_description, queued_at
+        """
+        # Normalize description field - dashboard uses problem_statement
+        description = (
+            data.get("mission_description") or
+            data.get("problem_statement") or
+            ""
+        )
+
+        # Normalize title - fallback to truncated description
+        title = data.get("mission_title")
+        if not title and description:
+            title = (description[:80] + "...") if len(description) > 80 else description
+        elif not title:
+            title = "Untitled"
+
+        # Normalize timestamp - dashboard uses added_at, core uses queued_at
+        timestamp = (
+            data.get("queued_at") or
+            data.get("added_at") or
+            datetime.now().isoformat()
+        )
+
+        # Normalize priority - dashboard may send numeric (0, 50, 100) instead of string
+        raw_priority = data.get("priority", "normal")
+        priority_enum = Priority.from_string(raw_priority)
+        priority_str = priority_enum.value
+
         return cls(
             id=data.get("id", f"queue_{uuid_module.uuid4().hex[:8]}"),
             recommendation_id=data.get("recommendation_id"),
-            mission_title=data.get("mission_title", "Untitled"),
-            mission_description=data.get("mission_description", ""),
+            mission_title=title,
+            mission_description=description,
             cycle_budget=data.get("cycle_budget", 3),
-            queued_at=data.get("queued_at", datetime.now().isoformat()),
+            queued_at=timestamp,
             source_recommendation=data.get("source_recommendation"),
-            priority=data.get("priority", "normal"),
+            priority=priority_str,
             scheduled_start=data.get("scheduled_start"),
             start_condition=data.get("start_condition"),
             depends_on=data.get("depends_on"),
@@ -238,7 +288,11 @@ class MissionQueueScheduler:
                 self.io_utils = None
 
     def _load_queue(self) -> QueueState:
-        """Load queue state from disk."""
+        """Load queue state from disk.
+
+        Handles format normalization between dashboard (missions key) and
+        core scheduler (queue key) formats.
+        """
         if self.io_utils:
             data = self.io_utils.atomic_read_json(
                 MISSION_QUEUE_PATH,
@@ -250,6 +304,15 @@ class MissionQueueScheduler:
                     data = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError):
                 data = {"queue": [], "enabled": True}
+
+        # Normalize between dashboard format (missions) and core format (queue)
+        # Dashboard uses 'missions', core scheduler uses 'queue'
+        if "missions" in data and "queue" not in data:
+            data["queue"] = data["missions"]
+        elif "missions" in data and data["missions"] and not data.get("queue"):
+            # missions has data but queue is empty - use missions
+            data["queue"] = data["missions"]
+
         return QueueState.from_dict(data)
 
     def _save_queue(self, state: QueueState):

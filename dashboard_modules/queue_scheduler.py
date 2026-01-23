@@ -151,6 +151,88 @@ def queue_status():
         return jsonify({"error": str(e)})
 
 
+@queue_scheduler_bp.route('/lock-status')
+def get_lock_status():
+    """Get queue processing lock status for diagnostics."""
+    try:
+        from queue_processing_lock import is_queue_locked, get_queue_lock_info
+        lock_info = get_queue_lock_info()
+
+        # Add age calculation if locked
+        if lock_info and lock_info.get("locked_at"):
+            try:
+                locked_at = datetime.fromisoformat(lock_info["locked_at"])
+                lock_info["age_seconds"] = (datetime.now() - locked_at).total_seconds()
+            except (ValueError, TypeError):
+                lock_info["age_seconds"] = None
+
+        return jsonify({
+            "locked": is_queue_locked(),
+            "lock_info": lock_info,
+            "timestamp": datetime.now().isoformat()
+        })
+    except ImportError:
+        return jsonify({
+            "locked": False,
+            "lock_info": None,
+            "error": "Lock module not available",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@queue_scheduler_bp.route('/lock-metrics')
+def get_lock_metrics():
+    """Get lock acquisition/release timing metrics."""
+    try:
+        from queue_lock_metrics import get_lock_metrics as get_metrics
+        metrics = get_metrics()
+
+        return jsonify({
+            "summary": metrics.get_summary(),
+            "recent_events": metrics.get_recent_events(20),
+            "timestamp": datetime.now().isoformat()
+        })
+    except ImportError:
+        return jsonify({
+            "summary": None,
+            "recent_events": [],
+            "error": "Lock metrics module not available",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@queue_scheduler_bp.route('/lock-release', methods=['POST'])
+def force_release_lock():
+    """Force release a stale queue processing lock (admin endpoint)."""
+    try:
+        from queue_processing_lock import force_release_stale_lock, get_queue_lock_info
+        lock_info = get_queue_lock_info()
+        if lock_info and lock_info.get("is_valid"):
+            return jsonify({
+                "released": False,
+                "reason": "Lock is valid and holder is alive",
+                "lock_info": lock_info
+            }), 409
+
+        released = force_release_stale_lock()
+        return jsonify({
+            "released": released,
+            "previous_lock": lock_info,
+            "timestamp": datetime.now().isoformat()
+        })
+    except ImportError:
+        return jsonify({
+            "released": False,
+            "error": "Lock module not available"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 @queue_scheduler_bp.route('/add', methods=['POST'])
 def add_to_queue():
     """Add a mission to the queue."""
@@ -294,6 +376,19 @@ def reorder_queue():
 @queue_scheduler_bp.route('/next', methods=['POST'])
 def start_next_mission():
     """Start the next mission in the queue (if AtlasForge is not busy)."""
+    # Acquire queue processing lock to prevent race conditions
+    lock_acquired = False
+    try:
+        from queue_processing_lock import acquire_queue_lock, release_queue_lock
+        lock_acquired = acquire_queue_lock(source="queue_next_api", timeout=2, blocking=False)
+        if not lock_acquired:
+            return jsonify({
+                "error": "Queue processing in progress",
+                "retry_after": 5
+            }), 409
+    except ImportError:
+        pass  # Lock module not available, proceed without lock
+
     try:
         # Check if AtlasForge is currently running
         from io_utils import atomic_read_json
@@ -396,6 +491,14 @@ def start_next_mission():
     except Exception as e:
         logger.error(f"Error starting next mission: {e}")
         return jsonify({"error": str(e)})
+    finally:
+        # Release queue processing lock
+        if lock_acquired:
+            try:
+                from queue_processing_lock import release_queue_lock
+                release_queue_lock()
+            except ImportError:
+                pass
 
 
 @queue_scheduler_bp.route('/settings', methods=['GET'])

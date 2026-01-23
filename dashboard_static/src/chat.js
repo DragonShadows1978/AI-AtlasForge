@@ -4,7 +4,7 @@
  * Dependencies: core.js
  */
 
-import { showToast } from './core.js';
+import { showToast, downloadFileViaFetch } from './core.js';
 
 // =============================================================================
 // FILE PATH DETECTION
@@ -36,7 +36,31 @@ function processMessageForDownloads(content) {
         }
 
         const filename = relativePath.split('/').pop();
-        return `<a href="/api/download/${relativePath}" class="download-link" download title="${relativePath}">${filename}</a>`;
+        // Use data attributes for fetch-based download (bypasses Chrome's strict cert checks for self-signed SSL)
+        return `<a href="#" class="download-link chat-download" data-download-url="/api/download/${relativePath}" data-filename="${filename}" title="${relativePath}">${filename}</a>`;
+    });
+}
+
+/**
+ * Initialize chat download link handlers using event delegation
+ * This handles dynamically added download links in chat messages
+ */
+export function initChatDownloadHandlers() {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+
+    container.addEventListener('click', async (e) => {
+        const link = e.target.closest('.chat-download[data-download-url]');
+        if (!link) return;
+
+        e.preventDefault();
+        const url = link.dataset.downloadUrl;
+        const filename = link.dataset.filename;
+        try {
+            await downloadFileViaFetch(url, filename);
+        } catch (err) {
+            // Error already shown via toast in downloadFileViaFetch
+        }
     });
 }
 

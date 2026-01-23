@@ -3,7 +3,7 @@
 SSL Certificate Generator for AtlasForge Dashboard
 
 Generates self-signed certificates for HTTPS support.
-Certificates are valid for localhost and local network access.
+Certificates are valid for localhost, local network access, and Tailscale IPs.
 
 Usage:
     python scripts/generate_certs.py
@@ -16,6 +16,53 @@ Output:
 import subprocess
 import sys
 from pathlib import Path
+
+
+def get_tailscale_ip() -> str | None:
+    """Get the Tailscale IP address if available."""
+    try:
+        result = subprocess.run(
+            ["ip", "addr", "show", "tailscale0"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            # Parse output: look for "inet X.X.X.X/32"
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("inet "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        # Extract IP without subnet mask
+                        ip = parts[1].split("/")[0]
+                        return ip
+    except Exception:
+        pass
+    return None
+
+
+def get_local_ips() -> list[str]:
+    """Get all local non-loopback IPv4 addresses."""
+    ips = []
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "addr", "show"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("inet ") and "127.0.0.1" not in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ip = parts[1].split("/")[0]
+                        ips.append(ip)
+    except Exception:
+        pass
+    return ips
 
 
 def generate_certificates(output_dir: Path, days: int = 365) -> bool:
@@ -34,9 +81,32 @@ def generate_certificates(output_dir: Path, days: int = 365) -> bool:
     cert_path = output_dir / "cert.pem"
     key_path = output_dir / "key.pem"
 
+    # Detect additional IPs to include in certificate
+    tailscale_ip = get_tailscale_ip()
+    local_ips = get_local_ips()
+
+    # Build IP entries for SAN config
+    ip_entries = ["IP.1 = 127.0.0.1", "IP.2 = ::1"]
+    ip_index = 3
+
+    # Add Tailscale IP if available
+    if tailscale_ip:
+        ip_entries.append(f"IP.{ip_index} = {tailscale_ip}")
+        ip_index += 1
+        print(f"Including Tailscale IP: {tailscale_ip}")
+
+    # Add local network IPs
+    for ip in local_ips:
+        if ip != tailscale_ip:  # Avoid duplicates
+            ip_entries.append(f"IP.{ip_index} = {ip}")
+            ip_index += 1
+            print(f"Including local IP: {ip}")
+
+    ip_section = "\n".join(ip_entries)
+
     # OpenSSL configuration for Subject Alternative Names
-    # Covers: localhost, local IPs, and wildcard local domains
-    san_config = """
+    # Covers: localhost, local IPs, Tailscale, and wildcard local domains
+    san_config = f"""
 [req]
 default_bits = 4096
 distinguished_name = req_distinguished_name
@@ -56,8 +126,7 @@ DNS.1 = localhost
 DNS.2 = *.local
 DNS.3 = *.lan
 DNS.4 = *.home
-IP.1 = 127.0.0.1
-IP.2 = ::1
+{ip_section}
 """
 
     # Write temporary config file

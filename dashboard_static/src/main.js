@@ -533,6 +533,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load initial chat history (handles race condition with WebSocket)
     socket.loadInitialChatHistory();
 
+    // Initialize chat download handlers (fetch-based downloads for self-signed SSL compatibility)
+    if (typeof chat.initChatDownloadHandlers === 'function') {
+        chat.initChatDownloadHandlers();
+    }
+
     // Load saved card states
     widgets.loadCardStates();
 

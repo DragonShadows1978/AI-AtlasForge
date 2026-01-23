@@ -1952,6 +1952,193 @@ function renderTreeSVG(roots, allNodes) {
 const originalCheckScheduledMissions = checkScheduledMissions;
 
 // =============================================================================
+// LOCK STATUS WIDGET
+// =============================================================================
+
+let lockStatusData = null;
+let lockMetricsData = null;
+
+/**
+ * Toggle lock status panel visibility
+ */
+export function toggleLockStatus() {
+    const panel = document.getElementById('queue-lock-status');
+    if (panel) {
+        panel.classList.toggle('collapsed');
+        const toggleIcon = panel.querySelector('.toggle-icon');
+        if (toggleIcon) {
+            toggleIcon.textContent = panel.classList.contains('collapsed') ? '▼' : '▲';
+        }
+        // Load lock data when expanded
+        if (!panel.classList.contains('collapsed')) {
+            loadLockStatus();
+        }
+    }
+}
+
+/**
+ * Load lock status from API
+ */
+export async function loadLockStatus() {
+    try {
+        const [statusData, metricsData] = await Promise.all([
+            api('/api/queue/lock-status'),
+            api('/api/queue/lock-metrics')
+        ]);
+
+        lockStatusData = statusData;
+        lockMetricsData = metricsData;
+
+        renderLockStatus(statusData, metricsData);
+    } catch (e) {
+        console.error('Failed to load lock status:', e);
+    }
+}
+
+/**
+ * Render lock status widget
+ */
+function renderLockStatus(status, metrics) {
+    const container = document.getElementById('lock-status-content');
+    if (!container) return;
+
+    const locked = status.locked;
+    const lockInfo = status.lock_info;
+    const summary = metrics?.summary || {};
+    const recentEvents = metrics?.recent_events || [];
+
+    let html = `
+        <div class="lock-status-header ${locked ? 'locked' : 'unlocked'}">
+            <span class="lock-icon">${locked ? '🔒' : '🔓'}</span>
+            <span class="lock-state">${locked ? 'LOCKED' : 'Unlocked'}</span>
+        </div>
+    `;
+
+    if (locked && lockInfo) {
+        const ageSeconds = lockInfo.age_seconds || 0;
+        const ageDisplay = ageSeconds < 60 ? `${Math.round(ageSeconds)}s` : `${Math.round(ageSeconds / 60)}m`;
+
+        html += `
+            <div class="lock-details">
+                <div class="lock-detail-row">
+                    <span class="lock-label">Holder:</span>
+                    <span class="lock-value">${escapeHtml(lockInfo.locked_by || 'unknown')}</span>
+                </div>
+                <div class="lock-detail-row">
+                    <span class="lock-label">PID:</span>
+                    <span class="lock-value">${lockInfo.pid || '-'}</span>
+                </div>
+                <div class="lock-detail-row">
+                    <span class="lock-label">Age:</span>
+                    <span class="lock-value ${ageSeconds > 30 ? 'warning' : ''}">${ageDisplay}</span>
+                </div>
+                <div class="lock-detail-row">
+                    <span class="lock-label">Status:</span>
+                    <span class="lock-value ${lockInfo.is_valid ? 'valid' : 'invalid'}">
+                        ${lockInfo.is_valid ? 'Valid' : (lockInfo.is_expired ? 'Expired' : 'Stale')}
+                    </span>
+                </div>
+            </div>
+        `;
+
+        // Show force release button only if lock is stale
+        if (!lockInfo.is_valid || lockInfo.is_expired) {
+            html += `
+                <button class="btn btn-small danger" onclick="forceReleaseLock()">
+                    Force Release Stale Lock
+                </button>
+            `;
+        }
+    }
+
+    // Metrics summary
+    if (summary.total_acquisitions > 0) {
+        html += `
+            <div class="lock-metrics">
+                <div class="metrics-header">Lock Metrics</div>
+                <div class="metrics-grid">
+                    <div class="metric">
+                        <span class="metric-value">${summary.total_acquisitions}</span>
+                        <span class="metric-label">Acquisitions</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${summary.success_rate}%</span>
+                        <span class="metric-label">Success Rate</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${Math.round(summary.avg_wait_time_ms)}ms</span>
+                        <span class="metric-label">Avg Wait</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${Math.round(summary.avg_hold_time_ms)}ms</span>
+                        <span class="metric-label">Avg Hold</span>
+                    </div>
+                </div>
+                ${summary.warnings_issued > 0 ? `<div class="metrics-warning">⚠️ ${summary.warnings_issued} long-hold warnings</div>` : ''}
+            </div>
+        `;
+    }
+
+    // Recent events
+    if (recentEvents.length > 0) {
+        html += `
+            <div class="lock-events">
+                <div class="events-header">Recent Events</div>
+                <div class="events-list">
+                    ${recentEvents.slice(0, 5).map(e => `
+                        <div class="event-row ${e.event_type}">
+                            <span class="event-type">${getEventIcon(e.event_type)}</span>
+                            <span class="event-source">${escapeHtml(e.source)}</span>
+                            <span class="event-time">${e.wait_time_ms ? `${Math.round(e.wait_time_ms)}ms` : ''}</span>
+                            ${e.warning ? `<span class="event-warning">⚠️</span>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+/**
+ * Get icon for lock event type
+ */
+function getEventIcon(eventType) {
+    switch (eventType) {
+        case 'acquire': return '🔐';
+        case 'release': return '🔓';
+        case 'acquire_failed': return '❌';
+        case 'timeout': return '⏱️';
+        default: return '•';
+    }
+}
+
+/**
+ * Force release a stale lock via API
+ */
+export async function forceReleaseLock() {
+    if (!confirm('Are you sure you want to force release the lock? This should only be done if the lock holder has crashed.')) {
+        return;
+    }
+
+    try {
+        const data = await api('/api/queue/lock-release', 'POST');
+        if (data.released) {
+            showToast('Lock released successfully', 'success');
+            await loadLockStatus();
+        } else if (data.reason) {
+            showToast(`Cannot release: ${data.reason}`, 'warning');
+        } else if (data.error) {
+            showToast(`Error: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        console.error('Failed to release lock:', e);
+        showToast('Failed to release lock', 'error');
+    }
+}
+
+// =============================================================================
 // GLOBAL EXPORTS (for onclick handlers in HTML)
 // =============================================================================
 
@@ -1988,6 +2175,9 @@ window.applyBulkAction = applyBulkAction;
 window.closeBulkActionModal = closeBulkActionModal;
 window.toggleQueueHealth = toggleQueueHealth;
 window.toggleDependencyGraph = toggleDependencyGraph;
+window.toggleLockStatus = toggleLockStatus;
+window.loadLockStatus = loadLockStatus;
+window.forceReleaseLock = forceReleaseLock;
 
 // Export additional module references (functions already exported at definition)
 export {
