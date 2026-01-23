@@ -25,10 +25,50 @@ header {
     border-bottom: 1px solid var(--border);
     padding: 15px 20px;
     display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.header-row-1 {
+    display: flex;
     justify-content: space-between;
     align-items: center;
+    width: 100%;
+}
+.header-row-2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+.header-row-2 .status-group {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+.header-row-2 .controls-group {
+    display: flex;
+    align-items: center;
+    gap: 15px;
 }
 h1 { color: var(--accent); font-size: 1.3em; }
+
+/* Breathing animation for AtlasForge Working status */
+@keyframes breathing {
+    0%, 100% { color: #3fb950; text-shadow: 0 0 4px #3fb950; }
+    50% { color: #1a7f37; text-shadow: 0 0 2px #1a7f37; }
+}
+@keyframes breathing-dot {
+    0%, 100% { background: #3fb950; box-shadow: 0 0 8px #3fb950; }
+    50% { background: #1a7f37; box-shadow: 0 0 4px #1a7f37; }
+}
+.service-status.working .service-dot {
+    background: #3fb950;
+    box-shadow: 0 0 6px #3fb950;
+    animation: breathing-dot 2s ease-in-out infinite;
+}
+.service-status.working .service-state {
+    animation: breathing 2s ease-in-out infinite;
+}
 .status-badge {
     padding: 5px 12px;
     border-radius: 20px;
@@ -4940,11 +4980,11 @@ h1 { color: var(--accent); font-size: 1.3em; }
 .layout-toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
+    gap: 6px;
+    padding: 3px 6px;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 4px;
 }
 
 /* Toolbar buttons */
@@ -4952,8 +4992,8 @@ h1 { color: var(--accent); font-size: 1.3em; }
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 10px;
-    font-size: 0.8em;
+    padding: 4px 8px;
+    font-size: 0.75em;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 4px;

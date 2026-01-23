@@ -99,8 +99,16 @@
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 
         /* Header & Navigation */
-        header{background:var(--panel);border-bottom:1px solid var(--border);padding:15px 20px;display:flex;justify-content:space-between;align-items:center}
+        header{background:var(--panel);border-bottom:1px solid var(--border);padding:15px 20px;display:flex;flex-direction:column;gap:10px}
+        .header-row-1{display:flex;justify-content:space-between;align-items:center}
+        .header-row-2{display:flex;align-items:center;gap:20px}
         h1{color:var(--accent);font-size:1.3em}
+
+        /* Breathing animation for AtlasForge Working status */
+        @keyframes breathing{0%,100%{color:#3fb950;text-shadow:0 0 4px #3fb950}50%{color:#1a7f37;text-shadow:0 0 2px #1a7f37}}
+        .service-status.working .service-dot{background:#3fb950;box-shadow:0 0 6px #3fb950;animation:breathing-dot 2s ease-in-out infinite}
+        .service-status.working .service-state{animation:breathing 2s ease-in-out infinite}
+        @keyframes breathing-dot{0%,100%{background:#3fb950;box-shadow:0 0 8px #3fb950}50%{background:#1a7f37;box-shadow:0 0 4px #1a7f37}}
         .status-badge{padding:5px 12px;border-radius:20px;font-size:0.85em;font-weight:500}
         .status-badge.on{background:rgba(63,185,80,0.2);color:var(--green)}
         .status-badge.off{background:rgba(248,81,73,0.2);color:var(--red)}
@@ -254,74 +262,81 @@
         <div class="tt-summary"></div>
     </div>
     <header>
-        <h1>AI-AtlasForge</h1>
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <!-- Layout Toolbar -->
-            <div class="layout-toolbar" id="layout-toolbar">
-                <!-- Undo/Redo Buttons -->
-                <button id="layout-undo-btn" class="toolbar-btn" title="Undo layout change (Ctrl+Z)" disabled aria-label="Undo layout change">
-                    <span class="toolbar-icon">&#8630;</span>
-                </button>
-                <button id="layout-redo-btn" class="toolbar-btn" title="Redo layout change (Ctrl+Y)" disabled aria-label="Redo layout change">
-                    <span class="toolbar-icon">&#8631;</span>
-                </button>
-
-                <span class="toolbar-divider"></span>
-
-                <!-- Preset Selector -->
-                <div class="preset-selector" id="preset-selector" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false" title="Select layout preset">
-                    <span id="preset-name" class="preset-name">Default</span>
-                    <span id="unsaved-indicator" class="unsaved-indicator" title="Unsaved changes">*</span>
-                    <span class="preset-arrow">&#9662;</span>
+        <!-- Row 1: Banner (left) | Connection Status (right) -->
+        <div class="header-row-1">
+            <img src="/static/images/banner.png" alt="AI-AtlasForge" style="height: clamp(30px, 5vw, 60px); width: auto; max-width: 100%;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <!-- WebSocket Connection Status Indicator -->
+                <div id="ws-connection-indicator" class="ws-indicator ws-disconnected" title="WebSocket connection status">
+                    <span class="ws-dot"></span>
+                    <span id="ws-connection-status" class="ws-status-text">Connecting...</span>
                 </div>
-
-                <!-- Preset Dropdown (hidden by default) -->
-                <div id="preset-dropdown" class="preset-dropdown" role="listbox" aria-label="Layout presets" style="display: none;"></div>
-
-                <!-- Save Preset Button -->
-                <button id="save-preset-btn" class="toolbar-btn" title="Save current layout as preset" aria-label="Save layout preset">
-                    <span class="toolbar-icon">&#128190;</span> Save
-                </button>
-
-                <span class="toolbar-divider"></span>
-
-                <!-- Reset Button -->
-                <button class="toolbar-btn" onclick="resetWidgetLayout()" title="Reset widget layout to default order" aria-label="Reset layout">
-                    Reset
-                </button>
-
-                <span class="toolbar-divider"></span>
-
-                <!-- Lock Tiles Button -->
-                <button id="lock-tiles-btn" class="lock-tiles-btn" onclick="toggleTileLock()" title="Lock tiles to prevent accidental movement while navigating">
-                    <span class="lock-icon">&#128275;</span>
-                    <span class="lock-text">Lock</span>
-                </button>
+                <!-- Port Indicator -->
+                <div class="port-indicator" title="Dashboard running on this port">
+                    <span class="port-label">Port:</span>
+                    <span id="dashboard-port" class="port-value"></span>
+                </div>
+                <script>document.getElementById('dashboard-port').textContent = location.port || '80';</script>
             </div>
-            <!-- WebSocket Connection Status Indicator -->
-            <div id="ws-connection-indicator" class="ws-indicator ws-disconnected" title="WebSocket connection status">
-                <span class="ws-dot"></span>
-                <span id="ws-connection-status" class="ws-status-text">Connecting...</span>
-            </div>
-            <!-- Port Indicator -->
-            <div class="port-indicator" title="Dashboard running on this port">
-                <span class="port-label">Port:</span>
-                <span id="dashboard-port" class="port-value"></span>
-            </div>
-            <script>document.getElementById('dashboard-port').textContent = location.port || '80';</script>
-            <!-- Service Status Indicators -->
-            <div class="service-status-group">
-                <div id="atlasforge-service-status" class="service-status offline" title="R&D Engine status">
+        </div>
+        <!-- Row 2: Service Status (left) | Layout Controls (right) -->
+        <div class="header-row-2">
+            <div class="status-group">
+                <div id="atlasforge-service-status" class="service-status offline" title="AtlasForge Engine status">
                     <span class="service-label">AtlasForge:</span>
                     <span class="service-dot"></span>
                     <span id="atlasforge-service-state" class="service-state">Offline</span>
                 </div>
-                <div id="investigation-service-status" class="service-status offline" title="Dashboard Investigation status">
-                    <span class="service-label">AtlasForge Inv:</span>
+                <div id="investigation-service-status" class="service-status offline" title="Investigation Engine status">
+                    <span class="service-label">Investigations:</span>
                     <span class="service-dot"></span>
                     <span id="investigation-service-state" class="service-state">Offline</span>
                 </div>
+            </div>
+            <div class="controls-group">
+                <!-- Layout Toolbar -->
+                <div class="layout-toolbar" id="layout-toolbar">
+                    <!-- Undo/Redo Buttons -->
+                    <button id="layout-undo-btn" class="toolbar-btn" title="Undo layout change (Ctrl+Z)" disabled aria-label="Undo layout change">
+                        <span class="toolbar-icon">&#8630;</span>
+                    </button>
+                    <button id="layout-redo-btn" class="toolbar-btn" title="Redo layout change (Ctrl+Y)" disabled aria-label="Redo layout change">
+                        <span class="toolbar-icon">&#8631;</span>
+                    </button>
+
+                    <span class="toolbar-divider"></span>
+
+                    <!-- Preset Selector -->
+                    <div class="preset-selector" id="preset-selector" tabindex="0" role="button" aria-haspopup="listbox" aria-expanded="false" title="Select layout preset">
+                        <span id="preset-name" class="preset-name">Default</span>
+                        <span id="unsaved-indicator" class="unsaved-indicator" title="Unsaved changes">*</span>
+                        <span class="preset-arrow">&#9662;</span>
+                    </div>
+
+                    <!-- Preset Dropdown (hidden by default) -->
+                    <div id="preset-dropdown" class="preset-dropdown" role="listbox" aria-label="Layout presets" style="display: none;"></div>
+
+                    <!-- Save Preset Button -->
+                    <button id="save-preset-btn" class="toolbar-btn" title="Save current layout as preset" aria-label="Save layout preset">
+                        <span class="toolbar-icon">&#128190;</span> Save
+                    </button>
+
+                    <span class="toolbar-divider"></span>
+
+                    <!-- Reset Button -->
+                    <button class="toolbar-btn" onclick="resetWidgetLayout()" title="Reset widget layout to default order" aria-label="Reset layout">
+                        Reset
+                    </button>
+
+                    <span class="toolbar-divider"></span>
+
+                    <!-- Lock Tiles Button -->
+                    <button id="lock-tiles-btn" class="lock-tiles-btn" onclick="toggleTileLock()" title="Lock tiles to prevent accidental movement while navigating">
+                        <span class="lock-icon">&#128275;</span>
+                        <span class="lock-text">Lock</span>
+                    </button>
                 </div>
+            </div>
         </div>
     </header>
 

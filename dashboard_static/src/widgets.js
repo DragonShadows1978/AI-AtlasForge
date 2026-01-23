@@ -452,19 +452,12 @@ export function updateAtlasForgeServiceStatus(running, mode) {
     if (!container || !stateEl) return;
 
     // Determine status class and text
-    container.classList.remove('online', 'offline', 'busy');
+    container.classList.remove('online', 'offline', 'busy', 'working');
 
     if (running) {
-        if (mode === 'rd') {
-            container.classList.add('online');
-            stateEl.textContent = 'R&D Mode';
-        } else if (mode === 'free') {
-            container.classList.add('online');
-            stateEl.textContent = 'Free Mode';
-        } else {
-            container.classList.add('online');
-            stateEl.textContent = 'Online';
-        }
+        // Use 'working' class for breathing animation when active
+        container.classList.add('working');
+        stateEl.textContent = 'Working';
     } else {
         container.classList.add('offline');
         stateEl.textContent = 'Offline';
