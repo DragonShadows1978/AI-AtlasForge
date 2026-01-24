@@ -327,6 +327,7 @@ from dashboard_modules import (
     semantic_bp, init_semantic_blueprint,
     version_bp, init_version_blueprint,
     get_bundle_version, init_bundle_version,
+    artifact_health_bp, init_artifact_health_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -377,6 +378,7 @@ except Exception:
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
 init_version_blueprint(BASE_DIR)
 init_bundle_version(STATIC_DIR, BASE_DIR)
+init_artifact_health_blueprint(WORKSPACE_DIR / "artifacts")
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -391,6 +393,7 @@ app.register_blueprint(url_handlers_bp)
 app.register_blueprint(queue_scheduler_bp)
 app.register_blueprint(semantic_bp)
 app.register_blueprint(version_bp)
+app.register_blueprint(artifact_health_bp)
 
 # Register non-prefixed routes
 register_archival_routes(app)
