@@ -340,6 +340,9 @@ def extract_json_from_response(text: str) -> Optional[dict]:
 # Path to auto-advance signal file (file-based IPC)
 AUTO_ADVANCE_SIGNAL_PATH = STATE_DIR / "auto_advance_signal.json"
 
+# Path to queue auto-start signal file (from queue processing)
+QUEUE_AUTO_START_SIGNAL_PATH = STATE_DIR / "queue_auto_start_signal.json"
+
 # Path to retry metrics log for long-term analysis
 RETRY_METRICS_LOG_PATH = LOG_DIR / "auto_advance_metrics.jsonl"
 
@@ -469,6 +472,10 @@ def _wait_for_new_mission_with_retry(
        - Fastest detection when dashboard signals correctly
        - Handles in_progress/complete/error states
 
+    1B. **Queue Signal File**: Check queue_auto_start_signal.json for queue missions
+       - Detects missions started from the mission queue
+       - Written by af_engine._create_mission_from_queue_item()
+
     2. **Mission File (Fallback)**: Poll mission.json for changes
        - Works even if signal file mechanism fails
        - Detects direct mission changes without signaling
@@ -595,6 +602,30 @@ def _wait_for_new_mission_with_retry(
             _clear_signal_file()
             # Fall through to check mission.json directly as fallback
 
+        # === LAYER 1B: Queue Auto-Start Signal Detection ===
+        # Check queue_auto_start_signal.json for missions started from queue
+        try:
+            queue_signal = io_utils.atomic_read_json(QUEUE_AUTO_START_SIGNAL_PATH, {})
+            if queue_signal.get("action") == "start_rd":
+                queue_mission_id = queue_signal.get("mission_id")
+                if queue_mission_id and queue_mission_id != completed_mission_id:
+                    logger.info(f"Queue auto-start signal detected for: {queue_mission_id}")
+                    metrics["signal_detected"] = True
+                    # Reload mission.json to verify the queue-created mission exists
+                    controller.mission = controller.load_mission()
+                    loaded_mission_id = controller.mission.get("mission_id")
+                    if loaded_mission_id == queue_mission_id and _is_valid_mission(controller.mission):
+                        logger.info(f"Queue mission verified: {queue_mission_id}")
+                        # Clear the queue signal file
+                        _clear_queue_signal_file()
+                        metrics["reason"] = "queue_auto_start"
+                        metrics["total_wait_time"] = time_module.time() - start_time
+                        return True, metrics
+                    else:
+                        logger.warning(f"Queue signal for {queue_mission_id} but mission.json has {loaded_mission_id}")
+        except Exception as e:
+            logger.debug(f"Queue signal file read failed: {e}")
+
         # === LAYER 2: Mission File Polling (Fallback) ===
         # Directly check mission.json for changes, works even if signaling breaks
         controller.mission = controller.load_mission()
@@ -641,6 +672,19 @@ def _clear_signal_file() -> None:
     if AUTO_ADVANCE_SIGNAL_PATH.exists():
         try:
             AUTO_ADVANCE_SIGNAL_PATH.unlink()
+        except OSError:
+            pass
+
+
+def _clear_queue_signal_file() -> None:
+    """Clear the queue auto-start signal file.
+
+    Safely removes the queue signal file to prevent stale reads. Failures are
+    silently ignored since a lingering signal file is not critical.
+    """
+    if QUEUE_AUTO_START_SIGNAL_PATH.exists():
+        try:
+            QUEUE_AUTO_START_SIGNAL_PATH.unlink()
         except OSError:
             pass
 

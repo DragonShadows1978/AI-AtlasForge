@@ -201,6 +201,15 @@ try:
 except ImportError:
     pass  # Queue notifications module not available
 
+# Artifact Manager integration (optional - automated artifact management at CYCLE_END)
+ARTIFACT_MANAGER_AVAILABLE = False
+run_cycle_end_artifact_processing = None
+try:
+    from workspace.AtlasForge.artifact_manager import run_cycle_end_artifact_processing
+    ARTIFACT_MANAGER_AVAILABLE = True
+except ImportError:
+    pass  # Artifact manager module not available
+
 # Paths - Import from centralized config
 from atlasforge_config import (
     BASE_DIR, STATE_DIR, WORKSPACE_DIR, ARTIFACTS_DIR, RESEARCH_DIR,
@@ -717,6 +726,8 @@ class RDMissionController:
 
     def __init__(self):
         self.mission = self.load_mission()
+        # Flag to prevent log_history from saving during queue processing
+        self._queue_processing = False
         # Initialize stage if not set (default to PLANNING)
         if "current_stage" not in self.mission:
             self.mission["current_stage"] = "PLANNING"
@@ -986,6 +997,9 @@ class RDMissionController:
 
         queue_path = STATE_DIR / "mission_queue.json"
 
+        # Set flag to prevent log_history from saving during queue processing
+        self._queue_processing = True
+
         try:
             # Try using the extended scheduler if available
             if QUEUE_SCHEDULER_AVAILABLE:
@@ -1089,6 +1103,8 @@ class RDMissionController:
         except Exception as e:
             logger.error(f"Queue processing failed: {e}")
         finally:
+            # Reset queue processing flag
+            self._queue_processing = False
             # Release queue processing lock
             try:
                 from queue_processing_lock import release_queue_lock
@@ -1168,8 +1184,11 @@ class RDMissionController:
                 "metadata": {"queued": True, "queued_at": queue_item.get("queued_at")}
             }
 
-            # Save mission state
-            io_utils.atomic_write_json(MISSION_PATH, new_mission)
+            # Save mission state with return value check
+            success = io_utils.atomic_write_json(MISSION_PATH, new_mission)
+            if not success:
+                logger.error(f"Failed to write new mission {mission_id} to disk")
+                return False
 
             # Save mission config
             mission_config_path = mission_dir / "mission_config.json"
@@ -1206,11 +1225,29 @@ class RDMissionController:
             signal_path = STATE_DIR / "queue_auto_start_signal.json"
             io_utils.atomic_write_json(signal_path, auto_start_signal)
 
+            # Emit WebSocket notification for dashboard
+            try:
+                from websocket_events import emit_mission_auto_started
+                mission_title = queue_item.get("mission_title") or (problem_statement[:60] + "..." if len(problem_statement) > 60 else problem_statement)
+                emit_mission_auto_started(
+                    mission_id=mission_id,
+                    mission_title=mission_title,
+                    queue_id=queue_item.get("id"),
+                    source="queue_auto"
+                )
+            except ImportError:
+                pass  # websocket_events not available
+
             logger.info(f"Created mission {mission_id} from queue. Auto-start signal written.")
-            self.log_history(
-                f"Queued mission started: {queue_item.get('mission_title', 'Untitled')}",
-                {"new_mission_id": mission_id, "queue_item_id": queue_item.get("id")}
-            )
+            # NOTE: Do NOT call self.log_history() here - it would overwrite the new mission
+            # with self.mission (the old COMPLETE mission) via save_mission()
+            # Instead, just log to logger and let the new mission start fresh
+            logger.info(f"Queued mission started: {queue_item.get('mission_title', 'Untitled')} "
+                       f"(new_mission_id={mission_id}, queue_item_id={queue_item.get('id')})")
+
+            # Small delay to ensure filesystem sync before verification
+            import time
+            time.sleep(0.01)  # 10ms
 
             # Verify mission was created successfully
             verify_mission = io_utils.atomic_read_json(MISSION_PATH, {})
@@ -1218,7 +1255,8 @@ class RDMissionController:
                 logger.info(f"Verified mission {mission_id} created with PLANNING stage")
                 return True
             else:
-                logger.error(f"Mission verification failed: expected {mission_id} in PLANNING stage")
+                logger.error(f"Mission verification failed: expected {mission_id} in PLANNING stage, "
+                           f"got {verify_mission.get('mission_id')} in {verify_mission.get('current_stage')}")
                 return False
 
         except Exception as e:
@@ -1232,7 +1270,16 @@ class RDMissionController:
         logger.info(f"R&D Iteration: {self.mission['iteration']}")
 
     def log_history(self, entry: str, details: dict = None):
-        """Log an action to the mission history."""
+        """Log an action to the mission history.
+
+        Safety: Will not save to disk during queue processing to prevent
+        overwriting newly created missions.
+        """
+        # Safety check: don't save if we're in the middle of queue processing
+        if getattr(self, '_queue_processing', False):
+            logger.warning(f"Skipping log_history save during queue processing: {entry}")
+            return
+
         if "history" not in self.mission:
             self.mission["history"] = []
 
@@ -2160,6 +2207,34 @@ Respond with JSON:
                         logger.info(f"Analytics: Cycle {cycle_num} ingested {ingest_result['transcripts_processed']} transcripts (source: {ingest_result.get('source', 'unknown')})")
             except Exception as e:
                 logger.warning(f"Analytics mid-mission ingestion failed: {e}")
+
+        # Artifact Management: Auto-categorize and index artifacts created this cycle
+        if ARTIFACT_MANAGER_AVAILABLE:
+            try:
+                mission_id = self.mission.get("mission_id")
+                files_created = cycle_report.get('files_created', [])
+                files_modified = cycle_report.get('files_modified', [])
+
+                if mission_id and (files_created or files_modified):
+                    artifact_result = run_cycle_end_artifact_processing(
+                        mission_id=mission_id,
+                        cycle_number=cycle_num,
+                        files_created=files_created,
+                        files_modified=files_modified,
+                        generate_health_report=False,  # Only generate on final cycle
+                    )
+                    # Add artifact processing results to cycle entry
+                    cycle_entry['artifact_management'] = {
+                        'files_processed': artifact_result.get('files_processed', 0),
+                        'files_categorized': artifact_result.get('files_categorized', 0),
+                        'index_updated': artifact_result.get('index_updated', False),
+                        'naming_issues': len(artifact_result.get('naming_issues', [])),
+                        'archive_suggestions': len(artifact_result.get('archive_suggestions', [])),
+                    }
+                    self.mission["cycle_history"][-1] = cycle_entry
+                    logger.info(f"Artifact Management: Cycle {cycle_num} processed {artifact_result.get('files_processed', 0)} files")
+            except Exception as e:
+                logger.warning(f"Artifact management processing failed: {e}")
 
         self.save_mission()
         logger.info(f"Saved cycle {cycle_num} to history")
