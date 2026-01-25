@@ -2,21 +2,22 @@
   "snapshot_type": "cycle_1",
   "mission_id": "test_mission",
   "stage": "CYCLE_END",
-  "timestamp": "2026-01-25T17:05:59.996242",
+  "timestamp": "2026-01-25T17:06:00.282278",
   "snapshot_number": 8,
   "event_data": {
     "cycle_number": 1,
-    "final": true,
-    "final_report": {
-      "summary": "Mission complete",
-      "all_files": [
+    "cycles_remaining": 1,
+    "continuation_prompt": "Continue with cycle 2",
+    "cycle_report": {
+      "summary": "Completed cycle 1",
+      "files_created": [
         "test.py"
       ],
-      "key_achievements": [
-        "Built test"
+      "files_modified": [],
+      "achievements": [
+        "Completed phase 1"
       ],
-      "challenges_overcome": [],
-      "lessons_learned": []
+      "issues": []
     }
   }
 }
