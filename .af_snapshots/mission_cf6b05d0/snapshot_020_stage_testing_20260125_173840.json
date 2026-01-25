@@ -1,0 +1,23 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_cf6b05d0",
+  "stage": "TESTING",
+  "timestamp": "2026-01-25T17:38:40.090612",
+  "snapshot_number": 20,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [],
+      "property_violations": [
+        "StageRegistry returns default handler for lowercase 'planning' (defensive design)",
+        "StageRegistry returns default handler for empty string '' (defensive design)",
+        "StageRegistry returns default handler for None (defensive design)"
+      ],
+      "mutation_score": null,
+      "spec_alignment": 0.917,
+      "epistemic_score": 0.87,
+      "rigor_level": "strong"
+    }
+  }
+}
