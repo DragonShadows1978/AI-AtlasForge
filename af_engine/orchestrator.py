@@ -99,6 +99,11 @@ class StageOrchestrator:
         """Get the current mission state."""
         return self.state.mission
 
+    @mission.setter
+    def mission(self, value: Dict[str, Any]) -> None:
+        """Set the mission state (backward compatibility)."""
+        self.state.mission = value
+
     @property
     def current_stage(self) -> str:
         """Get the current stage."""
