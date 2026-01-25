@@ -1,0 +1,13 @@
+{
+  "snapshot_type": "cycle_3",
+  "mission_id": "t4",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T18:13:20.079083",
+  "snapshot_number": 10,
+  "event_data": {
+    "cycle_number": 3,
+    "cycles_remaining": 2,
+    "continuation_prompt": "C2",
+    "cycle_report": {}
+  }
+}
