@@ -73,6 +73,9 @@ class StageOrchestrator:
         self.cycles = CycleManager(self.state)
         self.prompts = PromptFactory(self.root)
 
+        # Flag to prevent log_history from saving during queue processing (backward compat)
+        self._queue_processing = False
+
         # Load default integrations
         self._load_integrations()
 
@@ -394,6 +397,14 @@ class StageOrchestrator:
     def log_history(self, entry: str, details: Optional[Dict] = None) -> None:
         """Log an entry to mission history."""
         self.state.log_history(entry, details)
+
+    def increment_iteration(self) -> int:
+        """Increment the iteration counter (backward compatibility)."""
+        return self.state.increment_iteration()
+
+    def get_recent_history(self, n: int = 10) -> list:
+        """Get recent history entries (backward compatibility)."""
+        return self.state.history[-n:]
 
     def reload_mission(self) -> None:
         """Reload mission from disk."""
