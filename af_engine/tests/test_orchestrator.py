@@ -181,7 +181,10 @@ class TestResponseProcessing:
             next_stage = orch.process_response(response)
 
             assert next_stage == "BUILDING"
-            orch.state.increment_iteration.assert_called_once()
+            # Note: increment_iteration is only called when _increment_iteration is True
+            # in output_data (e.g., needs_revision/needs_replanning). Normal transitions
+            # do NOT increment iteration.
+            orch.state.increment_iteration.assert_not_called()
 
     def test_process_response_handles_none(self):
         """Test that process_response handles None response."""
