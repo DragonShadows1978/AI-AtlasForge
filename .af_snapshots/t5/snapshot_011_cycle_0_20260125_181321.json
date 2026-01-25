@@ -1,0 +1,30 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "t5",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T18:13:21.043972",
+  "snapshot_number": 11,
+  "event_data": {
+    "current_cycle": 3,
+    "cycle_budget": 5,
+    "cycles_remaining": 2,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-01-25T18:13:20.678761",
+        "iteration_count": 0,
+        "continuation_prompt": "C0"
+      },
+      {
+        "cycle": 2,
+        "completed_at": "2026-01-25T18:13:20.895154",
+        "iteration_count": 0,
+        "continuation_prompt": "C1"
+      }
+    ],
+    "summary": "C2",
+    "next_stage": "PLANNING"
+  }
+}
