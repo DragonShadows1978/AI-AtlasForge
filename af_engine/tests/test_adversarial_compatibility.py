@@ -173,22 +173,26 @@ class TestHighSeverityIssues:
             assert "cycle_budget" not in reset_mission
 
     def test_load_mission_json_error(self):
-        """HIGH: load_mission_from_file() doesn't handle JSONDecodeError."""
+        """HIGH: load_mission_from_file() handles invalid JSON gracefully.
+
+        The function should return False when given invalid JSON, not crash.
+        """
         from af_engine.orchestrator import StageOrchestrator
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
             orch.state = Mock()
             orch.state.mission = {}
+            orch.save_mission = Mock()
 
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 f.write("{invalid json")
                 temp_file = Path(f.name)
 
             try:
-                with patch('af_engine.orchestrator.io_utils', None):
-                    with pytest.raises(json.JSONDecodeError):
-                        orch.load_mission_from_file(temp_file)
+                # The function should handle JSON errors gracefully and return False
+                result = orch.load_mission_from_file(temp_file)
+                assert result is False, "load_mission_from_file should return False for invalid JSON"
             finally:
                 temp_file.unlink()
 
