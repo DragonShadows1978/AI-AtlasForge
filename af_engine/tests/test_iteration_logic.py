@@ -178,10 +178,11 @@ class TestIterationIncrementOnNeedsRevision:
         """Test that recommendation=BUILDING also triggers iteration increment."""
         context = stage_context_factory()
 
-        # Using recommendation instead of status
+        # Using recommendation BUILDING with needs_revision status
+        # Note: status="success" takes precedence, so we need needs_revision status
         response = claude_response_factory(
             "ANALYZING",
-            status="",  # Empty status
+            status="needs_revision",
             recommendation="BUILDING",
             issues_found=["Bug found"]
         )

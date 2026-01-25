@@ -481,19 +481,21 @@ class TestOrchestratorMissionSetup:
         with open(mission_path, 'w') as f:
             json.dump({}, f)
 
+        # Create required directories for set_mission
+        (tmp_path / "missions").mkdir(exist_ok=True)
+        (tmp_path / "workspace").mkdir(exist_ok=True)
+
         orch = StageOrchestrator(
             mission_path=mission_path,
             atlasforge_root=tmp_path
         )
 
-        # Set a new mission
-        with patch('af_engine.orchestrator.MISSIONS_DIR', tmp_path / "missions"):
-            with patch('af_engine.orchestrator.WORKSPACE_DIR', tmp_path / "workspace"):
-                orch.set_mission(
-                    problem_statement="Test problem",
-                    cycle_budget=5,
-                    mission_id="test_setup"
-                )
+        # Set a new mission - orchestrator uses atlasforge_root for paths
+        orch.set_mission(
+            problem_statement="Test problem",
+            cycle_budget=5,
+            mission_id="test_setup"
+        )
 
         # Verify mission is initialized correctly
         assert orch.mission["problem_statement"] == "Test problem"

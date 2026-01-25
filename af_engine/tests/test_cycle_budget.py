@@ -182,11 +182,25 @@ class TestCycleManagerBehavior:
     @pytest.mark.unit
     def test_cycle_manager_should_continue(
         self,
-        cycle_manager
+        tmp_path,
+        mission_factory
     ):
         """Test CycleManager.should_continue returns correct values."""
-        # Default is cycle 1 of 3
-        assert cycle_manager.should_continue() is True
+        from af_engine.cycle_manager import CycleManager
+        from af_engine.state_manager import StateManager
+
+        # Create mission with cycle 1 of 3 (should continue)
+        mission = mission_factory(cycle_budget=3, current_cycle=1)
+        mission_path = tmp_path / "state" / "mission.json"
+        mission_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(mission_path, 'w') as f:
+            json.dump(mission, f)
+
+        state = StateManager(mission_path)
+        cm = CycleManager(state)
+
+        # cycle 1 of 3: should continue (1 < 3)
+        assert cm.should_continue() is True
 
     @pytest.mark.unit
     def test_cycle_manager_is_last_cycle(
