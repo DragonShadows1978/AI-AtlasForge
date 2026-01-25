@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "ANALYZING",
+  "mission_id": "mission_27508e45",
+  "timestamp": "2026-01-25T09:30:16.694469",
+  "data": {
+    "status": "analysis_complete",
+    "recommendation": "",
+    "issues_found": []
+  }
+}
