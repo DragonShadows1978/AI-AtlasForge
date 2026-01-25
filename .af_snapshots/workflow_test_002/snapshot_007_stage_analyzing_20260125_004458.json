@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "workflow_test_002",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T00:44:58.993803",
+  "snapshot_number": 7,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "CYCLE_END",
+    "iteration": 4
+  }
+}
