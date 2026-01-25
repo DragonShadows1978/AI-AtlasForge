@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "conductor_test_001",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T09:30:01.895730",
+  "snapshot_number": 6,
+  "event_data": {
+    "status": "success",
+    "recommendation": "",
+    "issues_found": []
+  }
+}
