@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "conductor_test",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T04:42:51.904189",
+  "snapshot_number": 1,
+  "event_data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 1
+  }
+}
