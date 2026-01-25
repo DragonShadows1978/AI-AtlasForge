@@ -1,0 +1,30 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "test_mission",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T17:37:20.820594",
+  "snapshot_number": 19,
+  "event_data": {
+    "total_cycles": 2,
+    "deliverables": [
+      "test.py"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Follow-up mission",
+      "mission_description": "Continue work",
+      "suggested_cycles": 3,
+      "rationale": "Natural extension"
+    },
+    "final_report": {
+      "summary": "Mission complete",
+      "all_files": [
+        "test.py"
+      ],
+      "key_achievements": [
+        "Built test"
+      ],
+      "challenges_overcome": [],
+      "lessons_learned": []
+    }
+  }
+}
