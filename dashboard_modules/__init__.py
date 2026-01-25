@@ -68,6 +68,8 @@ from .url_handlers import url_handlers_bp
 from .queue_scheduler import queue_scheduler_bp, init_queue_scheduler_blueprint
 from .semantic import semantic_bp, init_semantic_blueprint
 from .version_checker import version_bp, init_version_blueprint
+from .bundle_version import get_bundle_version, init_bundle_version
+from .artifact_health import artifact_health_bp, init_artifact_health_blueprint
 
 __all__ = [
     # Blueprints
@@ -91,6 +93,12 @@ __all__ = [
     'init_semantic_blueprint',
     'version_bp',
     'init_version_blueprint',
+    # Bundle version (cache-busting)
+    'get_bundle_version',
+    'init_bundle_version',
+    # Artifact health
+    'artifact_health_bp',
+    'init_artifact_health_blueprint',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]

@@ -608,3 +608,37 @@ def emit_queue_resumed():
     }
 
     _safe_emit('queue_resumed', 'update', data)
+
+
+def emit_mission_auto_started(mission_id: str, mission_title: str, queue_id: str = None, source: str = "auto"):
+    """
+    Emit event when a mission is automatically started from the queue.
+
+    This notifies the dashboard so it can:
+    1. Display a toast notification
+    2. Trigger browser notification (if enabled)
+    3. Refresh queue display
+
+    Args:
+        mission_id: The new mission's ID
+        mission_title: Title/description of the started mission
+        queue_id: Original queue item ID (if available)
+        source: Source of auto-start trigger:
+                - "queue_auto" - Triggered by queue completion
+                - "queue_next_button" - Manual "Start Next" button
+                - "idle_auto_start" - Triggered by idle state detection
+    """
+    event_key = f'mission_auto_started:{mission_id}'
+    if not _should_emit(event_key):
+        return
+
+    data = {
+        'event': 'mission_auto_started',
+        'mission_id': mission_id,
+        'mission_title': mission_title,
+        'queue_id': queue_id,
+        'source': source,
+        'timestamp': datetime.now().isoformat()
+    }
+
+    _safe_emit('queue_auto_start', 'update', data, queue_if_unavailable=True)

@@ -1,0 +1,219 @@
+# Stage Definitions Configuration
+#
+# This file defines the stage handlers and their configurations for the
+# modular R&D Engine. Each stage has:
+#   - name: Human-readable name
+#   - description: What the stage does
+#   - handler_module: Python module path
+#   - handler_class: Class name in the module
+#   - restrictions: Tool and path restrictions
+#   - transitions: Valid status -> next_stage mappings
+#   - integrations: Required and optional integrations
+
+stages:
+  PLANNING:
+    name: "Planning"
+    description: "Research codebase and create implementation plan"
+    handler_module: "af_engine.stages.planning"
+    handler_class: "PlanningStageHandler"
+    restrictions:
+      allowed_tools:
+        - "Read"
+        - "Glob"
+        - "Grep"
+        - "Write"
+        - "Bash"
+        - "WebFetch"
+        - "WebSearch"
+        - "Task"
+      blocked_tools:
+        - "NotebookEdit"
+      allowed_write_paths:
+        - "*/artifacts/*"
+        - "*/research/*"
+      forbidden_write_paths:
+        - "*.py"
+        - "*.js"
+        - "*.ts"
+        - "*.tsx"
+      allow_bash: true
+      read_only: false
+    transitions:
+      plan_complete: "BUILDING"
+      needs_more_research: "PLANNING"
+      error: "PLANNING"
+    integrations:
+      required:
+        - "analytics"
+        - "token_watcher"
+      optional:
+        - "knowledge_base"
+        - "afterimage"
+        - "decision_graph"
+        - "recovery"
+        - "websocket"
+
+  BUILDING:
+    name: "Building"
+    description: "Implement the solution based on the plan"
+    handler_module: "af_engine.stages.building"
+    handler_class: "BuildingStageHandler"
+    restrictions:
+      allowed_tools: []  # Empty means no restrictions
+      blocked_tools: []
+      allowed_write_paths:
+        - "*"
+      forbidden_write_paths: []
+      allow_bash: true
+      read_only: false
+    transitions:
+      build_complete: "TESTING"
+      build_in_progress: "BUILDING"
+      build_blocked: "BUILDING"
+      needs_replanning: "PLANNING"
+    integrations:
+      required:
+        - "analytics"
+      optional:
+        - "plan_backup"
+        - "afterimage"
+        - "git"
+        - "snapshots"
+        - "decision_graph"
+        - "websocket"
+
+  TESTING:
+    name: "Testing"
+    description: "Test the implementation thoroughly"
+    handler_module: "af_engine.stages.testing"
+    handler_class: "TestingStageHandler"
+    restrictions:
+      allowed_tools: []
+      blocked_tools: []
+      allowed_write_paths:
+        - "*"
+      forbidden_write_paths: []
+      allow_bash: true
+      read_only: false
+    transitions:
+      tests_passed: "ANALYZING"
+      tests_failed: "BUILDING"
+      tests_in_progress: "TESTING"
+    integrations:
+      required:
+        - "analytics"
+      optional:
+        - "git"
+        - "snapshots"
+        - "decision_graph"
+        - "websocket"
+
+  ANALYZING:
+    name: "Analyzing"
+    description: "Analyze results and determine next steps"
+    handler_module: "af_engine.stages.analyzing"
+    handler_class: "AnalyzingStageHandler"
+    restrictions:
+      allowed_tools:
+        - "Read"
+        - "Glob"
+        - "Grep"
+        - "Write"
+      blocked_tools:
+        - "Edit"
+        - "NotebookEdit"
+      allowed_write_paths:
+        - "*/artifacts/*"
+        - "*/research/*"
+      forbidden_write_paths:
+        - "*.py"
+        - "*.js"
+      allow_bash: false
+      read_only: false
+    transitions:
+      success: "CYCLE_END"
+      needs_revision: "BUILDING"
+      needs_replanning: "PLANNING"
+      analysis_in_progress: "ANALYZING"
+    integrations:
+      required:
+        - "analytics"
+      optional:
+        - "decision_graph"
+        - "websocket"
+
+  CYCLE_END:
+    name: "Cycle End"
+    description: "Complete cycle and determine if more cycles needed"
+    handler_module: "af_engine.stages.cycle_end"
+    handler_class: "CycleEndStageHandler"
+    restrictions:
+      allowed_tools:
+        - "Read"
+        - "Glob"
+        - "Grep"
+        - "Write"
+      blocked_tools:
+        - "Edit"
+        - "NotebookEdit"
+      allowed_write_paths:
+        - "*/artifacts/*"
+        - "*/research/*"
+      forbidden_write_paths:
+        - "*.py"
+        - "*.js"
+      allow_bash: false
+      read_only: false
+    transitions:
+      cycle_complete: "PLANNING"  # Continue to next cycle
+      mission_complete: "COMPLETE"  # Final cycle done
+    integrations:
+      required:
+        - "analytics"
+      optional:
+        - "drift_validation"
+        - "knowledge_base"
+        - "queue_scheduler"
+        - "post_mission_hooks"
+        - "websocket"
+
+  COMPLETE:
+    name: "Complete"
+    description: "Mission has been completed"
+    handler_module: "af_engine.stages.complete"
+    handler_class: "CompleteStageHandler"
+    restrictions:
+      allowed_tools:
+        - "Read"
+        - "Glob"
+        - "Grep"
+      blocked_tools:
+        - "Edit"
+        - "Write"
+        - "NotebookEdit"
+        - "Bash"
+      allowed_write_paths: []
+      forbidden_write_paths:
+        - "*"
+      allow_bash: false
+      read_only: true
+    transitions:
+      mission_complete: "COMPLETE"
+    integrations:
+      required:
+        - "analytics"
+      optional:
+        - "knowledge_base"
+        - "queue_scheduler"
+        - "post_mission_hooks"
+        - "artifact_manager"
+        - "websocket"
+
+# Stage flow diagram:
+#
+#   PLANNING -> BUILDING -> TESTING -> ANALYZING -> CYCLE_END -> COMPLETE
+#       ^                                  |              |
+#       |__________________________________|              |
+#                (if tests fail)                          |
+#       |_________________________________________________|
+#                  (if more cycles remain)

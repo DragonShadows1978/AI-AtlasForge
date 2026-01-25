@@ -62,9 +62,17 @@ ENV/
 *~
 *.pre_restore
 *.orig
+*.backup
+
+# ------ Deployment Artifacts ------
+deploy.log
 
 # Workspace (transient work area)
 workspace/
+
+# ------ Developer Mode Marker ------
+# Signals active development - bypasses version update checks
+.dev_mode
 
 # ------ Environment & Secrets ------
 .env

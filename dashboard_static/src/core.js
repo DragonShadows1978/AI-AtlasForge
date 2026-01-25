@@ -108,11 +108,20 @@ export function formatDuration(seconds) {
 
 /**
  * Format timestamp to time ago string
- * @param {number} timestamp - Unix timestamp in seconds
+ * @param {number|string} timestampOrDateStr - Unix timestamp in seconds OR ISO date string
  * @returns {string} - Formatted string (e.g., "5m ago")
  */
-export function formatTimeAgo(timestamp) {
+export function formatTimeAgo(timestampOrDateStr) {
+    let timestamp;
+    if (typeof timestampOrDateStr === 'string') {
+        // Parse ISO date string to Unix timestamp (seconds)
+        timestamp = new Date(timestampOrDateStr).getTime() / 1000;
+    } else {
+        timestamp = timestampOrDateStr;
+    }
+
     const seconds = Math.floor((Date.now() / 1000) - timestamp);
+    if (isNaN(seconds) || seconds < 0) return 'recently';
     if (seconds < 60) return 'just now';
     if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
     if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';

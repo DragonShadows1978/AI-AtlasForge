@@ -878,6 +878,56 @@ export function showMissionAnalytics(missionId) {
     openMissionAnalyticsModal(missionId);
 }
 
+// =============================================================================
+// ARTIFACT HEALTH WIDGET
+// =============================================================================
+
+export async function refreshArtifactHealthWidget() {
+    try {
+        const summary = await api('/api/artifact-health/summary');
+        if (summary.error) {
+            console.warn('[ArtifactHealth] API error:', summary.error);
+            return;
+        }
+
+        // Update health score and bar
+        const healthPercent = Math.round((summary.overall_health || 0) * 100);
+        const healthBar = document.getElementById('artifact-health-bar');
+        const healthPercentEl = document.getElementById('artifact-health-percent');
+        if (healthBar) {
+            healthBar.style.width = healthPercent + '%';
+        }
+        if (healthPercentEl) {
+            healthPercentEl.textContent = healthPercent;
+            // Color code based on health
+            if (healthPercent >= 80) {
+                healthPercentEl.style.color = 'var(--green)';
+            } else if (healthPercent >= 60) {
+                healthPercentEl.style.color = 'var(--yellow)';
+            } else {
+                healthPercentEl.style.color = 'var(--red)';
+            }
+        }
+
+        // Update stats
+        const totalFilesEl = document.getElementById('artifact-total-files');
+        const categoriesEl = document.getElementById('artifact-categories');
+        const orphansEl = document.getElementById('artifact-orphans');
+        const duplicatesEl = document.getElementById('artifact-duplicates');
+        const staleEl = document.getElementById('artifact-stale');
+        const recsEl = document.getElementById('artifact-recommendations');
+
+        if (totalFilesEl) totalFilesEl.textContent = summary.total_files || 0;
+        if (categoriesEl) categoriesEl.textContent = summary.categories || 0;
+        if (orphansEl) orphansEl.textContent = summary.orphans || 0;
+        if (duplicatesEl) duplicatesEl.textContent = summary.duplicates || 0;
+        if (staleEl) staleEl.textContent = summary.stale_files || 0;
+        if (recsEl) recsEl.textContent = summary.recommendations_count || 0;
+    } catch (e) {
+        console.error('[ArtifactHealth] Widget error:', e);
+    }
+}
+
 // Export fullMissionText getter
 export function getFullMissionText() {
     return fullMissionText;

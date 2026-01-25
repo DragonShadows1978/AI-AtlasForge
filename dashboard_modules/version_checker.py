@@ -9,6 +9,9 @@ Features:
 - Checks AI-AfterImage version status (if installed)
 - Caches results to avoid excessive git operations
 - Provides API endpoint for dashboard
+- **Developer Mode**: When a `.dev_mode` file exists in a repo root,
+  version status displays "Developer Mode" instead of checking remote.
+  This prevents false "update available" warnings during active development.
 
 Usage:
     from dashboard_modules.version_checker import version_bp, init_version_blueprint
@@ -73,6 +76,18 @@ def _run_git_command(repo_dir: Path, *args) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _is_dev_mode(repo_dir: Path) -> bool:
+    """Check if developer mode is enabled for this repository.
+
+    Developer mode is signaled by the presence of a `.dev_mode` file
+    in the repository root. This file should be gitignored.
+    """
+    if not repo_dir:
+        return False
+    dev_mode_file = repo_dir / '.dev_mode'
+    return dev_mode_file.exists()
+
+
 def _get_local_commit(repo_dir: Path) -> str | None:
     """Get the current local commit hash."""
     success, output = _run_git_command(repo_dir, 'rev-parse', 'HEAD')
@@ -121,6 +136,22 @@ def _check_repo_version(repo_dir: Path, name: str) -> dict:
             'installed': False,
             'status': 'not_installed',
             'message': 'Not Installed',
+        }
+
+    # Check for Developer Mode first - skip remote checks if active
+    if _is_dev_mode(repo_dir):
+        local_commit = _get_local_commit(repo_dir)
+        version_tag = _get_local_version_tag(repo_dir)
+        return {
+            'name': name,
+            'installed': True,
+            'status': 'dev_mode',
+            'message': 'Developer Mode',
+            'version': version_tag or local_commit or 'dev',
+            'local_commit': local_commit,
+            'remote_check': False,
+            'dev_mode': True,
+            'note': 'Developer mode active - remote check skipped',
         }
 
     # Get local commit

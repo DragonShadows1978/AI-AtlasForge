@@ -10,8 +10,9 @@
     <link rel="shortcut icon" type="image/x-icon" href="/static/favicon.ico">
 
     <!-- Preload critical resources for LCP optimization -->
-    <link rel="preload" href="/static/dist/bundle.min.css" as="style" fetchpriority="high">
-    <link rel="modulepreload" href="/static/dist/bundle.min.js" fetchpriority="high">
+    <!-- Cache-busting: version hash appended to prevent stale cached bundles -->
+    <link rel="preload" href="/static/dist/bundle.min.css?v={{ bundle_css_version }}" as="style" fetchpriority="high">
+    <link rel="modulepreload" href="/static/dist/bundle.min.js?v={{ bundle_js_version }}" fetchpriority="high">
     <link rel="preload" href="/static/vendor/socket.io.min.js" as="script" fetchpriority="high">
 
     <!--
@@ -83,7 +84,7 @@
     </script>
 
     <!-- Bundled CSS (minified) -->
-    <link rel="stylesheet" href="/static/dist/bundle.min.css">
+    <link rel="stylesheet" href="/static/dist/bundle.min.css?v={{ bundle_css_version }}">
 
     <!-- Fallback to original CSS if bundle not found -->
     <link rel="stylesheet" href="/static/css/main.css" media="print" onload="this.media='all'">
@@ -121,8 +122,8 @@
         .container{display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr) minmax(300px,1.2fr);gap:15px;padding:15px;height:calc(100vh - 140px);overflow:hidden}
         .widget-column-1,.widget-column-2{overflow-y:auto;height:100%;padding-right:5px;scrollbar-gutter:stable}
         .left-panel{overflow-y:auto;max-height:calc(100vh - 140px)}
-        /* Mobile: horizontal scroll layout */
-        @media(max-width:600px){html,body{min-width:300vw;background:var(--bg)}body{overflow-x:auto}#atlasforge-tab{width:100vw;overflow-x:scroll;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth;background:var(--bg)}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:300vw;min-width:300vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - 140px);background:var(--bg)}.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - 160px)}}
+        /* Mobile: horizontal scroll layout with fixed header/tabs */
+        @media(max-width:600px){:root{--mobile-header-height:100px;--mobile-tabs-height:44px}html,body{width:100vw;overflow-x:hidden;background:var(--bg)}header{position:sticky;top:0;z-index:100;width:100vw;background:var(--panel)}.main-tabs{position:sticky;top:var(--mobile-header-height);z-index:99;width:100vw;background:var(--panel)}#atlasforge-tab{width:100vw;overflow:visible;background:var(--bg)}.mobile-scroll-wrapper{width:100vw;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:300vw;min-width:300vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 60px);background:var(--bg)}.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 80px)}}
         .mobile-scroll-dots{display:none}
         @media(max-width:600px){.mobile-scroll-dots{display:flex;justify-content:center;gap:8px;position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(22,27,34,0.95);border-radius:20px;padding:6px 12px;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.3)}.scroll-dot{width:8px;height:8px;border-radius:50%;background:var(--text-dim);cursor:pointer;transition:all 0.3s ease}.scroll-dot.active{background:var(--accent);transform:scale(1.3);box-shadow:0 0 8px var(--accent)}.scroll-dot:hover{background:var(--accent);opacity:0.7}}
         .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:15px}
@@ -220,6 +221,7 @@
         .version-status.update-available{color:var(--red)}
         .version-status.error{color:var(--yellow)}
         .version-status.not-installed{color:var(--text-dim);font-style:italic}
+        .version-status.dev-mode{color:#bc8cff;font-style:italic}
 
         /* Service Status Indicators (AtlasForge + Investigation) */
         .service-status-group{display:flex;align-items:center;gap:12px}
@@ -373,6 +375,7 @@
         </nav>
 
     <div id="atlasforge-tab" class="tab-content active">
+    <div class="mobile-scroll-wrapper">
     <div class="container">
         <!-- Widget Column 1 (Primary - User Priority) -->
         <div class="widget-column-1">
@@ -559,15 +562,16 @@
             <div class="card" id="queue-card">
                 <div class="card-header" id="queue-widget-header" onclick="toggleCard('queue')">
                     <h3>Mission Queue <span id="queue-count" class="badge" style="display: none;">0</span></h3>
-                    <span id="queue-notification-icon" onclick="event.stopPropagation(); toggleNotifications();" title="Click to enable browser notifications">🔔</span>
                     <span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="queue-controls">
-                        <label class="queue-toggle">
+                        <label class="auto-start-switch" title="Auto-start next mission when current completes" onclick="event.stopPropagation();">
                             <input type="checkbox" id="queue-enabled-checkbox">
-                            <span>Auto-start</span>
+                            <span class="auto-start-slider"></span>
+                            <span class="auto-start-label" id="auto-start-label">Auto-Start</span>
                         </label>
+                        <span id="queue-notification-icon" onclick="event.stopPropagation(); toggleNotifications();" title="Enable browser notifications" class="queue-notification-btn">🔔</span>
                         <span class="queue-select-all" onclick="selectAllItems()" title="Select/deselect all">☑ All</span>
                         <button class="btn btn-small primary" onclick="startNextFromQueue()" title="Start next mission manually">Start Next</button>
                         <button class="btn btn-small" id="queue-pause-btn" onclick="toggleQueuePause()" title="Pause queue processing">Pause</button>
@@ -597,6 +601,7 @@
                             <option value="high">🟠 High</option>
                             <option value="low">⚪ Low</option>
                         </select>
+                        <input type="number" id="queue-add-cycles" class="queue-cycles-input" min="1" max="10" value="3" title="Cycle Budget">
                         <input type="text" id="queue-add-input" class="queue-input" placeholder="Quick add mission to queue...">
                         <button class="btn btn-small" onclick="quickAddEnhanced()">Add</button>
                     </div>
@@ -788,6 +793,54 @@
                     </div>
                     <div class="analytics-trend-chart" id="analytics-trend-chart">
                         <div style="color: var(--text-dim); font-size: 0.75em; width: 100%; text-align: center;">No trend data</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Artifact Health Widget -->
+            <div class="card" id="artifact-health-widget-card">
+                <div class="card-header" onclick="toggleCard('artifact-health-widget')">
+                    <h3>Artifact Health</h3>
+                    <span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="artifact-health-score">
+                        <div class="health-bar-container">
+                            <div class="health-bar" id="artifact-health-bar" style="width: 0%"></div>
+                        </div>
+                        <div class="health-score-text">
+                            <span id="artifact-health-percent">-</span>% Health
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="artifact-total-files">-</div>
+                            <div class="analytics-stat-label">Total Files</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="artifact-categories">-</div>
+                            <div class="analytics-stat-label">Categories</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value warning" id="artifact-orphans">-</div>
+                            <div class="analytics-stat-label">Orphans</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value warning" id="artifact-duplicates">-</div>
+                            <div class="analytics-stat-label">Duplicates</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value stale" id="artifact-stale">-</div>
+                            <div class="analytics-stat-label">Stale Files</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="artifact-recommendations">-</div>
+                            <div class="analytics-stat-label">Recommendations</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1221,7 +1274,8 @@
             <h3>AtlasForge Activity <span id="chat-socket-indicator" class="ws-indicator ws-unknown" title="Chat connection status"></span></h3>
             <div id="chat-messages" class="chat-messages"></div>
         </div>
-    </div>
+    </div><!-- End container -->
+    </div><!-- End mobile-scroll-wrapper -->
     </div><!-- End of atlasforge-tab -->
 
     <!-- Investigations Tab Content -->
@@ -2112,7 +2166,7 @@
     <!-- Main JavaScript Bundle (ES6 modules with code splitting) -->
     <!-- Critical widget functions (git/kb analytics refresh) are inlined in main bundle -->
     <!-- Tab-specific features are lazy-loaded on demand for performance -->
-    <script type="module" src="/static/dist/bundle.min.js"></script>
+    <script type="module" src="/static/dist/bundle.min.js?v={{ bundle_js_version }}"></script>
 
     <!-- Legacy Fallback (for browsers without ES6 module support) -->
     <script nomodule>
@@ -2177,7 +2231,11 @@
                 if (container) container.style.display = 'flex';
 
                 // Set the status class and text
-                if (data.status === 'up_to_date') {
+                if (data.status === 'dev_mode') {
+                    statusEl.classList.add('dev-mode');
+                    statusEl.textContent = 'Developer Mode';
+                    statusEl.title = 'Developer mode active - remote version check skipped. Version: ' + (data.version || 'dev');
+                } else if (data.status === 'up_to_date') {
                     statusEl.classList.add('up-to-date');
                     statusEl.textContent = 'Up To Date';
                     if (data.version) {

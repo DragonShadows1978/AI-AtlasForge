@@ -139,13 +139,28 @@ def queue_status():
         current_stage = mission.get("current_stage", "COMPLETE")
         is_running = current_stage not in ["COMPLETE", None, ""]
 
+        # Build next_up info for the first queued mission
+        next_up = None
+        missions = queue.get("missions", [])
+        if missions:
+            first = missions[0]
+            problem_stmt = first.get("problem_statement", "")
+            next_up = {
+                "id": first.get("id"),
+                "title": (problem_stmt[:60] + "...") if len(problem_stmt) > 60 else problem_stmt,
+                "priority": first.get("priority", "normal"),
+                "position": 1,
+                "cycle_budget": first.get("cycle_budget", 3)
+            }
+
         return jsonify({
-            "queue_length": len(queue.get("missions", [])),
-            "missions": queue.get("missions", []),
+            "queue_length": len(missions),
+            "missions": missions,
             "settings": queue.get("settings", {}),
             "last_updated": queue.get("last_updated"),
-            "af_running": is_running,
-            "current_stage": current_stage
+            "atlasforge_running": is_running,
+            "current_stage": current_stage,
+            "next_up": next_up
         })
     except Exception as e:
         return jsonify({"error": str(e)})
@@ -478,6 +493,18 @@ def start_next_mission():
             "signaled_at": datetime.now().isoformat(),
             "source": "queue_next_button"
         })
+
+        # Emit auto-start notification event
+        try:
+            from websocket_events import emit_mission_auto_started
+            emit_mission_auto_started(
+                mission_id=mission_id,
+                mission_title=mission_title,
+                queue_id=next_mission.get("id"),
+                source="queue_next_button"
+            )
+        except ImportError:
+            pass  # websocket_events not available
 
         # Emit WebSocket update
         _emit_queue_update(_load_queue())

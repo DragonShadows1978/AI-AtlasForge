@@ -1,0 +1,154 @@
+# Integration Configuration
+#
+# This file defines integration handlers and their settings for the
+# modular R&D Engine. Each integration has:
+#   - module: Python module path
+#   - class: Class name in the module
+#   - enabled: Whether the integration is active
+#   - priority: Execution order (lower = higher priority)
+#   - config: Integration-specific settings
+
+integrations:
+  analytics:
+    module: "af_engine.integrations.analytics"
+    class: "AnalyticsIntegration"
+    enabled: true
+    priority: 0  # CRITICAL - always runs first
+    config:
+      track_tokens: true
+      track_costs: true
+      track_timing: true
+
+  token_watcher:
+    module: "af_engine.integrations.token_watcher"
+    class: "TokenWatcherIntegration"
+    enabled: true
+    priority: 0  # CRITICAL
+    config:
+      warning_threshold: 0.8
+      critical_threshold: 0.95
+
+  recovery:
+    module: "af_engine.integrations.recovery"
+    class: "RecoveryIntegration"
+    enabled: true
+    priority: 10  # HIGH
+    config:
+      checkpoint_interval: 300  # seconds
+      max_checkpoints: 10
+
+  websocket:
+    module: "af_engine.integrations.websocket_events"
+    class: "WebSocketIntegration"
+    enabled: true
+    priority: 10  # HIGH
+    config:
+      emit_stage_updates: true
+      emit_progress: true
+
+  decision_graph:
+    module: "af_engine.integrations.decision_graph"
+    class: "DecisionGraphIntegration"
+    enabled: true
+    priority: 10  # HIGH
+    config:
+      track_tool_invocations: true
+      track_file_access: true
+
+  git:
+    module: "af_engine.integrations.git"
+    class: "GitIntegration"
+    enabled: true
+    priority: 20  # NORMAL
+    config:
+      auto_commit: false
+      commit_on_stage_complete: false
+
+  snapshots:
+    module: "af_engine.integrations.snapshots"
+    class: "SnapshotIntegration"
+    enabled: true
+    priority: 20  # NORMAL
+    config:
+      snapshot_on_stage_start: true
+      max_snapshots_per_mission: 20
+
+  drift_validation:
+    module: "af_engine.integrations.drift_validation"
+    class: "DriftValidationIntegration"
+    enabled: true
+    priority: 20  # NORMAL
+    config:
+      validate_on_cycle_end: true
+      strict_mode: false
+
+  knowledge_base:
+    module: "af_engine.integrations.knowledge_base"
+    class: "KnowledgeBaseIntegration"
+    enabled: true
+    priority: 30  # LOW
+    config:
+      extract_learnings: true
+      inject_relevant: true
+      max_learnings: 5
+
+  afterimage:
+    module: "af_engine.integrations.afterimage"
+    class: "AfterImageIntegration"
+    enabled: true
+    priority: 30  # LOW
+    config:
+      inject_code_memory: true
+      max_memories: 3
+
+  plan_backup:
+    module: "af_engine.integrations.plan_backup"
+    class: "PlanBackupIntegration"
+    enabled: true
+    priority: 20  # NORMAL
+    config:
+      backup_on_building_start: true
+      backup_dir: "backups/plans"
+
+  artifact_manager:
+    module: "af_engine.integrations.artifact_manager"
+    class: "ArtifactManagerIntegration"
+    enabled: true
+    priority: 30  # LOW
+    config:
+      auto_catalog: true
+      archive_on_complete: true
+
+  queue_scheduler:
+    module: "af_engine.integrations.queue_scheduler"
+    class: "QueueSchedulerIntegration"
+    enabled: true
+    priority: 30  # LOW
+    config:
+      check_queue_on_complete: true
+      auto_start_next: false
+
+  post_mission_hooks:
+    module: "af_engine.integrations.post_mission_hooks"
+    class: "PostMissionHooksIntegration"
+    enabled: true
+    priority: 40  # BACKGROUND
+    config:
+      hooks_dir: "hooks/post_mission"
+      timeout: 60
+
+  enhancer:
+    module: "af_engine.integrations.enhancer"
+    class: "EnhancerIntegration"
+    enabled: true
+    priority: 40  # BACKGROUND
+    config:
+      enable_exploration_tracking: true
+      enable_fingerprinting: true
+
+# Priority levels:
+#   0  - CRITICAL: Always runs first (analytics, token tracking)
+#   10 - HIGH: Important but not critical (recovery, websocket)
+#   20 - NORMAL: Default priority (git, snapshots)
+#   30 - LOW: Background operations (learning extraction)
+#   40 - BACKGROUND: Non-essential (enhancer)

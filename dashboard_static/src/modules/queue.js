@@ -92,6 +92,14 @@ export async function initQueueWidget() {
         updateSuggestionsBadge(data.count);
     });
 
+    // Handler for mission auto-started event (from websocket_events.py)
+    registerHandler('queue_auto_start', (data) => {
+        if (data.event === 'mission_auto_started') {
+            console.log('Mission auto-started notification:', data);
+            handleMissionAutoStarted(data);
+        }
+    });
+
     registerHandler('mission_status', (data) => {
         // Update running state when mission status changes
         const wasRunning = queueData.atlasforge_running;
@@ -206,6 +214,10 @@ function renderQueueItems() {
         return;
     }
 
+    // Check if auto-start is enabled and engine is not running
+    const autoStartEnabled = queueData.settings?.auto_start || false;
+    const engineIdle = !queueData.atlasforge_running;
+
     container.innerHTML = missions.map((m, index) => {
         const priorityClass = getPriorityClass(m.priority);
         const sourceIcon = getSourceIcon(m.source);
@@ -217,13 +229,19 @@ function renderQueueItems() {
         const dependencyBadge = m.depends_on ? `<span class="queue-dep-badge" title="Depends on: ${m.depends_on}">🔗</span>` : '';
         const projectBadge = m.project_name ? `<span class="queue-project-badge" title="Project: ${escapeHtml(m.project_name)}">📁 ${escapeHtml(m.project_name)}</span>` : '';
 
+        // "Next Up" badge for first item when auto-start is enabled
+        const isNextUp = index === 0 && autoStartEnabled;
+        const nextUpBadge = isNextUp ? `<span class="queue-next-up-badge" title="Will auto-start when current mission completes">⚡ Next Up</span>` : '';
+        const nextUpClass = isNextUp ? 'next-up' : '';
+
         return `
-            <div class="queue-item ${priorityClass} ${isSelected ? 'selected' : ''}" data-queue-id="${m.id}" draggable="true">
+            <div class="queue-item ${priorityClass} ${nextUpClass} ${isSelected ? 'selected' : ''}" data-queue-id="${m.id}" draggable="true">
                 <div class="queue-item-drag-handle" title="Drag to reorder">⋮⋮</div>
                 <input type="checkbox" class="queue-item-checkbox" data-queue-id="${m.id}"
                        ${isSelected ? 'checked' : ''} onclick="toggleItemSelection('${m.id}')">
                 <div class="queue-item-main">
                     <div class="queue-item-header">
+                        ${nextUpBadge}
                         <span class="queue-item-priority" style="background: ${getPriorityBgColor(m.priority)}; color: ${getPriorityColor(m.priority)}">
                             ${getPriorityLabel(m.priority)}
                         </span>
@@ -267,12 +285,17 @@ function updateQueueCount() {
 }
 
 /**
- * Update the auto-start checkbox state
+ * Update the auto-start checkbox state and label
  */
 function updateQueueCheckbox() {
     const checkbox = document.getElementById('queue-enabled-checkbox');
+    const label = document.getElementById('auto-start-label');
     if (checkbox && queueData.settings) {
-        checkbox.checked = queueData.settings.auto_start || false;
+        const isEnabled = queueData.settings.auto_start || false;
+        checkbox.checked = isEnabled;
+        if (label) {
+            label.textContent = isEnabled ? 'Auto-Start ON' : 'Auto-Start';
+        }
     }
 }
 
@@ -428,12 +451,26 @@ async function toggleQueueAutoStart() {
             auto_start: checkbox.checked
         });
         if (data.status === 'updated') {
-            showToast(`Queue auto-start ${checkbox.checked ? 'enabled' : 'disabled'}`);
+            // Update label text to reflect state
+            const label = document.getElementById('auto-start-label');
+            if (label) {
+                label.textContent = checkbox.checked ? 'Auto-Start ON' : 'Auto-Start';
+            }
+            showToast(`Queue auto-start ${checkbox.checked ? 'enabled' : 'disabled'}`, checkbox.checked ? 'success' : 'info');
             queueData.settings = data.settings;
+
+            // Request notification permission when enabling auto-start
+            if (checkbox.checked && 'Notification' in window && Notification.permission === 'default') {
+                requestNotificationPermission();
+            }
+
+            // Re-render to update "Next Up" badges
+            renderQueueItems();
         }
     } catch (e) {
         console.error('Failed to update settings:', e);
         checkbox.checked = !checkbox.checked; // Revert
+        showToast('Failed to update auto-start setting', 'error');
     }
 }
 
@@ -585,6 +622,33 @@ function showAutoStartNotification(data) {
     showToast(`🚀 Started: ${title}`, 'success');
 }
 
+/**
+ * Handle mission auto-started event from WebSocket
+ * Shows toast notification, triggers browser notification, and refreshes queue
+ */
+function handleMissionAutoStarted(data) {
+    const title = data.mission_title || data.mission_id || 'Queued Mission';
+    const source = data.source || 'auto';
+
+    // Show toast notification
+    showToast(`🚀 Auto-started: ${title}`, 'success');
+
+    // Trigger browser notification if enabled
+    if (notificationsEnabled) {
+        showBrowserNotification(
+            'Mission Auto-Started',
+            `${title} has been automatically started from the queue`,
+            data.mission_id
+        );
+    }
+
+    // Hide any pending auto-start indicator
+    hideAutoStartIndicator();
+
+    // Refresh the queue widget to reflect the change
+    refreshQueueWidget();
+}
+
 // =============================================================================
 // PAUSE/RESUME FUNCTIONALITY
 // =============================================================================
@@ -734,6 +798,10 @@ function showEditModal(mission) {
             </div>
             <div class="modal-body">
                 <div class="form-group">
+                    <label>Mission Text</label>
+                    <textarea id="edit-problem-statement" class="form-input" rows="4" placeholder="Describe the mission...">${escapeHtml(mission.problem_statement || '')}</textarea>
+                </div>
+                <div class="form-group">
                     <label>Priority</label>
                     <select id="edit-priority" class="form-input">
                         <option value="critical" ${mission.priority === 'critical' ? 'selected' : ''}>🔴 Critical</option>
@@ -783,6 +851,7 @@ function showEditModal(mission) {
  * Save edits to a queue item
  */
 export async function saveQueueItemEdit(queueId) {
+    const problemStatement = document.getElementById('edit-problem-statement')?.value;
     const priority = document.getElementById('edit-priority')?.value;
     const cycles = parseInt(document.getElementById('edit-cycles')?.value) || 3;
     const dependsOn = document.getElementById('edit-depends-on')?.value;
@@ -791,6 +860,7 @@ export async function saveQueueItemEdit(queueId) {
 
     try {
         const data = await api(`/api/queue/update/${queueId}`, 'PUT', {
+            problem_statement: problemStatement,
             priority,
             cycle_budget: cycles,
             depends_on: dependsOn || null,
@@ -1143,6 +1213,10 @@ export async function quickAddEnhanced() {
 
     const priority = prioritySelect?.value || 'normal';
 
+    // Get cycle budget from input or default to 3
+    const cyclesInput = document.getElementById('queue-add-cycles');
+    const cycleBudget = cyclesInput ? parseInt(cyclesInput.value, 10) || 3 : 3;
+
     // Get project name from main project input (carries over to queued missions)
     const projectNameInput = document.getElementById('project-name-input');
     const projectName = projectNameInput ? projectNameInput.value.trim() : '';
@@ -1151,7 +1225,7 @@ export async function quickAddEnhanced() {
         const payload = {
             problem_statement: input.value.trim(),
             priority: priority,
-            cycle_budget: 3,
+            cycle_budget: cycleBudget,
             source: 'dashboard'
         };
         // Include project_name if specified

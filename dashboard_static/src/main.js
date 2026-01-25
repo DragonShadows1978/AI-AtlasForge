@@ -185,6 +185,7 @@ window.confirmRestart = widgets.confirmRestart;
 window.refresh = widgets.refresh;
 window.refreshAtlasForgeWidgets = widgets.refreshAtlasForgeWidgets;
 window.refreshAnalyticsWidget = widgets.refreshAnalyticsWidget;
+window.refreshArtifactHealthWidget = widgets.refreshArtifactHealthWidget;
 window.refreshFullAnalytics = widgets.refreshFullAnalytics;
 window.showMissionAnalytics = widgets.showMissionAnalytics;
 window.applyAnalyticsPeriodFilter = widgets.applyAnalyticsPeriodFilter;
@@ -712,16 +713,16 @@ function initKeyboardShortcuts() {
  * Shows which column is currently in view and allows tapping to navigate
  */
 function initMobileScrollDots() {
-    // On mobile (<= 600px), the scroll container is #atlasforge-tab, not .container
-    // because CSS sets overflow-x: scroll on #atlasforge-tab
-    const atlasforgeTab = document.getElementById('atlasforge-tab');
+    // On mobile (<= 600px), the scroll container is .mobile-scroll-wrapper
+    // This wrapper scrolls horizontally while header/tabs stay fixed
+    const mobileScrollWrapper = document.querySelector('#atlasforge-tab .mobile-scroll-wrapper');
     const container = document.querySelector('#atlasforge-tab .container');
     const dotsContainer = document.getElementById('mobile-scroll-dots');
     const dots = document.querySelectorAll('#mobile-scroll-dots .scroll-dot');
 
-    if (!atlasforgeTab || !container || !dotsContainer || dots.length === 0) {
+    if (!mobileScrollWrapper || !container || !dotsContainer || dots.length === 0) {
         console.log('Mobile scroll dots: missing elements', {
-            atlasforgeTab: !!atlasforgeTab,
+            mobileScrollWrapper: !!mobileScrollWrapper,
             container: !!container,
             dotsContainer: !!dotsContainer,
             dots: dots.length
@@ -729,9 +730,9 @@ function initMobileScrollDots() {
         return;
     }
 
-    // Get the scroll container - #atlasforge-tab on mobile, .container on tablet
+    // Get the scroll container - .mobile-scroll-wrapper on mobile, .container on tablet
     function getScrollContainer() {
-        return window.innerWidth <= 600 ? atlasforgeTab : container;
+        return window.innerWidth <= 600 ? mobileScrollWrapper : container;
     }
 
     // Only show dots on mobile (handled by CSS, but also check here)
@@ -772,8 +773,8 @@ function initMobileScrollDots() {
         });
     };
 
-    // Listen for scroll events on BOTH containers (handles resize/orientation change)
-    atlasforgeTab.addEventListener('scroll', updateActiveDot, { passive: true });
+    // Listen for scroll events on mobile scroll wrapper and container
+    mobileScrollWrapper.addEventListener('scroll', updateActiveDot, { passive: true });
     container.addEventListener('scroll', updateActiveDot, { passive: true });
 
     // Listen for resize events
@@ -900,6 +901,9 @@ function setupMinimalPolling() {
     // Initial call for analytics widget (must be called on page load)
     widgets.refreshAnalyticsWidget();
 
+    // Initial call for artifact health widget
+    widgets.refreshArtifactHealthWidget();
+
     // Very infrequent polling as backup when WebSocket is connected
     // These only trigger if WebSocket hasn't sent updates recently
 
@@ -935,6 +939,10 @@ function setupFullPolling() {
     // Analytics widget - every 30 seconds
     widgets.refreshAnalyticsWidget();
     pollingIntervals.push(setInterval(widgets.refreshAnalyticsWidget, 30000));
+
+    // Artifact health widget - every 60 seconds
+    widgets.refreshArtifactHealthWidget();
+    pollingIntervals.push(setInterval(widgets.refreshArtifactHealthWidget, 60000));
 
     // Decision graph refresh - every 10 seconds
     decisionGraph.refreshDecisionGraph();

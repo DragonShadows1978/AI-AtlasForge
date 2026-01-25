@@ -33,6 +33,19 @@ let selectionModeActive = false;
 // Saved searches state
 let savedSearches = [];
 
+// Store scroll position when modal opens (for mobile)
+let savedScrollX = 0;
+let savedScrollY = 0;
+
+// Helper to remove modal-open class only if no modals are visible
+function removeModalOpenClass() {
+    const visibleModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]');
+    if (visibleModals.length === 0) {
+        document.body.classList.remove('modal-open');
+        window.scrollTo(savedScrollX, savedScrollY);
+    }
+}
+
 // Tag colors for consistent coloring based on tag name hash
 const TAG_COLORS = [
     { bg: 'rgba(88, 166, 255, 0.2)', border: '#58a6ff', text: '#58a6ff' },   // Blue
@@ -539,7 +552,15 @@ window.showInvestigationDetail = async function(investigationId) {
 
     if (title) title.textContent = `Investigation: ${investigationId}`;
     body.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-dim);">Loading...</div>';
+
+    // Save scroll position before showing modal (for mobile)
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+
     modal.style.display = 'flex';
+
+    // Add modal-open class to body for mobile touch handling
+    document.body.classList.add('modal-open');
 
     try {
         // Load investigation status
@@ -650,6 +671,8 @@ window.closeInvestigationDetailModal = function() {
     const modal = document.getElementById('inv-detail-modal');
     if (modal) modal.style.display = 'none';
     currentInvestigationId = null;
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 };
 
 // ============================================================================
@@ -719,6 +742,8 @@ window.closeTagModal = function() {
     // Refresh the cards to show updated tags
     loadInvestigations();
     loadAllTags();
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 };
 
 /**
@@ -1077,6 +1102,8 @@ function renderComparisonModal(inv1, inv2) {
 window.closeCompareModal = function() {
     const modal = document.getElementById('inv-compare-modal');
     if (modal) modal.style.display = 'none';
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 };
 
 // ============================================================================
@@ -1250,7 +1277,15 @@ window.openTagStatsModal = async function() {
 
     if (!modal || !body) return;
 
+    // Save scroll position before showing modal (for mobile)
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+
     modal.style.display = 'flex';
+
+    // Add modal-open class to body for mobile touch handling
+    document.body.classList.add('modal-open');
+
     body.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-dim);">Loading tag analytics...</div>';
 
     try {
@@ -1380,6 +1415,8 @@ function renderTagStats(container, data) {
 window.closeTagStatsModal = function() {
     const modal = document.getElementById('inv-tag-stats-modal');
     if (modal) modal.style.display = 'none';
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 };
 
 // ============================================================================
@@ -1428,7 +1465,15 @@ window.openSaveSearchModal = function() {
 
     if (!modal) return;
 
+    // Save scroll position before showing modal (for mobile)
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+
     modal.style.display = 'flex';
+
+    // Add modal-open class to body for mobile touch handling
+    document.body.classList.add('modal-open');
+
     if (input) {
         input.value = '';
         input.focus();
@@ -1441,6 +1486,8 @@ window.openSaveSearchModal = function() {
 window.closeSaveSearchModal = function() {
     const modal = document.getElementById('inv-save-search-modal');
     if (modal) modal.style.display = 'none';
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 };
 
 /**
@@ -1574,7 +1621,15 @@ window.openTagModal = async function(investigationId) {
 
     if (!modal) return;
 
+    // Save scroll position before showing modal (for mobile)
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+
     modal.style.display = 'flex';
+
+    // Add modal-open class to body for mobile touch handling
+    document.body.classList.add('modal-open');
+
     if (input) input.value = '';
 
     // Get investigation query for suggestions
@@ -1849,7 +1904,14 @@ window.compareSelectedInvestigations = async function() {
             ${diffSection}
         `;
 
+        // Save scroll position before showing modal (for mobile)
+        savedScrollX = window.scrollX || window.pageXOffset;
+        savedScrollY = window.scrollY || window.pageYOffset;
+
         modal.style.display = 'flex';
+
+        // Add modal-open class to body for mobile touch handling
+        document.body.classList.add('modal-open');
     } catch (e) {
         showToast('Failed to compare: ' + e.message);
     }

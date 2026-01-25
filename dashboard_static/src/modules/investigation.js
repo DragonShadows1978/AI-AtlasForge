@@ -13,6 +13,10 @@ let currentInvestigationId = null;
 let investigationPolling = null;
 let isInvestigationRunning = false;
 
+// Store scroll position when modal opens (for mobile)
+let savedScrollX = 0;
+let savedScrollY = 0;
+
 /**
  * Toggle between R&D mode and Investigation mode
  */
@@ -297,6 +301,15 @@ export async function viewInvestigationReport() {
     }
 }
 
+// Helper to remove modal-open class only if no modals are visible
+function removeModalOpenClass() {
+    const visibleModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]');
+    if (visibleModals.length === 0) {
+        document.body.classList.remove('modal-open');
+        window.scrollTo(savedScrollX, savedScrollY);
+    }
+}
+
 /**
  * Show the investigation report in a modal
  */
@@ -327,7 +340,15 @@ function showReportModal(reportContent, investigationId) {
 
     document.getElementById('investigation-report-title').textContent = `Investigation Report: ${investigationId}`;
     document.getElementById('investigation-report-body').textContent = reportContent;
+
+    // Save scroll position before showing modal (for mobile)
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+
     modal.style.display = 'flex';
+
+    // Add modal-open class to body for mobile touch handling
+    document.body.classList.add('modal-open');
 }
 
 /**
@@ -338,6 +359,8 @@ export function closeInvestigationReportModal() {
     if (modal) {
         modal.style.display = 'none';
     }
+    // Remove modal-open class safely (only if no other modals visible)
+    removeModalOpenClass();
 }
 
 /**

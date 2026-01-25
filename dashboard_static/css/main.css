@@ -158,27 +158,65 @@ h1 { color: var(--accent); font-size: 1.3em; }
 
 /* Responsive: Mobile - horizontal swipe columns */
 @media (max-width: 600px) {
-    /* Fix background extending on horizontal scroll */
+    /* CSS custom properties for mobile header/tabs height */
+    :root {
+        --mobile-header-height: 100px;
+        --mobile-tabs-height: 44px;
+    }
+
+    /* Keep body at viewport width - NO horizontal scroll on body */
     html {
-        min-width: 100%;
+        width: 100vw;
+        overflow-x: hidden;
         background: var(--bg);
     }
     body {
-        overflow-x: auto;
         width: 100vw;
-        min-width: 300vw; /* Ensure body extends full width of content */
+        overflow-x: hidden; /* Prevent body from scrolling horizontally */
+        overflow-y: auto;
         background: var(--bg);
     }
+
+    /* Sticky header - stays fixed at top during horizontal scroll */
+    header {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        width: 100vw;
+        background: var(--panel);
+        box-sizing: border-box;
+    }
+
+    /* Sticky tabs - stays fixed below header during horizontal scroll */
+    .main-tabs {
+        position: sticky;
+        top: var(--mobile-header-height);
+        z-index: 99;
+        width: 100vw;
+        background: var(--panel);
+        box-sizing: border-box;
+        overflow-x: auto; /* Allow tabs to scroll if too many */
+    }
+
+    /* Tab content - normal width, no scroll */
     #atlasforge-tab {
-        width: 300vw; /* Match content width */
-        min-width: 300vw;
-        overflow-x: visible;
+        width: 100vw;
+        overflow: visible;
+        background: var(--bg);
+    }
+
+    /* NEW: Mobile scroll wrapper - this is what scrolls horizontally */
+    .mobile-scroll-wrapper {
+        width: 100vw;
+        overflow-x: auto;
         overflow-y: visible;
         -webkit-overflow-scrolling: touch;
         scroll-snap-type: x mandatory;
         scroll-behavior: smooth;
-        background: var(--bg);
+        box-sizing: border-box;
     }
+
+    /* Container inside scroll wrapper - holds the 3 columns */
     .container {
         display: flex;
         flex-direction: row;
@@ -189,9 +227,11 @@ h1 { color: var(--accent); font-size: 1.3em; }
         gap: 15px;
         overflow: visible;
         height: auto;
-        min-height: calc(100vh - 140px);
+        min-height: calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 60px);
         background: var(--bg);
     }
+
+    /* Columns - each takes up one viewport width */
     .widget-column-1,
     .widget-column-2,
     .chat-container {
@@ -203,8 +243,9 @@ h1 { color: var(--accent); font-size: 1.3em; }
         box-sizing: border-box;
         overflow-y: auto;
         height: auto;
-        max-height: calc(100vh - 160px);
+        max-height: calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 80px);
     }
+
     /* Mobile text overflow fixes - Enhanced */
     .card h3,
     .card-header h3,
@@ -1775,7 +1816,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     transform: rotate(-90deg);
 }
 .card-content {
-    overflow: hidden;
+    overflow-y: auto;
     max-height: 500px;
     transition: max-height 0.3s ease, opacity 0.3s ease;
     opacity: 1;
@@ -2172,6 +2213,36 @@ h1 { color: var(--accent); font-size: 1.3em; }
     border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
 }
+
+/* Artifact Health Widget Styles */
+.artifact-health-score {
+    margin-bottom: 15px;
+}
+.health-bar-container {
+    height: 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+.health-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 50%, var(--green) 100%);
+    transition: width 0.5s ease;
+}
+.health-score-text {
+    text-align: center;
+    margin-top: 6px;
+    font-size: 0.9em;
+    color: var(--text-dim);
+}
+#artifact-health-percent {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: var(--accent);
+}
+.analytics-stat-value.warning { color: var(--orange); }
+.analytics-stat-value.stale { color: var(--text-dim); }
 
 /* Git Status Widget Styles */
 .git-status-grid {
@@ -8639,6 +8710,86 @@ body.modal-open {
     accent-color: var(--accent);
 }
 
+/* Enhanced Auto-Start Toggle Switch */
+.auto-start-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.auto-start-switch input {
+    display: none;
+}
+
+.auto-start-slider {
+    width: 40px;
+    height: 20px;
+    background: var(--text-dim);
+    border-radius: 10px;
+    position: relative;
+    transition: background 0.3s ease;
+}
+
+.auto-start-slider::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    top: 2px;
+    left: 2px;
+    transition: left 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.auto-start-switch input:checked + .auto-start-slider {
+    background: var(--green);
+}
+
+.auto-start-switch input:checked + .auto-start-slider::after {
+    left: 22px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 0 8px rgba(46, 204, 113, 0.4);
+}
+
+.auto-start-label {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.auto-start-switch input:checked ~ .auto-start-label {
+    color: var(--green);
+}
+
+/* Notification Button in Queue Controls */
+.queue-notification-btn {
+    font-size: 1.1em;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: all 0.2s ease;
+    padding: 2px 4px;
+    border-radius: 3px;
+}
+
+.queue-notification-btn:hover {
+    opacity: 1;
+    background: var(--accent-muted);
+}
+
+.queue-notification-btn.enabled {
+    opacity: 1;
+    color: var(--yellow);
+}
+
+.queue-notification-btn.disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
 /* Queue List */
 .queue-list {
     display: flex;
@@ -8968,6 +9119,23 @@ body.modal-open {
 }
 
 .queue-priority-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* Queue Cycles Input */
+.queue-cycles-input {
+    width: 50px;
+    padding: 6px 8px;
+    text-align: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85em;
+}
+
+.queue-cycles-input:focus {
     outline: none;
     border-color: var(--accent);
 }
@@ -10380,6 +10548,33 @@ body.modal-open {
     padding: 2px 6px;
     border-radius: 3px;
     cursor: help;
+}
+
+/* Next Up Badge - for auto-start indicator */
+.queue-next-up-badge {
+    font-size: 0.75em;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(234, 88, 12, 0.2));
+    color: #f59e0b;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: 600;
+    animation: pulse-glow 2s ease-in-out infinite;
+    cursor: help;
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    }
+    50% {
+        box-shadow: 0 0 8px 2px rgba(245, 158, 11, 0.3);
+    }
+}
+
+/* Next Up queue item highlight */
+.queue-item.next-up {
+    border-left: 3px solid #f59e0b;
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent);
 }
 
 /* Select All Button */

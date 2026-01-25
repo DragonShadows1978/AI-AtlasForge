@@ -112,6 +112,23 @@ class EmailInvestigationTrayIndicator:
 
         menu.append(Gtk.SeparatorMenuItem())
 
+        # ===== TERMINAL =====
+        terminal_header = Gtk.MenuItem(label="--- Terminal ---")
+        terminal_header.set_sensitive(False)
+        menu.append(terminal_header)
+
+        # Terminal sessions status
+        self.terminal_status_item = Gtk.MenuItem(label="Sessions: Checking...")
+        self.terminal_status_item.set_sensitive(False)
+        menu.append(self.terminal_status_item)
+
+        # Open Terminal
+        open_terminal_item = Gtk.MenuItem(label="Open Terminal")
+        open_terminal_item.connect("activate", self.open_terminal)
+        menu.append(open_terminal_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
         # Quit tray
         quit_item = Gtk.MenuItem(label="Quit Tray")
         quit_item.connect("activate", self.quit)
@@ -161,6 +178,9 @@ class EmailInvestigationTrayIndicator:
 
                 self.last_error = None
 
+                # Fetch terminal status
+                self._update_terminal_status()
+
         except urllib.error.URLError as e:
             self._handle_service_offline(f"Connection error: {e.reason}")
         except Exception as e:
@@ -183,6 +203,20 @@ class EmailInvestigationTrayIndicator:
         # Disable daemon controls when service is down
         self.start_item.set_sensitive(False)
         self.stop_item.set_sensitive(False)
+
+        # Terminal status when offline
+        self.terminal_status_item.set_label("Sessions: N/A")
+
+    def _update_terminal_status(self):
+        """Fetch terminal session count from API."""
+        try:
+            req = urllib.request.Request(f"{EMAIL_SERVICE_URL}/api/terminal/status", timeout=2)
+            with urllib.request.urlopen(req, timeout=2) as response:
+                data = json.loads(response.read())
+                session_count = data.get("active_sessions", 0)
+                self.terminal_status_item.set_label(f"Sessions: {session_count}")
+        except:
+            self.terminal_status_item.set_label("Sessions: 0")
 
     def start_daemon(self, _):
         """Start the email monitoring daemon via API."""
@@ -268,6 +302,10 @@ class EmailInvestigationTrayIndicator:
         """Open the email monitor tab in mini-mind dashboard."""
         # Open to the email monitor widget directly
         subprocess.Popen(["xdg-open", f"{EMAIL_SERVICE_URL}/#email-monitor"])
+
+    def open_terminal(self, _):
+        """Open the terminal page."""
+        subprocess.Popen(["xdg-open", f"{EMAIL_SERVICE_URL}/terminal"])
 
     def check_inbox(self, _):
         """Trigger manual inbox check."""
