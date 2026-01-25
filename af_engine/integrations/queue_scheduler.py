@@ -3,10 +3,15 @@ af_engine.integrations.queue_scheduler - Mission Queue Management
 
 This integration manages the mission queue, starting next missions
 when current ones complete.
+
+NOTE: The actual queue processing is now handled directly by the
+StageOrchestrator._process_mission_queue() method. This integration
+only provides queue status information for monitoring/display purposes.
 """
 
 import logging
-from typing import List, Optional
+from pathlib import Path
+from typing import Optional
 
 from .base import (
     BaseIntegrationHandler,
@@ -20,8 +25,12 @@ logger = logging.getLogger(__name__)
 
 class QueueSchedulerIntegration(BaseIntegrationHandler):
     """
-    Manages mission queue and auto-starts next queued mission
-    when current mission completes.
+    Monitors mission queue status.
+
+    The actual queue processing (starting next mission) is handled
+    by StageOrchestrator._process_mission_queue() which is called
+    directly when a mission completes. This integration only provides
+    status info for dashboard display.
 
     Operates at LOW priority to ensure all other completion
     handlers run first.
@@ -39,43 +48,75 @@ class QueueSchedulerIntegration(BaseIntegrationHandler):
         self.queue_path = queue_path
 
     def _check_availability(self) -> bool:
-        """Check if queue scheduler module is available."""
+        """Check if queue file exists."""
         try:
-            from dashboard_modules.queue_scheduler import start_next_mission
-            return True
+            from atlasforge_config import STATE_DIR
+            queue_path = STATE_DIR / "mission_queue.json"
+            return queue_path.exists()
         except ImportError:
-            logger.debug("Queue scheduler not available")
             return False
 
     def on_mission_completed(self, event: Event) -> None:
-        """Check for and start next queued mission."""
+        """
+        Log queue status when mission completes.
+
+        Note: Actual queue processing is handled by
+        StageOrchestrator._process_mission_queue() which runs
+        after the MISSION_COMPLETED event is emitted.
+        """
         try:
-            from dashboard_modules.queue_scheduler import queue_status
-
-            # Get queue status to check for pending missions
-            status = queue_status()
-            if hasattr(status, 'get_json'):
-                status_data = status.get_json()
-            else:
-                status_data = status
-
-            pending_count = status_data.get("queue_length", 0)
+            status = self.get_queue_status()
+            pending_count = status.get("pending", 0)
 
             if pending_count > 0:
                 logger.info(f"Queue: {pending_count} pending missions available")
-                # Signal that there are pending missions
-                # The dashboard/orchestrator handles actual mission start
+                # Add to event data for other handlers
                 event.data["pending_missions"] = pending_count
             else:
                 logger.debug("Queue: No pending missions")
 
         except Exception as e:
-            logger.warning(f"Queue scheduler failed: {e}")
+            logger.warning(f"Queue status check failed: {e}")
 
     def get_queue_status(self) -> dict:
-        """Get current queue status."""
+        """
+        Get current queue status using direct file access.
+
+        Avoids Flask context dependency by reading queue file directly.
+        """
         try:
-            from dashboard_modules.queue_scheduler import get_queue_status
-            return get_queue_status()
+            # Try using mission_queue_scheduler if available
+            try:
+                from mission_queue_scheduler import get_scheduler
+                scheduler = get_scheduler()
+                state = scheduler.get_queue()
+                return {
+                    "pending": len([q for q in state.queue if q.get("status") != "completed"]),
+                    "in_progress": 0,  # Determined by active mission state
+                    "completed": len([q for q in state.queue if q.get("status") == "completed"]),
+                    "enabled": state.enabled,
+                    "paused": state.paused
+                }
+            except ImportError:
+                pass
+
+            # Fallback: read queue file directly
+            try:
+                import io_utils
+                from atlasforge_config import STATE_DIR
+                queue_path = STATE_DIR / "mission_queue.json"
+                queue_data = io_utils.atomic_read_json(queue_path, {"queue": [], "enabled": True})
+                queue = queue_data.get("queue", [])
+                return {
+                    "pending": len(queue),
+                    "in_progress": 0,
+                    "completed": 0,
+                    "enabled": queue_data.get("enabled", True)
+                }
+            except Exception:
+                pass
+
+            return {"pending": 0, "in_progress": 0, "completed": 0}
+
         except Exception:
             return {"pending": 0, "in_progress": 0, "completed": 0}

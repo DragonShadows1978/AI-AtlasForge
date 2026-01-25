@@ -13,7 +13,10 @@ The StageOrchestrator:
 - Generates prompts via PromptFactory
 """
 
+import json
 import logging
+import uuid
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -183,6 +186,9 @@ class StageOrchestrator:
                     "cycle_count": self.cycles.current_cycle,
                 }
             )
+
+            # Process mission queue - start next queued mission
+            self._process_mission_queue()
 
     def build_rd_prompt(self, context: str = "") -> str:
         """
@@ -631,6 +637,370 @@ class StageOrchestrator:
         }
         self.save_mission()
         logger.info("Mission reset to PLANNING")
+
+    # =========================================================================
+    # Mission Queue Processing (ported from legacy af_engine)
+    # =========================================================================
+
+    def _process_mission_queue(self) -> None:
+        """
+        Check if there are queued missions and start the next one.
+
+        This is called after a mission completes (reaches COMPLETE stage).
+        Uses the extended queue scheduler if available, which handles:
+        - Priority-based ordering
+        - Scheduled start times
+        - Mission dependencies
+
+        Falls back to simple FIFO queue if scheduler not available.
+
+        IMPORTANT: Queue item is only removed AFTER successful mission creation
+        to prevent mission loss if creation fails.
+
+        Uses file-based locking to prevent race conditions with
+        dashboard_v2.queue_auto_start_watcher().
+        """
+        # Import paths from atlasforge_config
+        try:
+            from atlasforge_config import STATE_DIR, MISSIONS_DIR, WORKSPACE_DIR
+        except ImportError:
+            STATE_DIR = self.root / "state"
+            MISSIONS_DIR = self.root / "missions"
+            WORKSPACE_DIR = self.root / "workspace"
+
+        # Import io_utils for atomic file operations
+        try:
+            import io_utils
+        except ImportError:
+            logger.warning("io_utils not available, queue processing disabled")
+            return
+
+        # Try to import queue scheduler
+        QUEUE_SCHEDULER_AVAILABLE = False
+        get_queue_scheduler = None
+        try:
+            from mission_queue_scheduler import get_scheduler as get_queue_scheduler
+            QUEUE_SCHEDULER_AVAILABLE = True
+        except ImportError:
+            pass
+
+        # Try to import queue notifications
+        QUEUE_NOTIFICATIONS_AVAILABLE = False
+        notify_queue_empty = None
+        notify_mission_completed = None
+        try:
+            from queue_notifications import (
+                notify_queue_empty,
+                notify_mission_completed
+            )
+            QUEUE_NOTIFICATIONS_AVAILABLE = True
+        except ImportError:
+            pass
+
+        # Acquire queue processing lock to prevent race conditions
+        release_queue_lock = None
+        try:
+            from queue_processing_lock import acquire_queue_lock, release_queue_lock
+            if not acquire_queue_lock(source="af_engine_modular", timeout=2, blocking=False):
+                logger.info("Queue processing locked by another process, skipping")
+                return
+        except ImportError:
+            logger.warning("queue_processing_lock module not available, proceeding without lock")
+
+        queue_path = STATE_DIR / "mission_queue.json"
+
+        # Set flag to prevent log_history from saving during queue processing
+        self._queue_processing = True
+
+        try:
+            # Try using the extended scheduler if available
+            if QUEUE_SCHEDULER_AVAILABLE and get_queue_scheduler:
+                scheduler = get_queue_scheduler()
+                next_item_obj = scheduler.get_next_ready_item()
+
+                if next_item_obj is None:
+                    # Check if queue is empty vs just waiting
+                    state = scheduler.get_queue()
+                    if not state.queue:
+                        logger.debug("Queue empty - no next mission")
+                        # Send notification that queue is empty
+                        if QUEUE_NOTIFICATIONS_AVAILABLE and notify_queue_empty:
+                            notify_queue_empty(self.mission.get("mission_id"))
+                        return
+                    else:
+                        logger.debug("No ready items - all waiting on schedule/dependencies")
+                        return
+
+                # DON'T remove the item yet - wait for successful mission creation
+                next_item = next_item_obj.to_dict()
+                next_item_id = next_item_obj.id
+                queue = scheduler.get_queue().queue
+            else:
+                # Fallback to simple queue processing
+                queue_data = io_utils.atomic_read_json(queue_path, {"queue": [], "enabled": True})
+
+                if not queue_data.get("enabled", True):
+                    logger.debug("Queue processing disabled - skipping")
+                    return
+
+                queue = queue_data.get("queue", [])
+                if not queue:
+                    logger.debug("Queue empty - no next mission")
+                    return
+
+                # DON'T pop yet - just peek at the first item
+                next_item = queue[0]
+                next_item_id = next_item.get("id")
+
+            logger.info(f"Processing queued mission: {next_item.get('mission_title', 'Untitled')}")
+
+            # Send completion notification for previous mission
+            if QUEUE_NOTIFICATIONS_AVAILABLE and notify_mission_completed:
+                prev_mission_id = self.mission.get("mission_id")
+                prev_mission_title = self.mission.get("original_problem_statement", "")[:50]
+                cycles_used = self.mission.get("current_cycle", 1)
+                notify_mission_completed(
+                    prev_mission_id,
+                    prev_mission_title,
+                    cycles_used,
+                    len(queue)
+                )
+
+            # Create the new mission - returns True on success
+            success = self._create_mission_from_queue_item(next_item)
+
+            # Only remove from queue AFTER successful mission creation
+            if success:
+                if QUEUE_SCHEDULER_AVAILABLE and get_queue_scheduler:
+                    scheduler = get_queue_scheduler()
+                    scheduler.remove_item(next_item_id)
+                    logger.info(f"Removed item {next_item_id} from queue after successful mission creation")
+                else:
+                    # Fallback: remove from simple queue
+                    queue_data = io_utils.atomic_read_json(queue_path, {"queue": [], "enabled": True})
+                    queue = queue_data.get("queue", [])
+                    # Remove the first item (the one we processed)
+                    if queue and queue[0].get("id") == next_item_id:
+                        queue.pop(0)
+                    else:
+                        # Fallback: remove by matching ID
+                        queue = [q for q in queue if q.get("id") != next_item_id]
+                    queue_data["queue"] = queue
+                    queue_data["last_processed_at"] = datetime.now().isoformat()
+                    io_utils.atomic_write_json(queue_path, queue_data)
+                    logger.info(f"Removed item {next_item_id} from queue after successful mission creation")
+
+                # Emit queue update event
+                try:
+                    from websocket_events import emit_queue_updated
+                    if QUEUE_SCHEDULER_AVAILABLE and get_queue_scheduler:
+                        updated_queue = get_queue_scheduler().get_queue()
+                        emit_queue_updated({
+                            "missions": updated_queue.queue,
+                            "settings": {
+                                "enabled": updated_queue.enabled,
+                                "paused": updated_queue.paused,
+                                "auto_estimate_time": updated_queue.auto_estimate_time,
+                                "default_priority": updated_queue.default_priority
+                            }
+                        }, 'mission_started')
+                    else:
+                        emit_queue_updated(queue_data, 'mission_started')
+                except Exception as e:
+                    logger.warning(f"Failed to emit queue update: {e}")
+            else:
+                logger.error(f"Mission creation failed - keeping item {next_item_id} in queue")
+
+        except Exception as e:
+            logger.error(f"Queue processing failed: {e}")
+        finally:
+            # Reset queue processing flag
+            self._queue_processing = False
+            # Release queue processing lock
+            if release_queue_lock:
+                try:
+                    release_queue_lock()
+                except Exception:
+                    pass
+
+    def _create_mission_from_queue_item(self, queue_item: dict) -> bool:
+        """
+        Create a new mission from a queue item and signal for auto-start.
+
+        Args:
+            queue_item: Dict with mission_title, mission_description, cycle_budget, project_name, etc.
+
+        Returns:
+            bool: True if mission was created successfully, False otherwise
+        """
+        # Import paths from atlasforge_config
+        try:
+            from atlasforge_config import STATE_DIR, MISSIONS_DIR, WORKSPACE_DIR, MISSION_PATH
+        except ImportError:
+            STATE_DIR = self.root / "state"
+            MISSIONS_DIR = self.root / "missions"
+            WORKSPACE_DIR = self.root / "workspace"
+            MISSION_PATH = STATE_DIR / "mission.json"
+
+        # Import io_utils for atomic file operations
+        try:
+            import io_utils
+        except ImportError:
+            logger.error("io_utils not available, cannot create mission")
+            return False
+
+        # Try to import project name resolver
+        PROJECT_NAME_RESOLVER_AVAILABLE = False
+        resolve_project_name = None
+        try:
+            from project_name_resolver import resolve_project_name
+            PROJECT_NAME_RESOLVER_AVAILABLE = True
+        except ImportError:
+            pass
+
+        # Try to import analytics
+        ANALYTICS_AVAILABLE = False
+        get_analytics = None
+        try:
+            from mission_analytics import get_analytics
+            ANALYTICS_AVAILABLE = True
+        except ImportError:
+            pass
+
+        try:
+            # Generate mission ID
+            mission_id = f"mission_{uuid.uuid4().hex[:8]}"
+
+            # Get mission details from queue item
+            # Handle both dashboard format (problem_statement) and core format (mission_description)
+            problem_statement = (
+                queue_item.get("mission_description") or
+                queue_item.get("problem_statement") or
+                queue_item.get("mission_title", "")
+            )
+            cycle_budget = queue_item.get("cycle_budget", 3)
+            user_project_name = queue_item.get("project_name")
+
+            # Resolve project name for shared workspace
+            resolved_project_name = None
+            if PROJECT_NAME_RESOLVER_AVAILABLE and resolve_project_name:
+                resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
+                # Use shared workspace under workspace/<project_name>/
+                mission_workspace = WORKSPACE_DIR / resolved_project_name
+                logger.info(f"Queue mission resolved project name: {resolved_project_name}")
+            else:
+                # Legacy: per-mission workspace
+                mission_workspace = MISSIONS_DIR / mission_id / "workspace"
+
+            # Create mission directory (for config, analytics, drift validation)
+            mission_dir = MISSIONS_DIR / mission_id
+            mission_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create workspace directories (may already exist if shared project)
+            (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+            (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
+            (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
+
+            # Create the mission
+            new_mission = {
+                "mission_id": mission_id,
+                "problem_statement": problem_statement,
+                "original_problem_statement": problem_statement,
+                "preferences": {},
+                "success_criteria": [],
+                "current_stage": "PLANNING",
+                "iteration": 0,
+                "max_iterations": 10,
+                "artifacts": {"plan": None, "code": [], "tests": []},
+                "history": [],
+                "created_at": datetime.now().isoformat(),
+                "last_updated": datetime.now().isoformat(),
+                "cycle_started_at": datetime.now().isoformat(),
+                "cycle_budget": max(1, cycle_budget),
+                "current_cycle": 1,
+                "cycle_history": [],
+                "mission_workspace": str(mission_workspace),
+                "mission_dir": str(mission_dir),
+                "project_name": resolved_project_name,
+                "source_queue_item_id": queue_item.get("id"),
+                "source_recommendation_id": queue_item.get("recommendation_id"),
+                "metadata": {"queued": True, "queued_at": queue_item.get("queued_at")}
+            }
+
+            # Save mission state with return value check
+            success = io_utils.atomic_write_json(MISSION_PATH, new_mission)
+            if not success:
+                logger.error(f"Failed to write new mission {mission_id} to disk")
+                return False
+
+            # Save mission config
+            mission_config_path = mission_dir / "mission_config.json"
+            config_data = {
+                "mission_id": mission_id,
+                "problem_statement": problem_statement,
+                "cycle_budget": max(1, cycle_budget),
+                "created_at": new_mission["created_at"],
+                "source_queue_item_id": queue_item.get("id")
+            }
+            if resolved_project_name:
+                config_data["project_name"] = resolved_project_name
+                config_data["project_workspace"] = str(mission_workspace)
+            with open(mission_config_path, 'w') as f:
+                json.dump(config_data, f, indent=2)
+
+            # Register with analytics if available
+            if ANALYTICS_AVAILABLE and get_analytics:
+                try:
+                    analytics = get_analytics()
+                    analytics.start_mission(mission_id, problem_statement)
+                except Exception as e:
+                    logger.warning(f"Analytics: Failed to register queued mission: {e}")
+
+            # Signal for auto-start via file-based IPC
+            # The dashboard/watcher will detect this and start R&D mode
+            auto_start_signal = {
+                "action": "start_rd",
+                "mission_id": mission_id,
+                "mission_title": queue_item.get("mission_title", "Queued Mission"),
+                "signaled_at": datetime.now().isoformat(),
+                "source": "queue"
+            }
+            signal_path = STATE_DIR / "queue_auto_start_signal.json"
+            io_utils.atomic_write_json(signal_path, auto_start_signal)
+
+            # Emit WebSocket notification for dashboard
+            try:
+                from websocket_events import emit_mission_auto_started
+                mission_title = queue_item.get("mission_title") or (problem_statement[:60] + "..." if len(problem_statement) > 60 else problem_statement)
+                emit_mission_auto_started(
+                    mission_id=mission_id,
+                    mission_title=mission_title,
+                    queue_id=queue_item.get("id"),
+                    source="queue_auto"
+                )
+            except ImportError:
+                pass  # websocket_events not available
+
+            logger.info(f"Created mission {mission_id} from queue. Auto-start signal written.")
+            logger.info(f"Queued mission started: {queue_item.get('mission_title', 'Untitled')} "
+                       f"(new_mission_id={mission_id}, queue_item_id={queue_item.get('id')})")
+
+            # Small delay to ensure filesystem sync before verification
+            time.sleep(0.01)  # 10ms
+
+            # Verify mission was created successfully
+            verify_mission = io_utils.atomic_read_json(MISSION_PATH, {})
+            if verify_mission.get("mission_id") == mission_id and verify_mission.get("current_stage") == "PLANNING":
+                logger.info(f"Verified mission {mission_id} created with PLANNING stage")
+                return True
+            else:
+                logger.error(f"Mission verification failed: expected {mission_id} in PLANNING stage, "
+                           f"got {verify_mission.get('mission_id')} in {verify_mission.get('current_stage')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to create mission from queue item: {e}")
+            return False
 
 
 # Alias for backward compatibility
