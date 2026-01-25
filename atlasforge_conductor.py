@@ -73,6 +73,9 @@ logger = logging.getLogger("atlasforge_conductor")
 # Global state
 running = True
 
+# Maximum retries when Claude times out or fails to respond
+MAX_CLAUDE_RETRIES = 3
+
 
 def signal_handler(signum, frame):
     global running
@@ -729,6 +732,7 @@ def run_rd_mode():
     controller = atlasforge_engine.RDMissionController()
 
     cycle_count = 0
+    timeout_retries = 0  # Track consecutive timeout failures
 
     try:
         while running:
@@ -839,7 +843,17 @@ def run_rd_mode():
             response_text = invoke_llm(prompt, timeout=1800, cwd=workspace)
 
             if not response_text:
-                logger.warning("No response from Claude, retrying...")
+                timeout_retries += 1
+                if timeout_retries >= MAX_CLAUDE_RETRIES:
+                    logger.error(f"Claude timed out {MAX_CLAUDE_RETRIES} times consecutively")
+                    send_to_chat(f"Error: Claude unresponsive after {MAX_CLAUDE_RETRIES} retries. Mission halted.")
+                    append_journal({
+                        "type": "claude_timeout_failure",
+                        "stage": current_stage,
+                        "retries": timeout_retries
+                    })
+                    break  # Exit loop - mission needs intervention
+                logger.warning(f"No response from Claude, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES})...")
                 time.sleep(10)
                 continue
 
@@ -856,6 +870,9 @@ def run_rd_mode():
                 })
                 time.sleep(5)
                 continue
+
+            # Reset timeout counter on successful response
+            timeout_retries = 0
 
             # Log the response
             append_journal({

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Feature flag: Controls whether to use the new modular engine or legacy
 # Default to False for safe rollout - can be enabled via environment variable
-USE_MODULAR_ENGINE = os.environ.get('USE_MODULAR_ENGINE', 'false').lower() in ('true', '1', 'yes')
+USE_MODULAR_ENGINE = os.environ.get('USE_MODULAR_ENGINE', 'true').lower() in ('true', '1', 'yes')
 
 # Valid stages (same as legacy)
 STAGES = ["PLANNING", "BUILDING", "TESTING", "ANALYZING", "CYCLE_END", "COMPLETE"]

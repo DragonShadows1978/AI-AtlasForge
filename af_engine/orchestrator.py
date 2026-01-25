@@ -283,8 +283,12 @@ class StageOrchestrator:
         if result.message:
             logger.info(f"Handler message: {result.message}")
 
-        # Increment iteration
-        self.state.increment_iteration()
+        # Check if stage handler requests iteration increment
+        # Only increment on ANALYZING -> BUILDING or ANALYZING -> PLANNING transitions
+        # (i.e., when needs_revision or needs_replanning)
+        if result.output_data.get("_increment_iteration"):
+            self.state.increment_iteration()
+            logger.info(f"Iteration incremented to {self.state.iteration}")
 
         return result.next_stage
 

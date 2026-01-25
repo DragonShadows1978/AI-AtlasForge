@@ -174,6 +174,7 @@ Respond with JSON:
         Get PLANNING stage restrictions.
 
         Only allows writes to artifacts/ and research/ directories.
+        Matches legacy init_guard.py STAGE_POLICIES["PLANNING"].
         """
         return StageRestrictions(
             allowed_tools=[
@@ -181,8 +182,12 @@ Respond with JSON:
                 "Bash", "WebFetch", "WebSearch", "Task"
             ],
             blocked_tools=["NotebookEdit"],
-            allowed_write_paths=["*/artifacts/*", "*/research/*"],
-            forbidden_write_paths=["*.py", "*.js", "*.ts", "*/workspace/*"],
+            allowed_write_paths=[
+                "*/artifacts/*",
+                "*/research/*",
+                "*implementation_plan.md"
+            ],
+            forbidden_write_paths=["*.py", "*.js", "*.ts"],
             allow_bash=True,
             read_only=False
         )

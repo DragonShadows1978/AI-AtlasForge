@@ -208,13 +208,22 @@ Respond with JSON:
         Get CYCLE_END stage restrictions.
 
         Only allows writes to artifacts/ and research/.
+        Matches legacy init_guard.py STAGE_POLICIES["CYCLE_END"].
         """
         return StageRestrictions(
             allowed_tools=[
-                "Read", "Glob", "Grep", "Write", "Edit"
+                "Read", "Glob", "Grep", "Write", "Edit",
+                "Task"
             ],
-            blocked_tools=["Bash", "NotebookEdit"],
-            allowed_write_paths=["*/artifacts/*", "*/research/*"],
+            blocked_tools=[],
+            allowed_write_paths=[
+                "*/artifacts/*",
+                "*/research/*",
+                "*report.md",
+                "*report.json",
+                "*cycle_report*",
+                "*mission_logs/*"
+            ],
             forbidden_write_paths=["*.py", "*.js", "*.ts"],
             allow_bash=False,
             read_only=False

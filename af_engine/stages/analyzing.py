@@ -110,23 +110,23 @@ If recommending COMPLETE, also include:
             )
 
         elif status == "needs_revision" or recommendation == "BUILDING":
-            # Need to make fixes
+            # Need to make fixes - signal orchestrator to increment iteration
             return StageResult(
                 success=True,
                 next_stage="BUILDING",
                 status=status,
-                output_data=response,
+                output_data={**response, "_increment_iteration": True},
                 events_to_emit=events,
                 message=response.get("message_to_human", "Needs revision, returning to building")
             )
 
         elif status == "needs_replanning" or recommendation == "PLANNING":
-            # Need to revise the plan
+            # Need to revise the plan - signal orchestrator to increment iteration
             return StageResult(
                 success=True,
                 next_stage="PLANNING",
                 status=status,
-                output_data=response,
+                output_data={**response, "_increment_iteration": True},
                 events_to_emit=events,
                 message=response.get("message_to_human", "Needs replanning")
             )
@@ -148,14 +148,21 @@ If recommending COMPLETE, also include:
         Get ANALYZING stage restrictions.
 
         Only allows writes to research/ and artifacts/.
+        Matches legacy init_guard.py STAGE_POLICIES["ANALYZING"].
         """
         return StageRestrictions(
             allowed_tools=[
                 "Read", "Glob", "Grep", "Write", "Edit",
                 "WebFetch", "WebSearch", "Task"
             ],
-            blocked_tools=["NotebookEdit"],
-            allowed_write_paths=["*/artifacts/*", "*/research/*"],
+            blocked_tools=[],
+            allowed_write_paths=[
+                "*/artifacts/*",
+                "*/research/*",
+                "*analysis.md",
+                "*report.md",
+                "*test_results.md"
+            ],
             forbidden_write_paths=["*.py", "*.js", "*.ts"],
             allow_bash=False,
             read_only=False
