@@ -298,6 +298,10 @@ class PromptFactory:
         if not preferences:
             return ""
 
+        # Handle case where preferences is a string instead of dict
+        if isinstance(preferences, str):
+            return f"User Preferences: {preferences}"
+
         lines = ["User Preferences:"]
 
         for key, value in preferences.items():
