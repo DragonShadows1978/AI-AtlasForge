@@ -572,8 +572,8 @@ class TestInitGuardOrchestratorIntegration:
 
         # Verify NotebookEdit is blocked in both
         assert "NotebookEdit" in guard_blocked
-        if orch_restrictions.blocked_tools:
-            assert "NotebookEdit" in orch_restrictions.blocked_tools
+        if orch_restrictions["blocked_tools"]:
+            assert "NotebookEdit" in orch_restrictions["blocked_tools"]
 
     @pytest.mark.regression
     def test_complete_restrictions_match_init_guard(
@@ -596,8 +596,8 @@ class TestInitGuardOrchestratorIntegration:
         assert "Edit" in guard_blocked
         assert "Write" in guard_blocked
 
-        # Verify is_read_only
-        assert orch_restrictions.is_read_only is True
+        # Verify read_only (dict access)
+        assert orch_restrictions["read_only"] is True
 
     @pytest.mark.regression
     def test_building_full_access_matches(
@@ -618,4 +618,4 @@ class TestInitGuardOrchestratorIntegration:
 
         # Both should have no blocked tools
         assert len(guard_blocked) == 0
-        assert not orch_restrictions.blocked_tools or len(orch_restrictions.blocked_tools) == 0
+        assert not orch_restrictions["blocked_tools"] or len(orch_restrictions["blocked_tools"]) == 0
