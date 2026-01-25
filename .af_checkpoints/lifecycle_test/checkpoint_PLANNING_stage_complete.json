@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "PLANNING",
+  "mission_id": "lifecycle_test",
+  "timestamp": "2026-01-25T06:30:44.239077",
+  "data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 0
+  }
+}
