@@ -246,6 +246,10 @@ class StageOrchestrator:
         Returns:
             The next stage to transition to
         """
+        # Guard against None response
+        if response is None:
+            response = {}
+
         stage = self.current_stage
         handler = self.registry.get_handler(stage)
         stage_context = self._build_stage_context()
