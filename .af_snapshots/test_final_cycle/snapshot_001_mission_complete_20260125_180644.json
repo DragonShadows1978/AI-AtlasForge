@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "test_final_cycle",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T18:06:44.330059",
+  "snapshot_number": 1,
+  "event_data": {
+    "total_cycles": 3,
+    "deliverables": [
+      "output.py"
+    ],
+    "next_mission_recommendation": {},
+    "final_report": {
+      "summary": "Mission complete"
+    }
+  }
+}
