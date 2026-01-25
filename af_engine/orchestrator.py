@@ -257,7 +257,8 @@ class StageOrchestrator:
         1. Gets the handler for the current stage
         2. Processes the response through the handler
         3. Emits events from the result
-        4. Returns the next stage
+        4. Handles cycle advancement for CYCLE_END -> PLANNING transitions
+        5. Returns the next stage
 
         Args:
             response: Claude's response dictionary
@@ -295,6 +296,18 @@ class StageOrchestrator:
         if result.output_data.get("_increment_iteration"):
             self.state.increment_iteration()
             logger.info(f"Iteration incremented to {self.state.iteration}")
+
+        # Handle cycle advancement for CYCLE_END -> PLANNING transitions
+        # This is the key fix: when transitioning from CYCLE_END to PLANNING,
+        # we need to advance the cycle counter before returning the next stage
+        if stage == "CYCLE_END" and result.next_stage == "PLANNING":
+            continuation_prompt = result.output_data.get("continuation_prompt", "")
+            if continuation_prompt and self.should_continue_cycle():
+                logger.info(f"Advancing cycle from {self.cycles.current_cycle} to next cycle")
+                self.advance_to_next_cycle(continuation_prompt)
+                # Note: advance_to_next_cycle already calls update_stage("PLANNING")
+                # so we return the current stage to prevent double-transition
+                return self.current_stage
 
         return result.next_stage
 

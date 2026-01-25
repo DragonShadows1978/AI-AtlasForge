@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_10bf0c28",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T18:02:44.117290",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Previous mission_915d422e fixed a core bug in af_engine.py - similar pattern of tracing through the code flow to find where logic is missing"
+    ],
+    "steps_planned": 3
+  }
+}
