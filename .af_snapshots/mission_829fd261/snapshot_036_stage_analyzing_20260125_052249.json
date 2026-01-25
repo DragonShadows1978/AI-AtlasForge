@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_829fd261",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T05:22:49.120586",
+  "snapshot_number": 36,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Minor: Empty JSON file ({}) doesn't get default mission_id (adversarial edge case - LOW impact)"
+    ]
+  }
+}
