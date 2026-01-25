@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "conductor_test",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T05:19:38.636300",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [],
+    "steps_planned": 0
+  }
+}
