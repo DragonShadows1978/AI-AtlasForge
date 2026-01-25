@@ -121,7 +121,7 @@ class PromptFactory:
                 return prompt
 
         try:
-            learnings = kb_provider.search_relevant_learnings(mission_context, max_results=5)
+            learnings = kb_provider.query_relevant_learnings(mission_context, top_k=5)
 
             if not learnings:
                 return prompt

@@ -6,6 +6,7 @@ relevant knowledge into new mission planning.
 """
 
 import logging
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from .base import (
@@ -39,12 +40,12 @@ class KnowledgeBaseIntegration(BaseIntegrationHandler):
         """Initialize knowledge base integration."""
         super().__init__()
         self.kb_path = kb_path
-        self.current_mission_learnings = []
+        self.current_mission_learnings: List[Dict[str, Any]] = []
 
     def _check_availability(self) -> bool:
         """Check if knowledge base is available."""
         try:
-            from knowledge_base import KnowledgeBase
+            from mission_knowledge_base import MissionKnowledgeBase
             return True
         except ImportError:
             logger.debug("Knowledge base not available")
@@ -55,13 +56,13 @@ class KnowledgeBaseIntegration(BaseIntegrationHandler):
         self.current_mission_learnings = []
 
         try:
-            from knowledge_base import KnowledgeBase
-            kb = KnowledgeBase()
+            from mission_knowledge_base import MissionKnowledgeBase
+            kb = MissionKnowledgeBase()
 
             mission_statement = event.data.get("mission_statement", "")
             if mission_statement:
-                # Query for similar past missions
-                results = kb.semantic_search(mission_statement, limit=5)
+                # Query for similar past missions using correct API
+                results = kb.query_relevant_learnings(mission_statement, top_k=5)
                 if results:
                     logger.info(f"Found {len(results)} relevant KB entries for mission")
         except Exception as e:
@@ -89,31 +90,28 @@ class KnowledgeBaseIntegration(BaseIntegrationHandler):
             })
 
     def on_mission_completed(self, event: Event) -> None:
-        """Extract and store learnings from completed mission."""
+        """
+        Trigger KB ingestion of completed mission.
+
+        The MissionKnowledgeBase ingests mission logs automatically via
+        ingest_completed_mission(). This handler logs the event for
+        tracking purposes and can trigger manual re-ingestion if needed.
+        """
         try:
-            from knowledge_base import KnowledgeBase
-            kb = KnowledgeBase()
+            from mission_knowledge_base import MissionKnowledgeBase, MISSION_LOGS_DIR
 
-            final_report = event.data.get("final_report", {})
-            lessons = final_report.get("lessons_learned", [])
+            mission_id = event.mission_id
+            mission_log_path = MISSION_LOGS_DIR / f"{mission_id}.json"
 
-            # Store lessons in KB
-            for lesson in lessons:
-                kb.add_learning(
-                    content=lesson,
-                    mission_id=event.mission_id,
-                    learning_type="lesson",
+            if mission_log_path.exists():
+                kb = MissionKnowledgeBase()
+                result = kb.ingest_completed_mission(mission_log_path)
+                logger.info(
+                    f"KB ingested mission {mission_id}: "
+                    f"{result.get('learnings_extracted', 0)} learnings extracted"
                 )
-
-            # Store accumulated learnings
-            for learning in self.current_mission_learnings:
-                kb.add_learning(
-                    content=learning["content"],
-                    mission_id=event.mission_id,
-                    learning_type=learning["type"],
-                )
-
-            logger.info(f"Extracted {len(lessons) + len(self.current_mission_learnings)} learnings to KB")
+            else:
+                logger.debug(f"Mission log not found at {mission_log_path}, skipping KB ingestion")
 
         except Exception as e:
             logger.warning(f"KB learning extraction failed: {e}")
@@ -121,8 +119,10 @@ class KnowledgeBaseIntegration(BaseIntegrationHandler):
     def get_context_for_planning(self, mission_statement: str) -> str:
         """Get KB context formatted for planning stage prompt."""
         try:
-            from knowledge_base import KnowledgeBase
-            kb = KnowledgeBase()
-            return kb.get_planning_context(mission_statement)
-        except Exception:
+            from mission_knowledge_base import MissionKnowledgeBase
+            kb = MissionKnowledgeBase()
+            # Use correct method name
+            return kb.generate_planning_context(mission_statement)
+        except Exception as e:
+            logger.debug(f"Failed to get KB context: {e}")
             return ""

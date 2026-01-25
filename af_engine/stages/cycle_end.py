@@ -193,8 +193,8 @@ Respond with JSON:
             )
 
         else:
-            # Unexpected status
-            logger.warning(f"CYCLE_END: Unexpected status '{status}'")
+            # Status not explicitly handled - log at debug level and handle gracefully
+            logger.debug(f"CYCLE_END: Status '{status}' - treating as in-progress")
             return StageResult(
                 success=False,
                 next_stage="CYCLE_END",
