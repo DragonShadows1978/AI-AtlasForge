@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "adversarial_property_test",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T09:33:14.149134",
+  "snapshot_number": 3,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "CYCLE_END",
+    "iteration": 0
+  }
+}
