@@ -66,13 +66,16 @@ class StateManager:
             # Use io_utils for atomic reads if available
             try:
                 import io_utils
-                self._mission = io_utils.atomic_read_json(self.mission_path, default_mission)
+                loaded = io_utils.atomic_read_json(self.mission_path, default_mission)
             except ImportError:
                 if self.mission_path.exists():
                     with open(self.mission_path, 'r') as f:
-                        self._mission = json.load(f)
+                        loaded = json.load(f)
                 else:
-                    self._mission = default_mission
+                    loaded = default_mission
+
+            # Merge with defaults to ensure required fields exist
+            self._mission = {**default_mission, **loaded}
 
             self._dirty = False
             logger.debug(f"Loaded mission from {self.mission_path}")
