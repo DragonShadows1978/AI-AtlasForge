@@ -1,0 +1,22 @@
+{
+  "snapshot_type": "cycle_3",
+  "mission_id": "test_mission",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T17:13:00.734139",
+  "snapshot_number": 1,
+  "event_data": {
+    "cycle_number": 3,
+    "final": true,
+    "final_report": {
+      "summary": "Mission complete",
+      "all_files": [
+        "test.py"
+      ],
+      "key_achievements": [
+        "Built test"
+      ],
+      "challenges_overcome": [],
+      "lessons_learned": []
+    }
+  }
+}
