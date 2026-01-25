@@ -93,6 +93,8 @@ class TestCycleManagerProperties:
 class TestCycleContinuation:
     """Tests for cycle continuation logic."""
 
+    @pytest.mark.regression
+    @pytest.mark.regression_cycle_budget
     def test_should_continue_true(self):
         """Test should_continue returns True when cycles remain."""
         from af_engine.cycle_manager import CycleManager
@@ -105,6 +107,8 @@ class TestCycleContinuation:
 
         assert mgr.should_continue() is True
 
+    @pytest.mark.regression
+    @pytest.mark.regression_cycle_budget
     def test_should_continue_false(self):
         """Test should_continue returns False when at budget."""
         from af_engine.cycle_manager import CycleManager

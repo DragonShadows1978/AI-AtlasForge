@@ -18,6 +18,7 @@ import json
 class TestCriticalIssues:
     """Tests for CRITICAL severity issues."""
 
+    @pytest.mark.regression
     def test_queue_processing_flag_not_checked(self):
         """CRITICAL: log_history doesn't check _queue_processing flag."""
         from af_engine.orchestrator import StageOrchestrator
@@ -30,6 +31,7 @@ class TestCriticalIssues:
             orch.log_history("test entry", {"key": "value"})
             orch.state.log_history.assert_called_once()
 
+    @pytest.mark.regression
     def test_mission_dir_property_missing(self):
         """CRITICAL: StateManager doesn't expose mission_dir property."""
         from af_engine.orchestrator import StageOrchestrator
@@ -41,6 +43,8 @@ class TestCriticalIssues:
             with pytest.raises(AttributeError):
                 _ = orch.mission_dir
 
+    @pytest.mark.regression
+    @pytest.mark.regression_cycle_budget
     def test_missing_cycle_advancement(self):
         """CRITICAL: process_response() doesn't handle CYCLE_END properly."""
         from af_engine.orchestrator import StageOrchestrator
@@ -80,6 +84,7 @@ class TestCriticalIssues:
 class TestHighSeverityIssues:
     """Tests for HIGH severity issues."""
 
+    @pytest.mark.regression
     def test_get_recent_history_broken(self):
         """HIGH: get_recent_history() accesses wrong property."""
         from af_engine.orchestrator import StageOrchestrator
@@ -97,6 +102,7 @@ class TestHighSeverityIssues:
             with pytest.raises(AttributeError):
                 _ = orch.get_recent_history(1)
 
+    @pytest.mark.regression
     def test_invalid_stage_silent_fail(self):
         """HIGH: update_stage() silently fails with invalid stage."""
         from af_engine.orchestrator import StageOrchestrator
@@ -115,6 +121,8 @@ class TestHighSeverityIssues:
             assert result is None
             orch.state.update_stage.assert_not_called()
 
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
     def test_non_dict_response_crashes(self):
         """HIGH: process_response() only guards against None."""
         from af_engine.orchestrator import StageOrchestrator
@@ -139,6 +147,7 @@ class TestHighSeverityIssues:
                 with pytest.raises(AttributeError):
                     orch.process_response(invalid_response)
 
+    @pytest.mark.regression
     def test_reset_mission_incomplete(self):
         """HIGH: reset_mission() drops critical fields."""
         from af_engine.orchestrator import StageOrchestrator
@@ -172,6 +181,7 @@ class TestHighSeverityIssues:
             assert "success_criteria" not in reset_mission
             assert "cycle_budget" not in reset_mission
 
+    @pytest.mark.regression
     def test_load_mission_json_error(self):
         """HIGH: load_mission_from_file() handles invalid JSON gracefully.
 
