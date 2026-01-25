@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "parity_test_modular",
+  "stage": "TESTING",
+  "timestamp": "2026-01-25T09:30:04.193442",
+  "snapshot_number": 5,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {}
+  }
+}
