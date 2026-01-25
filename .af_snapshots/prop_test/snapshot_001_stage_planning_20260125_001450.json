@@ -2,11 +2,11 @@
   "snapshot_type": "stage_planning",
   "mission_id": "prop_test",
   "stage": "PLANNING",
-  "timestamp": "2026-01-25T00:14:49.500934",
-  "snapshot_number": 0,
+  "timestamp": "2026-01-25T00:14:50.463432",
+  "snapshot_number": 1,
   "event_data": {
     "old_stage": "PLANNING",
-    "new_stage": "PLANNING",
+    "new_stage": "BUILDING",
     "iteration": 0
   }
 }
