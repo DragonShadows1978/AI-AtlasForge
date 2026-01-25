@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "TESTING",
+  "mission_id": "mission_8da77859",
+  "timestamp": "2026-01-25T09:06:55.548725",
+  "data": {
+    "old_stage": "TESTING",
+    "new_stage": "ANALYZING",
+    "iteration": 3
+  }
+}

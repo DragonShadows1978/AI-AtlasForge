@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_8da77859",
+  "stage": "TESTING",
+  "timestamp": "2026-01-25T09:06:55.547042",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {}
+  }
+}
