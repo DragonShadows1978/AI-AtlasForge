@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "modular_test_001",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T00:44:02.683104",
+  "snapshot_number": 0,
+  "event_data": {
+    "old_stage": "BUILDING",
+    "new_stage": "BUILDING",
+    "iteration": 2
+  }
+}
