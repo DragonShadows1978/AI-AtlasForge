@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "adversarial_001",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T00:14:23.763697",
+  "snapshot_number": 28,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "CYCLE_END",
+    "iteration": 0
+  }
+}
