@@ -1,0 +1,11 @@
+{
+  "type": "stage_start",
+  "stage": "CYCLE_END",
+  "mission_id": "func_test_001",
+  "timestamp": "2026-01-25T07:21:28.625050",
+  "data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "CYCLE_END",
+    "iteration": 4
+  }
+}
