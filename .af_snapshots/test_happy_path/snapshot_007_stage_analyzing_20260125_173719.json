@@ -1,12 +1,12 @@
 {
   "snapshot_type": "stage_analyzing",
-  "mission_id": "test_mission",
+  "mission_id": "test_happy_path",
   "stage": "ANALYZING",
-  "timestamp": "2026-01-25T17:37:19.858507",
-  "snapshot_number": 0,
+  "timestamp": "2026-01-25T17:37:19.877892",
+  "snapshot_number": 7,
   "event_data": {
     "old_stage": "ANALYZING",
-    "new_stage": "ANALYZING",
+    "new_stage": "CYCLE_END",
     "iteration": 0
   }
 }
