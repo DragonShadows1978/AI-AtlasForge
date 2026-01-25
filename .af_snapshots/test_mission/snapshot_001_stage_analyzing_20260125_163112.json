@@ -2,11 +2,13 @@
   "snapshot_type": "stage_analyzing",
   "mission_id": "test_mission",
   "stage": "ANALYZING",
-  "timestamp": "2026-01-25T16:31:12.057780",
+  "timestamp": "2026-01-25T16:31:12.409432",
   "snapshot_number": 1,
   "event_data": {
-    "status": "needs_revision",
-    "recommendation": "BUILDING",
-    "issues_found": []
+    "status": "needs_replanning",
+    "recommendation": "PLANNING",
+    "issues_found": [
+      "Architecture issue"
+    ]
   }
 }
