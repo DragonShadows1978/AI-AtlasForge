@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_cf6b05d0",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T16:35:36.914472",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "[LOW] test_tool_check_with_none_tool_name expects False but gets True - semantically correct behavior, not a bug"
+    ]
+  }
+}
