@@ -2,11 +2,11 @@
   "snapshot_type": "stage_testing",
   "mission_id": "test_mission",
   "stage": "TESTING",
-  "timestamp": "2026-01-25T17:37:20.207765",
-  "snapshot_number": 5,
+  "timestamp": "2026-01-25T17:37:20.205505",
+  "snapshot_number": 6,
   "event_data": {
     "old_stage": "TESTING",
     "new_stage": "ANALYZING",
-    "iteration": 0
+    "iteration": 1
   }
 }
