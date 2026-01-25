@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "workflow_test_002",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T00:44:58.932608",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "test.py"
+    ],
+    "files_modified": []
+  }
+}
