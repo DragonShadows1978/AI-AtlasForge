@@ -757,7 +757,8 @@ class StageOrchestrator:
             # Send completion notification for previous mission
             if QUEUE_NOTIFICATIONS_AVAILABLE and notify_mission_completed:
                 prev_mission_id = self.mission.get("mission_id")
-                prev_mission_title = self.mission.get("original_problem_statement", "")[:50]
+                # Use 'or ""' to handle None values (get() returns None if key exists with None value)
+                prev_mission_title = (self.mission.get("original_problem_statement") or "")[:50]
                 cycles_used = self.mission.get("current_cycle", 1)
                 notify_mission_completed(
                     prev_mission_id,
