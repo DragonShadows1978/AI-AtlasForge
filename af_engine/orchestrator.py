@@ -879,7 +879,7 @@ class StageOrchestrator:
                 queue_item.get("problem_statement") or
                 queue_item.get("mission_title", "")
             )
-            cycle_budget = queue_item.get("cycle_budget", 3)
+            cycle_budget = queue_item.get("cycle_budget") or 3  # Handle None values
             user_project_name = queue_item.get("project_name")
 
             # Resolve project name for shared workspace
