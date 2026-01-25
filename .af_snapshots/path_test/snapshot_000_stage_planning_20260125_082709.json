@@ -1,9 +1,10 @@
 {
-  "type": "stage_complete",
-  "stage": "PLANNING",
+  "snapshot_type": "stage_planning",
   "mission_id": "path_test",
+  "stage": "PLANNING",
   "timestamp": "2026-01-25T08:27:09.808808",
-  "data": {
+  "snapshot_number": 0,
+  "event_data": {
     "old_stage": "PLANNING",
     "new_stage": "PLANNING",
     "iteration": 0
