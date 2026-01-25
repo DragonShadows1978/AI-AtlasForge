@@ -415,6 +415,42 @@ class StageOrchestrator:
         self.state.load_mission()
         return self.state.mission
 
+    def load_mission_from_file(self, filepath: Path) -> bool:
+        """Load a mission from a template file (backward compatibility).
+
+        Args:
+            filepath: Path to the mission template JSON file
+
+        Returns:
+            True if successfully loaded, False otherwise
+        """
+        from datetime import datetime
+        try:
+            import io_utils
+        except ImportError:
+            import json
+            io_utils = None
+
+        if io_utils:
+            template = io_utils.atomic_read_json(filepath, {})
+        else:
+            if not filepath.exists():
+                return False
+            with open(filepath, 'r') as f:
+                template = json.load(f)
+
+        if template and template.get("problem_statement"):
+            # Reset to PLANNING stage
+            template["current_stage"] = "PLANNING"
+            template["iteration"] = 0
+            template["history"] = []
+            template["created_at"] = datetime.now().isoformat()
+            self.state.mission = template
+            self.save_mission()
+            logger.info(f"Loaded mission from {filepath}")
+            return True
+        return False
+
     def save_mission(self) -> None:
         """Save mission to disk."""
         self.state.save_mission()
