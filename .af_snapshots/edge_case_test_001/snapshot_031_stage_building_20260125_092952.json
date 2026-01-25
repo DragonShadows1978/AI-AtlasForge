@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "edge_case_test_001",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T09:29:52.371352",
+  "snapshot_number": 31,
+  "event_data": {
+    "old_stage": "BUILDING",
+    "new_stage": "TESTING",
+    "iteration": 100
+  }
+}
