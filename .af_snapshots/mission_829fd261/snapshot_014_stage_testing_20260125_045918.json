@@ -1,0 +1,21 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_829fd261",
+  "stage": "TESTING",
+  "timestamp": "2026-01-25T04:59:18.817880",
+  "snapshot_number": 14,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "empty_mission_json: Empty JSON file lacks default mission_id (MEDIUM severity, LOW impact)"
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 1.0,
+      "epistemic_score": 0.979,
+      "rigor_level": "rigorous"
+    }
+  }
+}
