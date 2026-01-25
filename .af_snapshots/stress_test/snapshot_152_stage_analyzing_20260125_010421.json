@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "stress_test",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T01:04:21.549415",
+  "snapshot_number": 152,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "PLANNING",
+    "iteration": 0
+  }
+}
