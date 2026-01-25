@@ -2,7 +2,7 @@
   "snapshot_type": "stage_planning",
   "mission_id": "benchmark_test",
   "stage": "PLANNING",
-  "timestamp": "2026-01-25T01:00:00.096037",
+  "timestamp": "2026-01-25T01:00:00.155362",
   "snapshot_number": 1,
   "event_data": {
     "old_stage": "PLANNING",
