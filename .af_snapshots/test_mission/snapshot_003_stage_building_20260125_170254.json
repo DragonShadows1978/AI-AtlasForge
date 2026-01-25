@@ -2,11 +2,13 @@
   "snapshot_type": "stage_building",
   "mission_id": "test_mission",
   "stage": "BUILDING",
-  "timestamp": "2026-01-25T17:02:53.963687",
+  "timestamp": "2026-01-25T17:02:54.495480",
   "snapshot_number": 3,
   "event_data": {
-    "old_stage": "BUILDING",
-    "new_stage": "TESTING",
-    "iteration": 0
+    "status": "build_complete",
+    "files_created": [
+      "test.py"
+    ],
+    "files_modified": []
   }
 }
