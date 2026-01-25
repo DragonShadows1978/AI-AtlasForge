@@ -1,0 +1,11 @@
+{
+  "type": "stage_start",
+  "stage": "TESTING",
+  "mission_id": "rapid_test",
+  "timestamp": "2026-01-25T06:38:21.073392",
+  "data": {
+    "old_stage": "BUILDING",
+    "new_stage": "TESTING",
+    "iteration": 0
+  }
+}

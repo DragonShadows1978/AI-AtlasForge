@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "CYCLE_END",
+  "mission_id": "rapid_test",
+  "timestamp": "2026-01-25T06:38:21.080971",
+  "data": {
+    "old_stage": "CYCLE_END",
+    "new_stage": "COMPLETE",
+    "iteration": 0
+  }
+}
