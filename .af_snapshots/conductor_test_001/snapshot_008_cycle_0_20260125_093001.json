@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "conductor_test_001",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T09:30:01.901046",
+  "snapshot_number": 8,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 2,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 4,
+    "cycle_history": [],
+    "summary": "Continue with improvements",
+    "next_stage": "PLANNING"
+  }
+}
