@@ -2,11 +2,11 @@
   "snapshot_type": "stage_analyzing",
   "mission_id": "test_adversarial",
   "stage": "ANALYZING",
-  "timestamp": "2026-01-25T16:17:19.284879",
-  "snapshot_number": 5,
+  "timestamp": "2026-01-25T16:17:19.316289",
+  "snapshot_number": 1,
   "event_data": {
-    "status": "success",
-    "recommendation": "COMPLETE",
+    "status": "needs_revision",
+    "recommendation": "",
     "issues_found": []
   }
 }
