@@ -1,0 +1,11 @@
+{
+  "type": "stage_start",
+  "stage": "BUILDING",
+  "mission_id": "conductor_sim",
+  "timestamp": "2026-01-25T06:38:25.310394",
+  "data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 1
+  }
+}
