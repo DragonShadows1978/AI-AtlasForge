@@ -248,19 +248,26 @@ class TestIterationIncrementOnNeedsReplanning:
     def test_needs_replanning_with_recommendation_planning(
         self,
         analyzing_handler,
-        stage_context_factory,
-        claude_response_factory
+        stage_context_factory
     ):
-        """Test that recommendation=PLANNING also triggers iteration increment."""
+        """Test that recommendation=PLANNING triggers iteration increment when status is not 'success'.
+
+        Note: The analyzing handler logic checks status first, so status="success" takes precedence
+        over recommendation. This test verifies that when status is empty/unknown and
+        recommendation is PLANNING, the needs_replanning path is taken.
+        """
         context = stage_context_factory()
 
-        # Using recommendation instead of status
-        response = claude_response_factory(
-            "ANALYZING",
-            status="",  # Empty status
-            recommendation="PLANNING",
-            issues_found=["Architecture issue"]
-        )
+        # Directly construct response without using factory to avoid default status="success"
+        # The handler will check status first - only take replanning path if status is not "success"
+        response = {
+            "status": "unknown",  # Not "success", so recommendation will be checked
+            "recommendation": "PLANNING",
+            "analysis": "Architecture needs rethinking",
+            "issues_found": ["Architecture issue"],
+            "proposed_fixes": ["Redesign approach"],
+            "message_to_human": "Needs replanning"
+        }
 
         result = analyzing_handler.process_response(response, context)
 

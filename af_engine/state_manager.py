@@ -210,7 +210,8 @@ class StateManager:
         Returns:
             The new iteration number
         """
-        current = self._mission.get("iteration", 0)
+        # Use self.mission to ensure lazy loading happens first
+        current = self.mission.get("iteration", 0)
         self._mission["iteration"] = current + 1
         self._dirty = True
         if self.auto_save:
