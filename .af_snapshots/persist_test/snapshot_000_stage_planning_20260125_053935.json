@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "persist_test",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T05:39:35.810566",
+  "snapshot_number": 0,
+  "event_data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 0
+  }
+}
