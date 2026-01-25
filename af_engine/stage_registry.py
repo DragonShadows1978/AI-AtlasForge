@@ -73,6 +73,10 @@ class StageRegistry:
             KeyError: If stage_name is not valid
             ImportError: If handler module cannot be loaded
         """
+        # Handle None or empty stage names by defaulting to PLANNING
+        if not stage_name:
+            logger.warning("Null or empty stage_name passed to get_handler, defaulting to PLANNING")
+            stage_name = "PLANNING"
         stage_upper = stage_name.upper()
 
         # Return cached handler if available
@@ -196,6 +200,8 @@ class StageRegistry:
         Returns:
             StageRestrictions for the stage
         """
+        if not stage_name:
+            stage_name = "PLANNING"
         stage_upper = stage_name.upper()
 
         # Check YAML config first
@@ -225,6 +231,8 @@ class StageRegistry:
         Returns:
             Dict mapping response status to next stage
         """
+        if not stage_name:
+            stage_name = "PLANNING"
         stage_upper = stage_name.upper()
         stage_config = self._config.get('stages', {}).get(stage_upper, {})
         return stage_config.get('transitions', {})
@@ -238,6 +246,8 @@ class StageRegistry:
 
     def is_valid_stage(self, stage_name: str) -> bool:
         """Check if a stage name is valid."""
+        if not stage_name:
+            return False
         return stage_name.upper() in self.get_all_stages()
 
     def reload_config(self) -> None:
