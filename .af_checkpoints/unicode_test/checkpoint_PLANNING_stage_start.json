@@ -2,7 +2,7 @@
   "type": "stage_start",
   "stage": "PLANNING",
   "mission_id": "path_test",
-  "timestamp": "2026-01-25T07:32:09.041915",
+  "timestamp": "2026-01-25T08:00:14.336731",
   "data": {
     "old_stage": "PLANNING",
     "new_stage": "PLANNING",
