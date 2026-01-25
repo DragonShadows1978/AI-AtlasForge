@@ -1,8 +1,8 @@
 {
-  "type": "stage_complete",
+  "type": "stage_start",
   "stage": "PLANNING",
   "mission_id": "default",
-  "timestamp": "2026-01-25T09:30:30.475371",
+  "timestamp": "2026-01-25T09:30:30.478749",
   "data": {
     "old_stage": "PLANNING",
     "new_stage": "PLANNING",
