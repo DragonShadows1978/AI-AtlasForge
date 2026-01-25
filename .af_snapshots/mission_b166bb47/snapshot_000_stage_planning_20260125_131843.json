@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_b166bb47",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T13:18:43.650621",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Previous missions worked on queue auto-start toggle and queue processing"
+    ],
+    "steps_planned": 5
+  }
+}
