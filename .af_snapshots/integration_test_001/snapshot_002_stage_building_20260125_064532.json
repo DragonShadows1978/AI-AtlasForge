@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "integration_test_001",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T06:45:32.039398",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "file1.py",
+      "file2.py"
+    ],
+    "files_modified": []
+  }
+}
