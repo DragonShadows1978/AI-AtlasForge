@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "multi_cycle_test_001",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T18:10:23.179283",
+  "snapshot_number": 6,
+  "event_data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 0
+  }
+}

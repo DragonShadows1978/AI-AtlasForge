@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_cycle_end",
+  "mission_id": "multi_cycle_test_001",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T18:10:23.174578",
+  "snapshot_number": 5,
+  "event_data": {
+    "old_stage": "CYCLE_END",
+    "new_stage": "PLANNING",
+    "iteration": 0
+  }
+}
