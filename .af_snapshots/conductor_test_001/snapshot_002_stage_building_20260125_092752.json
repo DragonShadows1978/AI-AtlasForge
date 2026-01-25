@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "conductor_test_001",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T09:27:52.038437",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "main.py"
+    ],
+    "files_modified": []
+  }
+}
