@@ -459,24 +459,35 @@ class TestEventEmission:
         claude_response_factory
     ):
         """Test stage_started event is emitted on update_stage."""
+        from af_engine.integrations.base import (
+            BaseIntegrationHandler, StageEvent, IntegrationPriority
+        )
+
         mission = mission_factory(current_stage="PLANNING")
         orch = orchestrator_factory(mission=mission)
 
-        # Track emitted events
+        # Create a test handler to track emitted events
         emitted_events = []
 
-        def track_event(event):
-            emitted_events.append(event)
+        class TestHandler(BaseIntegrationHandler):
+            name = "test_event_handler"
+            priority = IntegrationPriority.NORMAL
 
-        # Subscribe to events (use integrations, not integration_manager)
-        orch.integrations.subscribe("stage_started", track_event)
+            def get_subscriptions(self):
+                return [StageEvent.STAGE_STARTED]
+
+            def handle_event(self, event):
+                emitted_events.append(event)
+
+        # Register the test handler
+        orch.integrations.register(TestHandler())
 
         # Transition
         orch.process_response(claude_response_factory("PLANNING"))
         orch.update_stage("BUILDING")
 
         # Verify event was emitted
-        stage_started_events = [e for e in emitted_events if e.type.value == "stage_started"]
+        stage_started_events = [e for e in emitted_events if e.type == StageEvent.STAGE_STARTED]
         assert len(stage_started_events) >= 1
 
     @pytest.mark.integration
@@ -487,24 +498,35 @@ class TestEventEmission:
         claude_response_factory
     ):
         """Test stage_completed event is emitted on process_response."""
+        from af_engine.integrations.base import (
+            BaseIntegrationHandler, StageEvent, IntegrationPriority
+        )
+
         mission = mission_factory(current_stage="BUILDING")
         orch = orchestrator_factory(mission=mission)
         orch.update_stage("BUILDING")
 
-        # Track emitted events
+        # Create a test handler to track emitted events
         emitted_events = []
 
-        def track_event(event):
-            emitted_events.append(event)
+        class TestHandler(BaseIntegrationHandler):
+            name = "test_event_handler"
+            priority = IntegrationPriority.NORMAL
 
-        # Subscribe to events (use integrations, not integration_manager)
-        orch.integrations.subscribe("stage_completed", track_event)
+            def get_subscriptions(self):
+                return [StageEvent.STAGE_COMPLETED]
+
+            def handle_event(self, event):
+                emitted_events.append(event)
+
+        # Register the test handler
+        orch.integrations.register(TestHandler())
 
         # Complete stage
         orch.process_response(claude_response_factory("BUILDING"))
 
         # Verify event was emitted
-        stage_completed_events = [e for e in emitted_events if e.type.value == "stage_completed"]
+        stage_completed_events = [e for e in emitted_events if e.type == StageEvent.STAGE_COMPLETED]
         assert len(stage_completed_events) >= 1
 
 
