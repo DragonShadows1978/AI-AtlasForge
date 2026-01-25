@@ -2,7 +2,7 @@
   "snapshot_type": "stage_cycle_end",
   "mission_id": "test_mission",
   "stage": "CYCLE_END",
-  "timestamp": "2026-01-25T17:09:50.026745",
+  "timestamp": "2026-01-25T17:09:50.926175",
   "snapshot_number": 10,
   "event_data": {
     "old_stage": "CYCLE_END",
