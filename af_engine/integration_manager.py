@@ -175,6 +175,28 @@ class IntegrationManager:
             source="integration_manager"
         ))
 
+    def emit_mission_started(
+        self,
+        mission_id: str,
+        stage: str = "PLANNING",
+        data: Optional[Dict] = None
+    ) -> None:
+        """
+        Convenience method to emit a MISSION_STARTED event.
+
+        Args:
+            mission_id: The mission ID
+            stage: The initial stage (usually PLANNING)
+            data: Optional additional event data
+        """
+        self.emit(Event(
+            type=StageEvent.MISSION_STARTED,
+            stage=stage,
+            mission_id=mission_id,
+            data=data or {},
+            source="integration_manager"
+        ))
+
     def emit_mission_completed(
         self,
         mission_id: str,

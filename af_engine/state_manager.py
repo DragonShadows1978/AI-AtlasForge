@@ -301,6 +301,14 @@ class StateManager:
     # Workspace path helpers
     # =========================================================================
 
+    @property
+    def mission_dir(self) -> Path:
+        """Get the mission directory path."""
+        mission_dir = self.mission.get("mission_dir")
+        if mission_dir:
+            return Path(mission_dir)
+        return Path.cwd()
+
     def get_workspace_dir(self) -> Path:
         """Get the mission workspace directory."""
         workspace = self.mission.get("mission_workspace")

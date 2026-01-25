@@ -114,6 +114,11 @@ class StageOrchestrator:
         """Get the mission ID."""
         return self.state.mission_id
 
+    @property
+    def mission_dir(self) -> Path:
+        """Get the mission directory path (backward compatibility)."""
+        return self.state.mission_dir
+
     # =========================================================================
     # Core workflow methods
     # =========================================================================
@@ -414,6 +419,167 @@ class StageOrchestrator:
             "cycles_remaining": self.cycles.cycles_remaining,
             "integrations": self.integrations.get_stats(),
         }
+
+    # =========================================================================
+    # Mission setup methods (backward compatibility with legacy controller)
+    # =========================================================================
+
+    def set_mission(
+        self,
+        problem_statement: str,
+        preferences: dict = None,
+        success_criteria: list = None,
+        mission_id: str = None,
+        cycle_budget: int = 1,
+        project_name: str = None
+    ) -> None:
+        """Set a new mission with optional cycle budget for multi-cycle execution.
+
+        If PROJECT_NAME_RESOLVER_AVAILABLE, workspace is created under workspace/<project_name>/
+        to enable workspace sharing across missions working on the same project.
+        Otherwise falls back to missions/mission_<UUID>/workspace/ for backwards compatibility.
+        """
+        import uuid
+        import json
+
+        # Import paths from atlasforge_config
+        try:
+            from atlasforge_config import MISSIONS_DIR, WORKSPACE_DIR
+        except ImportError:
+            MISSIONS_DIR = self.root / "missions"
+            WORKSPACE_DIR = self.root / "workspace"
+
+        # Try to import project name resolver
+        resolve_project_name = None
+        try:
+            from project_name_resolver import resolve_project_name
+        except ImportError:
+            pass
+
+        # Generate mission ID
+        mid = mission_id or f"mission_{uuid.uuid4().hex[:8]}"
+
+        # Resolve project name for shared workspace
+        resolved_project_name = None
+        if resolve_project_name is not None:
+            resolved_project_name = resolve_project_name(problem_statement, mid, project_name)
+            # Use shared workspace under workspace/<project_name>/
+            mission_workspace = WORKSPACE_DIR / resolved_project_name
+            logger.info(f"Resolved project name: {resolved_project_name}")
+        else:
+            # Legacy: per-mission workspace
+            mission_workspace = MISSIONS_DIR / mid / "workspace"
+
+        # Create mission directory (for config, analytics, drift validation)
+        mission_dir = MISSIONS_DIR / mid
+        mission_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create workspace directories (may already exist if shared project)
+        (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+        (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
+        (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"Mission workspace at {mission_workspace}")
+
+        self.state.mission = {
+            "mission_id": mid,
+            "problem_statement": problem_statement,
+            "original_problem_statement": problem_statement,  # Keep root mission
+            "preferences": preferences or {},
+            "success_criteria": success_criteria or [],
+            "current_stage": "PLANNING",
+            "iteration": 0,
+            "max_iterations": 10,
+            "artifacts": {"plan": None, "code": [], "tests": []},
+            "history": [],
+            "created_at": datetime.now().isoformat(),
+            "cycle_started_at": datetime.now().isoformat(),
+            # Cycle iteration fields
+            "cycle_budget": max(1, cycle_budget),  # Minimum 1 cycle
+            "current_cycle": 1,
+            "cycle_history": [],
+            # Mission workspace path
+            "mission_workspace": str(mission_workspace),
+            "mission_dir": str(mission_dir),
+            # Project name for workspace deduplication
+            "project_name": resolved_project_name,
+            "metadata": {}
+        }
+        self.save_mission()
+
+        # Also save a copy of the mission config in the mission directory
+        mission_config_path = mission_dir / "mission_config.json"
+        config_data = {
+            "mission_id": mid,
+            "problem_statement": problem_statement,
+            "cycle_budget": max(1, cycle_budget),
+            "created_at": self.mission["created_at"]
+        }
+        if resolved_project_name:
+            config_data["project_name"] = resolved_project_name
+            config_data["project_workspace"] = str(mission_workspace)
+        with open(mission_config_path, 'w') as f:
+            json.dump(config_data, f, indent=2)
+
+        logger.info(f"New mission set with {cycle_budget} cycles: {problem_statement[:100]}...")
+
+        # AtlasForge Enhancement: Set baseline fingerprint for mission continuity tracking
+        try:
+            from atlasforge_enhancements import AtlasForgeEnhancer
+            enhancer = AtlasForgeEnhancer()
+            enhancer.set_mission_baseline(problem_statement, source="initial_mission")
+            logger.info("AtlasForge baseline fingerprint set for mission continuity tracking")
+        except Exception as e:
+            logger.debug(f"AtlasForge enhancement not available: {e}")
+
+        # Analytics: Track mission start
+        try:
+            from mission_analytics import get_analytics
+            analytics = get_analytics()
+            analytics.start_mission(mid, problem_statement)
+            # Also track the initial PLANNING stage start
+            analytics.start_stage(mid, "PLANNING", iteration=0, cycle=1)
+            logger.info(f"Analytics: Started tracking mission {mid}")
+        except Exception as e:
+            logger.debug(f"Analytics not available: {e}")
+
+        # Real-time token watcher: Start watching for the new mission
+        try:
+            from realtime_token_watcher import start_watching_mission
+            workspace = self.mission.get('mission_workspace')
+            success = start_watching_mission(mid, workspace, stage="PLANNING")
+            if success:
+                logger.info(f"Token watcher: Started real-time monitoring for {mid}")
+            else:
+                logger.debug(f"Token watcher: Could not start (no transcript dir yet)")
+        except Exception as e:
+            logger.debug(f"Token watcher not available: {e}")
+
+        # Emit mission started event
+        self.integrations.emit_mission_started(
+            mission_id=mid,
+            data={
+                "problem_statement": problem_statement[:200],
+                "cycle_budget": cycle_budget,
+            }
+        )
+
+    def reset_mission(self) -> None:
+        """Reset mission to initial state (keeps problem statement)."""
+        problem = self.mission.get("problem_statement", "No mission defined.")
+        prefs = self.mission.get("preferences", {})
+
+        self.state.mission = {
+            "problem_statement": problem,
+            "preferences": prefs,
+            "current_stage": "PLANNING",
+            "iteration": 0,
+            "history": [],
+            "created_at": datetime.now().isoformat(),
+            "reset_at": datetime.now().isoformat()
+        }
+        self.save_mission()
+        logger.info("Mission reset to PLANNING")
 
 
 # Alias for backward compatibility
