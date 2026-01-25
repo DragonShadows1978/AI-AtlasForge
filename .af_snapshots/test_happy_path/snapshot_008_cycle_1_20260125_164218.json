@@ -1,0 +1,22 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "test_happy_path",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T16:42:18.329483",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "final": true,
+    "final_report": {
+      "summary": "Mission complete",
+      "all_files": [
+        "test.py"
+      ],
+      "key_achievements": [
+        "Built test"
+      ],
+      "challenges_overcome": [],
+      "lessons_learned": []
+    }
+  }
+}
