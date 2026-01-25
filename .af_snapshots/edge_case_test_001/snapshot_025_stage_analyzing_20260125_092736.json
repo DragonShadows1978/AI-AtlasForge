@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "edge_case_test_001",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T09:27:36.360021",
+  "snapshot_number": 25,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "PLANNING",
+    "iteration": 100
+  }
+}
