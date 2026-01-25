@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "test_happy_path",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-25T16:42:18.225036",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "test.py"
+    ],
+    "files_modified": []
+  }
+}
