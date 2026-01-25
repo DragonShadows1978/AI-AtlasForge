@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "parity_test_modular",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-25T09:27:54.374080",
+  "snapshot_number": 0,
+  "event_data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "BUILDING",
+    "iteration": 4
+  }
+}
