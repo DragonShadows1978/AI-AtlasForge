@@ -389,6 +389,11 @@ class StageOrchestrator:
         """Reload mission from disk."""
         self.state.load_mission()
 
+    def load_mission(self) -> Dict[str, Any]:
+        """Load and return mission from disk (backward compatibility)."""
+        self.state.load_mission()
+        return self.state.mission
+
     def save_mission(self) -> None:
         """Save mission to disk."""
         self.state.save_mission()
