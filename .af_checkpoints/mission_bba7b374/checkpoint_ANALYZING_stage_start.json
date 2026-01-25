@@ -1,0 +1,11 @@
+{
+  "type": "stage_start",
+  "stage": "ANALYZING",
+  "mission_id": "default",
+  "timestamp": "2026-01-25T09:01:48.849743",
+  "data": {
+    "old_stage": "TESTING",
+    "new_stage": "ANALYZING",
+    "iteration": 0
+  }
+}

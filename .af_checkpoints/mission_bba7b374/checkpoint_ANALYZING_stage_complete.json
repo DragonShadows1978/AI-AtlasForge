@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "ANALYZING",
+  "mission_id": "default",
+  "timestamp": "2026-01-25T09:01:48.850021",
+  "data": {
+    "old_stage": "ANALYZING",
+    "new_stage": "PLANNING",
+    "iteration": 0
+  }
+}

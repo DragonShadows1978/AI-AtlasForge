@@ -1,0 +1,11 @@
+{
+  "type": "stage_complete",
+  "stage": "PLANNING",
+  "mission_id": "default",
+  "timestamp": "2026-01-25T09:04:42.542276",
+  "data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 0
+  }
+}
