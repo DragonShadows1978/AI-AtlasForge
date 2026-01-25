@@ -2,11 +2,11 @@
   "snapshot_type": "stage_analyzing",
   "mission_id": "test_mission",
   "stage": "ANALYZING",
-  "timestamp": "2026-01-25T16:12:58.388011",
+  "timestamp": "2026-01-25T16:12:58.670719",
   "snapshot_number": 6,
   "event_data": {
-    "status": "success",
-    "recommendation": "COMPLETE",
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
     "issues_found": []
   }
 }
