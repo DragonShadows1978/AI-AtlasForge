@@ -41,7 +41,7 @@ class AfterImageIntegration(BaseIntegrationHandler):
     def _check_availability(self) -> bool:
         """Check if AfterImage is available."""
         try:
-            from afterimage import AfterImage
+            from afterimage import HybridSearch
             return True
         except ImportError:
             logger.debug("AfterImage not available")
@@ -54,15 +54,15 @@ class AfterImageIntegration(BaseIntegrationHandler):
             return
 
         try:
-            from afterimage import AfterImage
-            ai = AfterImage()
+            from afterimage import HybridSearch
 
             # Get mission context for querying
             mission_statement = event.data.get("mission_statement", "")
 
             if mission_statement:
-                # Query for similar past code
-                results = ai.query_similar_code(mission_statement, limit=5)
+                # Query for similar past code using HybridSearch
+                search = HybridSearch()
+                results = search.search(mission_statement, limit=5)
 
                 if results:
                     self.current_context = self._format_context(results)

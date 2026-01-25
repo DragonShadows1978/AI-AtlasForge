@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_f79cb63a",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T02:47:15.142907",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "tmux-backed terminal sessions that persist across reconnections (mission_d11f8468)",
+      "Service status bar in dashboard showing Web Terminal status (mission_5f2c5668)"
+    ],
+    "steps_planned": 9
+  }
+}

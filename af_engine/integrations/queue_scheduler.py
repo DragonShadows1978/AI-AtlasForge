@@ -41,7 +41,7 @@ class QueueSchedulerIntegration(BaseIntegrationHandler):
     def _check_availability(self) -> bool:
         """Check if queue scheduler module is available."""
         try:
-            from dashboard_modules.queue_scheduler import get_next_queued_mission
+            from dashboard_modules.queue_scheduler import start_next_mission
             return True
         except ImportError:
             logger.debug("Queue scheduler not available")
@@ -50,28 +50,22 @@ class QueueSchedulerIntegration(BaseIntegrationHandler):
     def on_mission_completed(self, event: Event) -> None:
         """Check for and start next queued mission."""
         try:
-            from dashboard_modules.queue_scheduler import (
-                get_next_queued_mission,
-                mark_mission_started,
-            )
+            from dashboard_modules.queue_scheduler import queue_status
 
-            # Get next queued mission
-            next_mission = get_next_queued_mission()
+            # Get queue status to check for pending missions
+            status = queue_status()
+            if hasattr(status, 'get_json'):
+                status_data = status.get_json()
+            else:
+                status_data = status
 
-            if next_mission:
-                mission_id = next_mission.get("id")
-                mission_title = next_mission.get("mission_title", "Untitled")
+            pending_count = status_data.get("queue_length", 0)
 
-                logger.info(f"Queue: Starting next mission - {mission_title}")
-
-                # Mark as started in queue
-                mark_mission_started(mission_id)
-
-                # Signal to orchestrator to start new mission
-                # The actual mission creation happens in the orchestrator
-                # based on this event data
-                event.data["next_queued_mission"] = next_mission
-
+            if pending_count > 0:
+                logger.info(f"Queue: {pending_count} pending missions available")
+                # Signal that there are pending missions
+                # The dashboard/orchestrator handles actual mission start
+                event.data["pending_missions"] = pending_count
             else:
                 logger.debug("Queue: No pending missions")
 

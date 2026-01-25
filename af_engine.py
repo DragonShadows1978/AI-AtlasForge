@@ -1568,7 +1568,8 @@ Respond with JSON:
         if AFTERIMAGE_AVAILABLE:
             try:
                 # Try to read the implementation plan
-                plan_path = self.mission_dir / "workspace" / "artifacts" / "implementation_plan.md"
+                mission_dir = Path(self.mission.get("mission_dir", ""))
+                plan_path = mission_dir / "workspace" / "artifacts" / "implementation_plan.md"
                 if plan_path.exists():
                     plan_content = plan_path.read_text()[:2000]  # First 2000 chars
 

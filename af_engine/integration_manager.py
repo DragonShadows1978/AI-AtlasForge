@@ -288,3 +288,145 @@ class IntegrationManager:
                 self.register(handler)
             except Exception as e:
                 logger.warning(f"Failed to load integration {name}: {e}")
+
+    # === HOT-RELOAD API ===
+
+    def reload_integration(self, name: str) -> bool:
+        """
+        Hot-reload a specific integration handler.
+
+        This method unregisters the handler, reimports its module,
+        and re-registers a fresh instance. Useful for development
+        when modifying integration code.
+
+        Args:
+            name: Name of the integration to reload
+
+        Returns:
+            True if reload succeeded, False otherwise
+        """
+        if name not in self._handlers:
+            logger.warning(f"Cannot reload unknown integration: {name}")
+            return False
+
+        handler = self._handlers[name]
+        handler_class = type(handler)
+        module_name = handler_class.__module__
+
+        try:
+            import importlib
+            import sys
+
+            # Unregister current handler
+            self.unregister(name)
+
+            # Reimport the module
+            if module_name in sys.modules:
+                module = sys.modules[module_name]
+                importlib.reload(module)
+            else:
+                module = importlib.import_module(module_name)
+
+            # Get the refreshed class
+            refreshed_class = getattr(module, handler_class.__name__)
+
+            # Create and register new instance
+            new_handler = refreshed_class()
+            self.register(new_handler)
+
+            logger.info(f"Hot-reloaded integration: {name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to hot-reload integration {name}: {e}")
+            # Try to restore the original handler
+            try:
+                self.register(handler)
+            except Exception:
+                pass
+            return False
+
+    def reload_all_integrations(self) -> Dict[str, bool]:
+        """
+        Hot-reload all registered integrations.
+
+        Returns:
+            Dictionary mapping handler names to reload success status
+        """
+        results = {}
+        handler_names = list(self._handlers.keys())
+
+        for name in handler_names:
+            results[name] = self.reload_integration(name)
+
+        successful = sum(1 for v in results.values() if v)
+        logger.info(f"Hot-reloaded {successful}/{len(handler_names)} integrations")
+
+        return results
+
+    def add_integration_dynamically(
+        self,
+        module_name: str,
+        class_name: str,
+    ) -> bool:
+        """
+        Dynamically add a new integration at runtime.
+
+        Args:
+            module_name: Full module path (e.g., 'af_engine.integrations.my_handler')
+            class_name: Handler class name
+
+        Returns:
+            True if integration was added successfully
+        """
+        try:
+            import importlib
+            module = importlib.import_module(module_name)
+            handler_class = getattr(module, class_name)
+            handler = handler_class()
+            self.register(handler)
+            logger.info(f"Dynamically added integration: {handler.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add integration {class_name}: {e}")
+            return False
+
+    def remove_integration(self, name: str) -> bool:
+        """
+        Remove an integration at runtime.
+
+        Args:
+            name: Name of the integration to remove
+
+        Returns:
+            True if integration was removed
+        """
+        if name not in self._handlers:
+            return False
+
+        self.unregister(name)
+        logger.info(f"Removed integration: {name}")
+        return True
+
+    def get_integration_info(self, name: str) -> Optional[Dict]:
+        """
+        Get detailed information about an integration.
+
+        Args:
+            name: Handler name
+
+        Returns:
+            Dictionary with integration details or None if not found
+        """
+        handler = self._handlers.get(name)
+        if not handler:
+            return None
+
+        return {
+            "name": handler.name,
+            "priority": handler.priority.name,
+            "available": handler.is_available(),
+            "subscriptions": [e.value for e in handler.get_subscriptions()],
+            "module": type(handler).__module__,
+            "class": type(handler).__name__,
+        }

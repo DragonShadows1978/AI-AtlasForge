@@ -100,28 +100,32 @@ class PromptFactory:
         prompt: str,
         mission_context: str,
         kb_provider: Optional[Any] = None,
+        use_cache: bool = True,
     ) -> str:
         """
         Inject Knowledge Base context into prompt.
 
+        Uses the kb_cache module for lazy loading and caching to reduce
+        latency from ~750ms to <10ms for cached queries.
+
         Args:
             prompt: Original prompt
             mission_context: Mission context for KB search
-            kb_provider: Optional KB provider instance
+            kb_provider: Optional KB provider instance (deprecated, ignored)
+            use_cache: Whether to use cached results (default True)
 
         Returns:
             Prompt with KB context injected
         """
-        if kb_provider is None:
-            try:
-                from mission_knowledge_base import MissionKnowledgeBase
-                kb_provider = MissionKnowledgeBase()
-            except ImportError:
-                logger.debug("Knowledge base not available")
-                return prompt
-
         try:
-            learnings = kb_provider.query_relevant_learnings(mission_context, top_k=5)
+            # Use the cached KB query for performance
+            from .kb_cache import query_relevant_learnings
+
+            learnings = query_relevant_learnings(
+                mission_context,
+                top_k=5,
+                use_cache=use_cache,
+            )
 
             if not learnings:
                 return prompt

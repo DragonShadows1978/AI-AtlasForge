@@ -42,25 +42,33 @@ class EnhancerIntegration(BaseIntegrationHandler):
     def _check_availability(self) -> bool:
         """Check if enhancer module is available."""
         try:
-            from rd_enhancer import RDEnhancer
+            from atlasforge_enhancements.atlasforge_enhancer import AtlasForgeEnhancer
             return True
         except ImportError:
-            logger.debug("RD Enhancer not available")
+            logger.debug("AtlasForge Enhancer not available")
             return False
 
-    def _get_enhancer(self):
+    def _get_enhancer(self, mission_id: str = None, storage_base = None):
         """Lazy-load the enhancer instance."""
-        if self._enhancer is None:
+        if self._enhancer is None and mission_id:
             try:
-                from rd_enhancer import RDEnhancer
-                self._enhancer = RDEnhancer()
+                from atlasforge_enhancements.atlasforge_enhancer import AtlasForgeEnhancer
+                from pathlib import Path
+                storage = Path(storage_base) / 'af_data' if storage_base else None
+                self._enhancer = AtlasForgeEnhancer(
+                    mission_id=mission_id,
+                    storage_base=storage
+                )
             except Exception as e:
                 logger.warning(f"Failed to initialize enhancer: {e}")
         return self._enhancer
 
     def on_mission_started(self, event: Event) -> None:
         """Set baseline fingerprint for mission continuity tracking."""
-        enhancer = self._get_enhancer()
+        mission_id = event.mission_id or event.data.get("mission_id")
+        workspace = event.data.get("mission_workspace") or event.data.get("workspace")
+
+        enhancer = self._get_enhancer(mission_id=mission_id, storage_base=workspace)
         if not enhancer:
             return
 
