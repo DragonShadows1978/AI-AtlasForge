@@ -92,6 +92,13 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
+## What's New in v1.5.0
+
+- **Modular Engine Architecture** - The R&D engine has been refactored into a plugin-based system with StageOrchestrator, stage handlers, and event-driven integrations
+- **Mission Queue System** - Queue multiple missions with auto-start capability. Missions automatically chain when one completes
+- **Cycle Budget Management** - Set how many improvement cycles a mission can run before completing
+- **17+ Integrations** - Event-driven handlers for analytics, git, recovery, knowledge base, and more
+
 ## Architecture
 
 ```
@@ -108,16 +115,21 @@ make sample-mission  # Load sample mission
     +---------+---------+         +-----------------+
               |
     +---------v---------+
-    |    R&D Engine     |
-    |   (State Machine) |
+    |  Modular Engine   |
+    | (StageOrchestrator)|
     +---------+---------+
               |
     +---------v-------------------+
-    |     Stage Pipeline          |
+    |     Stage Handlers          |
     |                             |
     |  PLANNING -> BUILDING ->    |
     |  TESTING -> ANALYZING ->    |
     |  CYCLE_END -> COMPLETE      |
+    +-----------------------------+
+              |
+    +---------v-------------------+
+    |   Integration Manager       |
+    |   (Event-Driven Hooks)      |
     +-----------------------------+
 ```
 
@@ -137,8 +149,19 @@ Missions can iterate through multiple cycles until success criteria are met.
 ### atlasforge.py
 Main execution loop. Spawns Claude instances, manages state, handles graceful shutdown.
 
-### af_engine.py
-State machine for mission execution. Manages stages, enforces constraints, tracks progress.
+### af_engine/ (Modular Engine)
+Plugin-based mission execution system:
+- **StageOrchestrator** - Core workflow orchestrator (~300 lines)
+- **Stage Handlers** - Pluggable handlers for each stage (Planning, Building, Testing, Analyzing, CycleEnd, Complete)
+- **IntegrationManager** - Event-driven integration coordination
+- **PromptFactory** - Template-based prompt generation
+
+### Mission Queue
+Queue multiple missions to run sequentially:
+- Auto-start next mission when current completes
+- Set cycle budgets per mission
+- Priority ordering
+- Dashboard integration for queue management
 
 ### dashboard_v2.py
 Web-based monitoring interface showing mission status, knowledge base, and analytics.
@@ -193,8 +216,12 @@ Designed for unattended execution:
 
 ```
 AI-AtlasForge/
-+-- atlasforge.py           # Main entry point
-+-- af_engine.py            # Stage state machine
++-- atlasforge_conductor.py # Main orchestrator
++-- af_engine/              # Modular engine package
+|   +-- orchestrator.py     # StageOrchestrator
+|   +-- stages/             # Stage handlers
+|   +-- integrations/       # Event-driven integrations
++-- af_engine_legacy.py     # Legacy engine (fallback)
 +-- dashboard_v2.py         # Web dashboard
 +-- adversarial_testing/    # Testing framework
 +-- atlasforge_enhancements/  # Enhancement modules
@@ -221,6 +248,7 @@ AI-AtlasForge uses environment variables for configuration:
 | `ATLASFORGE_PORT` | `5050` | Dashboard port |
 | `ATLASFORGE_ROOT` | (script directory) | Base directory |
 | `ATLASFORGE_DEBUG` | `false` | Enable debug logging |
+| `USE_MODULAR_ENGINE` | `true` | Use new modular engine (set to `false` for legacy) |
 
 ## Dashboard Features
 
