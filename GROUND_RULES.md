@@ -72,6 +72,7 @@ Examples of correct behavior:
 
 ## Virtual Display (IMPORTANT)
 **Use display :99 for ALL graphical operations.** A virtual framebuffer (Xvfb) is running:
+- If it is NOT running, turn it on.
 - Set `DISPLAY=:99` before launching graphical applications
 - This keeps your work isolated from the user's main display
 - Your screen capture code should connect to display :99
@@ -191,7 +192,12 @@ $ATLASFORGE_ROOT/
 ├── workspace/           # Your working directory
 │   ├── artifacts/       # Plans, reports, documentation
 │   ├── research/        # Notes, findings, analysis
-│   └── tests/           # Test scripts
+│   ├── tests/           # Test scripts
+│   └── <project>/       # Project code (modular monolith structure)
+│       ├── core/        # Core domain logic (800-1200 lines/file)
+│       ├── adapters/    # External integrations (400-600 lines/file)
+│       ├── interfaces/  # Public contracts (200-400 lines)
+│       └── orchestration/ # Workflow coordination
 ├── missions/            # Mission archives and logs
 │   └── mission_logs/    # Final mission reports (JSON)
 ├── state/               # Persistent state (don't manually edit)
@@ -212,6 +218,127 @@ Regardless of where file paths lead or where source files are referenced, all pr
 - Leave orphaned files outside the project root
 
 **Why:** Keeps the codebase organized, makes projects discoverable, and prevents drift where files end up in unexpected locations.
+
+## Agentic Architecture Standards - CRITICAL
+
+**This codebase is designed for agentic file management.** AI agents, not humans, are the primary code authors. This fundamentally changes file organization best practices.
+
+### Modular Monolithic Architecture (REQUIRED)
+
+All projects MUST follow modular monolithic architecture:
+- **Single deployable unit** with clear internal module boundaries
+- **High cohesion within modules** - related functionality stays together
+- **Loose coupling between modules** - communicate through interfaces only
+- **No cross-module data access** - each module owns its data exclusively
+
+### File Size Guidelines (Agentic vs Human)
+
+Traditional human-centric guidelines recommend 300-500 lines per file. **Agents operate differently:**
+
+| Category | Human Limit | Agentic Limit | Rationale |
+|----------|-------------|---------------|-----------|
+| Functions | ~20 lines | 50-100 lines | Agents maintain complex flow context |
+| Classes | ~200 lines | 400-600 lines | Cohesion reduces context switches |
+| Files | 300-500 lines | 800-1200 lines | Fewer files = less context assembly |
+| Modules | Many small files | Consolidated files | Clear boundaries, minimal imports |
+
+**Why larger files for agents?**
+- Reduces context assembly overhead (each file read costs tokens)
+- Agents don't suffer from "scroll fatigue" like humans
+- Consolidation improves cohesion and reduces import chains
+- Context windows (100K+ tokens) easily accommodate larger files
+
+**When to split files:**
+- When a single file exceeds 1200 lines
+- When the file has two clearly distinct responsibilities
+- When module boundaries dictate separation
+- When test isolation requires it
+
+### Standard Project Structure
+
+```
+project/
+├── core/                    # Core domain logic
+│   └── module_name.py       # 800-1200 lines acceptable
+├── adapters/                # External system integrations
+│   ├── api_adapter.py       # One adapter per external system
+│   └── db_adapter.py        # 400-600 lines each
+├── interfaces/              # Public contracts and types
+│   └── contracts.py         # Type definitions, protocols (200-400 lines)
+├── orchestration/           # Workflow coordination
+│   └── workflows.py         # Connects modules together
+├── tests/                   # Test files mirror structure
+│   ├── test_core/
+│   └── test_adapters/
+└── config/                  # Configuration (YAML, JSON)
+    └── settings.yaml
+```
+
+### Module Boundary Rules
+
+1. **Cohesion Test**: If functionality is always used together, keep it in one module
+2. **Coupling Test**: If modules are "chatty" (frequent calls), merge them
+3. **Data Ownership**: Each module owns its data structures; no external access
+4. **Interface Contract**: Modules expose only public interfaces, never internals
+5. **Dependency Direction**: Dependencies flow inward (adapters → core, not reverse)
+
+### Anti-Patterns to Avoid
+
+**DO NOT:**
+- Create files under 200 lines unless absolutely necessary
+- Split classes across multiple files
+- Create "utils.py" dumping grounds (consolidate or distribute properly)
+- Import internal module details (use public interfaces)
+- Create circular dependencies between modules
+
+**DO:**
+- Consolidate related functions into cohesive modules
+- Keep module count low (prefer 3-5 modules over 15-20)
+- Use type annotations for all public interfaces
+- Document module responsibilities in docstrings
+- Test at module boundaries, not internal functions
+
+### Context Engineering for Agents
+
+**Context is your most valuable resource.** Every file read, every import chain, every fragmented module costs context tokens.
+
+#### Context Optimization Principles
+
+1. **Consolidate over fragment** - 1 file of 1000 lines > 5 files of 200 lines
+2. **Flat over deep** - Shallow directory structures reduce navigation overhead
+3. **Explicit over implicit** - Clear imports, no magic, no hidden dependencies
+4. **Local over global** - Keep related code physically close
+
+#### File Reading Strategy
+
+When exploring a codebase:
+- Read entire modules, not individual functions
+- Start with interfaces/contracts.py to understand public API
+- Read core modules before adapters
+- Use grep strategically to find entry points
+
+#### Memory Files (Optional)
+
+For complex projects, maintain a `.memory.md` file:
+```markdown
+# Project Memory
+
+## Architecture Decisions
+- Using SQLite for persistence (simplicity over scale)
+- Event-driven communication between modules
+
+## Known Issues
+- API rate limiting not implemented yet
+- Logging needs structured format
+
+## Completed Milestones
+- Core domain logic complete
+- Database adapter functional
+```
+
+This reduces context reloading across sessions.
+
+---
 
 ## Live Dashboard & Monitoring
 
@@ -402,6 +529,24 @@ def test_integration():
     stats = get_stats()
     assert stats['metric'] >= threshold, f"Only {stats['metric']}"
 ```
+
+### Module-Level Testing Strategy
+
+Test at boundaries, not internals:
+
+1. **Module tests** - Test public interface of each module
+2. **Integration tests** - Test module interactions through interfaces
+3. **End-to-end tests** - Test complete workflows
+
+**Do NOT:**
+- Test private functions (they're implementation details)
+- Mock internal module components (test real behavior)
+- Create test files smaller than 100 lines (consolidate)
+
+**Test file sizing:**
+- Match implementation file size approximately
+- One test file per module (not per class/function)
+- Test files can be 400-800 lines
 
 ## Experiment Framework - POWERFUL TOOL
 
