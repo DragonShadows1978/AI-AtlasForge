@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_bef50233",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T20:36:21.702950",
+  "snapshot_number": 12,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Deprecated directory location from mission_2f33a4ac - confirmed source path at /home/vader/mini-mind-v2.DEPRECATED/"
+    ],
+    "steps_planned": 7
+  }
+}
