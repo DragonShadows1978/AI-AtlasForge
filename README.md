@@ -92,6 +92,11 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
+## What's New in v1.5.1
+
+- **Improved Version Checker** - Smarter update detection that distinguishes between "behind" (update available), "ahead" (local customizations), and "diverged" (both). Users with custom local commits no longer get false "Update Required" warnings
+- **Bug Fixes** - Fixed duplicate log entries, WebSocket SSL reconnection issues
+
 ## What's New in v1.5.0
 
 - **Modular Engine Architecture** - The R&D engine has been refactored into a plugin-based system with StageOrchestrator, stage handlers, and event-driven integrations
