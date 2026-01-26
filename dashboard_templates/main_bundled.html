@@ -219,6 +219,8 @@
         .version-status.checking{color:var(--text-dim)}
         .version-status.up-to-date{color:var(--green)}
         .version-status.update-available{color:var(--red)}
+        .version-status.ahead{color:#58a6ff;font-style:italic}
+        .version-status.diverged{color:var(--yellow)}
         .version-status.error{color:var(--yellow)}
         .version-status.not-installed{color:var(--text-dim);font-style:italic}
         .version-status.dev-mode{color:#bc8cff;font-style:italic}
@@ -2243,10 +2245,20 @@
                     }
                 } else if (data.status === 'update_available') {
                     statusEl.classList.add('update-available');
-                    statusEl.textContent = data.message || 'Update Required';
+                    statusEl.textContent = data.message || 'Update Available';
                     if (data.commits_behind) {
                         statusEl.title = data.commits_behind + ' commits behind. Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
                     }
+                } else if (data.status === 'ahead') {
+                    statusEl.classList.add('ahead');
+                    statusEl.textContent = data.message || 'Local Ahead';
+                    if (data.commits_ahead) {
+                        statusEl.title = data.commits_ahead + ' commits ahead (local customizations). Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
+                    }
+                } else if (data.status === 'diverged') {
+                    statusEl.classList.add('diverged');
+                    statusEl.textContent = data.message || 'Diverged';
+                    statusEl.title = 'Local and remote have diverged. ' + (data.commits_ahead || 0) + ' ahead, ' + (data.commits_behind || 0) + ' behind. Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
                 } else if (data.status === 'error') {
                     statusEl.classList.add('error');
                     statusEl.textContent = 'Error';

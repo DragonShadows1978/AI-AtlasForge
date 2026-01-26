@@ -128,6 +128,24 @@ def _get_commits_behind(repo_dir: Path, branch: str = 'main') -> int | None:
     return None
 
 
+def _get_commits_ahead(repo_dir: Path, branch: str = 'main') -> int | None:
+    """Get how many commits ahead of the remote we are.
+
+    This detects local commits that haven't been pushed to remote,
+    indicating local customizations or unpushed work.
+    """
+    for ref_branch in [branch, 'master', 'main']:
+        success, output = _run_git_command(
+            repo_dir, 'rev-list', '--count', f'origin/{ref_branch}..HEAD'
+        )
+        if success:
+            try:
+                return int(output)
+            except ValueError:
+                pass
+    return None
+
+
 def _check_repo_version(repo_dir: Path, name: str) -> dict:
     """Check version status for a git repository."""
     if not repo_dir or not repo_dir.exists():
@@ -196,23 +214,69 @@ def _check_repo_version(repo_dir: Path, name: str) -> dict:
             'remote_commit': remote_commit,
             'remote_check': True,
         }
-    else:
-        # Check how far behind
-        commits_behind = _get_commits_behind(repo_dir)
-        message = 'Update Required'
-        if commits_behind and commits_behind > 0:
-            message = f'Update Available ({commits_behind} commits)'
 
+    # Commits differ - check ahead/behind relationship
+    commits_behind = _get_commits_behind(repo_dir)
+    commits_ahead = _get_commits_ahead(repo_dir)
+
+    # Default to safe values if git commands fail
+    commits_behind = commits_behind or 0
+    commits_ahead = commits_ahead or 0
+
+    # Determine status based on relationship
+    if commits_behind > 0 and commits_ahead > 0:
+        # Diverged: local has commits AND is missing remote commits
+        return {
+            'name': name,
+            'installed': True,
+            'status': 'diverged',
+            'message': f'Diverged ({commits_ahead} ahead, {commits_behind} behind)',
+            'version': version_tag or local_commit,
+            'local_commit': local_commit,
+            'remote_commit': remote_commit,
+            'commits_ahead': commits_ahead,
+            'commits_behind': commits_behind,
+            'remote_check': True,
+        }
+    elif commits_ahead > 0:
+        # Ahead: local has commits not on remote (custom changes)
+        return {
+            'name': name,
+            'installed': True,
+            'status': 'ahead',
+            'message': f'Local Ahead ({commits_ahead} commits)',
+            'version': version_tag or local_commit,
+            'local_commit': local_commit,
+            'remote_commit': remote_commit,
+            'commits_ahead': commits_ahead,
+            'remote_check': True,
+        }
+    elif commits_behind > 0:
+        # Behind: remote has commits we don't have (update available)
         return {
             'name': name,
             'installed': True,
             'status': 'update_available',
-            'message': message,
+            'message': f'Update Available ({commits_behind} commits)',
             'version': version_tag or local_commit,
             'local_commit': local_commit,
             'remote_commit': remote_commit,
             'commits_behind': commits_behind,
             'remote_check': True,
+        }
+    else:
+        # Edge case: commits differ but both counts are 0
+        # This shouldn't happen, but treat as up_to_date
+        return {
+            'name': name,
+            'installed': True,
+            'status': 'up_to_date',
+            'message': 'Up To Date',
+            'version': version_tag or local_commit,
+            'local_commit': local_commit,
+            'remote_commit': remote_commit,
+            'remote_check': True,
+            'note': 'Commits differ but no ahead/behind detected',
         }
 
 
