@@ -1,0 +1,63 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_1c5d7a5d",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T21:14:57.797684",
+  "snapshot_number": 33,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "Fixed atlasforge_conductor.py with start_new_session=True (line 230)",
+      "Fixed investigation_engine.py with start_new_session=True (line 377)",
+      "Fixed experiment_framework.py with start_new_session=True (lines 181, 206)",
+      "Comprehensive test suite: test_subprocess_fd_inheritance.py (7 tests)",
+      "Integration test suite: test_conductor_integration.py (4 tests)",
+      "Adversarial test suite: test_adversarial_fd_inheritance.py (8 tests)",
+      "Implementation plan: artifacts/implementation_plan.md",
+      "Test results documentation: artifacts/test_results.md",
+      "Research findings: research/research_findings.md",
+      "Final analysis report: research/analysis.md"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Add Subprocess Timeout Monitoring with Automatic Recovery",
+      "mission_description": "Implement a subprocess monitoring layer that detects when Claude CLI invocations approach timeout thresholds and provides automatic recovery mechanisms. The system should: (1) Track subprocess execution time and emit warnings when approaching 50%, 75%, and 90% of timeout threshold; (2) Log detailed diagnostics including child process tree, open file descriptors, and memory usage when timeouts occur; (3) Implement graceful termination that signals the Claude process to wrap up before hard timeout; (4) Create a retry mechanism with exponential backoff for transient failures; (5) Add dashboard widget showing real-time subprocess health metrics; (6) Store timeout events in a structured log for pattern analysis across missions. This builds on the FD inheritance fix by adding observability and resilience to the subprocess invocation layer.",
+      "suggested_cycles": 3,
+      "rationale": "The current fix prevents the most common cause of subprocess hangs, but AtlasForge would benefit from better observability into subprocess health. When timeouts do occur (from other causes), the system currently has no visibility into why. A monitoring layer would help diagnose future issues faster, provide automatic recovery for transient failures, and give operators real-time insight into mission execution health. This naturally extends the FD inheritance fix by making the subprocess layer more robust and observable."
+    },
+    "final_report": {
+      "summary": "Successfully fixed the subprocess.run() hang issue that caused AtlasForge missions to timeout (1800s) despite Claude completing its work. The root cause was that background processes spawned by Claude (via Task tool with run_in_background) inherited the pipe file descriptors from subprocess.run(capture_output=True). The conductor waited for EOF on those pipes, but EOF only came when ALL FD holders exited - including background processes. The fix added start_new_session=True to all 4 subprocess.run() calls that invoke Claude CLI across 3 files, creating process session isolation via setsid() that prevents FD inheritance blocking. Comprehensive testing validated the fix with 7 functional tests, 4 integration tests, and 8 adversarial tests, all passing.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/atlasforge_conductor.py (modified line 230)",
+        "/home/vader/AI-AtlasForge/investigation_engine.py (modified line 377)",
+        "/home/vader/AI-AtlasForge/experiment_framework.py (modified lines 181, 206)",
+        "/home/vader/AI-AtlasForge/workspace/type/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/type/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/type/research/research_findings.md",
+        "/home/vader/AI-AtlasForge/workspace/type/research/analysis.md",
+        "/home/vader/AI-AtlasForge/workspace/type/tests/test_subprocess_fd_inheritance.py",
+        "/home/vader/AI-AtlasForge/workspace/type/tests/test_conductor_integration.py",
+        "/home/vader/AI-AtlasForge/workspace/type/tests/test_adversarial_fd_inheritance.py"
+      ],
+      "key_achievements": [
+        "Identified root cause: pipe FD inheritance by background grandchild processes prevents EOF",
+        "Applied minimal, targeted fix: start_new_session=True to 4 subprocess.run() calls across 3 files",
+        "Validated fix with 19 total tests (7 functional + 4 integration + 8 adversarial)",
+        "Documented known limitation (bash pipe chains) and confirmed it does not affect our use case",
+        "Fix is consistent with existing pattern in dashboard_modules/services.py line 159"
+      ],
+      "challenges_overcome": [
+        "Traced 23-minute hang from JSONL evidence showing Claude completed at 19:55:09 but subprocess didn't return until 20:18:30",
+        "Verified fix prevents setsid() bypass attempts (child calling setsid() fails with EPERM)",
+        "Confirmed rapid forking (20 concurrent forks), zombie processes, and double-fork daemonization don't break isolation",
+        "Validated large output (1MB) and empty stdin edge cases work correctly"
+      ],
+      "lessons_learned": [
+        "start_new_session=True should be standard practice when invoking subprocesses that may spawn their own children",
+        "Python's close_fds=True default doesn't prevent inheritance of stdout/stderr pipes (FDs 1 and 2)",
+        "File-based IPC patterns used elsewhere in AtlasForge can inform debugging of timing issues",
+        "Adversarial testing (setsid bypass, rapid forking, zombies, double-fork) is valuable for subprocess isolation fixes",
+        "Always check if the correct pattern already exists elsewhere in the codebase (dashboard_modules/services.py had it)"
+      ]
+    }
+  }
+}
