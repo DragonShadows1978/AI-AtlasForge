@@ -1376,4 +1376,4 @@ if __name__ == '__main__':
     print(f"Access at: {protocol}://localhost:{PORT}")
     print("=" * 50)
 
-    socketio.run(app, host='::', port=PORT, ssl_context=ssl_ctx, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='::', port=PORT, ssl_context=ssl_ctx, allow_unsafe_werkzeug=True, use_reloader=False)
