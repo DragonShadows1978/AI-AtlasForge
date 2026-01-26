@@ -66,7 +66,8 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(LOG_DIR / "atlasforge_conductor.log")
-    ]
+    ],
+    force=True  # Prevent duplicate handlers on reimport
 )
 logger = logging.getLogger("atlasforge_conductor")
 
