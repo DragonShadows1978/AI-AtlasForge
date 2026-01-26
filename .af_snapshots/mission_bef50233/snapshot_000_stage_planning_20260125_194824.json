@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_bef50233",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-25T19:48:24.952905",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Previous missions documented deprecation of mini-mind-v2 and migration patterns",
+      "Backup strategy learned from mission_16901836 for preserving original files"
+    ],
+    "steps_planned": 7
+  }
+}
