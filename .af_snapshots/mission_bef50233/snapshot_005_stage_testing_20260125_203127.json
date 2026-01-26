@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_bef50233",
+  "stage": "TESTING",
+  "timestamp": "2026-01-25T20:31:27.724901",
+  "snapshot_number": 5,
+  "event_data": {
+    "old_stage": "TESTING",
+    "new_stage": "ANALYZING",
+    "iteration": 0
+  }
+}
