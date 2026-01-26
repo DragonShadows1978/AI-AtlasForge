@@ -1,0 +1,68 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_bef50233",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-25T20:33:41.343082",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "cycles_remaining": 1,
+    "continuation_prompt": "Mission: Harden Terminal Server for Production Use\n\nPREVIOUS CYCLE SUMMARY:\nThe broken terminal on port 5002 was successfully replaced with the original working terminal from mini-mind-v2. The server is running and all core functionality verified: viewport fills space, scrolling works, authentication works, no lockups.\n\nREMAINING WORK:\n\n1. STATIC ASSET HARDENING:\n   The terminal currently loads xterm.js and CSS from CDN. For production/offline resilience:\n   - Examine /home/vader/AI-AtlasForge/workspace/terminal_server/templates/index.html\n   - Identify all CDN dependencies (xterm.js, addons, fonts, CSS)\n   - Download and place in /home/vader/AI-AtlasForge/workspace/terminal_server/static/\n   - Update templates to use local assets\n   - Test offline functionality\n\n2. SYSTEMD SERVICE SETUP:\n   A service file exists at /home/vader/AI-AtlasForge/workspace/terminal_server/terminal-dashboard.service but isn't installed:\n   - Review and update paths in the service file\n   - Install service: sudo cp terminal-dashboard.service /etc/systemd/system/\n   - Enable on boot: sudo systemctl enable terminal-dashboard\n   - Start service: sudo systemctl start terminal-dashboard\n   - Verify auto-restart on failure\n\n3. LOG ROTATION:\n   - server.log is 812KB after minimal testing\n   - audit.log is 174KB\n   - Configure logrotate for both logs\n   - Or implement log rotation in the application\n\n4. FINAL VERIFICATION:\n   - Kill current manual process\n   - Start via systemd service\n   - Verify all functionality still works\n   - Test service restart recovery\n\nFILES TO EXAMINE:\n- /home/vader/AI-AtlasForge/workspace/terminal_server/templates/index.html (CDN dependencies)\n- /home/vader/AI-AtlasForge/workspace/terminal_server/terminal-dashboard.service (systemd config)\n- /home/vader/AI-AtlasForge/workspace/terminal_server/config.py (any paths to update)\n- /home/vader/AI-AtlasForge/workspace/terminal_server/run.sh (startup script)\n\nSUCCESS CRITERIA:\n1. Terminal works without internet (local static assets)\n2. Service starts on boot via systemd\n3. Service auto-restarts on failure\n4. Logs are rotated to prevent disk fill\n5. All existing functionality preserved",
+    "cycle_report": {
+      "summary": "Successfully replaced the broken terminal server on port 5002 with the original working terminal from mini-mind-v2. The terminal server has been copied, configured for the new location, dependencies installed in a virtual environment, and deployed. All 17 tests (16 passed, 1 partial) confirm the terminal is fully functional with proper viewport sizing, scrolling, authentication, and stability.",
+      "files_created": [
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/main.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/auth.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/config.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/pty_manager.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/users.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/hash_password.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/requirements.txt",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/run.sh",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/README.md",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/terminal-dashboard.service",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/users.db",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/templates/index.html",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/venv/ (Python virtual environment)",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_api_integration.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_cycle2.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_cycle3.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_cycle4_terminal.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_mobile.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/test_websocket.py",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/api_test_results.json",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/audit.log",
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/server.log",
+        "/home/vader/AI-AtlasForge/workspace/AtlasForge/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/AtlasForge/artifacts/test_results.md",
+        "/tmp/terminal_screenshots/01_login_page.png",
+        "/tmp/terminal_screenshots/02_after_login.png",
+        "/tmp/terminal_screenshots/03_terminal_loaded.png",
+        "/tmp/terminal_screenshots/04_after_seq.png",
+        "/tmp/terminal_screenshots/05_long_line.png",
+        "/tmp/terminal_screenshots/99_final.png"
+      ],
+      "files_modified": [
+        "/home/vader/AI-AtlasForge/workspace/terminal_server/config.py (updated USER_DB_PATH and AUDIT_LOG_PATH)"
+      ],
+      "achievements": [
+        "Killed the broken terminal process (PID 2517992) on port 5002",
+        "Copied entire original terminal from mini-mind-v2.DEPRECATED to new location",
+        "Updated config.py paths to point to new installation directory",
+        "Created Python virtual environment and installed all dependencies (fastapi, uvicorn, bcrypt, python-jose, etc.)",
+        "Copied existing users.db with admin and David accounts",
+        "Started terminal server on port 5002 (now running as PID 2761315)",
+        "Verified viewport fills 100% width (1920x886 pixels)",
+        "Verified scrolling works with seq command testing",
+        "Passed 13/13 adversarial security tests (SQL injection, CSRF, auth bypass, JWT manipulation, command injection)",
+        "Passed concurrent connection tests (5 rapid tabs created/deleted)",
+        "Verified Unicode support (Japanese, Arabic, Chinese, emojis)",
+        "Captured 6 verification screenshots proving functionality"
+      ],
+      "issues": [
+        "Static files directory is empty - the original terminal appears to rely on CDN-loaded assets (xterm.js, CSS) embedded in templates/index.html rather than local static files. This works but could be a concern for offline usage.",
+        "No cutoff test returned PARTIAL - test script couldn't programmatically read window.term.cols but visual inspection confirmed working correctly"
+      ]
+    }
+  }
+}
