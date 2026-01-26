@@ -373,7 +373,8 @@ def invoke_claude(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=str(cwd)
+            cwd=str(cwd),
+            start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
         elapsed = time.time() - start_time

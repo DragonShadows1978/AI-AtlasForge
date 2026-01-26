@@ -225,7 +225,8 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> Optional[s
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=str(cwd)
+            cwd=str(cwd),
+            start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
         if result.returncode == 0:

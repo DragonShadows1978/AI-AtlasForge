@@ -177,7 +177,8 @@ def _invoke_claude_cli(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=str(cwd)
+            cwd=str(cwd),
+            start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
         if result.returncode == 0:
@@ -201,7 +202,8 @@ def _invoke_ollama(
             ["ollama", "run", model, prompt],
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
         if result.returncode == 0:
