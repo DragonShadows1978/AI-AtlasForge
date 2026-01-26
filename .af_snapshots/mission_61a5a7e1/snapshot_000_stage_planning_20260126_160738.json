@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_61a5a7e1",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-26T16:07:38.836063",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Python Modularization Best Practices from past missions",
+      "Current File Analysis patterns from investigations"
+    ],
+    "steps_planned": 4
+  }
+}
