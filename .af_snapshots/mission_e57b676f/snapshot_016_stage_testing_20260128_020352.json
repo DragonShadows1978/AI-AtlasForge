@@ -1,0 +1,21 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_e57b676f",
+  "stage": "TESTING",
+  "timestamp": "2026-01-28T02:03:52.619364",
+  "snapshot_number": 16,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "Negative token IDs not rejected - allows undefined behavior via Python's negative indexing"
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 0.9,
+      "epistemic_score": 0.2,
+      "rigor_level": "moderate"
+    }
+  }
+}

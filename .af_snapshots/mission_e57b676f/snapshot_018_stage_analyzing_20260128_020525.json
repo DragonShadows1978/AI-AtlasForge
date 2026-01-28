@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_e57b676f",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-28T02:05:25.900292",
+  "snapshot_number": 18,
+  "event_data": {
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
+    "issues_found": [
+      "Compression ratio 4.92x is below 5x minimum target (chunk_size=4 produces 64/13 = 4.92x)",
+      "Negative token IDs not validated - could cause undefined behavior with malformed input"
+    ]
+  }
+}
