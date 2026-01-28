@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_e57b676f",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-28T02:17:43.584993",
+  "snapshot_number": 27,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 3,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 1,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-01-28T01:09:05.604148",
+        "iteration_count": 0,
+        "continuation_prompt": "CYCLE 2: FIX GPU COMPATIBILITY AND VALIDATE END-TO-END\n\n## CRITICAL ISSUE FROM CYCLE 1\n\nThe host system has a CUDA driver/library version mismatch that blocks ALL GPU operations:\n```\ncudaErrorCompatNotSupportedOnDevice: forward compatibility was attempted on non supported HW\nNVIDIA Driver: 580.95.05\nNVML Library: 580.126\n```\n\n## IMMEDIATE PRIORITY: Fix tensor_gpu_v2.py GPU Initialization\n\nThe problem is that `tensor_gpu_v2.py` calls `init_streams(4)` at module import time (line 3835), which immediately crashes on driver mismatch.\n\n### Option A: Lazy Initialization\nModify tensor_gpu_v2.py to defer CUDA stream initialization until first use:\n1. Remove `init_streams(4)` from module-level execution\n2. Add a `ensure_initialized()` function called before CUDA operations\n3. Allow CPU-only mode when CUDA is unavailable\n\n### Option B: Graceful Fallback\nWrap CUDA initialization in try/except to allow partial CPU operation:\n```python\ntry:\n    init_streams(4)\n    _cuda_available = True\nexcept Exception as e:\n    warnings.warn(f'CUDA not available: {e}')\n    _cuda_available = False\n```\n\n## TASKS FOR CYCLE 2\n\n### 1. Fix GPU Initialization (REQUIRED)\n- Modify `/home/vader/AI-AtlasForge/workspace/StenoAI/tensor_gpu_v2.py`\n- Implement lazy initialization OR graceful fallback\n- Ensure module can be imported without CUDA crash\n- Test both GPU and CPU code paths\n\n### 2. Validate Core Components\nOnce GPU init is fixed, test each component:\n- [ ] TextEmbedding forward pass\n- [ ] TextEncoder with chunk pooling\n- [ ] TextVectorQuantizer with EMA updates\n- [ ] TextDecoder with upsampling\n- [ ] Full TextVQVAE end-to-end\n\n### 3. Test Compression Roundtrip\n- [ ] Compress sample text to codebook indices\n- [ ] Decompress back to text\n- [ ] Verify semantic similarity (BERTScore >= 0.90)\n- [ ] Measure actual compression ratio\n\n### 4. Validate Training Pipeline\n- [ ] Test `python train.py --dry-run` (if implemented)\n- [ ] Verify data loading works\n- [ ] Test one training step (forward + backward + optimizer)\n- [ ] Confirm checkpointing saves correctly\n\n### 5. Memory Profiling\n- [ ] Verify model fits in 8GB VRAM\n- [ ] Test with batch_size=16, max_len=256\n- [ ] Profile peak memory usage during training\n\n## FILES TO MODIFY\n\n1. `/home/vader/AI-AtlasForge/workspace/StenoAI/tensor_gpu_v2.py` - Fix GPU initialization\n2. `/home/vader/AI-AtlasForge/workspace/StenoAI/tests/test_stenoai.py` - Add more comprehensive tests\n3. Any core modules that need bug fixes discovered during testing\n\n## SUCCESS CRITERIA FOR CYCLE 2\n\n- [ ] tensor_gpu_v2.py imports without crash on any system\n- [ ] TextVQVAE forward pass completes without error\n- [ ] Compression roundtrip produces valid output\n- [ ] At least one training step runs successfully\n- [ ] Memory usage < 8GB VRAM\n\n## WORKSPACE\n`/home/vader/AI-AtlasForge/workspace/StenoAI`\n\n## EXISTING FILES\n- 17 Python files (10,827 lines total)\n- 12MB stenography data downloaded\n- Sample training data prepared"
+      }
+    ],
+    "summary": "STENOAI CYCLE 3: FINAL POLISH AND VALIDATION\n=============================================\n\nPREVIOUS CYCLES SUMMARY\n-----------------------\nCycle 1: Built complete VQ-VAE codebase (10,827 lines, 17 Py",
+    "next_stage": "PLANNING"
+  }
+}
