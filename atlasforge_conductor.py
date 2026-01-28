@@ -32,6 +32,14 @@ from typing import Optional, Dict, Any, List
 import io_utils
 import af_engine as atlasforge_engine
 
+# Anthropic SDK for Haiku-powered handoff summaries
+try:
+    import anthropic
+    HAS_ANTHROPIC_SDK = True
+except ImportError:
+    HAS_ANTHROPIC_SDK = False
+    anthropic = None
+
 # ContextWatcher for early handoff on context exhaustion
 try:
     from workspace.ContextWatcher.context_watcher import (
@@ -298,6 +306,121 @@ def extract_json_from_response(text: str) -> Optional[dict]:
 
     logger.warning(f"Could not extract JSON from response: {text[:200]}...")
     return None
+
+
+# =============================================================================
+# HAIKU-POWERED HANDOFF SUMMARIES
+# =============================================================================
+
+HAIKU_MODEL = "claude-3-haiku-20240307"
+HAIKU_TIMEOUT = 10  # seconds
+HAIKU_MAX_TOKENS = 500
+
+HAIKU_HANDOFF_PROMPT = """You are generating a handoff summary for a Claude session that is ending due to context limits. Summarize what was being worked on concisely.
+
+Mission: {mission_id}
+Stage: {stage}
+Recent activity context:
+{recent_context}
+
+Format your response EXACTLY as:
+**Working on:** [what was being built/fixed - one line]
+**Completed:** [what was finished - one line]
+**In progress:** [what was partially done - one line]
+**Next:** [immediate next steps - one line]
+**Decisions:** [key decisions made - one line]
+
+Be concise. Each line should be under 100 characters."""
+
+
+def invoke_haiku_summary(
+    mission_id: str,
+    stage: str,
+    recent_context: str,
+    timeout: int = HAIKU_TIMEOUT
+) -> Optional[str]:
+    """
+    Invoke Claude Haiku to generate an intelligent handoff summary.
+
+    Args:
+        mission_id: Current mission ID
+        stage: Current stage (BUILDING, TESTING, etc.)
+        recent_context: Recent activity context (last messages, files modified, etc.)
+        timeout: API call timeout in seconds
+
+    Returns:
+        Formatted summary string, or None on failure
+    """
+    if not HAS_ANTHROPIC_SDK:
+        logger.warning("Anthropic SDK not available, skipping Haiku summary")
+        return None
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.warning("ANTHROPIC_API_KEY not set, skipping Haiku summary")
+        return None
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
+
+        prompt = HAIKU_HANDOFF_PROMPT.format(
+            mission_id=mission_id,
+            stage=stage,
+            recent_context=recent_context or "No recent activity context available."
+        )
+
+        response = client.messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=HAIKU_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        if response.content and len(response.content) > 0:
+            summary = response.content[0].text.strip()
+            logger.info(f"Haiku generated handoff summary ({len(summary)} chars)")
+            return summary
+        else:
+            logger.warning("Haiku returned empty response")
+            return None
+
+    except anthropic.APITimeoutError:
+        logger.warning(f"Haiku API call timed out after {timeout}s")
+        return None
+    except anthropic.APIError as e:
+        logger.error(f"Haiku API error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error invoking Haiku: {e}")
+        return None
+
+
+def get_recent_chat_context(n_messages: int = 5) -> str:
+    """
+    Get recent chat history as context for Haiku.
+
+    Args:
+        n_messages: Number of recent messages to include
+
+    Returns:
+        Formatted string of recent messages
+    """
+    try:
+        history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
+        if not history:
+            return "No recent messages."
+
+        # Get last n messages
+        recent = history[-n_messages:]
+        lines = []
+        for msg in recent:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")[:200]  # Truncate long messages
+            lines.append(f"[{role}] {content}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        logger.debug(f"Error getting chat context: {e}")
+        return "No recent messages available."
 
 
 # =============================================================================
@@ -870,14 +993,29 @@ def run_rd_mode():
                 logger.warning(f"Context handoff triggered: {signal.level.value} at {signal.tokens_used} tokens")
 
                 if signal.level == HandoffLevel.GRACEFUL:
-                    # Write HANDOFF.md for graceful handoff
+                    # Write HANDOFF.md for graceful handoff with Haiku-generated summary
                     mission_id = controller.mission.get("mission_id", "unknown")
-                    summary = f"""**Working on:** Stage {current_stage}
+
+                    # Try to get intelligent summary from Haiku
+                    recent_context = get_recent_chat_context(n_messages=5)
+                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
+
+                    if haiku_summary:
+                        # Use Haiku-generated summary
+                        summary = f"""{haiku_summary}
+
+**Token stats:** {signal.tokens_used:,} total (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})
+**Handoff reason:** Context approaching limit, graceful handoff initiated"""
+                        send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. Haiku wrote HANDOFF.md.")
+                    else:
+                        # Fallback to basic summary if Haiku unavailable
+                        summary = f"""**Working on:** Stage {current_stage}
 **Tokens used:** {signal.tokens_used:,} (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})
 **Handoff reason:** Context approaching limit, graceful handoff initiated
 **Next:** Continue from current stage with fresh context"""
+                        send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. HANDOFF.md written.")
+
                     write_handoff_state(str(workspace), mission_id, current_stage, summary)
-                    send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. HANDOFF.md written.")
 
                 elif signal.level == HandoffLevel.EMERGENCY:
                     send_to_chat(f"[CONTEXT] EMERGENCY handoff at {signal.tokens_used:,} tokens!")

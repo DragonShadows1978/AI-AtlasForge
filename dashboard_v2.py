@@ -1231,6 +1231,48 @@ def api_ws_status():
 
 
 # =============================================================================
+# CONTEXT WATCHER API
+# =============================================================================
+
+@app.route('/api/context-watcher/stats')
+def api_context_watcher_stats():
+    """Get ContextWatcher metrics and active session info.
+
+    Returns JSON with:
+    - enabled: Whether ContextWatcher is enabled
+    - running: Whether it's actively monitoring
+    - using_watchdog: Whether using inotify or polling
+    - active_sessions: Count of monitored sessions
+    - total_handoffs: Total handoff events triggered
+    - graceful_handoffs: Count of graceful (130K) handoffs
+    - emergency_handoffs: Count of emergency (140K) handoffs
+    - sessions: Details of each active session
+    - thresholds: Current token thresholds
+    - metrics: Detailed timing and token metrics
+    """
+    try:
+        from workspace.ContextWatcher.context_watcher import get_context_watcher
+        watcher = get_context_watcher()
+        stats = watcher.get_all_stats()
+        stats['timestamp'] = datetime.now().isoformat()
+        return jsonify(stats)
+    except ImportError:
+        return jsonify({
+            'error': 'ContextWatcher module not available',
+            'enabled': False,
+            'running': False,
+            'timestamp': datetime.now().isoformat()
+        }), 503
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'enabled': False,
+            'running': False,
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+# =============================================================================
 # BACKGROUND WATCHER
 # =============================================================================
 
