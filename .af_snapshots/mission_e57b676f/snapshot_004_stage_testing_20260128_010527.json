@@ -1,0 +1,22 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_e57b676f",
+  "stage": "TESTING",
+  "timestamp": "2026-01-28T01:05:27.359735",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_error",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [],
+      "property_violations": [
+        "Empty string encodes to [0, 2] (BOS/EOS) - expected behavior",
+        "GPU environment mismatch prevents runtime testing"
+      ],
+      "mutation_score": null,
+      "spec_alignment": 0.5625,
+      "epistemic_score": 0.1,
+      "rigor_level": "insufficient"
+    }
+  }
+}
