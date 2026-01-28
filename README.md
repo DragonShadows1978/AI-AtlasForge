@@ -119,10 +119,10 @@ make sample-mission  # Load sample mission
     | (Execution Engine)|         |   (Monitoring)  |
     +---------+---------+         +-----------------+
               |
-    +---------v---------+
-    |  Modular Engine   |
-    | (StageOrchestrator)|
-    +---------+---------+
+    +---------v---------+         +-------------------+
+    |  Modular Engine   |<------->|  Context Watcher  |
+    | (StageOrchestrator)|        | (Token + Time)    |
+    +---------+---------+         +-------------------+
               |
     +---------v-------------------+
     |     Stage Handlers          |
@@ -167,6 +167,15 @@ Queue multiple missions to run sequentially:
 - Set cycle budgets per mission
 - Priority ordering
 - Dashboard integration for queue management
+
+### Context Watcher
+Real-time context monitoring to prevent timeout waste:
+- **Token-based detection**: Monitors JSONL transcripts for context exhaustion (130K/140K thresholds)
+- **Time-based detection**: Proactive handoff at 55 minutes before 1-hour timeout
+- **Haiku-powered summaries**: Generates intelligent HANDOFF.md via Claude Haiku
+- **Automatic recovery**: Sessions continue from HANDOFF.md on restart
+
+See [context_watcher/README.md](context_watcher/README.md) for detailed documentation.
 
 ### dashboard_v2.py
 Web-based monitoring interface showing mission status, knowledge base, and analytics.
@@ -227,6 +236,9 @@ AI-AtlasForge/
 |   +-- stages/             # Stage handlers
 |   +-- integrations/       # Event-driven integrations
 +-- af_engine_legacy.py     # Legacy engine (fallback)
++-- context_watcher/        # Context monitoring module
+|   +-- context_watcher.py  # Token + time-based handoff
+|   +-- tests/              # Context watcher tests
 +-- dashboard_v2.py         # Web dashboard
 +-- adversarial_testing/    # Testing framework
 +-- atlasforge_enhancements/  # Enhancement modules

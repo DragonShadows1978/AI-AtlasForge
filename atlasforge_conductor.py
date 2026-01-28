@@ -42,11 +42,12 @@ except ImportError:
 
 # ContextWatcher for early handoff on context exhaustion
 try:
-    from workspace.ContextWatcher.context_watcher import (
+    from context_watcher import (
         get_context_watcher,
         HandoffSignal,
         HandoffLevel,
-        write_handoff_state
+        write_handoff_state,
+        TIME_BASED_HANDOFF_ENABLED,
     )
     HAS_CONTEXT_WATCHER = True
 except ImportError:
@@ -55,6 +56,7 @@ except ImportError:
     HandoffSignal = None
     HandoffLevel = None
     write_handoff_state = None
+    TIME_BASED_HANDOFF_ENABLED = False
 
 # =============================================================================
 # CONFIGURATION
@@ -992,10 +994,10 @@ def run_rd_mode():
                 handoff_triggered.set()
                 logger.warning(f"Context handoff triggered: {signal.level.value} at {signal.tokens_used} tokens")
 
+                mission_id = controller.mission.get("mission_id", "unknown")
+
                 if signal.level == HandoffLevel.GRACEFUL:
                     # Write HANDOFF.md for graceful handoff with Haiku-generated summary
-                    mission_id = controller.mission.get("mission_id", "unknown")
-
                     # Try to get intelligent summary from Haiku
                     recent_context = get_recent_chat_context(n_messages=5)
                     haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
@@ -1017,6 +1019,27 @@ def run_rd_mode():
 
                     write_handoff_state(str(workspace), mission_id, current_stage, summary)
 
+                elif signal.level == HandoffLevel.TIME_BASED:
+                    # Time-based handoff at 55 minutes - use Haiku to write intelligent summary
+                    elapsed_min = signal.elapsed_minutes if signal.elapsed_minutes else 55.0
+                    recent_context = get_recent_chat_context(n_messages=5)
+                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
+
+                    if haiku_summary:
+                        summary = f"""{haiku_summary}
+
+**Elapsed time:** {elapsed_min:.1f} minutes
+**Handoff reason:** Time-based handoff at 55 minutes (proactive, before 1-hour timeout)"""
+                        send_to_chat(f"[CONTEXT] Time-based handoff at {elapsed_min:.1f} minutes. Haiku wrote HANDOFF.md.")
+                    else:
+                        summary = f"""**Working on:** Stage {current_stage}
+**Elapsed time:** {elapsed_min:.1f} minutes
+**Handoff reason:** Time-based handoff at 55 minutes (proactive, before 1-hour timeout)
+**Next:** Continue from current stage with fresh context"""
+                        send_to_chat(f"[CONTEXT] Time-based handoff at {elapsed_min:.1f} minutes. HANDOFF.md written.")
+
+                    write_handoff_state(str(workspace), mission_id, current_stage, summary)
+
                 elif signal.level == HandoffLevel.EMERGENCY:
                     send_to_chat(f"[CONTEXT] EMERGENCY handoff at {signal.tokens_used:,} tokens!")
 
@@ -1024,7 +1047,11 @@ def run_rd_mode():
             if HAS_CONTEXT_WATCHER:
                 try:
                     watcher = get_context_watcher()
-                    context_session_id = watcher.start_watching(str(workspace), on_context_handoff)
+                    context_session_id = watcher.start_watching(
+                        str(workspace),
+                        on_context_handoff,
+                        enable_time_handoff=TIME_BASED_HANDOFF_ENABLED
+                    )
                     if context_session_id:
                         logger.info(f"ContextWatcher started for session {context_session_id}")
                 except Exception as e:
