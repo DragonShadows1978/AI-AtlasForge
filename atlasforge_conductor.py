@@ -32,6 +32,22 @@ from typing import Optional, Dict, Any, List
 import io_utils
 import af_engine as atlasforge_engine
 
+# ContextWatcher for early handoff on context exhaustion
+try:
+    from workspace.ContextWatcher.context_watcher import (
+        get_context_watcher,
+        HandoffSignal,
+        HandoffLevel,
+        write_handoff_state
+    )
+    HAS_CONTEXT_WATCHER = True
+except ImportError:
+    HAS_CONTEXT_WATCHER = False
+    get_context_watcher = None
+    HandoffSignal = None
+    HandoffLevel = None
+    write_handoff_state = None
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -841,8 +857,53 @@ def run_rd_mode():
             workspace = get_mission_workspace(controller)
             logger.info(f"Using workspace: {workspace}")
 
-            # Invoke Claude
-            response_text = invoke_llm(prompt, timeout=1800, cwd=workspace)
+            # Invoke Claude with ContextWatcher monitoring
+            # Timeout is 3600s (1 hour) safety net - ContextWatcher handles normal handoffs
+            context_session_id = None
+            handoff_triggered = threading.Event()
+            handoff_signal_ref = [None]  # Mutable container for signal
+
+            def on_context_handoff(signal):
+                """Handle context exhaustion signal from ContextWatcher."""
+                handoff_signal_ref[0] = signal
+                handoff_triggered.set()
+                logger.warning(f"Context handoff triggered: {signal.level.value} at {signal.tokens_used} tokens")
+
+                if signal.level == HandoffLevel.GRACEFUL:
+                    # Write HANDOFF.md for graceful handoff
+                    mission_id = controller.mission.get("mission_id", "unknown")
+                    summary = f"""**Working on:** Stage {current_stage}
+**Tokens used:** {signal.tokens_used:,} (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})
+**Handoff reason:** Context approaching limit, graceful handoff initiated
+**Next:** Continue from current stage with fresh context"""
+                    write_handoff_state(str(workspace), mission_id, current_stage, summary)
+                    send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. HANDOFF.md written.")
+
+                elif signal.level == HandoffLevel.EMERGENCY:
+                    send_to_chat(f"[CONTEXT] EMERGENCY handoff at {signal.tokens_used:,} tokens!")
+
+            # Start ContextWatcher if available
+            if HAS_CONTEXT_WATCHER:
+                try:
+                    watcher = get_context_watcher()
+                    context_session_id = watcher.start_watching(str(workspace), on_context_handoff)
+                    if context_session_id:
+                        logger.info(f"ContextWatcher started for session {context_session_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to start ContextWatcher: {e}")
+
+            response_text = invoke_llm(prompt, timeout=3600, cwd=workspace)
+
+            # Stop ContextWatcher
+            if context_session_id and HAS_CONTEXT_WATCHER:
+                try:
+                    watcher = get_context_watcher()
+                    stats = watcher.get_session_stats(context_session_id)
+                    watcher.stop_watching(context_session_id)
+                    if stats:
+                        logger.info(f"ContextWatcher session {context_session_id}: peak={stats.get('peak_tokens', 0):,} tokens")
+                except Exception as e:
+                    logger.debug(f"Error stopping ContextWatcher: {e}")
 
             if not response_text:
                 timeout_retries += 1

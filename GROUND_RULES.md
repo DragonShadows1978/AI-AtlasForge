@@ -800,6 +800,48 @@ Each stage has specific tool restrictions to ensure clean execution:
 - Writes cycle summary and continuation mission
 - Mission reports are archived to `missions/mission_logs/`
 
+## Context Handoff Protocol
+
+When context fills (~130K tokens), Conductor triggers a graceful handoff.
+A summary is written to `HANDOFF.md` before termination.
+
+**If HANDOFF.md exists in the workspace, READ IT FIRST.**
+
+The handoff file contains:
+- What the previous Claude was working on
+- What's completed vs in-progress
+- Key decisions made
+- Next steps to continue
+
+This provides continuity beyond filesystem-as-state. The previous Claude
+left you notes - use them.
+
+**HANDOFF.md is APPEND-ONLY.** Each handoff adds a new timestamped section:
+
+```markdown
+## Handoff #3 - 2026-01-28 01:45:00
+**Working on:** text_vqvae.py decoder implementation
+**Completed:** encoder, VQ layer, embedding
+**In progress:** decoder upsampling logic
+**Next:** finish decoder, then training script
+**Decisions:** using learned upsampling instead of repeat
+```
+
+Multiple handoffs accumulate. You can see the full history of the mission
+across all context-fill events. This is valuable context - don't truncate it.
+
+**After reading HANDOFF.md:**
+1. Read ALL sections to understand full history
+2. Continue from the LATEST handoff
+3. Only archive HANDOFF.md when mission COMPLETES (not between handoffs)
+
+**If no HANDOFF.md exists:**
+- Normal startup - inspect workspace to understand state
+- Check TODO comments, incomplete files, test failures
+- Filesystem IS the state
+
+---
+
 ## When Stuck
 1. Read error messages carefully
 2. Search the internet for solutions
