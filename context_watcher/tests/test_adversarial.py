@@ -29,7 +29,7 @@ import string
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from workspace.ContextWatcher.context_watcher import (
+from context_watcher.context_watcher import (
     ContextWatcher,
     TokenState,
     SessionMonitor,

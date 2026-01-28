@@ -19,7 +19,7 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from workspace.ContextWatcher.context_watcher import (
+from context_watcher.context_watcher import (
     ContextWatcher,
     WatcherMetrics,
     SessionMonitor,
@@ -145,7 +145,7 @@ def test_metrics_to_dict():
     assert "handoffs" in result
     assert result["handoffs"]["total"] == 1
     assert result["handoffs"]["graceful"] == 1
-    assert result["handoffs"]["ratio"] == "1:0"
+    assert result["handoffs"]["ratio"] == "1:0:0"  # graceful:emergency:time_based
 
     assert "timing" in result
     assert result["timing"]["detection_samples"] == 1
