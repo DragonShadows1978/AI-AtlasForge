@@ -1,0 +1,18 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_0dc15a90",
+  "stage": "BUILDING",
+  "timestamp": "2026-01-29T12:03:04.689316",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "data/vocab.json",
+      "data/merges.txt"
+    ],
+    "files_modified": [
+      "adapters/data_loader.py",
+      "train.py"
+    ]
+  }
+}
