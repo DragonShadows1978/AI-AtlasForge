@@ -498,6 +498,79 @@ h1 { color: var(--accent); font-size: 1.3em; }
 }
 .journal-time { color: var(--text-dim); font-size: 0.8em; }
 
+/* ===========================================
+   ACTIVITY LOG MESSAGE TYPE STYLING (Cycle 3)
+   Differentiate restart types, errors, and fatals
+   =========================================== */
+
+/* Restart messages - graceful handoffs (green/teal) */
+.journal-entry.msg-restart .journal-type {
+    background: rgba(63, 185, 80, 0.2);
+    color: var(--green);
+    border-left: 3px solid var(--green);
+}
+.journal-entry.msg-restart {
+    border-left: 3px solid var(--green);
+    background: rgba(63, 185, 80, 0.05);
+}
+
+/* Context messages - context exhaustion (cyan/teal) */
+.journal-entry.msg-context .journal-type {
+    background: rgba(0, 188, 212, 0.2);
+    color: #00bcd4;
+    border-left: 3px solid #00bcd4;
+}
+.journal-entry.msg-context {
+    border-left: 3px solid #00bcd4;
+    background: rgba(0, 188, 212, 0.05);
+}
+
+/* Error messages - retriable errors (orange/yellow) */
+.journal-entry.msg-error .journal-type {
+    background: rgba(255, 140, 66, 0.2);
+    color: var(--orange);
+    border-left: 3px solid var(--orange);
+}
+.journal-entry.msg-error {
+    border-left: 3px solid var(--orange);
+    background: rgba(255, 140, 66, 0.05);
+}
+
+/* Fatal messages - mission halted (red) */
+.journal-entry.msg-fatal .journal-type {
+    background: rgba(248, 81, 73, 0.2);
+    color: var(--red);
+    border-left: 3px solid var(--red);
+    font-weight: 600;
+}
+.journal-entry.msg-fatal {
+    border-left: 3px solid var(--red);
+    background: rgba(248, 81, 73, 0.08);
+}
+.journal-entry.msg-fatal .journal-message {
+    color: var(--red);
+}
+
+/* Haiku messages - special processing (purple) */
+.journal-entry.msg-haiku .journal-type {
+    background: rgba(188, 140, 255, 0.2);
+    color: var(--purple);
+    border-left: 3px solid var(--purple);
+}
+.journal-entry.msg-haiku {
+    border-left: 3px solid var(--purple);
+    background: rgba(188, 140, 255, 0.05);
+}
+
+/* Message type icons (inserted via JS) */
+.journal-entry .msg-icon {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 4px;
+    vertical-align: text-top;
+}
+
 /* Expandable journal entries */
 .journal-entry.expandable {
     cursor: pointer;

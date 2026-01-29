@@ -16,6 +16,120 @@ let fullMissionText = '';
 let analyticsData = null;
 
 // =============================================================================
+// ACTIVITY LOG MESSAGE STYLING (Cycle 3)
+// Parse [RESTART:*], [ERROR:*], [FATAL], [CONTEXT] prefixes for visual styling
+// =============================================================================
+
+/**
+ * Parse message content to determine its type and styling class
+ * @param {string} content - The message content
+ * @returns {object} - { class: string, icon: string, displayType: string, cleanContent: string }
+ */
+function parseActivityMessageType(content) {
+    if (!content) return { class: 'msg-default', icon: '', displayType: '', cleanContent: content || '' };
+
+    // Check for [RESTART:*] prefix - graceful handoffs
+    const restartMatch = content.match(/^\[RESTART:([A-Z_]+)\]/);
+    if (restartMatch) {
+        const restartType = restartMatch[1];
+        return {
+            class: 'msg-restart',
+            icon: '↻',
+            displayType: `RESTART:${restartType}`,
+            cleanContent: content.substring(restartMatch[0].length).trim()
+        };
+    }
+
+    // Check for [ERROR:*] prefix - retriable errors
+    const errorMatch = content.match(/^\[ERROR:([A-Z_]+)\]/);
+    if (errorMatch) {
+        const errorType = errorMatch[1];
+        return {
+            class: 'msg-error',
+            icon: '⚠',
+            displayType: `ERROR:${errorType}`,
+            cleanContent: content.substring(errorMatch[0].length).trim()
+        };
+    }
+
+    // Check for [FATAL] prefix - mission halted
+    if (content.startsWith('[FATAL]')) {
+        return {
+            class: 'msg-fatal',
+            icon: '✖',
+            displayType: 'FATAL',
+            cleanContent: content.substring(7).trim()
+        };
+    }
+
+    // Check for [CONTEXT] prefix - context usage info
+    if (content.startsWith('[CONTEXT]')) {
+        return {
+            class: 'msg-context',
+            icon: '📊',
+            displayType: 'CONTEXT',
+            cleanContent: content.substring(9).trim()
+        };
+    }
+
+    // Check for [HAIKU] prefix - Haiku model processing
+    if (content.startsWith('[HAIKU]')) {
+        return {
+            class: 'msg-haiku',
+            icon: '🤖',
+            displayType: 'HAIKU',
+            cleanContent: content.substring(7).trim()
+        };
+    }
+
+    // Default - no special styling
+    return {
+        class: 'msg-default',
+        icon: '•',
+        displayType: '',
+        cleanContent: content
+    };
+}
+
+/**
+ * Render a journal entry with appropriate message type styling
+ * @param {object} j - Journal entry object
+ * @returns {string} - HTML string for the entry
+ */
+function renderStyledJournalEntry(j) {
+    const message = j.message || j.status || '';
+    const fullMessage = j.full_message || message;
+    const parsed = parseActivityMessageType(message);
+    const parsedFull = parseActivityMessageType(fullMessage);
+    const isTruncated = j.is_truncated;
+
+    // Use parsed displayType if available, otherwise fall back to j.type
+    const displayType = parsed.displayType || j.type || 'unknown';
+
+    if (isTruncated) {
+        return `
+            <div class="journal-entry expandable ${parsed.class}" data-entry-id="${j.timestamp}" onclick="window.toggleJournalEntry(this)">
+                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${parsed.icon}</span>` : ''}${escapeHtml(displayType)}</span>
+                <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
+                <div class="preview-message journal-message">${escapeHtml(parsed.cleanContent)}...<span class="expand-indicator">[+]</span></div>
+                <div class="full-message journal-message">${escapeHtml(parsedFull.cleanContent)}<span class="collapse-indicator">[-]</span></div>
+            </div>
+        `;
+    } else {
+        return `
+            <div class="journal-entry ${parsed.class}" data-entry-id="${j.timestamp}">
+                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${parsed.icon}</span>` : ''}${escapeHtml(displayType)}</span>
+                <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
+                <div class="journal-message">${escapeHtml(parsed.cleanContent)}</div>
+            </div>
+        `;
+    }
+}
+
+// Export for use in other modules
+export { parseActivityMessageType, renderStyledJournalEntry };
+
+// =============================================================================
 // COLLAPSIBLE CARD FUNCTIONALITY
 // =============================================================================
 
@@ -664,26 +778,7 @@ export async function refresh() {
 
     const journal = await api('/api/journal');
     const journalEl = document.getElementById('journal');
-    if (journalEl) journalEl.innerHTML = journal.map(j => {
-        if (j.is_truncated) {
-            return `
-                <div class="journal-entry expandable" data-entry-id="${j.timestamp}" onclick="window.toggleJournalEntry(this)">
-                    <span class="journal-type">${escapeHtml(j.type)}</span>
-                    <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
-                    <div class="preview-message">${escapeHtml(j.message)}...<span class="expand-indicator">[+]</span></div>
-                    <div class="full-message">${escapeHtml(j.full_message)}<span class="collapse-indicator">[-]</span></div>
-                </div>
-            `;
-        } else {
-            return `
-                <div class="journal-entry" data-entry-id="${j.timestamp}">
-                    <span class="journal-type">${escapeHtml(j.type)}</span>
-                    <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
-                    <div>${escapeHtml(j.message || j.status || '')}</div>
-                </div>
-            `;
-        }
-    }).join('') || '<div style="color: var(--text-dim)">No activity yet</div>';
+    if (journalEl) journalEl.innerHTML = journal.map(j => renderStyledJournalEntry(j)).join('') || '<div style="color: var(--text-dim)">No activity yet</div>';
 
     restoreJournalExpandedStates();
 

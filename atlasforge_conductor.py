@@ -1146,6 +1146,9 @@ def run_rd_mode():
                         send_to_chat(error_msg)
                         send_to_chat(fatal_msg)
                         send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
+                        # Add verbose error details for debugging (Cycle 3 enhancement)
+                        if error_info:
+                            send_to_chat(f"[ERROR:DETAILS] Raw error: {error_info[:500]}")
                         logger.error(f"Blocking error: {error_reason.value} - {error_explanation}")
                         append_journal({
                             "type": "claude_blocking_error",
@@ -1165,6 +1168,9 @@ def run_rd_mode():
                         fatal_msg = format_fatal_message(error_reason, error_explanation, MAX_CLAUDE_RETRIES)
                         send_to_chat(fatal_msg)
                         send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
+                        # Add verbose error details for debugging (Cycle 3 enhancement)
+                        if error_info:
+                            send_to_chat(f"[ERROR:DETAILS] Raw error: {error_info[:500]}")
                         append_journal({
                             "type": "claude_timeout_failure",
                             "stage": current_stage,

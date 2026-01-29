@@ -1273,6 +1273,127 @@ def api_context_watcher_stats():
 
 
 # =============================================================================
+# RESTART STATS API (Cycle 3)
+# Aggregates restart statistics from journal for Activity Log visibility
+# =============================================================================
+
+@app.route('/api/restart-stats')
+def api_restart_stats():
+    """Get aggregated restart statistics from the journal.
+
+    Returns JSON with:
+    - graceful_restarts: Count of graceful handoffs (context, time-based)
+    - error_restarts: Count of retriable error restarts
+    - blocking_errors: Count of blocking errors that halted the mission
+    - breakdown: Detailed counts by restart reason
+    - recent_errors: Last 5 error entries with details
+
+    This helps users understand at-a-glance:
+    - How many restarts were expected (graceful) vs problematic (errors)
+    - What types of errors occurred
+    - Whether the mission is healthy
+    """
+    try:
+        stats = {
+            'graceful_restarts': 0,
+            'error_restarts': 0,
+            'blocking_errors': 0,
+            'breakdown': {
+                'context_exhaustion': 0,
+                'time_based_handoff': 0,
+                'context_overflow': 0,
+                'cli_timeout': 0,
+                'api_error_500': 0,
+                'tool_call_bug': 0,
+                'rate_limited': 0,
+                'auth_failed': 0,
+                'network_error': 0,
+                'overloaded': 0,
+                'unknown': 0
+            },
+            'recent_errors': [],
+            'mission_id': None,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Get current mission ID
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        stats['mission_id'] = mission.get('mission_id')
+
+        # Parse journal for restart/error entries
+        if CLAUDE_JOURNAL_PATH.exists():
+            with open(CLAUDE_JOURNAL_PATH, 'r') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line.strip())
+                        entry_type = entry.get('type', '')
+
+                        # Graceful handoffs - don't count as errors
+                        if entry_type == 'graceful_handoff_restart':
+                            stats['graceful_restarts'] += 1
+                            reason = entry.get('restart_reason', 'unknown')
+                            if reason in stats['breakdown']:
+                                stats['breakdown'][reason] += 1
+
+                        # Timeout failures (retriable errors that hit max retries)
+                        elif entry_type == 'claude_timeout_failure':
+                            stats['error_restarts'] += 1
+                            reason = entry.get('error_category', 'unknown')
+                            if reason in stats['breakdown']:
+                                stats['breakdown'][reason] += 1
+                            # Add to recent errors
+                            stats['recent_errors'].append({
+                                'timestamp': entry.get('timestamp'),
+                                'stage': entry.get('stage'),
+                                'category': reason,
+                                'explanation': entry.get('error_explanation', ''),
+                                'retries': entry.get('retries', 0)
+                            })
+
+                        # Blocking errors (immediate halt)
+                        elif entry_type == 'claude_blocking_error':
+                            stats['blocking_errors'] += 1
+                            reason = entry.get('error_category', 'unknown')
+                            if reason in stats['breakdown']:
+                                stats['breakdown'][reason] += 1
+                            # Add to recent errors
+                            stats['recent_errors'].append({
+                                'timestamp': entry.get('timestamp'),
+                                'stage': entry.get('stage'),
+                                'category': reason,
+                                'explanation': entry.get('error_explanation', ''),
+                                'blocking': True
+                            })
+
+                    except json.JSONDecodeError:
+                        continue
+
+        # Keep only last 5 recent errors
+        stats['recent_errors'] = stats['recent_errors'][-5:]
+
+        # Calculate health score
+        total_events = stats['graceful_restarts'] + stats['error_restarts'] + stats['blocking_errors']
+        if total_events > 0:
+            # Health: graceful restarts are fine, errors reduce health
+            graceful_pct = stats['graceful_restarts'] / total_events
+            stats['health_score'] = round(graceful_pct * 100, 1)
+        else:
+            stats['health_score'] = 100.0  # No events = healthy
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'graceful_restarts': 0,
+            'error_restarts': 0,
+            'blocking_errors': 0,
+            'breakdown': {},
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+
+# =============================================================================
 # BACKGROUND WATCHER
 # =============================================================================
 
