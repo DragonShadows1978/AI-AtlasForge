@@ -31,6 +31,7 @@ Integration Handlers:
     - WebSocketIntegration: Real-time UI updates
     - EnhancerIntegration: AtlasForge enhancements
     - DecisionGraphIntegration: Tool invocation tracking
+    - MissionReportIntegration: Final report and recommendation storage
 """
 
 from .base import (
@@ -56,6 +57,7 @@ from .snapshots import SnapshotIntegration
 from .websocket_events import WebSocketIntegration
 from .enhancer import EnhancerIntegration
 from .decision_graph import DecisionGraphIntegration
+from .mission_report import MissionReportIntegration
 
 __all__ = [
     # Protocol and data classes
@@ -79,6 +81,7 @@ __all__ = [
     'WebSocketIntegration',
     'EnhancerIntegration',
     'DecisionGraphIntegration',
+    'MissionReportIntegration',
 ]
 
 # Default integrations to load (in priority order)
@@ -98,6 +101,7 @@ DEFAULT_INTEGRATIONS = [
     QueueSchedulerIntegration,
     PostMissionHooksIntegration,
     EnhancerIntegration,
+    MissionReportIntegration,
 ]
 
 
