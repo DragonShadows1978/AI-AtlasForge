@@ -344,6 +344,8 @@ def invoke_haiku_summary(
     """
     Invoke Claude Haiku to generate an intelligent handoff summary.
 
+    Uses the Claude CLI with --model flag to leverage subscription instead of API credits.
+
     Args:
         mission_id: Current mission ID
         stage: Current stage (BUILDING, TESTING, etc.)
@@ -353,43 +355,37 @@ def invoke_haiku_summary(
     Returns:
         Formatted summary string, or None on failure
     """
-    if not HAS_ANTHROPIC_SDK:
-        logger.warning("Anthropic SDK not available, skipping Haiku summary")
-        return None
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        logger.warning("ANTHROPIC_API_KEY not set, skipping Haiku summary")
-        return None
-
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
-
         prompt = HAIKU_HANDOFF_PROMPT.format(
             mission_id=mission_id,
             stage=stage,
             recent_context=recent_context or "No recent activity context available."
         )
 
-        response = client.messages.create(
-            model=HAIKU_MODEL,
-            max_tokens=HAIKU_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}]
+        result = subprocess.run(
+            ["claude", "-p", "--model", HAIKU_MODEL, "--dangerously-skip-permissions"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(BASE_DIR),
+            start_new_session=True
         )
 
-        if response.content and len(response.content) > 0:
-            summary = response.content[0].text.strip()
-            logger.info(f"Haiku generated handoff summary ({len(summary)} chars)")
-            return summary
+        if result.returncode == 0:
+            summary = result.stdout.strip()
+            if summary:
+                logger.info(f"Haiku generated handoff summary ({len(summary)} chars)")
+                return summary
+            else:
+                logger.warning("Haiku returned empty response")
+                return None
         else:
-            logger.warning("Haiku returned empty response")
+            logger.error(f"Haiku CLI error: {result.stderr}")
             return None
 
-    except anthropic.APITimeoutError:
-        logger.warning(f"Haiku API call timed out after {timeout}s")
-        return None
-    except anthropic.APIError as e:
-        logger.error(f"Haiku API error: {e}")
+    except subprocess.TimeoutExpired:
+        logger.warning(f"Haiku CLI call timed out after {timeout}s")
         return None
     except Exception as e:
         logger.error(f"Error invoking Haiku: {e}")

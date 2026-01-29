@@ -1,6 +1,6 @@
 [project]
 name = "ai-atlasforge"
-version = "1.6.0"
+version = "1.6.1"
 description = "Autonomous AI research and development platform powered by Claude"
 readme = "README.md"
 license = {text = "MIT"}
