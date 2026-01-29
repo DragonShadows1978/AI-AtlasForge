@@ -103,10 +103,10 @@ class MissionReportIntegration(BaseIntegrationHandler):
         mission_id = event.mission_id
         event_data = event.data or {}
 
-        # Extract data from event
-        total_cycles = event_data.get("total_cycles", 1)
-        deliverables = event_data.get("deliverables", [])
-        final_report_data = event_data.get("final_report", {})
+        # Extract data from event (handle explicit None values)
+        total_cycles = event_data.get("total_cycles") or 1
+        deliverables = event_data.get("deliverables") or []
+        final_report_data = event_data.get("final_report") or {}
 
         # Build the report
         final_report = {
