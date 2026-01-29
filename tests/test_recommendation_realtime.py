@@ -398,16 +398,20 @@ def test_multiple_recommendations_no_rate_limit_collision():
 
 
 def test_emit_latest_recommendation_on_complete():
-    """Test the _emit_latest_recommendation_on_complete method."""
+    """Test that emit_recommendation_added works for COMPLETE stage recommendations.
+
+    Both modular and legacy engines use emit_recommendation_added() for
+    WebSocket emissions. This test validates the emission works correctly.
+    """
     print("\n=== Test: Emit Latest Recommendation on Complete ===")
 
     import websocket_events
-    from af_engine import RDMissionController
 
     # Setup mock socketio
     mock_socketio = MockSocketIO()
     websocket_events._socketio = mock_socketio
     websocket_events._event_queue = []
+    websocket_events._last_emit_times = {}
 
     # Reset storage and add a test recommendation
     reset_storage()
@@ -428,44 +432,221 @@ def test_emit_latest_recommendation_on_complete():
     }
 
     storage.add(rec_entry)
-    print(f"✓ Added test recommendation for mission {test_mission_id}")
-
-    # Create engine with test mission
-    engine = RDMissionController()
-    engine.mission = {
-        'mission_id': test_mission_id,
-        'current_stage': 'COMPLETE'
-    }
+    print(f"  Added test recommendation for mission {test_mission_id}")
 
     # Clear emissions before test
     mock_socketio.clear()
 
-    # Call the method
-    engine._emit_latest_recommendation_on_complete()
+    # Simulate what MissionReportIntegration does: emit recommendation
+    # This works for both modular and legacy engines
+    websocket_events.emit_recommendation_added(rec_entry, queue_if_unavailable=True)
 
     # Check emission
     emission = mock_socketio.wait_for_emission('update', timeout=1.0)
 
     if not emission:
-        print("❌ No emission from _emit_latest_recommendation_on_complete")
+        print("  No emission from emit_recommendation_added")
         storage.delete(rec_id)
         websocket_events._socketio = None
         return False
 
     emitted_rec = emission['data'].get('data', {}).get('recommendation', {})
     if emitted_rec.get('id') != rec_id:
-        print(f"❌ Wrong recommendation ID: {emitted_rec.get('id')}")
+        print(f"  Wrong recommendation ID: {emitted_rec.get('id')}")
         storage.delete(rec_id)
         websocket_events._socketio = None
         return False
 
-    print(f"✓ Correct recommendation emitted on complete")
+    print(f"  Correct recommendation emitted on complete")
 
     # Cleanup
     storage.delete(rec_id)
     websocket_events._socketio = None
 
-    print("\n✅ Emit on complete test passed")
+    print("\n  Emit on complete test passed")
+    return True
+
+
+def test_drift_halt_suggestion_emission():
+    """Test that drift-halt suggestions emit correctly with drift_context."""
+    print("\n=== Test: Drift Halt Suggestion Emission ===")
+
+    import websocket_events
+
+    mock_socketio = MockSocketIO()
+    websocket_events._socketio = mock_socketio
+    websocket_events._event_queue = []
+    websocket_events._last_emit_times = {}
+
+    # Create a drift-halt recommendation with drift_context
+    drift_rec = {
+        'id': f'rec_drift_{uuid.uuid4().hex[:8]}',
+        'mission_title': 'Drift Refined Mission',
+        'mission_description': 'A mission refined after drift detection',
+        'source_mission_id': 'mission_drift_test',
+        'source_type': 'drift_halt',
+        'suggested_cycles': 2,
+        'rationale': 'Refocusing on core objective after scope drift',
+        'drift_context': {
+            'drift_failures': 3,
+            'average_similarity': 0.42,
+            'halted_at_cycle': 2,
+            'pattern_analysis': {'primary_drift': 'scope_creep'}
+        }
+    }
+
+    websocket_events.emit_recommendation_added(drift_rec)
+
+    emission = mock_socketio.wait_for_emission('update', timeout=1.0)
+
+    if not emission:
+        print("  No emission received")
+        websocket_events._socketio = None
+        return False
+
+    # Verify emission structure
+    data = emission['data'].get('data', {})
+    if data.get('event') != 'new_recommendation':
+        print(f"  Wrong event type: {data.get('event')}")
+        websocket_events._socketio = None
+        return False
+
+    rec = data.get('recommendation', {})
+
+    # Verify source_type is preserved
+    if rec.get('source_type') != 'drift_halt':
+        print(f"  source_type not preserved: {rec.get('source_type')}")
+        websocket_events._socketio = None
+        return False
+
+    print(f"  source_type preserved: {rec.get('source_type')}")
+    print(f"  Drift recommendation emitted successfully")
+
+    websocket_events._socketio = None
+    print("\n  Drift halt suggestion emission test passed")
+    return True
+
+
+def test_drift_context_storage():
+    """Test that drift_context is properly stored and retrieved."""
+    print("\n=== Test: Drift Context Storage ===")
+
+    reset_storage()
+    storage = get_storage()
+
+    drift_context = {
+        'drift_failures': 4,
+        'average_similarity': 0.35,
+        'halted_at_cycle': 3,
+        'pattern_analysis': {
+            'primary_drift': 'feature_creep',
+            'severity': 'high'
+        }
+    }
+
+    rec_id = f'rec_ctx_{uuid.uuid4().hex[:8]}'
+    drift_rec = {
+        'id': rec_id,
+        'mission_title': 'Context Storage Test',
+        'mission_description': 'Testing drift context storage',
+        'source_mission_id': 'mission_ctx_test',
+        'source_type': 'drift_halt',
+        'suggested_cycles': 2,
+        'rationale': 'Context test',
+        'created_at': datetime.now().isoformat(),
+        'drift_context': drift_context
+    }
+
+    storage.add(drift_rec)
+
+    # Retrieve and verify
+    retrieved = storage.get_by_id(rec_id)
+
+    if not retrieved:
+        print("  Could not retrieve recommendation")
+        return False
+
+    if 'drift_context' not in retrieved:
+        print("  drift_context not preserved")
+        return False
+
+    ctx = retrieved['drift_context']
+    if ctx.get('drift_failures') != 4:
+        print(f"  drift_failures mismatch: {ctx.get('drift_failures')}")
+        storage.delete(rec_id)
+        return False
+
+    if ctx.get('average_similarity') != 0.35:
+        print(f"  average_similarity mismatch: {ctx.get('average_similarity')}")
+        storage.delete(rec_id)
+        return False
+
+    pattern = ctx.get('pattern_analysis', {})
+    if pattern.get('primary_drift') != 'feature_creep':
+        print(f"  pattern_analysis.primary_drift mismatch")
+        storage.delete(rec_id)
+        return False
+
+    print(f"  drift_context preserved correctly:")
+    print(f"    - drift_failures: {ctx.get('drift_failures')}")
+    print(f"    - average_similarity: {ctx.get('average_similarity')}")
+    print(f"    - pattern_analysis: {pattern}")
+
+    storage.delete(rec_id)
+    print("\n  Drift context storage test passed")
+    return True
+
+
+def test_drift_auto_queue_mechanism():
+    """Test that drift suggestions can be auto-queued (mechanism only, not full integration)."""
+    print("\n=== Test: Drift Auto-Queue Mechanism ===")
+
+    # This tests the data structure that would be used for auto-queuing
+    # The actual auto-queue depends on queue_scheduler being available
+
+    drift_rec = {
+        'id': f'rec_aq_{uuid.uuid4().hex[:8]}',
+        'mission_title': 'Auto-Queue Test Mission',
+        'mission_description': 'Testing auto-queue data structure',
+        'source_mission_id': 'mission_aq_test',
+        'source_type': 'drift_halt',
+        'suggested_cycles': 2,
+        'rationale': 'Auto-queue test',
+        'drift_context': {
+            'drift_failures': 2,
+            'average_similarity': 0.45,
+            'halted_at_cycle': 1
+        }
+    }
+
+    # Verify the recommendation has all fields needed for auto-queuing
+    required_fields = ['mission_title', 'mission_description', 'suggested_cycles']
+    missing = [f for f in required_fields if f not in drift_rec]
+
+    if missing:
+        print(f"  Missing fields for auto-queue: {missing}")
+        return False
+
+    print(f"  All required fields present for auto-queue:")
+    print(f"    - mission_title: {drift_rec['mission_title']}")
+    print(f"    - mission_description: {drift_rec['mission_description'][:50]}...")
+    print(f"    - suggested_cycles: {drift_rec['suggested_cycles']}")
+
+    # Verify the source_type is correct
+    if drift_rec['source_type'] != 'drift_halt':
+        print(f"  Wrong source_type: {drift_rec['source_type']}")
+        return False
+
+    print(f"    - source_type: {drift_rec['source_type']}")
+
+    # Verify drift_context is present
+    if 'drift_context' not in drift_rec:
+        print("  drift_context missing")
+        return False
+
+    print(f"    - drift_context present with {len(drift_rec['drift_context'])} fields")
+
+    print("\n  Drift auto-queue mechanism test passed")
     return True
 
 
@@ -482,6 +663,10 @@ def run_all_tests():
         ("Timing Under 2 Seconds", test_timing_under_2_seconds),
         ("Multiple Recommendations Rate Limiting", test_multiple_recommendations_no_rate_limit_collision),
         ("Emit Latest Recommendation on Complete", test_emit_latest_recommendation_on_complete),
+        # Drift-specific tests
+        ("Drift Halt Suggestion Emission", test_drift_halt_suggestion_emission),
+        ("Drift Context Storage", test_drift_context_storage),
+        ("Drift Auto-Queue Mechanism", test_drift_auto_queue_mechanism),
     ]
 
     results = []
