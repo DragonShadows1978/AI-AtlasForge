@@ -994,6 +994,8 @@ def run_rd_mode():
 
                 if signal.level == HandoffLevel.GRACEFUL:
                     # Write HANDOFF.md for graceful handoff with Haiku-generated summary
+                    # Notify user that Haiku is being invoked
+                    send_to_chat(f"[HAIKU] Context limit detected ({signal.cache_creation:,} tokens). Invoking Haiku for intelligent handoff summary...")
                     # Try to get intelligent summary from Haiku
                     recent_context = get_recent_chat_context(n_messages=5)
                     haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
@@ -1018,6 +1020,8 @@ def run_rd_mode():
                 elif signal.level == HandoffLevel.TIME_BASED:
                     # Time-based handoff at 55 minutes - use Haiku to write intelligent summary
                     elapsed_min = signal.elapsed_minutes if signal.elapsed_minutes else 55.0
+                    # Notify user that Haiku is being invoked
+                    send_to_chat(f"[HAIKU] Time limit reached ({elapsed_min:.1f} min). Invoking Haiku for intelligent handoff summary...")
                     recent_context = get_recent_chat_context(n_messages=5)
                     haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
 
