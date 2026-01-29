@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_4be0e4ce",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-29T17:38:45.428754",
+  "snapshot_number": 21,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 3,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-01-29T17:15:20.127318",
+        "iteration_count": 0,
+        "continuation_prompt": "CONTINUATION: ContextWatcher Timeout Tracking Fix - Cycle 2\n\n## Previous Cycle Summary\nCycle 1 successfully implemented the core timeout tracking fix in atlasforge_conductor.py. The fix correctly distinguishes graceful handoffs from real errors and all 16 tests pass.\n\n## Remaining Work for Cycle 2\n\n### 1. Integration Testing (HIGHEST PRIORITY)\nRun the actual AtlasForge system with the fix to validate behavior in production:\n- Start a test mission that will naturally trigger context exhaustion\n- Verify that graceful handoffs do NOT increment the timeout counter\n- Verify that the activity log shows correct [RESTART] vs [ERROR] messages\n- Verify journal entries are correctly typed (graceful_handoff_restart vs claude_timeout_failure)\n\n### 2. Long-Running Process Simulation\nSimulate a model training scenario:\n- Create a test that runs for 55+ minutes to trigger time-based handoff\n- Verify the mission continues after multiple time-based handoffs\n- Confirm timeout_retries stays at 0 throughout\n\n### 3. Verify Real Error Detection Still Works\n- Inject a real CLI error (e.g., invalid command, network failure)\n- Verify it increments timeout_retries\n- Verify mission halts after 3 real errors\n\n### 4. Dashboard/Activity Log Visual Verification\n- Check that the dashboard displays the correct restart type messages\n- Verify the new [RESTART] and [ERROR] prefixes appear correctly in the UI\n\n### 5. Edge Case: Parallel Tool Call Bug Detection\nFrom the mission description, Claude v2.1.19-2.1.20 had a parallel tool call bug. Add detection for this specific error pattern:\n- Search for 'tool' errors in stderr\n- Log specific error pattern for future analysis\n\n### Files to Reference\n- atlasforge_conductor.py (already modified)\n- workspace/ContextWatcher_Fixes/tests/ (test suites)\n- workspace/ContextWatcher_Fixes/artifacts/test_results.md (test documentation)\n\n### Success Criteria for Cycle 2\n1. Integration test shows graceful handoffs not counted as errors in live system\n2. Activity log in dashboard shows correct [RESTART] vs [ERROR] differentiation\n3. Journal analysis confirms graceful_handoff_restart entries for handoffs\n4. Optional: Add specific error pattern detection for known bugs"
+      }
+    ],
+    "summary": "CYCLE 3: LIVE INTEGRATION VALIDATION\n\nThe ContextWatcher timeout/restart tracking fix has been fully implemented and unit-tested. Cycle 3 should validate the integration in a live environment.\n\nCOMPLE",
+    "next_stage": "PLANNING"
+  }
+}
