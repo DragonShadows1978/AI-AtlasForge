@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_de478f5e",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-29T11:16:40.510511",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Past missions successfully created SQLite-only storage for suggestions (mission_220bf0ee)",
+      "Past missions populated Mission Suggestions widget (mission_2d43fae5, mission_7091ee78)"
+    ],
+    "steps_planned": 6
+  }
+}
