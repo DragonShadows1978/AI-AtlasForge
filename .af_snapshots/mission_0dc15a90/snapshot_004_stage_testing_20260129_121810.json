@@ -1,0 +1,22 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_0dc15a90",
+  "stage": "TESTING",
+  "timestamp": "2026-01-29T12:18:10.367955",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "CRITICAL: Empty dataset bug - --small mode sets min_len=32 but sample corpus has max 27 tokens/sentence",
+        "CRITICAL: WikiText download fails with HTTP 301 redirect - no proper training data available"
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 0.71,
+      "epistemic_score": 0.6,
+      "rigor_level": "moderate"
+    }
+  }
+}
