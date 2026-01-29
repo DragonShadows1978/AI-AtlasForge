@@ -1,0 +1,43 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_4be0e4ce",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-29T17:38:45.357247",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "cycles_remaining": 1,
+    "continuation_prompt": "CYCLE 3: LIVE INTEGRATION VALIDATION\n\nThe ContextWatcher timeout/restart tracking fix has been fully implemented and unit-tested. Cycle 3 should validate the integration in a live environment.\n\nCOMPLETED WORK:\n1. atlasforge_conductor_errors.py - Full error classification module (449 lines)\n2. atlasforge_conductor.py - Modified lines 36-43, 1098-1201 with proper handoff/error handling\n3. 34 unit tests passing (test_error_classification.py, test_timeout_tracking_fix.py, test_adversarial_timeout.py)\n\nCYCLE 3 OBJECTIVES:\n1. Run a simulated long-running mission to trigger time-based handoff and verify:\n   - Activity Log shows [RESTART:TIME_BASED_HANDOFF] instead of [ERROR]\n   - timeout_retries counter does NOT increment\n   - Journal shows graceful_handoff_restart type\n\n2. Simulate error scenarios and verify:\n   - Rate limit error shows [ERROR:RATE_LIMITED] and halts immediately\n   - CLI timeout shows [ERROR:CLI_TIMEOUT] with attempt count\n   - 3 real errors trigger [FATAL] message\n\n3. Review claude_journal.jsonl after simulation to verify:\n   - graceful_handoff_restart entries have handoff_level field\n   - claude_timeout_failure entries have error_category field\n   - claude_blocking_error entries exist for rate limits\n\n4. Document any edge cases found during live testing and update tests if needed.\n\nFILES TO REFERENCE:\n- /home/vader/AI-AtlasForge/atlasforge_conductor_errors.py\n- /home/vader/AI-AtlasForge/atlasforge_conductor.py (lines 1098-1201)\n- /home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/artifacts/test_results.md",
+    "cycle_report": {
+      "summary": "Cycle 2 enhanced the error classification system created in Cycle 1. Built comprehensive error classification module (atlasforge_conductor_errors.py) with RestartReason enum, classify_error() function for pattern matching, and helper functions for formatted Activity Log messages. Integrated module into atlasforge_conductor.py to properly differentiate graceful handoffs from real errors. Created comprehensive test suites achieving 34/34 tests passing (100%).",
+      "files_created": [
+        "/home/vader/AI-AtlasForge/atlasforge_conductor_errors.py",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_error_classification.py",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_timeout_tracking_fix.py",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_adversarial_timeout.py",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/research/analysis.md"
+      ],
+      "files_modified": [
+        "/home/vader/AI-AtlasForge/atlasforge_conductor.py"
+      ],
+      "achievements": [
+        "RestartReason enum with 14 error categories (graceful, retriable, blocking)",
+        "classify_error() function recognizes 12+ error patterns from JSONL analysis",
+        "is_graceful() correctly identifies context_exhaustion, time_based_handoff, context_overflow",
+        "is_blocking() correctly identifies rate_limited, auth_failed, invalid_request",
+        "format_error_message() produces [ERROR:TYPE] prefix with attempt counts",
+        "format_fatal_message() produces [FATAL] prefix with error details",
+        "format_restart_message() produces [RESTART:TYPE] prefix for graceful handoffs",
+        "atlasforge_conductor.py now checks handoff_triggered.is_set() before incrementing timeout_retries",
+        "Journal entries now include error_category field for post-hoc analysis",
+        "34/34 tests passing including adversarial edge cases (race conditions, boundary conditions)"
+      ],
+      "issues": [
+        "Need live integration testing in an actual mission to confirm end-to-end behavior",
+        "JSONL parsing relies on pattern matching - unusual error formats may fall to UNKNOWN category",
+        "No automated CI pipeline - tests run manually"
+      ]
+    }
+  }
+}
