@@ -1,0 +1,67 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_4be0e4ce",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-29T18:12:00.856594",
+  "snapshot_number": 33,
+  "event_data": {
+    "total_cycles": 3,
+    "deliverables": [
+      "atlasforge_conductor_errors.py - Complete error classification module (350+ lines)",
+      "Modified atlasforge_conductor.py with core timeout tracking fix",
+      "Modified dashboard_v2.py with /api/restart-stats endpoint",
+      "Modified dashboard CSS/JS for Activity Log visual differentiation",
+      "34 passing tests covering all functionality",
+      "Comprehensive documentation in artifacts/ and research/"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Implement Mission Health Dashboard Widget",
+      "mission_description": "The /api/restart-stats endpoint now exposes restart breakdown data, but this information is not visible in the dashboard UI. Create a dedicated Mission Health Widget that displays: (1) Real-time restart statistics showing graceful vs error restart counts, (2) A visual health score indicator (the API already returns a health_score), (3) Recent error timeline with expandable details, (4) Rate limit and API quota tracking when applicable. The widget should appear on the main dashboard and update via WebSocket alongside other widgets. This would complete the UI/UX work started in Cycle 3 by surfacing the restart statistics to users in an actionable format.",
+      "suggested_cycles": 3,
+      "rationale": "Cycle 3 added the backend API endpoint for restart stats but the dashboard doesn't have a UI component to display this data. Users currently have to call the API directly or parse the Activity Log manually. A dedicated widget would provide at-a-glance mission health visibility, making it easier to distinguish between healthy long-running missions (many graceful handoffs, zero errors) and problematic missions (error restarts accumulating). This directly addresses the user's original concern about understanding why missions restart."
+    },
+    "final_report": {
+      "summary": "Successfully fixed the ContextWatcher timeout/restart tracking bug that was causing long-running missions to fail prematurely. The core issue was that graceful handoffs (context exhaustion, time-based) were incorrectly being counted as errors towards the 3-strike limit. Cycle 1 implemented the core fix by modifying invoke_llm() to return error tuples and adding handoff detection before incrementing timeout_retries. Cycle 2 created the comprehensive atlasforge_conductor_errors.py module with RestartReason enum (14 categories), error classification logic, and message formatting functions. Cycle 3 added UI/UX improvements including CSS styling for Activity Log message types, JavaScript parsing for message prefixes, and a /api/restart-stats endpoint for programmatic access to restart statistics. All 34 tests pass with 100% coverage.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/atlasforge_conductor_errors.py (CREATE - 350+ lines error classification module)",
+        "/home/vader/AI-AtlasForge/atlasforge_conductor.py (MODIFY - lines 36-39 imports, 1098-1201 error handling)",
+        "/home/vader/AI-AtlasForge/dashboard_v2.py (MODIFY - added /api/restart-stats endpoint ~110 lines)",
+        "/home/vader/AI-AtlasForge/dashboard_static/css/main.css (MODIFY - added 60+ lines CSS for message styling)",
+        "/home/vader/AI-AtlasForge/dashboard_static/src/widgets.js (MODIFY - added parseActivityMessageType(), renderStyledJournalEntry())",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_timeout_tracking_fix.py (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_error_classification.py (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/tests/test_adversarial_timeout.py (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/test_message_parsing.js (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/artifacts/implementation_plan.md (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/artifacts/fix_summary.md (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/artifacts/test_results.md (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/research/research_findings.md (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/research/analysis.md (CREATE)",
+        "/home/vader/AI-AtlasForge/workspace/ContextWatcher_Fixes/BUILD_SUMMARY.md (CREATE)"
+      ],
+      "key_achievements": [
+        "CORE BUG FIX: Graceful handoffs (context exhaustion, time-based, emergency) no longer count towards the 3-strike timeout limit",
+        "ERROR CLASSIFICATION: Created atlasforge_conductor_errors.py with RestartReason enum covering 14 error categories (CLI_TIMEOUT, RATE_LIMITED, AUTH_FAILED, TOOL_CALL_BUG, API_ERROR_500, OVERLOADED, OUTPUT_TOO_LONG, CONTEXT_OVERFLOW, NETWORK_ERROR, CLI_CRASH, CONTEXT_EXHAUSTION, TIME_BASED_HANDOFF, UNKNOWN)",
+        "JOURNAL DIFFERENTIATION: Added distinct journal entry types - graceful_handoff_restart vs claude_timeout_failure vs claude_blocking_error",
+        "ACTIVITY LOG CLARITY: Implemented message prefixes [RESTART:TYPE], [ERROR:TYPE], [FATAL], [CONTEXT] with color-coded CSS styling (green=graceful, orange=error, red=fatal)",
+        "RESTART STATS API: Added /api/restart-stats endpoint returning breakdown of graceful vs error restarts with health score",
+        "VERBOSE ERROR DETAILS: Fatal messages now include [ERROR:DETAILS] with raw error info for debugging",
+        "TEST COVERAGE: 34 tests covering timeout tracking, error classification, and adversarial edge cases (100% pass rate)"
+      ],
+      "challenges_overcome": [
+        "Race condition handling: Handoff signal can arrive after response_text check but before is_set() - solved by checking handoff state before incrementing counter",
+        "Backward compatibility: Old journal entries lack error_category field - handled gracefully with 'unknown' fallback",
+        "State reset integrity: Ensured both handoff_triggered.clear() and handoff_signal_ref[0] = None are called to prevent state leakage",
+        "Known Claude Code bugs: Documented tool call duplicate ID bug in v2.1.19-2.1.20 for pattern matching"
+      ],
+      "lessons_learned": [
+        "Always differentiate between 'expected graceful exit' and 'actual error' in retry logic - treating all timeouts as errors causes false positives",
+        "Return tuples (value, error_info) instead of just value/None to preserve error context for debugging",
+        "Use enums for error classification to provide structured categorization and helper functions like is_graceful(), is_blocking()",
+        "Journal entries should have distinct types for different scenarios to enable accurate analytics",
+        "UI differentiation (colors, icons, prefixes) makes debugging much easier for users monitoring long-running missions",
+        "Adversarial testing with edge cases (100 consecutive graceful handoffs, mixed sequences) catches boundary condition bugs"
+      ]
+    }
+  }
+}
