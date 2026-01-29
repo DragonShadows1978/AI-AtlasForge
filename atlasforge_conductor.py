@@ -225,7 +225,7 @@ def remove_pid():
 # LLM INVOCATION (Model-Agnostic)
 # =============================================================================
 
-def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> Optional[str]:
+def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Optional[str], Optional[str]]:
     """
     Invoke configured LLM and get response.
 
@@ -238,7 +238,11 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> Optional[s
         cwd: Working directory (default BASE_DIR)
 
     Returns:
-        Response text or None on error
+        Tuple of (response_text, error_info):
+        - On success: (response_text, None)
+        - On timeout: (None, "timeout:<seconds>")
+        - On CLI error: (None, "cli_error:<stderr_snippet>")
+        - On exception: (None, "exception:<error_message>")
     """
     if cwd is None:
         cwd = BASE_DIR
@@ -247,7 +251,8 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> Optional[s
         logger.info(f"Invoking Claude: {prompt[:100]}...")
 
         result = subprocess.run(
-            ["claude", "-p", "--dangerously-skip-permissions"],
+            ["claude", "-p", "--dangerously-skip-permissions",
+             "--disallowedTools", "EnterPlanMode,ExitPlanMode"],
             input=prompt,
             capture_output=True,
             text=True,
@@ -259,17 +264,18 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> Optional[s
         if result.returncode == 0:
             response = result.stdout.strip()
             logger.info(f"Claude responded: {response[:200]}...")
-            return response
+            return response, None
         else:
+            stderr_snippet = result.stderr[:500] if result.stderr else "No stderr"
             logger.error(f"Claude error: {result.stderr}")
-            return None
+            return None, f"cli_error:{stderr_snippet}"
 
     except subprocess.TimeoutExpired:
         logger.error(f"Claude timed out after {timeout}s")
-        return None
+        return None, f"timeout:{timeout}s"
     except Exception as e:
         logger.error(f"Error invoking Claude: {e}")
-        return None
+        return None, f"exception:{str(e)}"
 
 
 def extract_json_from_response(text: str) -> Optional[dict]:
@@ -363,7 +369,8 @@ def invoke_haiku_summary(
         )
 
         result = subprocess.run(
-            ["claude", "-p", "--model", HAIKU_MODEL, "--dangerously-skip-permissions"],
+            ["claude", "-p", "--model", HAIKU_MODEL, "--dangerously-skip-permissions",
+             "--disallowedTools", "EnterPlanMode,ExitPlanMode"],
             input=prompt,
             capture_output=True,
             text=True,
@@ -1057,7 +1064,7 @@ def run_rd_mode():
                 except Exception as e:
                     logger.warning(f"Failed to start ContextWatcher: {e}")
 
-            response_text = invoke_llm(prompt, timeout=3600, cwd=workspace)
+            response_text, error_info = invoke_llm(prompt, timeout=3600, cwd=workspace)
 
             # Stop ContextWatcher
             if context_session_id and HAS_CONTEXT_WATCHER:
@@ -1071,19 +1078,69 @@ def run_rd_mode():
                     logger.debug(f"Error stopping ContextWatcher: {e}")
 
             if not response_text:
-                timeout_retries += 1
-                if timeout_retries >= MAX_CLAUDE_RETRIES:
-                    logger.error(f"Claude timed out {MAX_CLAUDE_RETRIES} times consecutively")
-                    send_to_chat(f"Error: Claude unresponsive after {MAX_CLAUDE_RETRIES} retries. Mission halted.")
+                # =========================================================
+                # CRITICAL BUG FIX: Distinguish graceful handoffs from errors
+                # =========================================================
+                # Check if this was a graceful handoff (NOT an error)
+                # Graceful handoffs (context exhaustion, time-based) should NOT
+                # count towards the 3-strike timeout limit.
+                if handoff_triggered.is_set():
+                    handoff_signal = handoff_signal_ref[0]
+                    handoff_level = handoff_signal.level.value if handoff_signal else "unknown"
+
+                    # Log appropriate restart message based on handoff type
+                    if handoff_level == "graceful":
+                        send_to_chat(f"[RESTART] Context exhaustion handoff complete. Fresh instance starting...")
+                        logger.info("Graceful context handoff - NOT counting as error")
+                    elif handoff_level == "time_based":
+                        elapsed = handoff_signal.elapsed_minutes if handoff_signal and handoff_signal.elapsed_minutes else 55.0
+                        send_to_chat(f"[RESTART] Time-based handoff ({elapsed:.1f} min) complete. Fresh instance starting...")
+                        logger.info(f"Time-based handoff at {elapsed:.1f} min - NOT counting as error")
+                    else:
+                        send_to_chat(f"[RESTART] Emergency context handoff. Fresh instance starting...")
+                        logger.warning("Emergency handoff - NOT counting as error but flagging for review")
+
+                    # Record in journal with handoff type (distinguishable from errors)
                     append_journal({
-                        "type": "claude_timeout_failure",
+                        "type": "graceful_handoff_restart",
                         "stage": current_stage,
-                        "retries": timeout_retries
+                        "handoff_level": handoff_level,
+                        "mission_id": controller.mission.get("mission_id"),
+                        "error_info": error_info  # Include for diagnostics
                     })
-                    break  # Exit loop - mission needs intervention
-                logger.warning(f"No response from Claude, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES})...")
-                time.sleep(10)
-                continue
+
+                    # Reset handoff state for next iteration
+                    handoff_triggered.clear()
+                    handoff_signal_ref[0] = None
+
+                    # Do NOT increment timeout_retries - this is expected behavior
+                    time.sleep(5)  # Brief pause before restart
+                    continue
+                else:
+                    # Real error - increment counter
+                    timeout_retries += 1
+
+                    # Capture detailed error info for verbose logging
+                    error_details = error_info or "No response from Claude CLI (unknown reason)"
+
+                    if timeout_retries >= MAX_CLAUDE_RETRIES:
+                        logger.error(f"Claude timed out {MAX_CLAUDE_RETRIES} times consecutively")
+                        send_to_chat(f"[ERROR] Claude unresponsive after {MAX_CLAUDE_RETRIES} retries. Mission halted.")
+                        send_to_chat(f"[ERROR] Last error: {error_details}")
+                        send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
+                        append_journal({
+                            "type": "claude_timeout_failure",
+                            "stage": current_stage,
+                            "retries": timeout_retries,
+                            "error_details": error_details,
+                            "mission_id": controller.mission.get("mission_id")
+                        })
+                        break  # Exit loop - mission needs intervention
+
+                    send_to_chat(f"[ERROR] No response from Claude (attempt {timeout_retries}/{MAX_CLAUDE_RETRIES}). Error: {error_details}")
+                    logger.warning(f"No response from Claude, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES}). Error: {error_details}")
+                    time.sleep(10)
+                    continue
 
             # Parse response
             response = extract_json_from_response(response_text)
