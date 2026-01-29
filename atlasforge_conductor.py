@@ -32,6 +32,17 @@ from typing import Optional, Dict, Any, List
 import io_utils
 import af_engine as atlasforge_engine
 
+# Import error classification module for categorized error handling
+from atlasforge_conductor_errors import (
+    RestartReason,
+    classify_error,
+    is_graceful,
+    is_blocking,
+    format_error_message,
+    format_fatal_message,
+    format_restart_message,
+)
+
 # Anthropic SDK for Haiku-powered handoff summaries
 try:
     import anthropic
@@ -1088,23 +1099,31 @@ def run_rd_mode():
                     handoff_signal = handoff_signal_ref[0]
                     handoff_level = handoff_signal.level.value if handoff_signal else "unknown"
 
-                    # Log appropriate restart message based on handoff type
+                    # Map handoff level to RestartReason for consistent formatting
                     if handoff_level == "graceful":
-                        send_to_chat(f"[RESTART] Context exhaustion handoff complete. Fresh instance starting...")
+                        restart_reason = RestartReason.CONTEXT_EXHAUSTION
+                        extra_info = f"{handoff_signal.tokens_used:,} tokens" if handoff_signal else ""
                         logger.info("Graceful context handoff - NOT counting as error")
                     elif handoff_level == "time_based":
+                        restart_reason = RestartReason.TIME_BASED_HANDOFF
                         elapsed = handoff_signal.elapsed_minutes if handoff_signal and handoff_signal.elapsed_minutes else 55.0
-                        send_to_chat(f"[RESTART] Time-based handoff ({elapsed:.1f} min) complete. Fresh instance starting...")
+                        extra_info = f"{elapsed:.1f} min"
                         logger.info(f"Time-based handoff at {elapsed:.1f} min - NOT counting as error")
                     else:
-                        send_to_chat(f"[RESTART] Emergency context handoff. Fresh instance starting...")
+                        restart_reason = RestartReason.CONTEXT_OVERFLOW
+                        extra_info = "emergency"
                         logger.warning("Emergency handoff - NOT counting as error but flagging for review")
 
-                    # Record in journal with handoff type (distinguishable from errors)
+                    # Use consistent formatted restart message
+                    restart_msg = format_restart_message(restart_reason, extra_info)
+                    send_to_chat(restart_msg)
+
+                    # Record in journal with handoff type and reason (distinguishable from errors)
                     append_journal({
                         "type": "graceful_handoff_restart",
                         "stage": current_stage,
                         "handoff_level": handoff_level,
+                        "restart_reason": restart_reason.value,
                         "mission_id": controller.mission.get("mission_id"),
                         "error_info": error_info  # Include for diagnostics
                     })
@@ -1117,28 +1136,50 @@ def run_rd_mode():
                     time.sleep(5)  # Brief pause before restart
                     continue
                 else:
-                    # Real error - increment counter
+                    # Real error - classify it for proper handling
+                    error_reason, error_explanation = classify_error(error_info, response_text)
+
+                    # Check for blocking errors (don't retry, halt immediately)
+                    if is_blocking(error_reason):
+                        error_msg = format_error_message(error_reason, error_explanation)
+                        fatal_msg = format_fatal_message(error_reason, error_explanation)
+                        send_to_chat(error_msg)
+                        send_to_chat(fatal_msg)
+                        send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
+                        logger.error(f"Blocking error: {error_reason.value} - {error_explanation}")
+                        append_journal({
+                            "type": "claude_blocking_error",
+                            "stage": current_stage,
+                            "error_category": error_reason.value,
+                            "error_explanation": error_explanation,
+                            "error_info": error_info,
+                            "mission_id": controller.mission.get("mission_id")
+                        })
+                        break  # Exit loop - blocking errors don't retry
+
+                    # Retriable error - increment counter
                     timeout_retries += 1
 
-                    # Capture detailed error info for verbose logging
-                    error_details = error_info or "No response from Claude CLI (unknown reason)"
-
                     if timeout_retries >= MAX_CLAUDE_RETRIES:
-                        logger.error(f"Claude timed out {MAX_CLAUDE_RETRIES} times consecutively")
-                        send_to_chat(f"[ERROR] Claude unresponsive after {MAX_CLAUDE_RETRIES} retries. Mission halted.")
-                        send_to_chat(f"[ERROR] Last error: {error_details}")
+                        logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively: {error_reason.value}")
+                        fatal_msg = format_fatal_message(error_reason, error_explanation, MAX_CLAUDE_RETRIES)
+                        send_to_chat(fatal_msg)
                         send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
                         append_journal({
                             "type": "claude_timeout_failure",
                             "stage": current_stage,
                             "retries": timeout_retries,
-                            "error_details": error_details,
+                            "error_category": error_reason.value,
+                            "error_explanation": error_explanation,
+                            "error_info": error_info,
                             "mission_id": controller.mission.get("mission_id")
                         })
                         break  # Exit loop - mission needs intervention
 
-                    send_to_chat(f"[ERROR] No response from Claude (attempt {timeout_retries}/{MAX_CLAUDE_RETRIES}). Error: {error_details}")
-                    logger.warning(f"No response from Claude, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES}). Error: {error_details}")
+                    # Log retriable error with attempt count
+                    error_msg = format_error_message(error_reason, error_explanation, timeout_retries - 1, MAX_CLAUDE_RETRIES)
+                    send_to_chat(error_msg)
+                    logger.warning(f"Error ({error_reason.value}): {error_explanation}, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES})")
                     time.sleep(10)
                     continue
 
