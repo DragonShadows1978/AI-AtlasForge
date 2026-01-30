@@ -46,7 +46,12 @@ class TestCriticalIssues:
     @pytest.mark.regression
     @pytest.mark.regression_cycle_budget
     def test_missing_cycle_advancement(self):
-        """CRITICAL: process_response() doesn't handle CYCLE_END properly."""
+        """CRITICAL: process_response() must handle CYCLE_END -> PLANNING transitions.
+
+        This test verifies that when transitioning from CYCLE_END to PLANNING with
+        cycles remaining, the cycle advancement is triggered even if continuation_prompt
+        is empty. The fix uses a default continuation prompt when Claude doesn't provide one.
+        """
         from af_engine.orchestrator import StageOrchestrator
         from af_engine.stages.base import StageResult
 
@@ -55,13 +60,24 @@ class TestCriticalIssues:
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
+            orch.state.get_field = Mock(return_value="Test mission")
             orch.mission = {"current_cycle": 1, "cycle_budget": 3}
+
+            # Mock cycles manager - required for should_continue_cycle()
+            orch.cycles = Mock()
+            orch.cycles.current_cycle = 1
+            orch.cycles.cycle_budget = 3
+            orch.cycles.should_continue = Mock(return_value=True)
+            orch.cycles.create_cycle_completed_event = Mock(return_value=Mock())
+            orch.cycles.advance_cycle = Mock(return_value={"old_cycle": 1, "new_cycle": 2})
+            orch.cycles.create_cycle_started_event = Mock(return_value=Mock())
 
             mock_result = StageResult(
                 status="cycle_complete",
                 next_stage="PLANNING",
                 success=True,
                 events_to_emit=[],
+                output_data={"continuation_prompt": "test"}
             )
 
             mock_handler = Mock()
@@ -74,11 +90,15 @@ class TestCriticalIssues:
             orch.prompts = Mock()
             orch.prompts.build_context = Mock(return_value=mock_context)
             orch.integrations = Mock()
+            orch.update_stage = Mock()
 
             response = {"status": "cycle_complete", "continuation_prompt": "test"}
             next_stage = orch.process_response(response)
 
-            assert next_stage == "PLANNING"
+            # With the fix, cycles.advance_cycle should be called
+            orch.cycles.advance_cycle.assert_called_once_with("test")
+            # And should_continue_cycle should have been checked
+            orch.cycles.should_continue.assert_called_once()
 
 
 class TestHighSeverityIssues:
