@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "adversarial_test",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-30T18:35:38.801031",
+  "snapshot_number": 0,
+  "event_data": {
+    "cycle_number": 1,
+    "cycles_remaining": 1,
+    "continuation_prompt": "",
+    "cycle_report": {
+      "summary": "Done"
+    }
+  }
+}
