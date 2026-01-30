@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_56949304",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-30T07:07:36.215743",
+  "snapshot_number": 6,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Codebook collapse: VQ loss increased from 2.50 to 13.80 during training",
+      "Low reconstruction quality: 34.4% token accuracy (target 50%)",
+      "Low BERTScore F1: 0.032 (target 0.90)",
+      "Only 3-4 codebook entries actively used for diverse inputs"
+    ]
+  }
+}
