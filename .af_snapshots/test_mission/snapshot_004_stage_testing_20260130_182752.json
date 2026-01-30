@@ -2,11 +2,11 @@
   "snapshot_type": "stage_testing",
   "mission_id": "test_mission",
   "stage": "TESTING",
-  "timestamp": "2026-01-30T18:27:52.243554",
+  "timestamp": "2026-01-30T18:27:52.747650",
   "snapshot_number": 4,
   "event_data": {
-    "status": "tests_failed",
-    "tests_passed": false,
+    "status": "tests_passed",
+    "tests_passed": true,
     "adversarial_testing": {
       "red_team_issues": [],
       "property_violations": [],
