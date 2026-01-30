@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "adversarial_test",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-30T18:34:06.410829",
+  "snapshot_number": 4,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 5,
+    "cycles_remaining": 3,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-01-30T18:34:06.331024",
+        "iteration_count": 0,
+        "continuation_prompt": "=== CONTINUATION: Cycle 2 of 5 ===\n\nORIGINAL MISSION:\nAdversarial test mission\n\nPREVIOUS CYCLE NOTE:\nThe previous cycle completed but did not provide a specific continuation prompt.\n\nOBJECTIVES FOR THIS CYCLE:\n- Continue work from the previous cycle\n- Address any remaining tasks from the original mission\n- Build upon completed work\n\nContinue the mission from where the previous cycle left off.\n"
+      }
+    ],
+    "summary": "=== CONTINUATION: Cycle 3 of 5 ===\n\nORIGINAL MISSION:\nAdversarial test mission\n\nPREVIOUS CYCLE NOTE:\nThe previous cycle completed but did not provide a specific continuation prompt.\n\nOBJECTIVES FOR TH",
+    "next_stage": "PLANNING"
+  }
+}
