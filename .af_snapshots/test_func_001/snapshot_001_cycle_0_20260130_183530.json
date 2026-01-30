@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "test_func_001",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-30T18:35:30.114231",
+  "snapshot_number": 1,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 2,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [],
+    "summary": "=== CONTINUATION: Cycle 2 of 2 ===\n\nORIGINAL MISSION:\nTest functional cycle continuation\n\nPREVIOUS CYCLE NOTE:\nThe previous cycle completed but did not provide a specific continuation prompt.\n\nOBJECTI",
+    "next_stage": "PLANNING"
+  }
+}
