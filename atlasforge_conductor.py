@@ -331,13 +331,14 @@ def extract_json_from_response(text: str) -> Optional[dict]:
 # HAIKU-POWERED HANDOFF SUMMARIES
 # =============================================================================
 
-HAIKU_MODEL = "claude-3-haiku-20240307"
+HAIKU_MODEL = "claude-sonnet-4-5-20250929"
 HAIKU_TIMEOUT = 10  # seconds
 HAIKU_MAX_TOKENS = 500
 
 HAIKU_HANDOFF_PROMPT = """You are generating a handoff summary for a Claude session that is ending due to context limits. Summarize what was being worked on concisely.
 
 Mission: {mission_id}
+Mission Objective: {mission_objective}
 Stage: {stage}
 Recent activity context:
 {recent_context}
@@ -349,13 +350,14 @@ Format your response EXACTLY as:
 **Next:** [immediate next steps - one line]
 **Decisions:** [key decisions made - one line]
 
-Be concise. Each line should be under 100 characters."""
+Be concise. Each line should be under 100 characters. Stay focused on the Mission Objective above."""
 
 
 def invoke_haiku_summary(
     mission_id: str,
     stage: str,
     recent_context: str,
+    mission_objective: str = "",
     timeout: int = HAIKU_TIMEOUT
 ) -> Optional[str]:
     """
@@ -367,6 +369,7 @@ def invoke_haiku_summary(
         mission_id: Current mission ID
         stage: Current stage (BUILDING, TESTING, etc.)
         recent_context: Recent activity context (last messages, files modified, etc.)
+        mission_objective: The actual mission description/problem statement
         timeout: API call timeout in seconds
 
     Returns:
@@ -375,6 +378,7 @@ def invoke_haiku_summary(
     try:
         prompt = HAIKU_HANDOFF_PROMPT.format(
             mission_id=mission_id,
+            mission_objective=mission_objective or "No mission objective available.",
             stage=stage,
             recent_context=recent_context or "No recent activity context available."
         )
@@ -1016,7 +1020,8 @@ def run_rd_mode():
                     send_to_chat(f"[HAIKU] Context limit detected ({signal.cache_creation:,} tokens). Invoking Haiku for intelligent handoff summary...")
                     # Try to get intelligent summary from Haiku
                     recent_context = get_recent_chat_context(n_messages=5)
-                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
+                    mission_objective = controller.mission.get("problem_statement", "")
+                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context, mission_objective)
 
                     if haiku_summary:
                         # Use Haiku-generated summary
@@ -1041,7 +1046,8 @@ def run_rd_mode():
                     # Notify user that Haiku is being invoked
                     send_to_chat(f"[HAIKU] Time limit reached ({elapsed_min:.1f} min). Invoking Haiku for intelligent handoff summary...")
                     recent_context = get_recent_chat_context(n_messages=5)
-                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context)
+                    mission_objective = controller.mission.get("problem_statement", "")
+                    haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context, mission_objective)
 
                     if haiku_summary:
                         summary = f"""{haiku_summary}
