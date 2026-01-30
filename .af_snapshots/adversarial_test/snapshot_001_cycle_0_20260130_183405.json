@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "adversarial_test",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-30T18:34:05.577294",
+  "snapshot_number": 1,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 999999,
+    "cycles_remaining": 999998,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [],
+    "summary": "=== CONTINUATION: Cycle 2 of 999999 ===\n\nORIGINAL MISSION:\nAdversarial test mission\n\nPREVIOUS CYCLE NOTE:\nThe previous cycle completed but did not provide a specific continuation prompt.\n\nOBJECTIVES F",
+    "next_stage": "PLANNING"
+  }
+}
