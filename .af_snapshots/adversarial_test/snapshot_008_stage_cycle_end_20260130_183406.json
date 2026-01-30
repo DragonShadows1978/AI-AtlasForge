@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_cycle_end",
+  "mission_id": "adversarial_test",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-30T18:34:06.638962",
+  "snapshot_number": 8,
+  "event_data": {
+    "old_stage": "CYCLE_END",
+    "new_stage": "PLANNING",
+    "iteration": 0
+  }
+}
