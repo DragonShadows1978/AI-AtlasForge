@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "no_original",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-30T18:35:36.705073",
+  "snapshot_number": 1,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 2,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [],
+    "summary": "=== CONTINUATION: Cycle 2 of 2 ===\n\nORIGINAL MISSION:\nTest mission\n\nPREVIOUS CYCLE NOTE:\nThe previous cycle completed but did not provide a specific continuation prompt.\n\nOBJECTIVES FOR THIS CYCLE:\n- ",
+    "next_stage": "PLANNING"
+  }
+}
