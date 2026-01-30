@@ -130,6 +130,10 @@ Respond with JSON:
             continuation_prompt = response.get("continuation_prompt", "")
             cycle_report = response.get("cycle_report", {})
 
+            # Warn if continuation_prompt is missing (orchestrator will use default)
+            if not continuation_prompt:
+                logger.warning(f"CYCLE_END: No continuation_prompt provided for cycle {current_cycle}, default will be used")
+
             events = [
                 Event(
                     type=StageEvent.CYCLE_COMPLETED,

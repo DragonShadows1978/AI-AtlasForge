@@ -301,8 +301,13 @@ class StageOrchestrator:
         # This is the key fix: when transitioning from CYCLE_END to PLANNING,
         # we need to advance the cycle counter before returning the next stage
         if stage == "CYCLE_END" and result.next_stage == "PLANNING":
-            continuation_prompt = result.output_data.get("continuation_prompt", "")
-            if continuation_prompt and self.should_continue_cycle():
+            if self.should_continue_cycle():
+                continuation_prompt = result.output_data.get("continuation_prompt", "")
+                if not continuation_prompt:
+                    # Generate default continuation if Claude didn't provide one
+                    continuation_prompt = self._generate_default_continuation()
+                    logger.warning(f"No continuation_prompt provided, using default for cycle {self.cycles.current_cycle + 1}")
+
                 logger.info(f"Advancing cycle from {self.cycles.current_cycle} to next cycle")
                 self.advance_to_next_cycle(continuation_prompt)
                 # Note: advance_to_next_cycle already calls update_stage("PLANNING")
@@ -362,6 +367,32 @@ class StageOrchestrator:
     def get_cycle_status(self) -> Dict[str, Any]:
         """Get current cycle status."""
         return self.cycles.get_cycle_context()
+
+    def _generate_default_continuation(self) -> str:
+        """Generate a default continuation prompt when Claude doesn't provide one.
+
+        This ensures multi-cycle missions continue even if the CYCLE_END response
+        doesn't include a continuation_prompt field.
+        """
+        original_mission = self.state.get_field("original_problem_statement") or self.state.get_field("problem_statement", "Continue the mission")
+        current_cycle = self.cycles.current_cycle
+        cycle_budget = self.cycles.cycle_budget
+
+        return f"""=== CONTINUATION: Cycle {current_cycle + 1} of {cycle_budget} ===
+
+ORIGINAL MISSION:
+{original_mission}
+
+PREVIOUS CYCLE NOTE:
+The previous cycle completed but did not provide a specific continuation prompt.
+
+OBJECTIVES FOR THIS CYCLE:
+- Continue work from the previous cycle
+- Address any remaining tasks from the original mission
+- Build upon completed work
+
+Continue the mission from where the previous cycle left off.
+"""
 
     # =========================================================================
     # Stage restriction methods

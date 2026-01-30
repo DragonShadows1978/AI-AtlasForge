@@ -1,0 +1,20 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_56949304",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-30T15:09:16.628685",
+  "snapshot_number": 24,
+  "event_data": {
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
+    "issues_found": [
+      "Codebook collapse persists: only 3/4096 codes active (0.07% utilization)",
+      "Token accuracy regressed from 34.4% to 2.08% (target: 50%+)",
+      "BERTScore F1 at 0.019 (target: 0.90)",
+      "Training-inference gap: Gumbel-Softmax lacks temperature annealing",
+      "No dead code revival mechanism to reset unused codebook entries",
+      "API mismatch: evaluation code expects 'vq_layer' attribute",
+      "Unicode encoding error in validation data loading"
+    ]
+  }
+}

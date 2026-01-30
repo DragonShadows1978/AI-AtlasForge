@@ -1,0 +1,19 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_56949304",
+  "stage": "TESTING",
+  "timestamp": "2026-01-30T15:08:07.690971",
+  "snapshot_number": 22,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 1.0,
+      "epistemic_score": 0.2,
+      "rigor_level": "weak"
+    }
+  }
+}
