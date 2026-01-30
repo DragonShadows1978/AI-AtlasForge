@@ -1,0 +1,18 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_56949304",
+  "stage": "ANALYZING",
+  "timestamp": "2026-01-30T11:05:27.401775",
+  "snapshot_number": 18,
+  "event_data": {
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
+    "issues_found": [
+      "Gumbel-Softmax to hard argmax mismatch causes only 6 codes used at inference despite 125+ during training",
+      "CE loss plateaued at 6-8 throughout training, never converged to < 3.0",
+      "Token accuracy regressed from 34.4% (Cycle 1) to 21.72% (Cycle 2)",
+      "Compression ratio dropped below 5x target (4.91x vs 5.76x in Cycle 1)",
+      "Decoder mode collapsed to outputting high-frequency tokens ('the', ',', '.') regardless of input"
+    ]
+  }
+}
