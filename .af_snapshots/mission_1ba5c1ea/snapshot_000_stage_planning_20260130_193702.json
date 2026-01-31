@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_1ba5c1ea",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-30T19:37:02.087791",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Delete functionality for unwanted recommendations (mission_49c80228) - similar pattern for deleting investigations"
+    ],
+    "steps_planned": 8
+  }
+}
