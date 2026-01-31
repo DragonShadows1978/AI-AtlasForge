@@ -1094,6 +1094,36 @@ def run_rd_mode():
                 except Exception as e:
                     logger.debug(f"Error stopping ContextWatcher: {e}")
 
+            # =========================================================
+            # BUG FIX: Handle empty response with rc=0 (not an error)
+            # =========================================================
+            # Empty stdout with rc=0 is valid (rare but possible). This should
+            # NOT increment timeout_retries or trigger 3-strike halt.
+            if not response_text and not error_info:
+                logger.warning(f"Empty Claude response with rc=0 (not an error), continuing")
+                # Log to CLI error tracker for trend analysis
+                try:
+                    from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
+                        get_cli_error_logger, CLIEventType
+                    )
+                    cli_logger = get_cli_error_logger()
+                    cli_logger.log_empty_response(
+                        mission_id=controller.mission.get("mission_id"),
+                        stage=current_stage,
+                        cycle=cycle_count
+                    )
+                except ImportError:
+                    pass  # CLI error logger not available
+
+                append_journal({
+                    "type": "empty_response_warning",
+                    "stage": current_stage,
+                    "mission_id": controller.mission.get("mission_id"),
+                    "note": "rc=0 with empty stdout - not counting as error"
+                })
+                time.sleep(5)
+                continue
+
             if not response_text:
                 # =========================================================
                 # CRITICAL BUG FIX: Distinguish graceful handoffs from errors
@@ -1168,6 +1198,24 @@ def run_rd_mode():
 
                     # Retriable error - increment counter
                     timeout_retries += 1
+
+                    # Log to CLI error tracker for trend analysis
+                    try:
+                        from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
+                            get_cli_error_logger, CLIEventType
+                        )
+                        cli_logger = get_cli_error_logger()
+                        cli_logger.log_cli_error(
+                            mission_id=controller.mission.get("mission_id"),
+                            stage=current_stage,
+                            error_category=error_reason.value,
+                            error_info=error_info or "",
+                            cycle=cycle_count,
+                            retry_count=timeout_retries,
+                            resolution="retry" if timeout_retries < MAX_CLAUDE_RETRIES else "halt"
+                        )
+                    except ImportError:
+                        pass  # CLI error logger not available
 
                     if timeout_retries >= MAX_CLAUDE_RETRIES:
                         logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively: {error_reason.value}")
