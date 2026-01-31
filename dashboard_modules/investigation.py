@@ -1054,6 +1054,71 @@ def api_bulk_export():
 
 
 # =============================================================================
+# DELETE INVESTIGATION
+# =============================================================================
+
+@investigation_bp.route('/api/investigation/<investigation_id>', methods=['DELETE'])
+def api_delete_investigation(investigation_id):
+    """
+    Delete an investigation from history.
+
+    Query params:
+    - delete_files: 'true' to also delete workspace directory (default: false)
+
+    Returns:
+    {
+        "success": true/false,
+        "message": "...",
+        "files_deleted": true/false (if delete_files was requested)
+    }
+    """
+    from investigation_engine import delete_investigation
+
+    delete_files = request.args.get('delete_files', 'false').lower() == 'true'
+
+    result = delete_investigation(investigation_id, delete_files=delete_files)
+
+    if result["success"]:
+        return jsonify(result)
+    else:
+        return jsonify(result), 404
+
+
+@investigation_bp.route('/api/investigation/bulk/delete', methods=['POST'])
+def api_bulk_delete_investigations():
+    """
+    Delete multiple investigations from history.
+
+    Request body:
+    {
+        "ids": ["inv_xxx", "inv_yyy", ...],
+        "delete_files": false  // optional, default false
+    }
+
+    Returns:
+    {
+        "success": true/false,
+        "deleted_count": N,
+        "deleted": ["inv_xxx", ...],
+        "failed": [{"id": "inv_yyy", "reason": "..."}, ...],
+        "message": "..."
+    }
+    """
+    from investigation_engine import delete_investigations_bulk
+
+    data = request.get_json() or {}
+    ids = data.get('ids', [])
+    delete_files = data.get('delete_files', False)
+
+    if not ids:
+        return jsonify({"error": "ids required"}), 400
+
+    result = delete_investigations_bulk(ids, delete_files=delete_files)
+
+    return jsonify(result)
+
+
+# =============================================================================
 # TAG STATISTICS
 # =============================================================================
 

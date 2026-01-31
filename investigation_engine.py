@@ -336,6 +336,140 @@ def update_investigation_status(investigation_id: str, status: InvestigationStat
         save_investigation_state(state)
 
 
+def archive_current_investigation():
+    """
+    Move the current investigation to history if it's completed or failed.
+
+    This ensures completed investigations persist in history rather than
+    being overwritten when a new investigation starts.
+    """
+    state = load_investigation_state()
+    current = state.get("current")
+
+    if not current:
+        return False
+
+    # Only archive if the investigation is in a terminal state
+    terminal_states = [InvestigationStatus.COMPLETED.value, InvestigationStatus.FAILED.value]
+    if current.get("status") not in terminal_states:
+        return False
+
+    # Move current to history
+    if "history" not in state:
+        state["history"] = []
+
+    # Add to history (most recent first)
+    state["history"].insert(0, current)
+
+    # Clear current
+    state["current"] = None
+
+    save_investigation_state(state)
+    logger.info(f"Archived investigation {current.get('investigation_id')} to history")
+    return True
+
+
+def delete_investigation(investigation_id: str, delete_files: bool = False) -> dict:
+    """
+    Delete an investigation from history.
+
+    Args:
+        investigation_id: The ID of the investigation to delete
+        delete_files: If True, also delete the workspace directory
+
+    Returns:
+        dict with 'success', 'message', and optionally 'files_deleted'
+    """
+    state = load_investigation_state()
+
+    # Check if it's the current running investigation
+    if state.get("current") and state["current"].get("investigation_id") == investigation_id:
+        current_status = state["current"].get("status")
+        terminal_states = [InvestigationStatus.COMPLETED.value, InvestigationStatus.FAILED.value]
+        if current_status not in terminal_states:
+            return {
+                "success": False,
+                "message": "Cannot delete a running investigation. Stop it first."
+            }
+        # It's current but completed/failed - archive it first then delete from history
+        archive_current_investigation()
+        state = load_investigation_state()  # Reload after archive
+
+    # Find and remove from history
+    history = state.get("history", [])
+    original_len = len(history)
+
+    # Find the investigation to get its workspace_dir before removal
+    workspace_dir = None
+    for inv in history:
+        if inv.get("investigation_id") == investigation_id:
+            workspace_dir = inv.get("workspace_dir")
+            break
+
+    # Remove from history
+    state["history"] = [inv for inv in history if inv.get("investigation_id") != investigation_id]
+
+    if len(state["history"]) == original_len:
+        return {
+            "success": False,
+            "message": f"Investigation {investigation_id} not found"
+        }
+
+    save_investigation_state(state)
+
+    result = {
+        "success": True,
+        "message": f"Investigation {investigation_id} deleted"
+    }
+
+    # Optionally delete workspace files
+    if delete_files and workspace_dir:
+        try:
+            import shutil
+            workspace_path = Path(workspace_dir)
+            if workspace_path.exists():
+                shutil.rmtree(workspace_path)
+                result["files_deleted"] = True
+                result["message"] += f" (workspace deleted: {workspace_dir})"
+                logger.info(f"Deleted workspace directory: {workspace_dir}")
+        except Exception as e:
+            result["files_deleted"] = False
+            result["file_error"] = str(e)
+            logger.warning(f"Failed to delete workspace {workspace_dir}: {e}")
+
+    return result
+
+
+def delete_investigations_bulk(investigation_ids: list, delete_files: bool = False) -> dict:
+    """
+    Delete multiple investigations from history.
+
+    Args:
+        investigation_ids: List of investigation IDs to delete
+        delete_files: If True, also delete workspace directories
+
+    Returns:
+        dict with 'success', 'deleted_count', 'failed', 'message'
+    """
+    deleted = []
+    failed = []
+
+    for inv_id in investigation_ids:
+        result = delete_investigation(inv_id, delete_files=delete_files)
+        if result["success"]:
+            deleted.append(inv_id)
+        else:
+            failed.append({"id": inv_id, "reason": result["message"]})
+
+    return {
+        "success": len(deleted) > 0,
+        "deleted_count": len(deleted),
+        "deleted": deleted,
+        "failed": failed,
+        "message": f"Deleted {len(deleted)} investigation(s)" + (f", {len(failed)} failed" if failed else "")
+    }
+
+
 # =============================================================================
 # CLAUDE INVOCATION
 # =============================================================================
@@ -1420,6 +1554,10 @@ class InvestigationRunner:
             except Exception as code_error:
                 logger.warning(f"Code extraction/injection failed (non-fatal): {code_error}")
 
+            # Archive completed investigation to history (for persistence)
+            if not self.config.skip_global_state:
+                archive_current_investigation()
+
             return InvestigationResult(
                 investigation_id=self.config.investigation_id,
                 query=self.config.query,
@@ -1443,6 +1581,8 @@ class InvestigationRunner:
                     InvestigationStatus.FAILED,
                     {"error": str(e)}
                 )
+                # Archive failed investigation to history (for persistence)
+                archive_current_investigation()
 
             return InvestigationResult(
                 investigation_id=self.config.investigation_id,

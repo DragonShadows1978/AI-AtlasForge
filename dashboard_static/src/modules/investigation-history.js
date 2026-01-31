@@ -345,6 +345,7 @@ function renderCard(inv) {
             <div class="inv-card-actions" onclick="event.stopPropagation()">
                 <button class="btn" onclick="openTagModal('${inv.investigation_id}')" title="Edit tags">🏷</button>
                 <button class="btn primary" onclick="rerunInvestigation('${inv.investigation_id}')" title="Re-run">↻</button>
+                <button class="btn danger" onclick="deleteInvestigation('${inv.investigation_id}')" title="Delete">🗑</button>
             </div>
             <div class="inv-card-header">
                 <span class="inv-card-status ${statusClass}">${statusLabel}</span>
@@ -958,6 +959,77 @@ window.bulkExport = async function() {
         }
     } catch (e) {
         showToast('Export failed: ' + e.message);
+    }
+};
+
+/**
+ * Delete a single investigation
+ */
+window.deleteInvestigation = async function(investigationId, deleteFiles = false) {
+    // Confirm deletion
+    const confirmed = confirm(`Delete investigation ${investigationId}?\n\nThis action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        const params = deleteFiles ? '?delete_files=true' : '';
+        const result = await api(`/api/investigation/${investigationId}${params}`, {
+            method: 'DELETE'
+        });
+
+        if (result.success) {
+            showToast(result.message || `Investigation ${investigationId} deleted`);
+            // Refresh the list
+            await Promise.all([
+                loadInvestigations(),
+                loadInvestigationStats(),
+                loadAllTags()
+            ]);
+        } else {
+            showToast('Delete failed: ' + (result.message || 'Unknown error'));
+        }
+    } catch (e) {
+        showToast('Delete failed: ' + e.message);
+    }
+};
+
+/**
+ * Delete all selected investigations (bulk delete)
+ */
+window.bulkDeleteInvestigations = async function() {
+    if (selectedInvestigations.size === 0) {
+        showToast('No investigations selected');
+        return;
+    }
+
+    const count = selectedInvestigations.size;
+    const confirmed = confirm(`Delete ${count} selected investigation(s)?\n\nThis action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+        const result = await api('/api/investigation/bulk/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ids: Array.from(selectedInvestigations),
+                delete_files: false
+            })
+        });
+
+        if (result.success || result.deleted_count > 0) {
+            showToast(result.message || `Deleted ${result.deleted_count} investigation(s)`);
+            // Clear selection and refresh
+            selectedInvestigations.clear();
+            updateBulkActionBar();
+            await Promise.all([
+                loadInvestigations(),
+                loadInvestigationStats(),
+                loadAllTags()
+            ]);
+        } else {
+            showToast('Bulk delete failed: ' + (result.message || 'Unknown error'));
+        }
+    } catch (e) {
+        showToast('Bulk delete failed: ' + e.message);
     }
 };
 
