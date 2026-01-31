@@ -1164,6 +1164,25 @@ def run_rd_mode():
                         "error_info": error_info  # Include for diagnostics
                     })
 
+                    # Log handoff to CLI error tracker for trend analysis
+                    try:
+                        from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
+                            get_cli_error_logger
+                        )
+                        cli_logger = get_cli_error_logger()
+                        cli_logger.log_handoff(
+                            mission_id=controller.mission.get("mission_id"),
+                            stage=current_stage,
+                            handoff_level=handoff_level,
+                            cycle=cycle_count,
+                            extra={
+                                "restart_reason": restart_reason.value,
+                                "extra_info": extra_info
+                            }
+                        )
+                    except ImportError:
+                        pass  # CLI error logger not available
+
                     # Reset handoff state for next iteration
                     handoff_triggered.clear()
                     handoff_signal_ref[0] = None
@@ -1186,6 +1205,23 @@ def run_rd_mode():
                         if error_info:
                             send_to_chat(f"[ERROR:DETAILS] Raw error: {error_info[:500]}")
                         logger.error(f"Blocking error: {error_reason.value} - {error_explanation}")
+
+                        # Log blocking error to CLI error tracker
+                        try:
+                            from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
+                                get_cli_error_logger, CLIEventType
+                            )
+                            cli_logger = get_cli_error_logger()
+                            cli_logger.log_blocking_error(
+                                mission_id=controller.mission.get("mission_id"),
+                                stage=current_stage,
+                                error_category=error_reason.value,
+                                error_info=error_info or "",
+                                cycle=cycle_count
+                            )
+                        except ImportError:
+                            pass  # CLI error logger not available
+
                         append_journal({
                             "type": "claude_blocking_error",
                             "stage": current_stage,
