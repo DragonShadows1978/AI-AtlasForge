@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_f14912e5",
+  "stage": "PLANNING",
+  "timestamp": "2026-01-31T13:27:08.977801",
+  "snapshot_number": 12,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Deliverable: Error handling framework with recovery logic (from mission_a4266bba)",
+      "Deliverable: Fixed atlasforge_engine.py with defensive error handling (from mission_df04da14)"
+    ],
+    "steps_planned": 5
+  }
+}
