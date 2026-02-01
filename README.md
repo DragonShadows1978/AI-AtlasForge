@@ -308,6 +308,17 @@ See `requirements.txt` or `pyproject.toml` for full list.
 - [DISPLAY_LAYER.md](workspace/docs/DISPLAY_LAYER.md) - Display Layer user guide (Windows)
 - [TROUBLESHOOTING.md](workspace/docs/TROUBLESHOOTING.md) - Display Layer troubleshooting
 
+## Recent Changes
+
+### v1.6.7 (2026-02-01)
+- Fixed JSON response parsing bug in conductor (handles markdown code blocks)
+- StoryForge mission build improvements
+- ContextWatcher stability improvements
+
+### v1.6.5 (2026-01-31)
+- Build checkpoint improvements
+- Mission state persistence fixes
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
