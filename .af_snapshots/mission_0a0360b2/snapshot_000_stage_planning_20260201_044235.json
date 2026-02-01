@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_0a0360b2",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T04:42:35.589658",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Investigation State Management pattern for tracking workflow state",
+      "Modular architecture principles from past missions"
+    ],
+    "steps_planned": 11
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_87cb70dd",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T06:07:01.567903",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Bug fix in atlasforge_conductor.py (production-ready) - from mission_f14912e5: Similar bug fix mission provides confidence in the approach"
+    ],
+    "steps_planned": 6
+  }
+}
