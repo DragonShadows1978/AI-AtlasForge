@@ -395,6 +395,18 @@ app.register_blueprint(semantic_bp)
 app.register_blueprint(version_bp)
 app.register_blueprint(artifact_health_bp)
 
+# Conductor status and control API (enhanced singleton with takeover support)
+try:
+    # Add ConductorTakeover to path so its internal imports resolve
+    _conductor_path = str(Path(__file__).parent / "workspace" / "ConductorTakeover")
+    if _conductor_path not in sys.path:
+        sys.path.insert(0, _conductor_path)
+    from workspace.ConductorTakeover.conductor_dashboard_api import conductor_bp
+    app.register_blueprint(conductor_bp)
+    print("[Conductor] API endpoints registered (/api/conductor/*)")
+except ImportError as e:
+    print(f"[Conductor] API not available: {e}")
+
 # Register non-prefixed routes
 register_archival_routes(app)
 

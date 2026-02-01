@@ -70,6 +70,28 @@ except ImportError:
     write_handoff_state = None
     TIME_BASED_HANDOFF_ENABLED = False
 
+# Enhanced conductor singleton with takeover support
+try:
+    # Add ConductorTakeover to path so its internal imports resolve
+    import sys as _sys
+    _conductor_path = str(Path(__file__).resolve().parent / "workspace" / "ConductorTakeover")
+    if _conductor_path not in _sys.path:
+        _sys.path.insert(0, _conductor_path)
+
+    from workspace.ConductorTakeover.conductor_integration import (
+        acquire_conductor_lock_enhanced,
+        release_conductor_lock_enhanced,
+        setup_enhanced_signal_handlers,
+        update_conductor_state,
+        is_shutdown_requested,
+        show_conductor_status,
+        parse_conductor_args,
+        ConductorMode,
+    )
+    HAS_ENHANCED_CONDUCTOR = True
+except ImportError:
+    HAS_ENHANCED_CONDUCTOR = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -1000,12 +1022,16 @@ def get_mission_workspace(controller) -> Path:
     return WORKSPACE_DIR
 
 
-def run_rd_mode():
+def run_rd_mode(takeover: bool = False, force: bool = False):
     """
     Run Claude in directed R&D mode.
 
     Uses the RDMissionController to guide Claude through:
     PLANNING -> BUILDING -> TESTING -> ANALYZING -> CYCLE_END -> COMPLETE
+
+    Args:
+        takeover: If True, attempt graceful takeover of existing conductor
+        force: If True, force takeover with SIGKILL if needed
     """
     global running
 
@@ -1014,10 +1040,26 @@ def run_rd_mode():
     logger.info("=" * 60)
 
     # Acquire exclusive lock to prevent multiple conductors
-    if not acquire_conductor_lock():
-        logger.error("Failed to acquire conductor lock - another instance may be running")
-        send_to_chat("[ERROR] Another conductor instance is already running. Exiting.")
-        return
+    if HAS_ENHANCED_CONDUCTOR:
+        # Load mission info for lock metadata
+        mission = io_utils.atomic_read_json(STATE_DIR / "mission.json", {})
+        state = load_state()
+        if not acquire_conductor_lock_enhanced(
+            takeover=takeover,
+            force=force,
+            mission_id=mission.get('mission_id'),
+            current_stage=mission.get('current_stage'),
+            boot_count=state.get('boot_count', 0)
+        ):
+            logger.error("Failed to acquire conductor lock - another instance may be running")
+            send_to_chat("[ERROR] Another conductor instance is already running. Use --takeover to restart.")
+            return
+    else:
+        # Fallback to basic locking
+        if not acquire_conductor_lock():
+            logger.error("Failed to acquire conductor lock - another instance may be running")
+            send_to_chat("[ERROR] Another conductor instance is already running. Exiting.")
+            return
 
     save_pid()
 
@@ -1026,6 +1068,18 @@ def run_rd_mode():
     state["boot_count"] = state.get("boot_count", 0) + 1
     state["last_boot"] = datetime.now().isoformat()
     save_state(state)
+
+    # Install enhanced signal handlers for graceful takeover support
+    if HAS_ENHANCED_CONDUCTOR:
+        def shutdown_callback():
+            """Save mission state on shutdown signal."""
+            try:
+                save_state(state)
+                send_to_chat("[SHUTDOWN] Mission state saved.")
+            except Exception as e:
+                logger.error(f"Shutdown callback error: {e}")
+
+        setup_enhanced_signal_handlers(shutdown_callback)
 
     send_to_chat(f"AtlasForge starting Mission Launch #{state['boot_count']}")
 
@@ -1042,6 +1096,12 @@ def run_rd_mode():
 
             current_stage = controller.mission.get("current_stage", "PLANNING")
             logger.info(f"=== R&D Cycle {cycle_count} | Stage: {current_stage} ===")
+
+            # Check for graceful shutdown request (takeover in progress)
+            if HAS_ENHANCED_CONDUCTOR and is_shutdown_requested():
+                logger.info("Shutdown requested, completing current operation...")
+                send_to_chat("[SHUTDOWN] Graceful shutdown requested. Completing current operation.")
+                break
 
             # Check for human interrupt
             human_msg = check_human_message()
@@ -1457,6 +1517,13 @@ def run_rd_mode():
                 cycle_info = f" (Cycle {controller.mission.get('current_cycle', 1)}/{controller.mission.get('cycle_budget', 1)})"
                 send_to_chat(f"Stage transition: {current_stage} -> {next_stage}{cycle_info}")
 
+                # Update lock metadata with current stage
+                if HAS_ENHANCED_CONDUCTOR:
+                    update_conductor_state(
+                        mission_id=controller.mission.get('mission_id'),
+                        current_stage=next_stage
+                    )
+
             # Save state
             save_state(state)
 
@@ -1469,7 +1536,10 @@ def run_rd_mode():
     finally:
         save_state(state)
         remove_pid()
-        release_conductor_lock()
+        if HAS_ENHANCED_CONDUCTOR:
+            release_conductor_lock_enhanced()
+        else:
+            release_conductor_lock()
         logger.info("Claude Autonomous R&D Mode stopped")
 
 
@@ -1596,21 +1666,37 @@ def run_free_mode():
 
 def main():
     """Main entry point."""
-    # Parse command line arguments
-    mode = "rd"  # Default to R&D mode
+    if HAS_ENHANCED_CONDUCTOR:
+        # Use enhanced argument parsing with takeover support
+        args = parse_conductor_args()
 
-    for arg in sys.argv[1:]:
-        if arg.startswith("--mode="):
-            mode = arg.split("=")[1].lower()
+        if args.mode == ConductorMode.CHECK_STATUS:
+            show_conductor_status()
+            sys.exit(0)
 
-    if mode == "rd":
-        run_rd_mode()
-    elif mode == "free":
-        run_free_mode()
+        if args.mode == ConductorMode.RD:
+            run_rd_mode(takeover=args.takeover, force=args.force_takeover)
+        elif args.mode == ConductorMode.FREE:
+            run_free_mode()
+        else:
+            print(f"Unknown mode: {args.mode}")
+            sys.exit(1)
     else:
-        print(f"Unknown mode: {mode}")
-        print("Usage: python3 claude_autonomous.py --mode=rd|free")
-        sys.exit(1)
+        # Fallback to basic arg parsing
+        mode = "rd"  # Default to R&D mode
+
+        for arg in sys.argv[1:]:
+            if arg.startswith("--mode="):
+                mode = arg.split("=")[1].lower()
+
+        if mode == "rd":
+            run_rd_mode()
+        elif mode == "free":
+            run_free_mode()
+        else:
+            print(f"Unknown mode: {mode}")
+            print("Usage: python3 atlasforge_conductor.py --mode=rd|free")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
