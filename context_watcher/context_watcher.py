@@ -327,7 +327,13 @@ class TimeBasedHandoffMonitor:
             )
 
     def _timer_loop(self):
-        """Wait for timeout and fire callback if not cancelled."""
+        """Wait for timeout and fire callback if not cancelled.
+
+        DEFENSE-IN-DEPTH: Before firing the callback, this method validates
+        that the session is still active in the ContextWatcher. This catches
+        edge cases where _cleanup_session() was called but the timer thread
+        didn't get cancelled properly (e.g., timing race conditions).
+        """
         # Wait for timeout or cancellation
         triggered = self._stop_event.wait(timeout=self.timeout_seconds)
 
@@ -340,6 +346,26 @@ class TimeBasedHandoffMonitor:
 
             if self._fired:
                 return  # Already fired (shouldn't happen)
+
+            # DEFENSE-IN-DEPTH: Validate session is still active before firing
+            # This catches zombie timers that weren't properly cancelled
+            try:
+                # Import here to avoid circular dependency at module load time
+                global _watcher_instance
+                if _watcher_instance is not None:
+                    # Check without acquiring watcher lock to avoid deadlock
+                    # (we already hold self._lock)
+                    if self.session_id not in _watcher_instance._sessions:
+                        logger.warning(
+                            f"Time-based handoff for session {self.session_id} skipped: "
+                            f"session no longer active (zombie timer detected and prevented)"
+                        )
+                        self._cancelled = True
+                        return
+            except Exception as e:
+                # Fallback: proceed with handoff if validation fails
+                # Better to fire a potentially stale handoff than miss a real one
+                logger.debug(f"Could not validate session activity for {self.session_id}: {e}")
 
             self._fired = True
 
@@ -854,6 +880,7 @@ class SessionMonitor:
     def stop_time_handoff_monitor(self):
         """Stop the time-based handoff monitor for this session."""
         if self._time_handoff_monitor:
+            logger.debug(f"Stopping time handoff monitor for session {self.session_id}")
             self._time_handoff_monitor.cancel()
             self._time_handoff_monitor = None
 
@@ -1123,9 +1150,29 @@ class ContextWatcher:
             self._stop_event.wait(CHECK_INTERVAL)
 
     def _cleanup_session(self, session_id: str):
-        """Clean up a session (internal, assumes lock NOT held)."""
+        """Clean up a session (internal, assumes lock NOT held).
+
+        CRITICAL: This method must stop the time-based handoff monitor before
+        deleting the session. Failure to do so results in zombie timer threads
+        that fire callbacks for sessions that no longer exist.
+
+        Bug fixed: Previously this method did not call stop_time_handoff_monitor(),
+        while stop_watching() did. This caused zombie timers from stale sessions
+        to fire handoff callbacks on the wrong session context.
+        """
         with self._lock:
             if session_id in self._sessions:
+                monitor = self._sessions[session_id]
+
+                # CRITICAL: Stop the time-based handoff monitor to prevent zombie timers
+                # This was missing before, causing timers to fire after session cleanup
+                monitor.stop_time_handoff_monitor()
+                logger.info(f"Stopped time handoff monitor for stale session {session_id}")
+
+                # Update metrics before deletion
+                self._metrics.sessions_completed += 1
+                self._metrics.sessions_active = len(self._sessions) - 1
+
                 del self._sessions[session_id]
 
             # Clean up unused observers
