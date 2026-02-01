@@ -1,0 +1,62 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_bd7f26aa",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-01-31T20:27:48.658354",
+  "snapshot_number": 9,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "Working dismiss API endpoint at POST /api/investigation/dismiss",
+      "Frontend dismissInvestigation() function in investigation.js",
+      "Dismiss button in dashboard UI (main_bundled.html)",
+      "Research findings document (research_findings.md)",
+      "Implementation plan (implementation_plan.md)",
+      "Test results with 100% pass rate (test_results.md)",
+      "Analysis report (analysis.md)",
+      "Three test scripts for ongoing verification"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Investigation Auto-Archive on Completion",
+      "mission_description": "Currently, completed investigations remain in the 'current' slot until manually dismissed. Implement automatic archiving: when an investigation completes, automatically move it to history after a configurable delay (e.g., 5 seconds) while still showing the View Report button. This eliminates the need for manual dismiss in most cases while preserving the ability to review results. Include: (1) configurable auto-archive delay in investigation settings, (2) visual countdown indicator showing when auto-archive will occur, (3) 'Pin' button to prevent auto-archive if user wants to keep results visible longer, (4) option to disable auto-archive entirely. This improves the UX flow discovered during this bug investigation.",
+      "suggested_cycles": 3,
+      "rationale": "This mission directly builds on the dismiss functionality added here. During this bug fix, we discovered that users often want to quickly move on to new investigations without manual dismissal. Auto-archiving with a short delay provides a better default experience while the dismiss button (added in this fix) serves as a fallback for edge cases. The configurable delay and pin option ensure flexibility for different workflows."
+    },
+    "final_report": {
+      "summary": "Successfully identified and fixed the investigation panel lockout bug in the AtlasForge Dashboard. The bug prevented users from dismissing completed investigation results or starting new investigations while a mission was running. The root cause was a two-part issue: (1) no dismiss mechanism existed to clear completed investigations from the UI, and (2) frontend state could become stale. The fix added a new `/api/investigation/dismiss` API endpoint, a `dismissInvestigation()` frontend function, and a dismiss button to the UI. All 19 tests passed (12 self-tests + 7 adversarial tests), confirming the fix works correctly regardless of mission state.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/dashboard_modules/investigation.py (modified - added POST /api/investigation/dismiss endpoint at line 283-334)",
+        "/home/vader/AI-AtlasForge/dashboard_static/src/modules/investigation.js (modified - added dismissInvestigation() function)",
+        "/home/vader/AI-AtlasForge/dashboard_templates/main_bundled.html (modified - added dismiss button to investigation status card)",
+        "/home/vader/AI-AtlasForge/dashboard_static/src/main.js (modified - exported dismissInvestigation to window)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/artifacts/implementation_plan.md (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/research/research_findings.md (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/artifacts/test_results.md (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/research/analysis.md (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/tests/test_investigation_dismiss.py (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/tests/test_frontend_dismiss.py (created)",
+        "/home/vader/AI-AtlasForge/workspace/Bug_investigatin/tests/test_adversarial.py (created)"
+      ],
+      "key_achievements": [
+        "Identified root cause: missing dismiss mechanism + potential frontend state desync",
+        "Implemented POST /api/investigation/dismiss endpoint that moves completed investigations to history and clears current slot",
+        "Added dismissInvestigation() frontend function that calls API and resets UI state",
+        "Added dismiss button to UI that appears when investigation is completed/failed",
+        "Verified fix works while missions are running (the original bug scenario)",
+        "Passed 19/19 tests including adversarial scenarios (concurrent calls, corrupted state, rapid cycles)",
+        "Red team analysis found 14 theoretical vulnerabilities, none reproduced in stress testing"
+      ],
+      "challenges_overcome": [
+        "Initial hypothesis that backend was blocking investigations was incorrect - the lockout logic correctly allowed starting new investigations when current was completed",
+        "The actual issue was UX: users had no way to dismiss completed results, creating perception of being 'locked'",
+        "Concurrent access testing required careful state management to avoid race conditions"
+      ],
+      "lessons_learned": [
+        "Always verify assumptions about where bugs originate - the backend lockout logic was correct, the issue was missing UX flow",
+        "Investigation and mission systems are independent - the bug was purely in the investigation panel, not cross-system coupling",
+        "Frontend state can become stale if WebSocket events are missed - dismissInvestigation() explicitly resets all relevant state",
+        "Adversarial testing with concurrent calls is essential for state-management features"
+      ]
+    }
+  }
+}
