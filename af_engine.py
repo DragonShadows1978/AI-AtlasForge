@@ -2662,22 +2662,31 @@ Respond with JSON:
         if enhancer:
             try:
                 # Get recent cycle output for analysis
+                # Use continuation_prompt (which contains actual cycle work) for healing analysis
+                # Fall back to summary if continuation_prompt is not available
                 recent_output = ""
                 if self.mission.get('cycle_history'):
-                    recent_output = self.mission['cycle_history'][-1].get('summary', '')
+                    cycle_entry = self.mission['cycle_history'][-1]
+                    recent_output = cycle_entry.get('continuation_prompt', cycle_entry.get('summary', ''))
+                    logger.debug(f"AtlasForge healing: Using recent_output length={len(recent_output)}")
 
                 enhanced_prompt = enhancer.heal_continuation(
                     continuation_prompt,
                     recent_output
                 )
+
+                # Log healing result
                 if enhanced_prompt != continuation_prompt:
                     logger.info("AtlasForge: Applied continuation healing due to detected drift")
                     # Store both versions for transparency
                     self.mission['rde_healing_applied'] = {
                         'cycle': current_cycle,
                         'original_prompt_preview': continuation_prompt[:200],
-                        'healing_applied': True
+                        'healing_applied': True,
+                        'healing_prompt_length': len(enhanced_prompt) - len(continuation_prompt)
                     }
+                else:
+                    logger.debug("AtlasForge: No healing applied (no drift or healing not needed)")
             except Exception as e:
                 logger.warning(f"AtlasForge continuation healing failed: {e}")
 
