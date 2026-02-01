@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_d94251f4",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T10:50:45.101474",
+  "snapshot_number": 13,
+  "event_data": {
+    "old_stage": "PLANNING",
+    "new_stage": "BUILDING",
+    "iteration": 0
+  }
+}
