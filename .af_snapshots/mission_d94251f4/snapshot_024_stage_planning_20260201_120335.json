@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_d94251f4",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T12:03:35.906884",
+  "snapshot_number": 24,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "State management should be recoverable from artifacts (from narrative_engine.py mission)",
+      "Investigation state management patterns for database sync (from inv_89cfe92b)"
+    ],
+    "steps_planned": 6
+  }
+}
