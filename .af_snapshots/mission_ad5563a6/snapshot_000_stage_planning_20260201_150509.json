@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_ad5563a6",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T15:05:09.846992",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "File-based locking pattern from mission_e8ecb36e (queue_processing_lock.py) - using metadata (source, PID, expires_at) for observability",
+      "Explicit detection approach from mission_a6c4dcaa - conductor state detection valuable for debugging"
+    ],
+    "steps_planned": 5
+  }
+}
