@@ -72,6 +72,10 @@ export async function startInvestigation() {
         if (result.success) {
             currentInvestigationId = result.investigation_id;
             isInvestigationRunning = true;
+
+            // Clear the input field on successful start
+            queryInput.value = '';
+
             showToast(`Investigation started: ${result.investigation_id}`);
 
             // Show status card and banner
