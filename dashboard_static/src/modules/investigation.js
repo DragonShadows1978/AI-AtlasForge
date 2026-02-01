@@ -266,6 +266,19 @@ function updateInvestigationUI(status) {
     if (typeof window.updateInvestigationServiceStatus === 'function') {
         window.updateInvestigationServiceStatus(isRunning, status.status);
     }
+
+    // Show dismiss button when investigation is completed or failed
+    const dismissBtn = document.getElementById('dismiss-investigation-btn');
+    if (dismissBtn) {
+        if (status.status === 'completed' || status.status === 'failed') {
+            dismissBtn.style.display = 'inline-block';
+            // Re-enable controls since investigation is done
+            updateInvestigationControlsState(false);
+            isInvestigationRunning = false;
+        } else {
+            dismissBtn.style.display = 'none';
+        }
+    }
 }
 
 /**
@@ -389,27 +402,66 @@ export async function checkForRunningInvestigation() {
     try {
         const status = await api('/api/investigation/status');
 
-        if (status && status.investigation_id && status.status !== 'completed' && status.status !== 'failed' && status.status !== 'idle') {
-            currentInvestigationId = status.investigation_id;
-            isInvestigationRunning = true;
-            showInvestigationStatus(status.investigation_id);
-            showInvestigationBanner(status.investigation_id, status.status || 'Running');
-            startInvestigationPolling(status.investigation_id);
-            document.getElementById('stop-investigation-btn').style.display = 'inline-block';
+        if (status && status.investigation_id) {
+            // Check if investigation is still running
+            const isRunning = status.status !== 'completed' && status.status !== 'failed' && status.status !== 'idle';
 
-            // Update header service status indicator
-            if (typeof window.updateInvestigationServiceStatus === 'function') {
-                window.updateInvestigationServiceStatus(true, status.status);
+            if (isRunning) {
+                // Investigation is actively running
+                currentInvestigationId = status.investigation_id;
+                isInvestigationRunning = true;
+                showInvestigationStatus(status.investigation_id);
+                showInvestigationBanner(status.investigation_id, status.status || 'Running');
+                startInvestigationPolling(status.investigation_id);
+                document.getElementById('stop-investigation-btn').style.display = 'inline-block';
+
+                // Update header service status indicator
+                if (typeof window.updateInvestigationServiceStatus === 'function') {
+                    window.updateInvestigationServiceStatus(true, status.status);
+                }
+
+                // Enable investigation mode checkbox
+                document.getElementById('investigation-mode-checkbox').checked = true;
+                toggleInvestigationMode();
+
+                // Disable controls since an investigation is already running
+                updateInvestigationControlsState(true);
+            } else if (status.status === 'completed' || status.status === 'failed') {
+                // Investigation completed/failed but not dismissed - show results with dismiss option
+                currentInvestigationId = status.investigation_id;
+                isInvestigationRunning = false;  // Not running, just completed
+                showInvestigationStatus(status.investigation_id);
+
+                // Update UI to show completed state
+                updateInvestigationUI(status);
+
+                // Show appropriate buttons
+                document.getElementById('stop-investigation-btn').style.display = 'none';
+                if (status.status === 'completed') {
+                    document.getElementById('view-report-btn').style.display = 'inline-block';
+                }
+                const dismissBtn = document.getElementById('dismiss-investigation-btn');
+                if (dismissBtn) dismissBtn.style.display = 'inline-block';
+
+                // Update header service status indicator (not running)
+                if (typeof window.updateInvestigationServiceStatus === 'function') {
+                    window.updateInvestigationServiceStatus(false, status.status);
+                }
+
+                // Enable investigation mode checkbox to show the panel
+                document.getElementById('investigation-mode-checkbox').checked = true;
+                toggleInvestigationMode();
+
+                // Controls should be ENABLED since investigation is not running
+                updateInvestigationControlsState(false);
+            } else {
+                // Idle or unknown status - ensure header shows offline
+                if (typeof window.updateInvestigationServiceStatus === 'function') {
+                    window.updateInvestigationServiceStatus(false, null);
+                }
             }
-
-            // Enable investigation mode checkbox
-            document.getElementById('investigation-mode-checkbox').checked = true;
-            toggleInvestigationMode();
-
-            // Disable controls since an investigation is already running
-            updateInvestigationControlsState(true);
         } else {
-            // Not running - ensure header shows offline
+            // No current investigation - ensure header shows offline
             if (typeof window.updateInvestigationServiceStatus === 'function') {
                 window.updateInvestigationServiceStatus(false, null);
             }
@@ -564,4 +616,45 @@ function updateInvestigationControlsState(disabled) {
  */
 export function isInvestigationActive() {
     return isInvestigationRunning;
+}
+
+/**
+ * Dismiss a completed/failed investigation
+ * Clears the current investigation and allows starting a new one
+ */
+export async function dismissInvestigation() {
+    try {
+        const result = await api('/api/investigation/dismiss', 'POST');
+
+        if (result.success) {
+            showToast('Investigation dismissed');
+
+            // Reset frontend state
+            currentInvestigationId = null;
+            isInvestigationRunning = false;
+
+            // Hide status card and banner
+            hideInvestigationStatus();
+            hideInvestigationBanner();
+
+            // Re-enable controls
+            updateInvestigationControlsState(false);
+
+            // Update header service status
+            if (typeof window.updateInvestigationServiceStatus === 'function') {
+                window.updateInvestigationServiceStatus(false, null);
+            }
+
+            // Hide buttons
+            document.getElementById('view-report-btn').style.display = 'none';
+            document.getElementById('stop-investigation-btn').style.display = 'none';
+            const dismissBtn = document.getElementById('dismiss-investigation-btn');
+            if (dismissBtn) dismissBtn.style.display = 'none';
+        } else {
+            showToast(result.message || 'Failed to dismiss', 'error');
+        }
+    } catch (err) {
+        console.error('Failed to dismiss investigation:', err);
+        showToast('Failed to dismiss investigation', 'error');
+    }
 }

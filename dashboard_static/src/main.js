@@ -220,6 +220,7 @@ window.stopInvestigation = investigation.stopInvestigation;
 window.showInvestigationStatus = investigation.showInvestigationStatus;
 window.hideInvestigationStatus = investigation.hideInvestigationStatus;
 window.viewInvestigationReport = investigation.viewInvestigationReport;
+window.dismissInvestigation = investigation.dismissInvestigation;
 window.closeInvestigationReportModal = investigation.closeInvestigationReportModal;
 window.copyInvestigationReport = investigation.copyInvestigationReport;
 window.showInvestigationBanner = investigation.showInvestigationBanner;

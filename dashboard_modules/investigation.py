@@ -277,6 +277,64 @@ def api_investigation_stop(investigation_id):
 
 
 # =============================================================================
+# DISMISS INVESTIGATION
+# =============================================================================
+
+@investigation_bp.route('/api/investigation/dismiss', methods=['POST'])
+def api_investigation_dismiss():
+    """
+    Dismiss the current completed/failed investigation.
+    Moves it to history and clears the current slot.
+
+    This allows users to dismiss investigation results and start a new
+    investigation, independent of whether a mission is running.
+
+    Returns:
+    {
+        "success": true/false,
+        "message": "...",
+        "investigation_id": "inv_xxx" (if dismissed)
+    }
+    """
+    from investigation_engine import load_investigation_state, save_investigation_state, InvestigationStatus
+
+    state = load_investigation_state()
+    current = state.get("current")
+
+    if not current:
+        return jsonify({"success": True, "message": "No investigation to dismiss"})
+
+    status = current.get("status")
+    terminal_states = [InvestigationStatus.COMPLETED.value, InvestigationStatus.FAILED.value]
+
+    if status not in terminal_states:
+        return jsonify({
+            "success": False,
+            "message": f"Cannot dismiss running investigation (status: {status})"
+        }), 409
+
+    # Move to history
+    if "history" not in state:
+        state["history"] = []
+    state["history"].insert(0, current)
+    state["current"] = None
+
+    save_investigation_state(state)
+
+    # Emit socket event if available
+    if socketio:
+        socketio.emit('investigation_dismissed', {
+            'investigation_id': current.get('investigation_id')
+        }, namespace='/widgets', room='investigation')
+
+    return jsonify({
+        "success": True,
+        "message": f"Investigation {current.get('investigation_id')} dismissed",
+        "investigation_id": current.get("investigation_id")
+    })
+
+
+# =============================================================================
 # TAGS STORAGE (in-memory + persistent)
 # =============================================================================
 
