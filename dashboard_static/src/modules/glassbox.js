@@ -603,6 +603,8 @@ export function init() {
     window.glassboxNextPage = glassboxNextPage;
     window.loadGlassboxMission = loadGlassboxMission;
     window.refreshGlassbox = refreshGlassbox;
+    // Alias for WebSocket handler compatibility (widgets.js calls refreshGlassboxWidget)
+    window.refreshGlassboxWidget = refreshGlassbox;
     // Widget popup functions
     window.closeGlassboxWidgetPopup = closeGlassboxWidgetPopup;
     window.viewGlassboxMissionInTab = viewGlassboxMissionInTab;

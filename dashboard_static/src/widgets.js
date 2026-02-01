@@ -1668,6 +1668,31 @@ export function handleGlassboxArchiveEvent(data) {
 }
 
 /**
+ * Handle generic GlassBox events from WebSocket (manifest_enhanced, etc.)
+ * @param {object} data - Event data with glassbox info
+ */
+export function handleGlassboxEvent(data) {
+    const eventData = data.data || data;
+
+    if (eventData.event === 'manifest_enhanced') {
+        const missionId = eventData.mission_id || 'Unknown';
+        showToast(`Enhanced manifest for ${missionId}`, 'info');
+
+        // Refresh GlassBox widget if the function exists
+        if (typeof window.refreshGlassboxWidget === 'function') {
+            window.refreshGlassboxWidget();
+        }
+    } else if (eventData.event === 'archive_created') {
+        const missionId = eventData.mission_id || 'Unknown';
+        showToast(`Archive created for ${missionId}`, 'success');
+
+        if (typeof window.refreshGlassboxWidget === 'function') {
+            window.refreshGlassboxWidget();
+        }
+    }
+}
+
+/**
  * Handle recommendation events from WebSocket
  * @param {object} data - Event data with recommendation info
  */
@@ -1773,6 +1798,7 @@ export function initWebSocketHandlers() {
     if (typeof window.registerSocketHandler === 'function') {
         window.registerSocketHandler('file_events', handleFileEvent);
         window.registerSocketHandler('glassbox_archive', handleGlassboxArchiveEvent);
+        window.registerSocketHandler('glassbox', handleGlassboxEvent);
         window.registerSocketHandler('recommendations', handleRecommendationEvent);
         window.registerSocketHandler('mission_status', handleMissionStatusEvent);
         window.registerSocketHandler('journal', handleJournalEvent);
@@ -1783,6 +1809,7 @@ export function initWebSocketHandlers() {
 // Make handlers available globally for socket.js integration
 window.handleFileEvent = handleFileEvent;
 window.handleGlassboxArchiveEvent = handleGlassboxArchiveEvent;
+window.handleGlassboxEvent = handleGlassboxEvent;
 window.handleRecommendationEvent = handleRecommendationEvent;
 window.handleMissionStatusEvent = handleMissionStatusEvent;
 window.handleJournalEvent = handleJournalEvent;

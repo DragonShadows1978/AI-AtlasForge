@@ -571,6 +571,7 @@ function resubscribeToRooms() {
         // Subscribe to new real-time push rooms
         subscribeToRoom('file_events');
         subscribeToRoom('glassbox_archive');
+        subscribeToRoom('glassbox');
         subscribeToRoom('recommendations');
         // Subscribe to queue events
         subscribeToRoom('queue_updated');
