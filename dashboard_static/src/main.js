@@ -25,6 +25,7 @@ import * as queue from './modules/queue.js';
 import * as backupStatus from './modules/backup-status.js';
 import * as activityFeed from './modules/activity-feed.js';
 import * as semantic from './modules/semantic.js';
+import * as conductorStatus from './modules/conductor-status.js';
 
 // Import new socket functions for WebSocket push
 import {
@@ -250,6 +251,11 @@ window.moveQueueItem = queue.moveQueueItem;
 window.initActivityFeed = activityFeed.initActivityFeed;
 window.refreshActivityFeed = activityFeed.refreshActivityFeed;
 window.startNextFromQueue = queue.startNextFromQueue;
+
+// Conductor Status Widget
+window.initConductorStatus = conductorStatus.initConductorStatus;
+window.refreshConductorStatus = conductorStatus.refreshConductorStatus;
+window.requestConductorTakeover = conductorStatus.requestConductorTakeover;
 
 // Semantic Search Widgets
 window.initSemanticWidgets = semantic.initSemanticWidgets;
@@ -584,6 +590,9 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Initialize backup status widget
     backupStatus.initBackupStatus();
+
+    // Initialize conductor status widget
+    conductorStatus.initConductorStatus();
 
     // Initialize GitHub status widget
 

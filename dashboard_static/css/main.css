@@ -9450,6 +9450,70 @@ body.modal-open {
     50% { opacity: 0.5; }
 }
 
+/* =============================================================================
+   Conductor Status Widget Styles
+   ============================================================================= */
+
+.badge.success {
+    background: var(--green);
+    color: var(--bg);
+}
+
+.badge.danger {
+    background: var(--red);
+    color: var(--bg);
+}
+
+.badge.warning {
+    background: var(--yellow);
+    color: var(--bg);
+}
+
+.conductor-details {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.conductor-detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 0.85em;
+}
+
+.conductor-detail-row .detail-label {
+    color: var(--text-dim);
+}
+
+.conductor-detail-row .detail-value {
+    color: var(--text);
+    font-family: monospace;
+}
+
+.conductor-detail-row.stale-warning {
+    color: var(--yellow);
+}
+
+.conductor-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.conductor-actions .btn {
+    flex: 1;
+    padding: 6px 12px;
+    font-size: 0.85em;
+}
+
+.conductor-error {
+    text-align: center;
+    padding: 16px;
+}
+
 /* Snapshots Modal */
 #snapshots-modal {
     position: fixed;
