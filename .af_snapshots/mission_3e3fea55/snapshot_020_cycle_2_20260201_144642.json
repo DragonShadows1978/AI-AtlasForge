@@ -1,0 +1,45 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_3e3fea55",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-01T14:46:42.714401",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "final": true,
+    "final_report": {
+      "summary": "Fixed two critical bugs in the AtlasForge Conductor system: (1) Zombie timer threads from stale sessions firing callbacks on wrong contexts, and (2) Mission continuation prompts not updating between cycles. The root causes were identified as _cleanup_session() not stopping time handoff monitors (causing zombie timers), and advance_cycle() not updating problem_statement with the continuation prompt (causing identical prompts across cycles). Both bugs have been fixed with comprehensive test coverage including unit tests, integration tests, and adversarial stress tests.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/context_watcher/context_watcher.py (MODIFIED - lines 1152-1179: _cleanup_session now calls stop_time_handoff_monitor)",
+        "/home/vader/AI-AtlasForge/af_engine/state_manager.py (MODIFIED - lines 245-250: advance_cycle now updates problem_statement with continuation_prompt)",
+        "/home/vader/AI-AtlasForge/context_watcher/tests/test_cleanup_timer.py (CREATED - 293 lines: Unit tests for zombie timer fix)",
+        "/home/vader/AI-AtlasForge/workspace/WiresCrossed/tests/test_session_lifecycle.py (CREATED - 287 lines: Integration tests for session lifecycle)",
+        "/home/vader/AI-AtlasForge/workspace/WiresCrossed/tests/test_continuation_prompt_fix.py (CREATED - 282 lines: Tests for continuation prompt fix)",
+        "/home/vader/AI-AtlasForge/workspace/WiresCrossed/tests/test_adversarial.py (CREATED - 478 lines: Adversarial stress tests for both fixes)"
+      ],
+      "key_achievements": [
+        "Fixed zombie timer bug: _cleanup_session() now calls stop_time_handoff_monitor() to prevent orphaned timer threads from firing callbacks on dead sessions",
+        "Fixed continuation prompt bug: advance_cycle() now updates problem_statement with the continuation_prompt so each cycle receives unique context",
+        "Added defense-in-depth: Timer callbacks now validate session still exists before firing",
+        "Preserved original_problem_statement for reference while allowing problem_statement to evolve",
+        "Created comprehensive test suite with 20+ tests covering unit, integration, and adversarial scenarios",
+        "Achieved stop_watching() and _cleanup_session() parity - both paths now properly clean up timers",
+        "Added explicit logging when stopping time handoff monitors during cleanup"
+      ],
+      "challenges_overcome": [
+        "Race condition between timer fire and session cleanup - solved with validation checks",
+        "Identifying that _cleanup_session was missing stop_time_handoff_monitor call while stop_watching had it",
+        "Understanding the dual-path session cleanup (explicit stop_watching vs stale detection cleanup)",
+        "Tracing the continuation prompt flow through StateManager -> CycleManager -> Orchestrator",
+        "Testing concurrent access scenarios with rapid session creation/destruction cycles"
+      ],
+      "lessons_learned": [
+        "When implementing cleanup in multiple code paths, ensure all paths have parity - the zombie timer bug existed because only one cleanup path stopped timers",
+        "Timer threads need explicit lifecycle management tied to their owning session - timers should not outlive sessions",
+        "State propagation bugs can hide for long periods when the state appears correct but is actually stale - the continuation prompt was stored in cycle_history but never applied",
+        "Defense-in-depth is valuable - even if primary cleanup fails, secondary validation prevents harm",
+        "Adversarial testing with rapid cycles and race conditions exposes bugs that unit tests miss"
+      ]
+    }
+  }
+}
