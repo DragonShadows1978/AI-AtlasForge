@@ -235,6 +235,268 @@ That's all."""
         assert result is not None
         assert result["status"] == "success"
 
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_deeply_nested(self):
+        """Verify nested JSON objects parse correctly."""
+        import atlasforge_conductor as conductor
+
+        text = '''Here's the result:
+```json
+{
+    "status": "build_complete",
+    "ready_for_testing": true,
+    "files_created": ["main.py", "config.py"],
+    "metadata": {
+        "author": "Claude",
+        "details": {
+            "lines_added": 150,
+            "lines_removed": 10
+        }
+    }
+}
+```
+That's all.'''
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "build_complete"
+        assert result["ready_for_testing"] is True
+        assert result["metadata"]["details"]["lines_added"] == 150
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_with_arrays(self):
+        """Verify arrays with objects parse correctly."""
+        import atlasforge_conductor as conductor
+
+        text = '''The build is complete.
+
+```json
+{
+    "status": "success",
+    "files": [
+        {"name": "app.py", "lines": 100},
+        {"name": "utils.py", "lines": 50}
+    ],
+    "tests": ["test_app.py", "test_utils.py"]
+}
+```'''
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "success"
+        assert len(result["files"]) == 2
+        assert result["files"][0]["name"] == "app.py"
+        assert len(result["tests"]) == 2
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_strings_with_braces(self):
+        """Verify strings containing { and } don't break parsing."""
+        import atlasforge_conductor as conductor
+
+        text = '''Output:
+{
+    "status": "success",
+    "message": "Created function foo() { return 42; }",
+    "template": "Hello {name}!"
+}'''
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "success"
+        assert "function foo()" in result["message"]
+        assert "{name}" in result["template"]
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_code_block_no_language(self):
+        """Verify ``` ... ``` works without json label."""
+        import atlasforge_conductor as conductor
+
+        text = '''Here's the response:
+
+```
+{"status": "done", "count": 5}
+```
+
+End of response.'''
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "done"
+        assert result["count"] == 5
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_multiple_objects_returns_first(self):
+        """Verify first valid object is returned when multiple exist."""
+        import atlasforge_conductor as conductor
+
+        # When JSON is embedded in prose, extract first balanced JSON
+        text = 'First result is {"status": "first"} and second is {"status": "second"}'
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "first"
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_extract_json_realistic_build_response(self):
+        """Test with a realistic Claude build_complete response."""
+        import atlasforge_conductor as conductor
+
+        text = '''The StoryForge application is complete. I've implemented all the requested features including the narrative engine, character system, and UI components.
+
+Let me generate the final build response.
+
+```json
+{
+    "status": "build_complete",
+    "ready_for_testing": true,
+    "files_created": [
+        "src/engine/narrative.py",
+        "src/engine/characters.py",
+        "src/ui/main_window.py",
+        "src/ui/character_panel.py"
+    ],
+    "files_modified": [
+        "src/config.py",
+        "requirements.txt"
+    ],
+    "summary": "Implemented narrative engine with branching storylines, character system with traits and relationships, and PyQt6 UI with dark theme",
+    "blockers": [],
+    "message_to_human": "Build complete. Ready for testing phase."
+}
+```
+
+All components are integrated and the application runs end-to-end.'''
+
+        result = conductor.extract_json_from_response(text)
+
+        assert result is not None
+        assert result["status"] == "build_complete"
+        assert result["ready_for_testing"] is True
+        assert len(result["files_created"]) == 4
+        assert len(result["files_modified"]) == 2
+        assert result["blockers"] == []
+
+
+# ===========================================================================
+# Test _find_balanced_json helper
+# ===========================================================================
+
+class TestFindBalancedJson:
+    """Test _find_balanced_json helper function."""
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_simple_json(self):
+        """Verify simple JSON extraction."""
+        import atlasforge_conductor as conductor
+
+        text = 'prefix {"key": "value"} suffix'
+        result = conductor._find_balanced_json(text)
+
+        assert result == '{"key": "value"}'
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_nested_json(self):
+        """Verify nested JSON extraction."""
+        import atlasforge_conductor as conductor
+
+        text = '{"outer": {"inner": {"deep": 1}}}'
+        result = conductor._find_balanced_json(text)
+
+        assert result == text
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_braces_in_strings(self):
+        """Verify braces inside strings are ignored."""
+        import atlasforge_conductor as conductor
+
+        text = '{"code": "function() { return {}; }"}'
+        result = conductor._find_balanced_json(text)
+
+        assert result == text
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_escaped_quotes(self):
+        """Verify escaped quotes are handled."""
+        import atlasforge_conductor as conductor
+
+        text = '{"message": "He said \\"hello\\""}'
+        result = conductor._find_balanced_json(text)
+
+        assert result == text
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_no_json_returns_none(self):
+        """Verify None returned when no JSON present."""
+        import atlasforge_conductor as conductor
+
+        text = 'no json here at all'
+        result = conductor._find_balanced_json(text)
+
+        assert result is None
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_unbalanced_returns_none(self):
+        """Verify None returned for unbalanced braces."""
+        import atlasforge_conductor as conductor
+
+        text = '{"key": "value"'  # Missing closing brace
+        result = conductor._find_balanced_json(text)
+
+        assert result is None
+
+
+# ===========================================================================
+# Test _cleanup_trailing_commas helper
+# ===========================================================================
+
+class TestCleanupTrailingCommas:
+    """Test _cleanup_trailing_commas helper function."""
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_trailing_comma_object(self):
+        """Verify trailing comma removed from object."""
+        import atlasforge_conductor as conductor
+
+        text = '{"a": 1, "b": 2,}'
+        result = conductor._cleanup_trailing_commas(text)
+
+        assert result == '{"a": 1, "b": 2}'
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_trailing_comma_array(self):
+        """Verify trailing comma removed from array."""
+        import atlasforge_conductor as conductor
+
+        text = '["a", "b", "c",]'
+        result = conductor._cleanup_trailing_commas(text)
+
+        assert result == '["a", "b", "c"]'
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_multiple_trailing_commas(self):
+        """Verify multiple trailing commas handled."""
+        import atlasforge_conductor as conductor
+
+        text = '{"items": ["a", "b",], "count": 2,}'
+        result = conductor._cleanup_trailing_commas(text)
+
+        assert result == '{"items": ["a", "b"], "count": 2}'
+
 
 # ===========================================================================
 # Test journal logging on timeout

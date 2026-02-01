@@ -289,39 +289,128 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         return None, f"exception:{str(e)}"
 
 
+def _find_balanced_json(text: str) -> Optional[str]:
+    """
+    Find a balanced JSON object by counting braces, handling strings correctly.
+
+    This function correctly handles nested JSON structures by tracking brace
+    depth rather than using regex patterns that fail on nested braces.
+
+    Args:
+        text: Input text that may contain JSON
+
+    Returns:
+        Extracted JSON string if found and balanced, None otherwise
+    """
+    start = text.find('{')
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i, char in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\' and in_string:
+            escape_next = True
+            continue
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+
+    return None  # Unbalanced braces
+
+
+def _cleanup_trailing_commas(json_str: str) -> str:
+    """
+    Remove trailing commas that are invalid in JSON.
+
+    Claude sometimes produces JSON with trailing commas which are valid in
+    JavaScript but not in strict JSON. This cleans them up.
+
+    Args:
+        json_str: JSON string that may have trailing commas
+
+    Returns:
+        Cleaned JSON string with trailing commas removed
+    """
+    # Remove trailing comma before } or ]
+    cleaned = re.sub(r',\s*\}', '}', json_str)
+    cleaned = re.sub(r',\s*\]', ']', cleaned)
+    return cleaned
+
+
 def extract_json_from_response(text: str) -> Optional[dict]:
     """
     Extract JSON from Claude's response.
-    Handles both clean JSON and JSON embedded in markdown.
+
+    Handles:
+    - Clean JSON strings
+    - JSON in markdown code blocks (```json ... ``` or ``` ... ```)
+    - JSON embedded in prose text
+    - Trailing commas in JSON
+    - Nested JSON objects and arrays
+
+    The extraction uses a multi-strategy approach:
+    1. Direct parse (for clean JSON)
+    2. Code block extraction (grabs content between fences)
+    3. Balanced brace matching (for prose-embedded JSON)
+    4. Trailing comma cleanup at each stage
+
+    Args:
+        text: Raw response text from Claude
+
+    Returns:
+        Parsed JSON dict if extraction successful, None otherwise
     """
     if not text:
         return None
 
-    # Try direct parse first
+    # Strategy 1: Try direct parse (clean JSON)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Try to find JSON in markdown code block
-    json_match = re.search(r'```json\s*(\{[\s\S]*?\})\s*```', text, re.DOTALL)
-    if json_match:
+    # Strategy 2: Extract from markdown code block
+    # Match ```json ... ``` or ``` ... ``` (with or without language label)
+    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if code_block_match:
+        block_content = code_block_match.group(1).strip()
         try:
-            return json.loads(json_match.group(1))
+            return json.loads(block_content)
         except json.JSONDecodeError:
-            pass
+            # Try with trailing comma cleanup
+            cleaned = _cleanup_trailing_commas(block_content)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
 
-    # Try to find any JSON object
-    json_match = re.search(r'(\{[\s\S]*\})', text, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-        # Clean up common issues
-        json_str = re.sub(r',\s*\}', '}', json_str)  # trailing comma
-        json_str = re.sub(r',\s*\]', ']', json_str)  # trailing comma in array
+    # Strategy 3: Find balanced JSON object in prose using brace-counting
+    # This correctly handles nested JSON structures
+    json_str = _find_balanced_json(text)
+    if json_str:
         try:
             return json.loads(json_str)
         except json.JSONDecodeError:
-            pass
+            # Try with trailing comma cleanup
+            cleaned = _cleanup_trailing_commas(json_str)
+            try:
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                pass
 
     logger.warning(f"Could not extract JSON from response: {text[:200]}...")
     return None
