@@ -274,6 +274,9 @@ class StageOrchestrator:
         handler = self.registry.get_handler(stage)
         stage_context = self._build_stage_context()
 
+        # Log incoming response for debugging
+        logger.info(f"Processing {stage} response with status='{response.get('status', '')}'")
+
         # Process response through handler
         result: StageResult = handler.process_response(response, stage_context)
 
@@ -281,10 +284,10 @@ class StageOrchestrator:
         for event in result.events_to_emit:
             self.integrations.emit(event)
 
-        # Log result
+        # Log result with handler decision
         logger.info(
-            f"Stage {stage} response: status={result.status}, "
-            f"next_stage={result.next_stage}, success={result.success}"
+            f"Stage {stage} handler returned: next_stage='{result.next_stage}', "
+            f"status='{result.status}', success={result.success}"
         )
 
         if result.message:

@@ -120,10 +120,17 @@ Respond with JSON:
 
         Determines whether to continue to next cycle or complete mission.
         """
-        status = response.get("status", "")
+        # Normalize status for case-insensitive matching
+        raw_status = response.get("status", "")
+        status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
         current_cycle = context.cycle_number
         cycle_budget = context.cycle_budget
         cycles_remaining = cycle_budget - current_cycle
+
+        # Log unrecognized status values for debugging
+        valid_statuses = ["cycle_complete", "mission_complete"]
+        if status and status not in valid_statuses:
+            logger.warning(f"CYCLE_END: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
         if status == "cycle_complete" and cycles_remaining > 0:
             # More cycles remaining - continue

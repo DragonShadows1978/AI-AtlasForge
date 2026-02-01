@@ -24,6 +24,7 @@ import signal
 import logging
 import os
 import threading
+import fcntl
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -87,6 +88,10 @@ CLAUDE_JOURNAL_PATH = STATE_DIR / "claude_journal.jsonl"
 CLAUDE_PROMPT_PATH = STATE_DIR / "claude_prompt.json"
 CHAT_HISTORY_PATH = STATE_DIR / "chat_history.json"
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
+CONDUCTOR_LOCK_PATH = BASE_DIR / "atlasforge_conductor.lock"
+
+# Global file descriptor for conductor lock
+_conductor_lock_fd = None
 
 # Ensure directories exist
 STATE_DIR.mkdir(exist_ok=True)
@@ -113,6 +118,46 @@ running = True
 
 # Maximum retries when Claude times out or fails to respond
 MAX_CLAUDE_RETRIES = 3
+
+
+def acquire_conductor_lock() -> bool:
+    """Acquire exclusive lock to prevent multiple conductor instances.
+
+    Uses fcntl file locking for atomic cross-process coordination.
+    The lock is automatically released when the process exits.
+
+    Returns:
+        True if lock acquired, False if another instance is running.
+    """
+    global _conductor_lock_fd
+    try:
+        _conductor_lock_fd = open(CONDUCTOR_LOCK_PATH, 'w')
+        fcntl.flock(_conductor_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _conductor_lock_fd.write(str(os.getpid()))
+        _conductor_lock_fd.flush()
+        logger.info(f"Acquired conductor lock (PID {os.getpid()})")
+        return True
+    except (IOError, BlockingIOError):
+        logger.error("Another conductor instance is already running")
+        if _conductor_lock_fd:
+            _conductor_lock_fd.close()
+            _conductor_lock_fd = None
+        return False
+
+
+def release_conductor_lock():
+    """Release conductor lock."""
+    global _conductor_lock_fd
+    if _conductor_lock_fd:
+        try:
+            fcntl.flock(_conductor_lock_fd.fileno(), fcntl.LOCK_UN)
+            _conductor_lock_fd.close()
+            CONDUCTOR_LOCK_PATH.unlink(missing_ok=True)
+            logger.info("Released conductor lock")
+        except Exception as e:
+            logger.debug(f"Error releasing conductor lock: {e}")
+        finally:
+            _conductor_lock_fd = None
 
 
 def signal_handler(signum, frame):
@@ -968,6 +1013,12 @@ def run_rd_mode():
     logger.info("CLAUDE AUTONOMOUS - R&D MODE")
     logger.info("=" * 60)
 
+    # Acquire exclusive lock to prevent multiple conductors
+    if not acquire_conductor_lock():
+        logger.error("Failed to acquire conductor lock - another instance may be running")
+        send_to_chat("[ERROR] Another conductor instance is already running. Exiting.")
+        return
+
     save_pid()
 
     state = load_state()
@@ -1418,6 +1469,7 @@ def run_rd_mode():
     finally:
         save_state(state)
         remove_pid()
+        release_conductor_lock()
         logger.info("Claude Autonomous R&D Mode stopped")
 
 

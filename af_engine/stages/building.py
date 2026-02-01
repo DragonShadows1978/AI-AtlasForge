@@ -73,10 +73,17 @@ Respond with JSON:
 
         Transitions to TESTING when build is complete and ready for testing.
         """
-        status = response.get("status", "")
+        # Normalize status for case-insensitive matching
+        raw_status = response.get("status", "")
+        status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
         ready_for_testing = response.get("ready_for_testing", False)
         files_created = response.get("files_created", [])
         files_modified = response.get("files_modified", [])
+
+        # Log unrecognized status values for debugging
+        valid_statuses = ["build_complete", "build_in_progress", "build_blocked"]
+        if status and status not in valid_statuses:
+            logger.warning(f"BUILDING: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
         if status == "build_complete" and ready_for_testing:
             events = [

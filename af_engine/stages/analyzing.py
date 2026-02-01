@@ -82,8 +82,15 @@ If recommending COMPLETE, also include:
 
         Determines next stage based on recommendation.
         """
-        status = response.get("status", "")
+        # Normalize status for case-insensitive matching
+        raw_status = response.get("status", "")
+        status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
         recommendation = response.get("recommendation", "").upper()
+
+        # Log unrecognized status values for debugging
+        valid_statuses = ["success", "needs_revision", "needs_replanning"]
+        if status and status not in valid_statuses:
+            logger.warning(f"ANALYZING: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
         events = [
             Event(

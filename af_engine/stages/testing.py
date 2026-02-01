@@ -116,7 +116,14 @@ Respond with JSON:
 
         Always transitions to ANALYZING regardless of test outcome.
         """
-        status = response.get("status", "")
+        # Normalize status for case-insensitive matching
+        raw_status = response.get("status", "")
+        status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
+
+        # Log unrecognized status values for debugging
+        valid_statuses = ["tests_passed", "tests_failed", "tests_error"]
+        if status and status not in valid_statuses:
+            logger.warning(f"TESTING: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
         events = [
             Event(

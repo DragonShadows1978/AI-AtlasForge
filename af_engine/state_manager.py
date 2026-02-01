@@ -242,6 +242,13 @@ class StateManager:
             self._mission["cycle_history"] = []
         self._mission["cycle_history"].append(cycle_summary)
 
+        # FIX: Apply continuation prompt to problem_statement
+        # This ensures the next PLANNING stage receives the updated mission context
+        # The original_problem_statement is preserved for reference
+        if continuation_prompt:
+            self._mission["problem_statement"] = continuation_prompt
+            logger.info(f"Updated problem_statement for cycle {current_cycle + 1}")
+
         # Advance to next cycle
         self._mission["current_cycle"] = current_cycle + 1
         self._mission["iteration"] = 0  # Reset iteration for new cycle
