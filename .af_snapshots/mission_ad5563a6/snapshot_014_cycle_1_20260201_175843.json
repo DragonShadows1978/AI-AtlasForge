@@ -1,0 +1,38 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_8aeaf2c2",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-01T17:58:43.884108",
+  "snapshot_number": 14,
+  "event_data": {
+    "cycle_number": 1,
+    "cycles_remaining": 1,
+    "continuation_prompt": "Verify and complete GlassBox frontend integration in dashboard_v2.py. Specifically:\n\n1. VERIFY GLASSBOX TAB RENDERING:\n   - Check that the GlassBox tab in dashboard_v2.py frontend (templates or JavaScript) correctly displays mission archives\n   - Ensure the /api/glassbox/* endpoints are called by the frontend\n   - Verify WebSocket event listeners for 'glassbox_*' events are registered in the frontend JavaScript\n\n2. TEST REAL-TIME UPDATES:\n   - Confirm that when emit_glassbox_event() is called, the frontend receives and processes the event\n   - Verify the GlassBox tab updates dynamically when mission archives are created/enhanced\n   - Check that emit_transcript_archived() events from af_engine.py are received by the dashboard\n\n3. RUN END-TO-END VALIDATION:\n   - Start the dashboard (python dashboard_v2.py) and navigate to the GlassBox tab\n   - Trigger a mission completion that creates transcript archives\n   - Verify the GlassBox tab reflects the new archive in real-time\n\n4. FIX ANY FRONTEND GAPS:\n   - If WebSocket listeners are missing in JavaScript, add them\n   - If GlassBox tab HTML/template is not rendering archive data, fix the template\n   - Ensure the API route connections are complete\n\n5. OPTIONAL - HEALING PROMPT END-TO-END TEST:\n   - Run a 2-cycle test mission with deliberate drift\n   - Verify rde_healing_applied appears in mission state after cycle 2\n   - Confirm healing prompt was prepended to continuation\n\nFiles to focus on:\n- /home/vader/AI-AtlasForge/dashboard_v2.py (frontend integration)\n- /home/vader/AI-AtlasForge/templates/*.html (GlassBox tab template if exists)\n- /home/vader/AI-AtlasForge/static/js/*.js (WebSocket event handlers)\n- /home/vader/AI-AtlasForge/workspace/glassbox/dashboard_routes.py (API endpoints)",
+    "cycle_report": {
+      "summary": "Fixed healing prompt data flow issue and integrated GlassBox WebSocket events. The healing prompts now correctly use continuation_prompt from cycle_history instead of just the summary. GlassBox WebSocket emission functions were verified to be properly integrated in mission_archiver.py and dashboard_routes.py.",
+      "files_created": [
+        "/home/vader/AI-AtlasForge/workspace/af_ehancements/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/af_ehancements/tests/test_healing_integration.py",
+        "/home/vader/AI-AtlasForge/workspace/af_ehancements/tests/test_glassbox_events.py",
+        "/home/vader/AI-AtlasForge/workspace/af_ehancements/tests/test_functional_integration.py",
+        "/home/vader/AI-AtlasForge/workspace/af_ehancements/tests/test_adversarial.py"
+      ],
+      "files_modified": [
+        "/home/vader/AI-AtlasForge/af_engine.py (line 2670: fixed healing data source to use continuation_prompt)",
+        "/home/vader/AI-AtlasForge/af_engine.py (line 2686: added healing_prompt_length tracking)"
+      ],
+      "achievements": [
+        "Fixed healing prompt data flow: _advance_to_next_cycle now uses cycle_entry.get('continuation_prompt', cycle_entry.get('summary', '')) instead of just summary",
+        "Added healing_prompt_length tracking to rde_healing_applied for better observability",
+        "Verified GlassBox emit_glassbox_event is integrated in mission_archiver.py and dashboard_routes.py",
+        "Verified emit_transcript_archived is called from af_engine.py for transcript archival events",
+        "Created comprehensive test suites covering: healing integration, GlassBox events, functional integration, adversarial edge cases",
+        "Tests verify: data flow correctness, WebSocket event emission, graceful degradation, security considerations"
+      ],
+      "issues": [
+        "GlassBox frontend integration still needs verification - dashboard_v2.py imports glassbox_bp but UI rendering needs validation",
+        "GlassBox tab may not be fully wired to show real-time updates despite WebSocket events being emitted"
+      ]
+    }
+  }
+}
