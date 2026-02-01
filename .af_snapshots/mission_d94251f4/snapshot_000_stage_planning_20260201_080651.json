@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_d94251f4",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T08:06:51.607174",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Investigation State Management from inv_89cfe92b - understanding state persistence patterns",
+      "narrative_engine.py NarrativeMissionController from mission_1b3b6e08 - stage-based workflow coordination"
+    ],
+    "steps_planned": 6
+  }
+}
