@@ -1,0 +1,52 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_8aeaf2c2",
+  "stage": "TESTING",
+  "timestamp": "2026-02-01T18:29:05.324018",
+  "snapshot_number": 22,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "epistemic_score": 1.0,
+      "rigor_level": "rigorous",
+      "total": 8,
+      "safe": 8,
+      "vulnerable": 0,
+      "tests": [
+        {
+          "name": "SQL Injection in mission_id",
+          "vulnerable": false
+        },
+        {
+          "name": "Path Traversal",
+          "vulnerable": false
+        },
+        {
+          "name": "XSS in Search",
+          "vulnerable": false
+        },
+        {
+          "name": "Pagination Edge Cases",
+          "vulnerable": false
+        },
+        {
+          "name": "Missing Mission Handling",
+          "vulnerable": false
+        },
+        {
+          "name": "Empty String Handling",
+          "vulnerable": false
+        },
+        {
+          "name": "Malformed JSON Handling",
+          "vulnerable": false
+        },
+        {
+          "name": "Unicode Handling",
+          "vulnerable": false
+        }
+      ]
+    }
+  }
+}
