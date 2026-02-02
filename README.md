@@ -310,6 +310,13 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.6.8 (2026-02-01)
+- Fixed zombie timer bug - stale session cleanup now stops timer threads
+- Fixed continuation prompt bug - cycle progression now updates problem_statement
+- Added conductor singleton with takeover protocol (prevents multiple instances)
+- Case-insensitive status matching in stage handlers
+- Defense-in-depth timer validation (zombie timer prevention)
+
 ### v1.6.7 (2026-02-01)
 - Fixed JSON response parsing bug in conductor (handles markdown code blocks)
 - StoryForge mission build improvements
