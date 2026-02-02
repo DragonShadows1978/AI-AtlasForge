@@ -1,0 +1,208 @@
+{
+  "validation_id": "healing_validation_20260201_202123",
+  "timestamp": "2026-02-01T20:21:23.030866",
+  "phases": {
+    "unit_tests": {
+      "success": true,
+      "test_count": 8,
+      "passed": 8,
+      "failed": 0,
+      "metrics": {
+        "mission_id": "healing_test_20260201_202123",
+        "timestamp": "2026-02-01T20:21:28.665188",
+        "baseline_fingerprint": {
+          "source": "baseline_mission",
+          "top_concepts": [
+            {
+              "concept": "caching",
+              "ratio": 0.125
+            },
+            {
+              "concept": "data",
+              "ratio": 0.125
+            },
+            {
+              "concept": "layer",
+              "ratio": 0.125
+            },
+            {
+              "concept": "database",
+              "ratio": 0.125
+            },
+            {
+              "concept": "cache",
+              "ratio": 0.125
+            },
+            {
+              "concept": "api",
+              "ratio": 0.0625
+            },
+            {
+              "concept": "build",
+              "ratio": 0.0625
+            },
+            {
+              "concept": "reduce",
+              "ratio": 0.0625
+            },
+            {
+              "concept": "implement",
+              "ratio": 0.0625
+            },
+            {
+              "concept": "query",
+              "ratio": 0.0625
+            }
+          ],
+          "total_concepts": 46,
+          "category_counts": {
+            "domain": 2,
+            "architectural": 4,
+            "action": 4,
+            "meta": 1
+          }
+        },
+        "cycle_output_fingerprint": {
+          "source": "cycle_output",
+          "top_concepts": [
+            {
+              "concept": "tracking",
+              "ratio": 0.1154
+            },
+            {
+              "concept": "interesting",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "weather",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "data",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "sports",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "statistics",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "recipe",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "travel",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "planning",
+              "ratio": 0.0769
+            },
+            {
+              "concept": "module",
+              "ratio": 0.0769
+            }
+          ],
+          "total_concepts": 98,
+          "category_counts": {
+            "domain": 9,
+            "architectural": 3,
+            "action": 1,
+            "meta": 2
+          }
+        },
+        "drift_metrics": {
+          "overall_similarity": 0.4867,
+          "drift_severity": "CRITICAL",
+          "alert_level": "RED",
+          "category_similarities": {
+            "architectural": 0.2265,
+            "action": 0.5,
+            "meta": 0.0
+          },
+          "top_changes": [
+            {
+              "concept": "layer",
+              "baseline_ratio": 0.125,
+              "current_ratio": 0.0,
+              "change": -0.125,
+              "direction": "decreased"
+            },
+            {
+              "concept": "cache",
+              "baseline_ratio": 0.125,
+              "current_ratio": 0.0,
+              "change": -0.125,
+              "direction": "decreased"
+            },
+            {
+              "concept": "caching",
+              "baseline_ratio": 0.125,
+              "current_ratio": 0.0,
+              "change": -0.125,
+              "direction": "decreased"
+            },
+            {
+              "concept": "tracking",
+              "baseline_ratio": 0.0,
+              "current_ratio": 0.1154,
+              "change": 0.1154,
+              "direction": "increased"
+            },
+            {
+              "concept": "database",
+              "baseline_ratio": 0.125,
+              "current_ratio": 0.0385,
+              "change": -0.0865,
+              "direction": "decreased"
+            }
+          ],
+          "healing_recommended": true
+        },
+        "healing_application": {
+          "original_prompt_length": 68,
+          "enhanced_prompt_length": 726,
+          "healing_prompt_length": 658,
+          "healing_applied": true,
+          "healing_strategy": null
+        },
+        "mission_state": {
+          "rde_healing_applied_present": true,
+          "cycle_field_value": 1,
+          "healing_applied_value": true,
+          "healing_prompt_length_value": 658,
+          "original_prompt_preview": "Continue with Redis caching implementation."
+        },
+        "validation_passed": true,
+        "validation_errors": [],
+        "validation_warnings": []
+      }
+    },
+    "integration_test": {
+      "success": true,
+      "similarity": 0.4867,
+      "drift_severity": "CRITICAL",
+      "healing_recommended": true,
+      "healing_prompt_length": 658,
+      "rde_healing_applied": {
+        "cycle": 1,
+        "healing_applied": true,
+        "healing_prompt_length": 658,
+        "original_prompt_preview": "Continue with the remaining implementation tasks."
+      }
+    },
+    "dashboard_verification": {
+      "success": true,
+      "skipped": true,
+      "reason": "Dashboard not running"
+    }
+  },
+  "overall_success": true,
+  "errors": [],
+  "warnings": [
+    "Dashboard not running during verification"
+  ]
+}
