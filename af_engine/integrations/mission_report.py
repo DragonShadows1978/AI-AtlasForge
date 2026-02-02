@@ -108,11 +108,17 @@ class MissionReportIntegration(BaseIntegrationHandler):
         deliverables = event_data.get("deliverables") or []
         final_report_data = event_data.get("final_report") or {}
 
-        # Build the report
+        # Build the report with all required fields for GlassBox
         final_report = {
             "mission_id": mission_id,
             "total_cycles": total_cycles,
             "completed_at": datetime.now().isoformat(),
+            "started_at": event_data.get("started_at"),
+            "mission_workspace": event_data.get("mission_workspace"),
+            "mission_dir": event_data.get("mission_dir"),
+            "original_mission": event_data.get("problem_statement"),
+            "current_cycle_completed": event_data.get("cycle_count", 1),
+            "cycle_history": event_data.get("cycle_history", []),
             "final_summary": final_report_data.get("summary", ""),
             "all_files": final_report_data.get("all_files", []),
             "key_achievements": final_report_data.get("key_achievements", []),
@@ -124,9 +130,10 @@ class MissionReportIntegration(BaseIntegrationHandler):
         }
 
         # Generate file manifest from workspace if available
-        # Look for mission-specific workspace first
-        mission_workspace = WORKSPACE_DIR
-        mission_dir = MISSIONS_DIR / f"mission_{mission_id}"
+        # Look for mission-specific workspace first - use event data if available
+        mission_workspace = Path(event_data.get("mission_workspace")) if event_data.get("mission_workspace") else WORKSPACE_DIR
+        # mission_id already has "mission_" prefix, don't add it again
+        mission_dir = Path(event_data.get("mission_dir")) if event_data.get("mission_dir") else MISSIONS_DIR / mission_id
 
         if mission_dir.exists():
             workspace_path = mission_dir / "workspace"

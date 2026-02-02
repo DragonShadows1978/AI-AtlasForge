@@ -58,6 +58,7 @@ from .websocket_events import WebSocketIntegration
 from .enhancer import EnhancerIntegration
 from .decision_graph import DecisionGraphIntegration
 from .mission_report import MissionReportIntegration
+from .transcript_archival import TranscriptArchivalIntegration
 
 __all__ = [
     # Protocol and data classes
@@ -82,6 +83,7 @@ __all__ = [
     'EnhancerIntegration',
     'DecisionGraphIntegration',
     'MissionReportIntegration',
+    'TranscriptArchivalIntegration',
 ]
 
 # Default integrations to load (in priority order)
@@ -102,6 +104,7 @@ DEFAULT_INTEGRATIONS = [
     PostMissionHooksIntegration,
     EnhancerIntegration,
     MissionReportIntegration,
+    TranscriptArchivalIntegration,
 ]
 
 

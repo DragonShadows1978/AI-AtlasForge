@@ -67,7 +67,8 @@ Respond with JSON:
         deliverables = response.get("deliverables", [])
         summary = response.get("summary", "Mission completed")
 
-        # Create MISSION_COMPLETED event
+        # Create MISSION_COMPLETED event with full mission state for integrations
+        # (transcript archival, report generation need workspace paths, timestamps)
         events = [
             Event(
                 type=StageEvent.MISSION_COMPLETED,
@@ -79,6 +80,13 @@ Respond with JSON:
                     "deliverables": deliverables,
                     "lessons_learned": lessons,
                     "cycle_count": context.cycle_number,
+                    # Fields needed by TranscriptArchivalIntegration and MissionReportIntegration
+                    "started_at": context.mission.get("created_at"),
+                    "mission_workspace": context.mission.get("mission_workspace"),
+                    "mission_dir": context.mission.get("mission_dir"),
+                    "problem_statement": context.mission.get("problem_statement"),
+                    "cycle_history": context.cycle_history,
+                    "project_name": context.mission.get("project_name"),
                 }
             )
         ]

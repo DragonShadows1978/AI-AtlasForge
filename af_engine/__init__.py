@@ -51,6 +51,22 @@ if USE_MODULAR_ENGINE:
         from .integration_manager import IntegrationManager
         from .cycle_manager import CycleManager
         from .prompt_factory import PromptFactory
+
+        # Also import archival functions from the root af_engine.py
+        # These are needed for GlassBox functionality
+        import sys
+        from pathlib import Path
+        parent_dir = Path(__file__).parent.parent
+        if str(parent_dir) not in sys.path:
+            sys.path.insert(0, str(parent_dir))
+        # Import directly by reading the module file to avoid circular imports
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("af_engine_root", parent_dir / "af_engine.py")
+        af_engine_root = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(af_engine_root)
+        archive_mission_transcripts = af_engine_root.archive_mission_transcripts
+        rearchive_mission = af_engine_root.rearchive_mission
+        rearchive_all_missions = af_engine_root.rearchive_all_missions
     except ImportError as e:
         logger.error(f"Failed to import modular engine components: {e}")
         logger.warning("Falling back to legacy engine")
@@ -111,6 +127,9 @@ if USE_MODULAR_ENGINE:
         'IntegrationManager',
         'CycleManager',
         'PromptFactory',
+        'archive_mission_transcripts',
+        'rearchive_mission',
+        'rearchive_all_missions',
     ])
 else:
     __all__.extend([

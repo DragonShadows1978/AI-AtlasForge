@@ -596,7 +596,8 @@ def rearchive_mission(mission_id: str) -> Dict:
         Dict with archival results
     """
     # Load mission log to get mission details
-    mission_log_path = MISSION_LOGS_DIR / f"{mission_id}.json"
+    # Reports are saved with _report.json suffix by MissionReportIntegration
+    mission_log_path = MISSION_LOGS_DIR / f"{mission_id}_report.json"
     archive_manifest_path = TRANSCRIPTS_ARCHIVE_DIR / mission_id / "manifest.json"
 
     mission = None
