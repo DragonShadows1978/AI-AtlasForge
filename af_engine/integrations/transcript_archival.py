@@ -49,8 +49,10 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
 
     def __init__(self):
         """Initialize the transcript archival integration."""
-        super().__init__()
+        # Initialize _archive_function BEFORE calling super().__init__()
+        # because the parent calls _check_availability() which uses this
         self._archive_function = None
+        super().__init__()
 
     def _get_archive_function(self):
         """
