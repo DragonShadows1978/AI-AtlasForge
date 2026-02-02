@@ -1,0 +1,19 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_fd40cba1",
+  "stage": "TESTING",
+  "timestamp": "2026-02-02T17:13:08.516655",
+  "snapshot_number": 28,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 0.938,
+      "epistemic_score": 0.95,
+      "rigor_level": "strong"
+    }
+  }
+}
