@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_3527f71c",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-01T20:48:01.182827",
+  "snapshot_number": 18,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Minor: Server returns 500 instead of 414/400 for mission IDs with 10,000+ characters (low priority edge case)"
+    ]
+  }
+}

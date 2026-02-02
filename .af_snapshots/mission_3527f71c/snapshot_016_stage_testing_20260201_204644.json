@@ -1,0 +1,21 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_3527f71c",
+  "stage": "TESTING",
+  "timestamp": "2026-02-01T20:46:44.888328",
+  "snapshot_number": 16,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "Server returns 500 for very long (10000+ char) mission ID - low priority edge case"
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 0.95,
+      "epistemic_score": 0.95,
+      "rigor_level": "strong"
+    }
+  }
+}
