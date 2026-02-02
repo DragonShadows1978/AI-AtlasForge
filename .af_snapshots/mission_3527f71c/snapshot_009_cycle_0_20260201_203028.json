@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_3527f71c",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T20:30:28.881104",
+  "snapshot_number": 9,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 3,
+    "cycles_remaining": 2,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [],
+    "summary": "Execute the live cycle transition to validate actual rde_healing_applied persistence in af_engine.py. This cycle should: (1) Verify the heal_continuation() fix from mission_8aeaf2c2 persists healing s",
+    "next_stage": "PLANNING"
+  }
+}

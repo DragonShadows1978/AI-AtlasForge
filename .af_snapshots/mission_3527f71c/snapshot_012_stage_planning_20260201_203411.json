@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_3527f71c",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T20:34:11.289130",
+  "snapshot_number": 12,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "From mission_8aeaf2c2: Fixed af_engine.py healing prompt integration verified to work in simulation",
+      "From mission_8aeaf2c2: 72 comprehensive tests covering healing, GlassBox confirmed mechanism works"
+    ],
+    "steps_planned": 5
+  }
+}
