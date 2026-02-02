@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_fd40cba1",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-02T16:50:50.495188",
+  "snapshot_number": 18,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Minor race condition in concurrent cancel requests (cosmetic, no data corruption)"
+    ]
+  }
+}
