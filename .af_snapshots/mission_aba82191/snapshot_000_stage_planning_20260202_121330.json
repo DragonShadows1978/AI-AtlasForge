@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_aba82191",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-02T12:13:30.818136",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "GlassBox architecture knowledge from mission_037e2367 - understanding how GlassBox reads from transcript archives",
+      "Mission Logs tab implementation from mission_8af549f2 - awareness of dual data sources (mission_logs vs transcript archives)"
+    ],
+    "steps_planned": 7
+  }
+}
