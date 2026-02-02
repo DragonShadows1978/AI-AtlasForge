@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_fd40cba1",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-02T14:25:11.427899",
+  "snapshot_number": 6,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Minor: Race condition in cancel endpoint allows multiple concurrent requests to return HTTP 200 (non-blocking, database ends in correct state)"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_fd40cba1",
+  "stage": "TESTING",
+  "timestamp": "2026-02-02T14:23:23.618160",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "Race condition: Multiple concurrent cancel requests can all return 200 OK (minor - end state is correct)"
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 1.0,
+      "epistemic_score": 1.0,
+      "rigor_level": "rigorous"
+    }
+  }
+}
