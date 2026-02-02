@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_3527f71c",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-01T20:51:54.570767",
+  "snapshot_number": 24,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "mission_8aeaf2c2: af_engine.py healing prompt integration fix is verified in place at lines 2651-2700"
+    ],
+    "steps_planned": 9
+  }
+}
