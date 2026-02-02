@@ -1,0 +1,23 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_fd40cba1",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-02T14:07:08.304409",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/sf_engine/job_registry.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/web/templates/history.html"
+    ],
+    "files_modified": [
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/sf_engine/claude_api.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/sf_engine/orchestrator.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/sf_engine/state_manager.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/database/models.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/web/routes.py",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/web/templates/index.html",
+      "/home/vader/AI-AtlasForge/workspace/StoryForge/web/templates/progress.html"
+    ]
+  }
+}
