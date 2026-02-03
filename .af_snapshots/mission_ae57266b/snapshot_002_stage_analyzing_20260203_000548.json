@@ -1,0 +1,12 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_ae57266b",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-03T00:05:48.774469",
+  "snapshot_number": 2,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": []
+  }
+}
