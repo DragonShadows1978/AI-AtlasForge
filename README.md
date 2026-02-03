@@ -310,6 +310,9 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.6.9 (2026-02-02)
+- Fixed GlassBox visualization issues
+
 ### v1.6.8 (2026-02-01)
 - Fixed zombie timer bug - stale session cleanup now stops timer threads
 - Fixed continuation prompt bug - cycle progression now updates problem_statement
