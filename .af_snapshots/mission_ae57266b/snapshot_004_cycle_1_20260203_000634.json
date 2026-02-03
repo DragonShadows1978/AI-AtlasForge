@@ -1,0 +1,41 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_ae57266b",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-03T00:06:34.406855",
+  "snapshot_number": 4,
+  "event_data": {
+    "cycle_number": 1,
+    "final": true,
+    "final_report": {
+      "summary": "Successfully completed two-part mission: (1) Fixed the History page delete button bug where 'processing' status projects couldn't be deleted even when no job was actively running. The fix modified the Jinja2 template condition to check both status AND the is_active flag, allowing deletion of stuck/crashed processing projects while still protecting truly active ones. (2) Implemented output path migration by adding STORYFORGE_HOME environment variable support to config.py. When set, all outputs and the database are stored at the specified location (e.g., /home/vader/StoryForge) rather than in the workspace. Code-relative paths (prompts, data) remain with the source code.",
+      "all_files": [
+        "web/templates/history.html - Modified delete button condition from 'status != processing' to 'status != processing or not is_active'",
+        "config.py - Added STORYFORGE_HOME environment variable support for data path redirection",
+        "tests/test_bugfix_and_migration.py - Created comprehensive test suite covering both bug fix and migration logic",
+        "artifacts/implementation_plan.md - Implementation plan document"
+      ],
+      "key_achievements": [
+        "Fixed delete button visibility for stuck 'processing' projects - users can now delete crashed/interrupted projects",
+        "Implemented STORYFORGE_HOME environment variable for output path migration",
+        "Database and outputs can now be stored at /home/vader/StoryForge instead of workspace",
+        "Maintained backward compatibility - default behavior unchanged when env var not set",
+        "Code-relative paths (prompts, data) remain with source code for proper operation",
+        "Target directory /home/vader/StoryForge already exists with proper structure (database/, outputs/ folders)",
+        "Created comprehensive test suite validating both fixes"
+      ],
+      "challenges_overcome": [
+        "Identified root cause of delete bug: template checked status but ignored job registry active state",
+        "Backend already provided is_active flag via routes.py - only template modification needed",
+        "Designed migration to use environment variable for flexibility rather than hard-coding paths",
+        "Ensured separation between data paths (migrated) and code paths (stay with source)"
+      ],
+      "lessons_learned": [
+        "Check existing backend code before assuming missing features - is_active was already computed but not used in template",
+        "Environment variable configuration provides clean separation between dev/prod paths",
+        "Pathlib makes path manipulation readable and cross-platform safe",
+        "Single-line template fixes can have significant UX impact (users couldn't clean up their history)"
+      ]
+    }
+  }
+}
