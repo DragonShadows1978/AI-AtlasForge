@@ -303,12 +303,45 @@ def remove_pid():
 # LLM INVOCATION (Model-Agnostic)
 # =============================================================================
 
+# Module-level process reference for handoff termination
+_active_claude_process = None
+_active_claude_lock = threading.Lock()
+
+
+def get_active_claude_process():
+    """Get the currently active Claude subprocess, if any."""
+    with _active_claude_lock:
+        return _active_claude_process
+
+
+def terminate_active_claude():
+    """Terminate the active Claude subprocess for graceful handoff.
+    Returns True if a process was terminated."""
+    with _active_claude_lock:
+        proc = _active_claude_process
+    if proc is None:
+        return False
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        proc.wait(timeout=10)
+        return True
+    except (ProcessLookupError, OSError):
+        return False
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
+        except (ProcessLookupError, OSError):
+            pass
+        return True
+
+
 def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Optional[str], Optional[str]]:
     """
     Invoke configured LLM and get response.
 
-    Currently uses Claude CLI, but designed to support multiple providers
-    (Claude, DeepSeek, etc.) via configuration.
+    Uses subprocess.Popen instead of subprocess.run so the process can be
+    terminated externally by the handoff callback (terminate_active_claude).
 
     Args:
         prompt: The prompt to send
@@ -322,36 +355,59 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         - On CLI error: (None, "cli_error:<stderr_snippet>")
         - On exception: (None, "exception:<error_message>")
     """
+    global _active_claude_process
     if cwd is None:
         cwd = BASE_DIR
 
     try:
         logger.info(f"Invoking Claude: {prompt[:100]}...")
 
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["claude", "-p", "--dangerously-skip-permissions",
              "--disallowedTools", "EnterPlanMode,ExitPlanMode"],
-            input=prompt,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             cwd=str(cwd),
             start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
-        if result.returncode == 0:
-            response = result.stdout.strip()
+        with _active_claude_lock:
+            _active_claude_process = proc
+
+        try:
+            stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=10)
+            except (ProcessLookupError, OSError):
+                pass
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait(timeout=5)
+                except (ProcessLookupError, OSError):
+                    pass
+            logger.error(f"Claude timed out after {timeout}s")
+            return None, f"timeout:{timeout}s"
+        finally:
+            with _active_claude_lock:
+                _active_claude_process = None
+
+        if proc.returncode == 0:
+            response = stdout.strip()
             logger.info(f"Claude responded: {response[:200]}...")
             return response, None
         else:
-            stderr_snippet = result.stderr[:500] if result.stderr else "No stderr"
-            logger.error(f"Claude error: {result.stderr}")
+            stderr_snippet = stderr[:500] if stderr else "No stderr"
+            logger.error(f"Claude error: {stderr}")
             return None, f"cli_error:{stderr_snippet}"
 
-    except subprocess.TimeoutExpired:
-        logger.error(f"Claude timed out after {timeout}s")
-        return None, f"timeout:{timeout}s"
     except Exception as e:
+        with _active_claude_lock:
+            _active_claude_process = None
         logger.error(f"Error invoking Claude: {e}")
         return None, f"exception:{str(e)}"
 
@@ -1266,6 +1322,13 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
                 elif signal.level == HandoffLevel.EMERGENCY:
                     send_to_chat(f"[CONTEXT] EMERGENCY handoff at {signal.tokens_used:,} tokens!")
+
+                # Terminate the active Claude subprocess so invoke_llm() returns immediately
+                # This is critical: without this, the handoff writes HANDOFF.md but the
+                # Claude subprocess keeps running until the 3600s timeout hits.
+                terminated = terminate_active_claude()
+                if terminated:
+                    logger.info(f"Terminated Claude subprocess for {signal.level.value} handoff")
 
             # Start ContextWatcher if available
             if HAS_CONTEXT_WATCHER:

@@ -816,7 +816,19 @@ class SessionMonitor:
             return None
 
     def is_stale(self) -> bool:
-        """Check if session has been inactive for too long."""
+        """Check if session has been inactive for too long.
+
+        Sessions with an active (not-yet-fired, not-cancelled) time-based
+        handoff monitor are NEVER considered stale — the handoff timer
+        itself serves as the session lifetime manager.
+        """
+        # If time-based handoff monitor is active, the session is not stale.
+        # The handoff timer is the authoritative timeout mechanism.
+        if (self._time_handoff_monitor is not None
+                and not self._time_handoff_monitor.has_fired
+                and not self._time_handoff_monitor.is_cancelled):
+            return False
+
         inactive_seconds = (datetime.now() - self.last_activity).total_seconds()
         return inactive_seconds > STALE_SESSION_TIMEOUT
 

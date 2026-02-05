@@ -148,13 +148,15 @@ Respond with JSON:
                 message=response.get("message_to_human", f"Tests {status}, moving to analysis")
             )
         else:
-            # Unexpected status, stay in testing
+            # Unexpected status — still forward to ANALYZING (never loop)
+            logger.warning(f"TESTING: Unexpected status '{raw_status}', forwarding to ANALYZING")
             return StageResult(
                 success=True,
-                next_stage="TESTING",
+                next_stage="ANALYZING",
                 status=status,
                 output_data=response,
-                message=response.get("message_to_human", "Continuing testing")
+                events_to_emit=events,
+                message=response.get("message_to_human", "Unexpected status, moving to analysis")
             )
 
     def get_restrictions(self) -> StageRestrictions:

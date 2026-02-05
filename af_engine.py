@@ -1915,14 +1915,9 @@ Respond with JSON:
                 return "BUILDING"
 
         elif current_stage == "TESTING":
-            if status == "tests_passed":
-                return "ANALYZING"
-            elif status == "tests_failed":
-                return "ANALYZING"  # Go to analyzing to decide what to do
-            elif status == "tests_error":
-                return "ANALYZING"  # Go to analyzing to diagnose
-            else:
-                return "TESTING"
+            if status not in ("tests_passed", "tests_failed", "tests_error"):
+                logger.warning(f"TESTING: Unexpected status '{status}', forwarding to ANALYZING")
+            return "ANALYZING"  # Always forward — TESTING should never loop
 
         elif current_stage == "ANALYZING":
             recommendation = response.get("recommendation", "").upper()
