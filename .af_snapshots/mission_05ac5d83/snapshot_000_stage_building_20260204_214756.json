@@ -1,0 +1,23 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_05ac5d83",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-04T21:47:56.547053",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "atlaslab/math/numerical.py (solve_ode, monte_carlo_uncertainty methods)",
+      "atlaslab/engine/stages/simulation.py (_run_monte_carlo_uncertainty method)",
+      "atlaslab/io/report_generator.py (full ReportGenerator: summary, markdown, json, save)",
+      "atlaslab/cli/main.py (investigate/query/report/list commands)",
+      "hypotheses/damped_oscillator.yaml (6 formulas, 4 predictions)",
+      "tests/test_math_engines.py (TestMonteCarloUncertainty: 11 tests)",
+      "tests/test_pipeline.py (TestDampedOscillator:10, TestODESolver:4, TestMonteCarlo:6, TestReportGenerator:10, TestCLI:7)"
+    ],
+    "files_modified": [
+      "atlaslab/engine/stages/simulation.py",
+      "atlaslab/math/numerical.py"
+    ]
+  }
+}
