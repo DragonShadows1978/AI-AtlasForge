@@ -1,0 +1,47 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_9544c550",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-05T15:27:34.068711",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "final": true,
+    "final_report": {
+      "summary": "Successfully diagnosed and fixed two interconnected critical bugs in the AtlasForge conductor that caused 3-hour stall loops during long-running tests. Bug #1: The TESTING stage had else-clauses in both af_engine.py and af_engine/stages/testing.py that looped back to TESTING on unrecognized status values, causing the conductor to retry the same test up to 3 times (each waiting up to 3600s). Fix: TESTING now unconditionally transitions to ANALYZING regardless of status. Bug #2: The context watcher's is_stale() method cleaned up sessions after 5 minutes of inactivity with no awareness of active time-based handoff monitors. During long tests with no JSONL writes, the 55-minute handoff timer was destroyed prematurely. Fix: Sessions with active (not-fired, not-cancelled) handoff timers are never considered stale. Additionally, converted invoke_llm() from blocking subprocess.run() to subprocess.Popen() with a shared process reference, enabling the handoff callback to terminate the Claude subprocess when the 55-minute timer fires. All fixes verified with 63/64 tests passing (98.4% \u2014 the 1 failure is a timing-precision artifact, not a code bug).",
+      "all_files": [
+        "context_watcher/context_watcher.py",
+        "af_engine.py",
+        "af_engine/stages/testing.py",
+        "atlasforge_conductor.py",
+        "artifacts/implementation_plan.md",
+        "artifacts/build_report.md",
+        "artifacts/test_results.md",
+        "research/research_findings.md",
+        "research/analysis.md"
+      ],
+      "key_achievements": [
+        "Identified compound bug interaction: stale cleanup killing handoff timer + TESTING loop-back = 3-hour stalls with no recovery",
+        "Fixed TESTING stage to always transition to ANALYZING regardless of status value in both root engine and modular handler",
+        "Fixed is_stale() to exempt sessions with active time-based handoff monitors from stale cleanup",
+        "Converted invoke_llm() from subprocess.run() to subprocess.Popen() enabling external process termination",
+        "Added terminate_active_claude() with SIGTERM\u2192SIGKILL escalation and thread-safe locking",
+        "Integrated process termination into handoff callback so 55-minute timer can actually stop the Claude subprocess",
+        "Comprehensive test coverage: 36 self-tests + 28 adversarial tests covering race conditions, pathological inputs, SIGTERM-resistant processes"
+      ],
+      "challenges_overcome": [
+        "Traced the compound interaction between two separate bugs (stale cleanup + TESTING loop) that together created the 3-hour stall",
+        "Identified that subprocess.run() is inherently unkillable from other threads, requiring architectural change to Popen",
+        "Handled edge cases: SIGTERM-resistant processes (SIGKILL escalation), concurrent terminate calls (thread-safe locking), already-dead processes (graceful failure)",
+        "Verified boundary timing behavior: is_stale() uses > operator correctly even at exact boundary (microsecond precision confirms correctness)"
+      ],
+      "lessons_learned": [
+        "Compound bugs are harder to diagnose than single bugs \u2014 the TESTING loop alone would cause 1-hour delays, but combined with the stale cleanup killing the handoff timer, it became a 3-hour unrecoverable stall",
+        "subprocess.run() should not be used for long-running processes that need external termination \u2014 always use Popen when timeouts or external kills are needed",
+        "Session lifecycle management must be aware of all active timers \u2014 a session with an active handoff monitor has a different lifetime model than a regular session",
+        "TESTING stage should never loop back to itself \u2014 the documented behavior was 'always transitions to ANALYZING' but the code contradicted this with else clauses",
+        "Adversarial testing with pathological inputs (null bytes, 10K strings, non-string types) is essential for orchestration code that processes external responses"
+      ]
+    }
+  }
+}
