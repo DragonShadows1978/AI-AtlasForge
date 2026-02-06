@@ -310,6 +310,18 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.7.0 (2026-02-06)
+- **Ground Rules Loader** - Provider-aware ground rules system with overlay support for Claude/Codex/investigation modes
+- **Enhanced Context Watcher** - Major overhaul with improved token tracking, time-based handoff, and Haiku-powered summaries
+- **Experiment Framework** - Expanded scientific experiment orchestration with multi-hypothesis testing
+- **Investigation Engine** - Enhanced multi-subagent investigation system with Codex provider support
+- **Dashboard Improvements** - New widgets system, improved chat interface, better WebSocket handling
+- **PromptFactory Enhancements** - Provider-aware caching, AfterImage integration with fallback paths
+- **Conductor Hardening** - Improved session management, singleton protocol, crash recovery
+- **Transcript Archival** - New integration for automatic transcript archival
+- **Research Agent** - Improved web researcher and knowledge synthesizer
+- 110 files changed, 3500+ lines added across the platform
+
 ### v1.6.9 (2026-02-02)
 - Fixed GlassBox visualization issues
 
@@ -317,12 +329,9 @@ See `requirements.txt` or `pyproject.toml` for full list.
 - Fixed zombie timer bug - stale session cleanup now stops timer threads
 - Fixed continuation prompt bug - cycle progression now updates problem_statement
 - Added conductor singleton with takeover protocol (prevents multiple instances)
-- Case-insensitive status matching in stage handlers
-- Defense-in-depth timer validation (zombie timer prevention)
 
 ### v1.6.7 (2026-02-01)
 - Fixed JSON response parsing bug in conductor (handles markdown code blocks)
-- StoryForge mission build improvements
 - ContextWatcher stability improvements
 
 ### v1.6.5 (2026-01-31)
