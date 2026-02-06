@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_c28b8945",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-06T17:10:35.044490",
+  "snapshot_number": 30,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Non-blocking backlog: full-file adversarial output still reports 27 broader hardening findings outside this mission\u2019s explicit closure scope.",
+      "Non-blocking reporting inconsistency: `blind_validation_phase6_manual.json` has `metrics.full_red_team_issues` and `metrics.target_red_team_issues` as null despite counts existing in adversarial artifacts."
+    ]
+  }
+}
