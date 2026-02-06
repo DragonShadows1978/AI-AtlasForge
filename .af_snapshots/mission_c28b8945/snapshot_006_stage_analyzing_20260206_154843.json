@@ -1,0 +1,18 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_c28b8945",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-06T15:48:43.318052",
+  "snapshot_number": 6,
+  "event_data": {
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
+    "issues_found": [
+      "Broad mutation adequacy is low for the monolithic module (`artifacts/mutation_phase6_strong.json`: score 0.50, 5 surviving mutants).",
+      "Adversarial/blind-validator full-file run timed out (`artifacts/adversarial_runner_phase6.json`: `red_team_error=ERROR: Timeout`).",
+      "Blind validation confidence is incomplete (`artifacts/blind_validation_phase6.json`: `overall_status=partial`, `spec_drift_detected=true`, `drift_severity=medium`).",
+      "Coverage gaps remain around surviving mutation locations (reported near lines 1627, 1786, 2103, 2337, 3491 in `tensor_gpu_v2.py`).",
+      "CPU-only safety/portability for CuPy-linked dtype/type paths is still flagged by validator recommendations."
+    ]
+  }
+}
