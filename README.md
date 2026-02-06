@@ -11,6 +11,7 @@ AI-AtlasForge is not a chatbot wrapper. It's an **autonomous research engine** t
 - Accumulates knowledge that persists across sessions
 - Self-corrects when drifting from objectives
 - Adversarially tests its own outputs
+- **Multi-provider**: Supports Claude and OpenAI Codex as LLM backends
 
 ## Quick Start
 
@@ -92,17 +93,16 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
-## What's New in v1.5.1
+## What's New in v1.7.0
 
-- **Improved Version Checker** - Smarter update detection that distinguishes between "behind" (update available), "ahead" (local customizations), and "diverged" (both). Users with custom local commits no longer get false "Update Required" warnings
-- **Bug Fixes** - Fixed duplicate log entries, WebSocket SSL reconnection issues
-
-## What's New in v1.5.0
-
-- **Modular Engine Architecture** - The R&D engine has been refactored into a plugin-based system with StageOrchestrator, stage handlers, and event-driven integrations
-- **Mission Queue System** - Queue multiple missions with auto-start capability. Missions automatically chain when one completes
-- **Cycle Budget Management** - Set how many improvement cycles a mission can run before completing
-- **17+ Integrations** - Event-driven handlers for analytics, git, recovery, knowledge base, and more
+- **OpenAI Codex Support** - Full multi-provider support: run missions and investigations with Claude or Codex as the LLM backend. Provider-aware ground rules, prompt templates, and transcript handling
+- **Ground Rules Loader** - Provider-aware ground rules system with overlay support for Claude/Codex/investigation modes
+- **Enhanced Context Watcher** - Major overhaul with improved token tracking, time-based handoff, and Haiku-powered summaries
+- **Experiment Framework** - Expanded scientific experiment orchestration with multi-hypothesis testing
+- **Investigation Engine** - Enhanced multi-subagent investigation system with provider selection
+- **Dashboard Improvements** - New widgets system, improved chat interface, better WebSocket handling
+- **Transcript Archival** - New integration for automatic transcript archival
+- 110 files changed, 3500+ lines added across the platform
 
 ## Architecture
 
@@ -311,10 +311,11 @@ See `requirements.txt` or `pyproject.toml` for full list.
 ## Recent Changes
 
 ### v1.7.0 (2026-02-06)
+- **OpenAI Codex Support** - Multi-provider LLM backend: run missions and investigations with Claude or Codex. Provider-aware ground rules, prompts, and transcript handling
 - **Ground Rules Loader** - Provider-aware ground rules system with overlay support for Claude/Codex/investigation modes
 - **Enhanced Context Watcher** - Major overhaul with improved token tracking, time-based handoff, and Haiku-powered summaries
 - **Experiment Framework** - Expanded scientific experiment orchestration with multi-hypothesis testing
-- **Investigation Engine** - Enhanced multi-subagent investigation system with Codex provider support
+- **Investigation Engine** - Enhanced multi-subagent investigation system with provider selection
 - **Dashboard Improvements** - New widgets system, improved chat interface, better WebSocket handling
 - **PromptFactory Enhancements** - Provider-aware caching, AfterImage integration with fallback paths
 - **Conductor Hardening** - Improved session management, singleton protocol, crash recovery
