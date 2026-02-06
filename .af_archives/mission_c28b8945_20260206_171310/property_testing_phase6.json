@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "total_violations": 0,
+  "violations": [],
+  "edge_case_generation": [
+    {
+      "device": "cpu",
+      "generated_integer_edge_cases": 24,
+      "matmul_cases_tested": 40
+    },
+    {
+      "device": "cuda",
+      "generated_integer_edge_cases": 24,
+      "matmul_cases_tested": 40
+    }
+  ]
+}
