@@ -1,0 +1,26 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_c28b8945",
+  "stage": "TESTING",
+  "timestamp": "2026-02-06T16:08:43.594605",
+  "snapshot_number": 10,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "Unhandled dtype parsing errors can crash execution (infer_dtype)",
+        "Object dtype accepted/propagated in numeric paths (infer_dtype/scatter_add)",
+        "unbroadcast lacks strict shape-compatibility checks (silent gradient corruption risk)",
+        "matmul_backward missing robust grad_out/shape prevalidation for malformed inputs",
+        "scatter_add allows broad index forms with weak bounds/validation controls",
+        "Full-file red-team run timed out (no complete fresh-agent result on monolithic file)"
+      ],
+      "property_violations": [],
+      "mutation_score": 0.85,
+      "spec_alignment": 1.0,
+      "epistemic_score": 0.36875,
+      "rigor_level": "insufficient"
+    }
+  }
+}
