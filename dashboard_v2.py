@@ -58,6 +58,7 @@ MISSION_PATH = STATE_DIR / "mission.json"
 PROPOSALS_PATH = STATE_DIR / "proposals.json"
 RECOMMENDATIONS_PATH = STATE_DIR / "recommendations.json"
 MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
+LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 
 # Ensure directories exist
@@ -163,16 +164,86 @@ def find_process(script_name: str) -> dict | None:
     return None
 
 
+def _normalize_provider(provider: str | None) -> str:
+    """Normalize provider identifier to supported values."""
+    if not provider:
+        return "claude"
+
+    normalized = str(provider).strip().lower()
+    if normalized in ("claude", "codex"):
+        return normalized
+    return "claude"
+
+
+def get_llm_provider() -> str:
+    """Get the persisted LLM provider selection."""
+    data = io_utils.atomic_read_json(LLM_PROVIDER_PATH, {})
+    provider = data.get("provider")
+    normalized = _normalize_provider(provider)
+
+    # Self-heal invalid persisted values to prevent repeated fallback ambiguity.
+    if provider != normalized:
+        set_llm_provider(normalized)
+
+    return normalized
+
+
+def set_llm_provider(provider: str) -> str:
+    """Persist the LLM provider selection and return normalized value."""
+    normalized = _normalize_provider(provider)
+    io_utils.atomic_write_json(LLM_PROVIDER_PATH, {
+        "provider": normalized,
+        "updated_at": datetime.now().isoformat()
+    })
+    return normalized
+
+
+def _resolve_chat_provider(msg: dict, fallback_provider: str) -> str:
+    """Resolve per-message provider with fallback to current provider."""
+    if not isinstance(msg, dict):
+        return fallback_provider
+    return _normalize_provider(msg.get("provider") or fallback_provider)
+
+
+def _resolve_chat_display_role(msg: dict, fallback_provider: str) -> str:
+    """
+    Resolve display role for chat activity.
+
+    Stored role remains `claude` for compatibility, but display role should
+    reflect the active provider (`codex`/`claude`).
+    """
+    role = str((msg or {}).get("role", "")).strip().lower()
+    if role == "claude":
+        provider = _resolve_chat_provider(msg, fallback_provider)
+        return "codex" if provider == "codex" else "claude"
+    return role or "unknown"
+
+
+def _serialize_chat_message(msg: dict, fallback_provider: str) -> dict:
+    """Serialize chat message with provider-aware display role metadata."""
+    role = str((msg or {}).get("role", "")).strip().lower() or "unknown"
+    provider = _resolve_chat_provider(msg, fallback_provider)
+    return {
+        "role": role,
+        "display_role": _resolve_chat_display_role(msg, fallback_provider),
+        "provider": provider,
+        "content": (msg or {}).get("content", ""),
+        "timestamp": (msg or {}).get("timestamp"),
+    }
+
+
 def get_claude_status() -> dict:
     """Get Claude autonomous status."""
     proc = find_process("atlasforge_conductor.py")
     state = io_utils.atomic_read_json(CLAUDE_STATE_PATH, {})
     mission = io_utils.atomic_read_json(MISSION_PATH, {})
+    provider = get_llm_provider()
 
     full_mission = mission.get("problem_statement", "No mission set")
     return {
         "running": proc is not None,
         "pid": proc["pid"] if proc else None,
+        "provider": provider,
         "mode": state.get("mode", "unknown"),
         "boot_count": state.get("boot_count", 0),
         "total_cycles": state.get("total_cycles", 0),
@@ -228,17 +299,22 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
 
     try:
         log_file = LOG_DIR / "atlasforge_conductor.log"
+        provider = get_llm_provider()
+        env = os.environ.copy()
+        env["ATLASFORGE_LLM_PROVIDER"] = provider
+
         subprocess.Popen(
             ["python3", str(script_path), f"--mode={mode}"],
             cwd=str(BASE_DIR),
             stdout=open(log_file, 'a'),
             stderr=subprocess.STDOUT,
-            start_new_session=True
+            start_new_session=True,
+            env=env
         )
         time.sleep(2)
 
         if find_process("atlasforge_conductor.py"):
-            return True, f"Started in {mode} mode"
+            return True, f"Started in {mode} mode ({provider})"
         return False, "Failed to start"
     except Exception as e:
         return False, str(e)
@@ -344,6 +420,8 @@ init_core_blueprint(
     stop_fn=stop_claude,
     send_msg_fn=send_message_to_claude,
     journal_fn=get_recent_journal,
+    get_provider_fn=get_llm_provider,
+    set_provider_fn=set_llm_provider,
     narrative_status_fn=None,
     narrative_start_fn=None,
     narrative_stop_fn=None,
@@ -777,7 +855,12 @@ def compress_response(response):
 def api_chat_history():
     """Get chat history for polling fallback when WebSocket is unavailable."""
     history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
-    return jsonify({'messages': history[-30:]})
+    fallback_provider = get_llm_provider()
+    messages = [
+        _serialize_chat_message(msg, fallback_provider)
+        for msg in history[-30:]
+    ]
+    return jsonify({'messages': messages})
 
 
 # =============================================================================
@@ -788,11 +871,13 @@ def api_chat_history():
 def handle_connect():
     global seen_messages
     history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
+    fallback_provider = get_llm_provider()
     for msg in history[-30:]:
-        if msg.get('role') == 'claude':
+        role = str(msg.get('role', '')).strip().lower()
+        if role in ('claude', 'codex'):
             msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
             seen_messages.add(msg_id)
-        emit('message', {'role': msg.get('role'), 'content': msg.get('content'), 'timestamp': msg.get('timestamp')})
+        emit('message', _serialize_chat_message(msg, fallback_provider))
 
 
 @socketio.on('send_message')
@@ -1416,7 +1501,8 @@ def watch_chat():
     try:
         history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
         for msg in history:
-            if msg.get('role') == 'claude':
+            role = str(msg.get('role', '')).strip().lower()
+            if role in ('claude', 'codex'):
                 msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
                 seen_messages.add(msg_id)
     except:
@@ -1425,17 +1511,15 @@ def watch_chat():
     while True:
         try:
             history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
+            fallback_provider = get_llm_provider()
 
             for msg in history[-10:]:
-                if msg.get('role') == 'claude':
+                role = str(msg.get('role', '')).strip().lower()
+                if role in ('claude', 'codex'):
                     msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
                     if msg_id not in seen_messages:
                         seen_messages.add(msg_id)
-                        socketio.emit('message', {
-                            'role': 'claude',
-                            'content': msg.get('content', ''),
-                            'timestamp': msg.get('timestamp')
-                        })
+                        socketio.emit('message', _serialize_chat_message(msg, fallback_provider))
 
             if len(seen_messages) > 500:
                 seen_messages = set(list(seen_messages)[-250:])

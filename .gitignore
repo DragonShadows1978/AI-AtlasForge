@@ -141,6 +141,10 @@ yarn.lock
 
 # ------ Investigations (personal data) ------
 investigations/
+!investigations/
+investigations/*
+!investigations/INV_GROUND_RULES.md
+!investigations/INV_GROUND_RULES_CODEX.md
 
 # ------ Predictive Drift (personal infrastructure) ------
 predictive_drift/

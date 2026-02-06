@@ -3,7 +3,7 @@
 Mission Continuity Tracker - AtlasForge Enhancement Feature 1.2
 
 Tracks concept fingerprints across multi-cycle missions to:
-1. Detect when Claude is "drifting off-mission"
+1. Detect when the active LLM is "drifting off-mission"
 2. Enable context healing when resuming missions
 3. Provide continuity metrics across cycles
 
@@ -174,7 +174,7 @@ class MissionContinuityTracker:
 
         Args:
             cycle_number: The cycle number just completed
-            cycle_output: All Claude output from this cycle
+            cycle_output: All LLM output from this cycle
             files_created: List of files created
             files_modified: List of files modified
             summary: Brief summary of cycle accomplishments
@@ -232,7 +232,7 @@ class MissionContinuityTracker:
         Check how well current output aligns with mission baseline.
 
         Args:
-            current_text: Current Claude output to analyze
+            current_text: Current LLM output to analyze
             source: Identifier for the current output
 
         Returns:
@@ -278,7 +278,7 @@ class MissionContinuityTracker:
         """
         Generate a healing prompt to restore mission alignment.
 
-        The prompt reminds Claude of key concepts that have drifted
+        The prompt reminds the active agent of key concepts that have drifted
         and suggests refocusing on the original mission intent.
         """
         # Find concepts that decreased (mission focus lost)

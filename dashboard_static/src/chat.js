@@ -74,25 +74,36 @@ export function initChatDownloadHandlers() {
  * @param {string} content - Message content
  * @param {string} timestamp - Optional timestamp
  */
-export function addMessage(role, content, timestamp = null) {
+export function addMessage(role, content, timestamp = null, metadata = null) {
     const container = document.getElementById('chat-messages');
     if (!container) return;
 
+    const normalizedRole = (role || '').toString().trim().toLowerCase();
+    const cssRole = normalizedRole === 'codex' ? 'claude' : normalizedRole;
+
     const div = document.createElement('div');
-    div.className = `message ${role}`;
+    div.className = `message ${cssRole}`;
 
     const time = timestamp
         ? new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
         : new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 
     let processedContent = content;
-    if (role === 'claude') {
+    if (normalizedRole === 'claude' || normalizedRole === 'codex') {
         processedContent = processMessageForDownloads(content);
     }
 
     div.dataset.rawContent = content;
 
-    div.innerHTML = `<button class="message-copy-btn" onclick="window.copyMessageText(this)">Copy</button><div class="message-meta">${role} - ${time}</div>${processedContent}`;
+    const meta = metadata || {};
+    const metaProvider = (meta.provider || '').toString().trim().toLowerCase();
+    const metaDisplayRole = (meta.display_role || meta.displayRole || '').toString().trim().toLowerCase();
+    const displayRole = (
+        metaDisplayRole ||
+        (normalizedRole === 'claude' && metaProvider === 'codex' ? 'codex' : normalizedRole)
+    ) || 'unknown';
+
+    div.innerHTML = `<button class="message-copy-btn" onclick="window.copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;

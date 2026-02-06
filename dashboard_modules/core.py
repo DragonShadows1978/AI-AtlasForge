@@ -53,6 +53,8 @@ start_claude = None
 stop_claude = None
 send_message_to_claude = None
 get_recent_journal = None
+get_llm_provider = None
+set_llm_provider = None
 
 # Narrative-specific functions
 get_narrative_status = None
@@ -71,6 +73,7 @@ def init_core_blueprint(
     mission_path, proposals_path, recommendations_path,
     io_utils_module,
     status_fn, start_fn, stop_fn, send_msg_fn, journal_fn,
+    get_provider_fn=None, set_provider_fn=None,
     narrative_status_fn=None, narrative_start_fn=None, narrative_stop_fn=None,
     narrative_send_msg_fn=None, narrative_chat_fn=None, narrative_mission_path=None,
     mission_queue_path=None
@@ -79,6 +82,7 @@ def init_core_blueprint(
     global BASE_DIR, STATE_DIR, WORKSPACE_DIR, MISSION_PATH, PROPOSALS_PATH, RECOMMENDATIONS_PATH
     global MISSION_LOGS_DIR, io_utils, MISSION_QUEUE_PATH
     global get_claude_status, start_claude, stop_claude, send_message_to_claude, get_recent_journal
+    global get_llm_provider, set_llm_provider
     global get_narrative_status, start_narrative, stop_narrative, send_message_to_narrative
     global get_narrative_chat_history, NARRATIVE_MISSION_PATH
 
@@ -96,6 +100,8 @@ def init_core_blueprint(
     stop_claude = stop_fn
     send_message_to_claude = send_msg_fn
     get_recent_journal = journal_fn
+    get_llm_provider = get_provider_fn
+    set_llm_provider = set_provider_fn
 
     # Narrative functions (optional)
     get_narrative_status = narrative_status_fn
@@ -192,6 +198,32 @@ def api_start(mode):
 def api_stop():
     success, message = stop_claude()
     return jsonify({"success": success, "message": message})
+
+
+@core_bp.route('/api/llm-provider', methods=['GET', 'POST'])
+def api_llm_provider():
+    """Get or set the active LLM provider for AtlasForge starts."""
+    if request.method == 'GET':
+        if get_llm_provider:
+            provider = get_llm_provider()
+        else:
+            provider = "claude"
+        return jsonify({"provider": provider, "supported": ["claude", "codex"]})
+
+    if not set_llm_provider:
+        return jsonify({"success": False, "message": "Provider configuration unavailable"}), 503
+
+    data = request.get_json(silent=True) or {}
+    provider = data.get("provider", "")
+    if not provider:
+        return jsonify({"success": False, "message": "Missing provider"}), 400
+
+    normalized = set_llm_provider(provider)
+    return jsonify({
+        "success": True,
+        "provider": normalized,
+        "message": f"Provider set to {normalized}"
+    })
 
 
 # =============================================================================
@@ -379,6 +411,7 @@ def api_mission():
         cycle_budget = int(data.get('cycle_budget', 1))
         metadata = data.get('metadata', {})
         user_project_name = data.get('project_name')  # Optional user-specified project name
+        active_provider = get_llm_provider() if get_llm_provider else "claude"
 
         if problem_statement:
             import uuid
@@ -427,6 +460,7 @@ def api_mission():
                 "mission_workspace": str(mission_workspace),
                 "mission_dir": str(mission_dir),
                 "project_name": resolved_project_name,
+                "llm_provider": active_provider,
                 "metadata": metadata
             }
             io_utils.atomic_write_json(MISSION_PATH, new_mission)
@@ -435,7 +469,8 @@ def api_mission():
                 "mission_id": mission_id,
                 "problem_statement": problem_statement,
                 "cycle_budget": max(1, cycle_budget),
-                "created_at": new_mission["created_at"]
+                "created_at": new_mission["created_at"],
+                "llm_provider": active_provider,
             }
             if resolved_project_name:
                 config_data["project_name"] = resolved_project_name
@@ -1005,6 +1040,7 @@ def api_set_mission_from_recommendation(rec_id):
         "mission_workspace": str(mission_workspace),
         "mission_dir": str(mission_dir),
         "project_name": resolved_project_name,
+        "llm_provider": get_llm_provider() if get_llm_provider else "claude",
         "source_recommendation_id": rec_id
     }
     io_utils.atomic_write_json(MISSION_PATH, new_mission)
@@ -1015,6 +1051,7 @@ def api_set_mission_from_recommendation(rec_id):
         "problem_statement": problem_statement,
         "cycle_budget": max(1, cycle_budget),
         "created_at": new_mission["created_at"],
+        "llm_provider": new_mission.get("llm_provider", "claude"),
         "source_recommendation_id": rec_id
     }
     if resolved_project_name:

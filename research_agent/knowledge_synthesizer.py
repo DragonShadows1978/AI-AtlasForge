@@ -24,7 +24,7 @@ from enum import Enum
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 from .web_researcher import WebResearchResult, SearchResult
 
 
@@ -228,7 +228,7 @@ Respond in JSON:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         timeout_seconds: int = 120
     ):
         """
@@ -295,7 +295,7 @@ Respond in JSON:
             findings=findings_text
         )
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             timeout=self.timeout_seconds
@@ -534,7 +534,7 @@ if __name__ == "__main__":
     )
 
     print("Synthesizing mock research results...")
-    synthesizer = KnowledgeSynthesizer(model=ModelType.CLAUDE_HAIKU)
+    synthesizer = KnowledgeSynthesizer(model=ModelType.FAST)
     result = synthesizer.synthesize_single(
         topic="mutation testing Python",
         research=mock_research,

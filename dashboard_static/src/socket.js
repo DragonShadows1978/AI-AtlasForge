@@ -290,7 +290,10 @@ function handleChatHistoryPoll(messages) {
         // Only add if not already seen
         if (!CONFIG.chat.seenMessages.has(msgId)) {
             CONFIG.chat.seenMessages.add(msgId);
-            window.addMessage(msg.role, msg.content, msg.timestamp);
+            window.addMessage(msg.role, msg.content, msg.timestamp, {
+                displayRole: msg.display_role,
+                provider: msg.provider
+            });
         }
     });
 
@@ -447,7 +450,10 @@ function initMainSocket() {
                 const msgId = `${data.timestamp || ''}:${(data.content || '').substring(0, 50)}`;
                 CONFIG.chat.seenMessages.add(msgId);
 
-                window.addMessage(data.role, data.content, data.timestamp);
+                window.addMessage(data.role, data.content, data.timestamp, {
+                    displayRole: data.display_role,
+                    provider: data.provider
+                });
             }
         });
     } catch (e) {

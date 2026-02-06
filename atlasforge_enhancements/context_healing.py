@@ -215,7 +215,7 @@ def generate_healing_prompt(
 
     Args:
         tracker: The mission continuity tracker
-        current_output: The current Claude output
+        current_output: The current LLM output
         original_mission: The original mission statement
         strategy_override: Optional strategy name to force
 

@@ -451,7 +451,7 @@ class PhaseExtractor:
         This is called when heuristic extraction fails.
         """
         try:
-            from experiment_framework import invoke_fresh_claude, ModelType
+            from experiment_framework import invoke_fresh_llm, ModelType
 
             prompt = f"""Analyze this mission specification and extract the distinct phases/stages.
 
@@ -470,9 +470,9 @@ List each phase in this format (JSON array):
 
 Only output the JSON array, no other text. If there are no clear phases, return an empty array []."""
 
-            response, _ = invoke_fresh_claude(
+            response, _ = invoke_fresh_llm(
                 prompt=prompt,
-                model=ModelType.CLAUDE_HAIKU,
+                model=ModelType.FAST,
                 timeout=30
             )
 

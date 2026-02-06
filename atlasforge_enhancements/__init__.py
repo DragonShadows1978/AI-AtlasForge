@@ -1,7 +1,7 @@
 """
 AtlasForge Enhancements Package
 
-Three features to help Claude Code explore and build more effectively:
+Three features to help AtlasForge agents explore and build more effectively:
 
 1. Cognitive Fingerprint Tracker - Mission continuity across cycles
 2. Exploration Memory Graph - Remember what was explored

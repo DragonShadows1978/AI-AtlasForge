@@ -255,6 +255,77 @@ export function collapseAllJournal() {
 // CONTROLS
 // =============================================================================
 
+function normalizeProvider(provider) {
+    const value = (provider || '').toString().trim().toLowerCase();
+    return value === 'codex' ? 'codex' : 'claude';
+}
+
+function getProviderSelectElements() {
+    const ids = ['llm-provider-select', 'investigation-llm-provider-select'];
+    return ids
+        .map((id) => document.getElementById(id))
+        .filter(Boolean);
+}
+
+export async function setLlmProvider(provider, showSuccessToast = true) {
+    const selectEls = getProviderSelectElements();
+    const normalized = normalizeProvider(provider);
+
+    try {
+        selectEls.forEach((selectEl) => {
+            selectEl.disabled = true;
+        });
+        const result = await api('/api/llm-provider', 'POST', { provider: normalized });
+        if (!result.success) {
+            showToast(result.message || 'Failed to set provider', 'error');
+            return;
+        }
+        if (showSuccessToast) {
+            showToast(result.message || `Provider set to ${result.provider}`, 'success');
+        }
+    } catch (e) {
+        console.error('Failed to set provider:', e);
+        showToast('Failed to set provider', 'error');
+    } finally {
+        selectEls.forEach((selectEl) => {
+            selectEl.disabled = false;
+        });
+    }
+
+    await refresh();
+}
+
+async function syncProviderControls(statusProvider) {
+    const selectEls = getProviderSelectElements();
+    if (selectEls.length === 0) return;
+
+    selectEls.forEach((selectEl) => {
+        if (!selectEl.dataset.wired) {
+            selectEl.dataset.wired = '1';
+            selectEl.addEventListener('change', async (event) => {
+                await setLlmProvider(event.target.value, true);
+            });
+        }
+    });
+
+    let provider = statusProvider;
+    if (!provider) {
+        try {
+            const providerData = await api('/api/llm-provider');
+            provider = providerData?.provider;
+        } catch (e) {
+            provider = 'claude';
+        }
+    }
+
+    const normalized = normalizeProvider(provider);
+    selectEls.forEach((selectEl) => {
+        if (selectEl.value !== normalized) {
+            selectEl.value = normalized;
+        }
+    });
+}
+
 export async function startClaude(mode) {
     // Get mission input text
     const missionInput = document.getElementById('mission-input');
@@ -546,6 +617,7 @@ export function updateStatusBar(data) {
     // stat-mode removed - only R&D mode exists
     setEl('stat-stage', data.rd_stage || '-');
     setEl('stat-project-name', data.project_name || '-');
+    setEl('stat-provider', normalizeProvider(data.provider));
     setEl('stat-iteration', data.rd_iteration);
     setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
     setEl('stat-cycles', data.total_cycles);
@@ -758,10 +830,13 @@ export async function refresh() {
         // stat-mode removed - only R&D mode exists
         setEl('stat-stage', data.rd_stage || '-');
         setEl('stat-project-name', data.project_name || '-');
+        setEl('stat-provider', normalizeProvider(data.provider));
         setEl('stat-iteration', data.rd_iteration);
         setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
         setEl('stat-cycles', data.total_cycles);
         setEl('stat-boots', data.boot_count);
+
+    await syncProviderControls(data.provider);
 
     fullMissionText = data.mission || 'No mission set';
     setFullMissionText(fullMissionText);

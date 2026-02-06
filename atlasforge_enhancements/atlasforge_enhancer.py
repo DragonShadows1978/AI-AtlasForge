@@ -38,6 +38,7 @@ Usage:
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from datetime import datetime
@@ -45,6 +46,33 @@ from typing import Dict, List, Optional, Tuple, Any
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+DEFAULT_LLM_PROVIDER = "claude"
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    """Normalize provider identifier to supported values."""
+    candidate = str(provider or "").strip().lower()
+    if candidate in SUPPORTED_LLM_PROVIDERS:
+        return candidate
+    return DEFAULT_LLM_PROVIDER
+
+
+def _detect_active_provider() -> str:
+    """Detect active provider from env first, then persisted state."""
+    env_provider = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    if env_provider:
+        return _normalize_provider(env_provider)
+
+    provider_path = Path(__file__).resolve().parent.parent / "state" / "llm_provider.json"
+    try:
+        with open(provider_path, "r") as f:
+            data = json.load(f)
+        return _normalize_provider(data.get("provider"))
+    except Exception:
+        return DEFAULT_LLM_PROVIDER
+
 
 try:
     from .mission_continuity_tracker import (
@@ -103,7 +131,8 @@ class AtlasForgeEnhancer:
     def __init__(
         self,
         mission_id: str,
-        storage_base: Optional[Path] = None
+        storage_base: Optional[Path] = None,
+        llm_provider: Optional[str] = None
     ):
         """
         Initialize the AtlasForge Enhancer.
@@ -111,6 +140,7 @@ class AtlasForgeEnhancer:
         Args:
             mission_id: Unique identifier for the current mission
             storage_base: Base path for storing data (default: ./atlasforge_data/)
+            llm_provider: Active LLM provider (claude/codex); auto-detected if None
 
         Raises:
             ValueError: If mission_id is empty or invalid
@@ -122,6 +152,7 @@ class AtlasForgeEnhancer:
             raise ValueError("mission_id must be 256 characters or less")
 
         self.mission_id = mission_id.strip()
+        self.llm_provider = _normalize_provider(llm_provider) if llm_provider else _detect_active_provider()
 
         # Thread safety
         self._lock = threading.RLock()
@@ -148,6 +179,14 @@ class AtlasForgeEnhancer:
         self.current_cycle = 1
         self.last_scaffold_app_id: Optional[str] = None
         self._initialized = True
+
+    def set_llm_provider(self, provider: str):
+        """Update active LLM provider for this enhancer instance."""
+        self.llm_provider = _normalize_provider(provider)
+
+    def get_llm_provider(self) -> str:
+        """Get active LLM provider for this enhancer instance."""
+        return self.llm_provider
 
     def _initialize_components(self):
         """Initialize all sub-components with error handling."""
@@ -234,7 +273,7 @@ class AtlasForgeEnhancer:
         Check how well current output aligns with the original mission.
 
         Args:
-            current_output: Current Claude output to analyze
+            current_output: Current LLM output to analyze
             source: Identifier for the output
 
         Returns:
@@ -294,7 +333,7 @@ class AtlasForgeEnhancer:
 
         Args:
             cycle_number: The cycle number just completed
-            cycle_output: All Claude output from this cycle
+            cycle_output: All LLM output from this cycle
             files_created: Files created in this cycle
             files_modified: Files modified in this cycle
             summary: Brief summary of accomplishments
@@ -697,6 +736,7 @@ class AtlasForgeEnhancer:
         report = {
             'cycle': cycle_number,
             'mission_id': self.mission_id,
+            'llm_provider': self.llm_provider,
             'processed_at': datetime.now().isoformat()
         }
 
@@ -716,7 +756,10 @@ class AtlasForgeEnhancer:
         report['exploration'] = exploration
 
         # 3. Check for drift
-        continuity = self.check_continuity(cycle_output, f"cycle_{cycle_number}")
+        continuity = self.check_continuity(
+            cycle_output,
+            f"{self.llm_provider}_cycle_{cycle_number}"
+        )
         report['drift'] = {
             'similarity': continuity.overall_similarity,
             'severity': continuity.drift_severity,
@@ -777,6 +820,7 @@ class AtlasForgeEnhancer:
         """Get comprehensive status across all features."""
         status = {
             'mission_id': self.mission_id,
+            'llm_provider': self.llm_provider,
             'current_cycle': self.current_cycle,
             'continuity': {
                 'checkpoints': len(self.continuity_tracker.checkpoints),

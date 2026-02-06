@@ -65,6 +65,7 @@ if USE_MODULAR_ENGINE:
         af_engine_root = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(af_engine_root)
         archive_mission_transcripts = af_engine_root.archive_mission_transcripts
+        ingest_afterimage_from_archive = af_engine_root.ingest_afterimage_from_archive
         rearchive_mission = af_engine_root.rearchive_mission
         rearchive_all_missions = af_engine_root.rearchive_all_missions
     except ImportError as e:
@@ -90,6 +91,15 @@ if not USE_MODULAR_ENGINE:
         rearchive_mission,
         rearchive_all_missions,
     )
+    # Keep AfterImage transcript ingestion available even in legacy fallback.
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("af_engine_root", parent_dir / "af_engine.py")
+        af_engine_root = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(af_engine_root)
+        ingest_afterimage_from_archive = af_engine_root.ingest_afterimage_from_archive
+    except Exception:
+        ingest_afterimage_from_archive = None
 
 
 # Re-export common functionality regardless of which engine is used
@@ -128,12 +138,14 @@ if USE_MODULAR_ENGINE:
         'CycleManager',
         'PromptFactory',
         'archive_mission_transcripts',
+        'ingest_afterimage_from_archive',
         'rearchive_mission',
         'rearchive_all_missions',
     ])
 else:
     __all__.extend([
         'archive_mission_transcripts',
+        'ingest_afterimage_from_archive',
         'rearchive_mission',
         'rearchive_all_missions',
     ])

@@ -213,8 +213,9 @@ except ImportError:
 # Paths - Import from centralized config
 from atlasforge_config import (
     BASE_DIR, STATE_DIR, WORKSPACE_DIR, ARTIFACTS_DIR, RESEARCH_DIR,
-    MISSION_PATH, GROUND_RULES_PATH, get_transcript_dir
+    MISSION_PATH, get_transcript_dir
 )
+from ground_rules_loader import load_ground_rules, get_active_llm_provider
 
 # Auto-advance signaling (file-based IPC)
 AUTO_ADVANCE_SIGNAL_PATH = STATE_DIR / "auto_advance_signal.json"
@@ -1340,16 +1341,24 @@ class RDMissionController:
             for h in recent:
                 history_str += f"[{h.get('stage')}] {h.get('entry', '')[:100]}\n"
 
-        # Load ground rules
+        # Load provider-aware ground rules (base + optional overlay).
+        provider = get_active_llm_provider()
         ground_rules = ""
-        if GROUND_RULES_PATH.exists():
-            try:
-                ground_rules = GROUND_RULES_PATH.read_text()
-            except Exception as e:
-                logger.warning(f"Failed to read ground rules: {e}")
+        try:
+            ground_rules, base_path, overlay_path, _ = load_ground_rules(provider=provider)
+            if not ground_rules:
+                logger.warning(f"No ground rules found (base path: {base_path})")
+            elif overlay_path:
+                logger.info(
+                    f"Loaded ground rules for provider '{provider}' "
+                    f"with overlay {overlay_path.name}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to read ground rules: {e}")
 
         # Base prompt
-        prompt_content = f"""You are Claude, operating as an Autonomous R&D Engineer.
+        agent_name = "Codex" if provider == "codex" else "Claude"
+        prompt_content = f"""You are {agent_name}, operating as an Autonomous R&D Engineer.
 
 === GROUND RULES (READ CAREFULLY) ===
 {ground_rules}

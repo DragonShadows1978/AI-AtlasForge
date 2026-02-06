@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Experiment Framework for Claude Autonomous
+Experiment Framework for AtlasForge autonomous evaluations.
 
 This module provides infrastructure for running controlled experiments
-with fresh Claude instances, collecting results, and comparing outcomes.
+with fresh LLM instances, collecting results, and comparing outcomes.
 
 Key capabilities:
-1. Spawn fresh Claude instances with controlled prompts
+1. Spawn fresh LLM instances with controlled prompts
 2. Run experiments with multiple conditions
 3. Collect and store results in structured format
 4. Compare results across experiments and models
@@ -31,10 +31,58 @@ import hashlib
 from atlasforge_config import BASE_DIR
 EXPERIMENTS_DIR = BASE_DIR / "experiments"
 RESULTS_DIR = EXPERIMENTS_DIR / "results"
+LLM_PROVIDER_PATH = BASE_DIR / "state" / "llm_provider.json"
 
 # Ensure directories exist
 EXPERIMENTS_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
+
+
+# Provider routing for shared Claude/Codex dashboard toggle
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+DEFAULT_LLM_PROVIDER = "claude"
+
+
+def _env_flag_enabled(name: str, default: bool = False) -> bool:
+    """Parse a boolean env flag with tolerant true/false values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _codex_web_search_enabled() -> bool:
+    """Enable Codex web search by default; allow opt-out via env."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=True)
+
+
+def _codex_autonomous_enabled() -> bool:
+    """Run Codex with no approval/sandbox prompts by default."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    """Normalize provider identifier to supported values."""
+    if not provider:
+        return DEFAULT_LLM_PROVIDER
+    normalized = str(provider).strip().lower()
+    if normalized in SUPPORTED_LLM_PROVIDERS:
+        return normalized
+    return DEFAULT_LLM_PROVIDER
+
+
+def _get_active_llm_provider() -> str:
+    """Get provider from env first, then dashboard state file."""
+    env_provider = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    if env_provider:
+        return _normalize_provider(env_provider)
+
+    try:
+        with open(LLM_PROVIDER_PATH, 'r') as f:
+            data = json.load(f)
+        return _normalize_provider(data.get("provider"))
+    except Exception:
+        return DEFAULT_LLM_PROVIDER
 
 
 # ============================================================================
@@ -42,11 +90,75 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # ============================================================================
 
 class ModelType(Enum):
-    """Available model types for experiments."""
+    """Available model tiers and provider-specific model identifiers."""
+    FAST = "fast"
+    BALANCED = "balanced"
+    POWERFUL = "powerful"
+    MINI_MIND = "llama3.1:8b"  # Local Ollama model
+
+    # Backward-compatible legacy identifiers.
+    CLAUDE_HAIKU = "haiku"
     CLAUDE_SONNET = "sonnet"
     CLAUDE_OPUS = "opus"
-    CLAUDE_HAIKU = "haiku"
-    MINI_MIND = "llama3.1:8b"  # Local Ollama model
+
+
+_MODEL_STRING_MAP = {
+    "fast": ModelType.FAST,
+    "balanced": ModelType.BALANCED,
+    "powerful": ModelType.POWERFUL,
+    "haiku": ModelType.CLAUDE_HAIKU,
+    "sonnet": ModelType.CLAUDE_SONNET,
+    "opus": ModelType.CLAUDE_OPUS,
+    "mini_mind": ModelType.MINI_MIND,
+    "llama3.1:8b": ModelType.MINI_MIND,
+}
+
+
+def _coerce_model_type(model: Any) -> ModelType:
+    """Coerce free-form model values into ModelType with sensible fallback."""
+    if isinstance(model, ModelType):
+        return model
+    if isinstance(model, str):
+        return _MODEL_STRING_MAP.get(model.strip().lower(), ModelType.BALANCED)
+    return ModelType.BALANCED
+
+
+def _resolve_model_for_provider(model: ModelType, provider: str) -> Optional[str]:
+    """
+    Resolve a provider-specific model identifier from a model tier/type.
+
+    Returns:
+        Provider model string or None to use provider default.
+    """
+    model = _coerce_model_type(model)
+
+    if provider == "claude":
+        claude_map = {
+            ModelType.FAST: "haiku",
+            ModelType.BALANCED: "sonnet",
+            ModelType.POWERFUL: "opus",
+            ModelType.CLAUDE_HAIKU: "haiku",
+            ModelType.CLAUDE_SONNET: "sonnet",
+            ModelType.CLAUDE_OPUS: "opus",
+        }
+        return claude_map.get(model, "sonnet")
+
+    if provider == "codex":
+        # Global override is handled first.
+        codex_override = os.environ.get("ATLASFORGE_CODEX_MODEL", "").strip()
+        if codex_override:
+            return codex_override
+
+        # Optional per-tier overrides.
+        codex_tier_map = {
+            ModelType.FAST: os.environ.get("ATLASFORGE_CODEX_MODEL_FAST", "").strip(),
+            ModelType.BALANCED: os.environ.get("ATLASFORGE_CODEX_MODEL_BALANCED", "").strip(),
+            ModelType.POWERFUL: os.environ.get("ATLASFORGE_CODEX_MODEL_POWERFUL", "").strip(),
+        }
+        resolved = codex_tier_map.get(model, "")
+        return resolved or None
+
+    return None
 
 
 @dataclass
@@ -118,15 +230,15 @@ class ExperimentResults:
 # INSTANCE SPAWNING
 # ============================================================================
 
-def invoke_fresh_claude(
+def invoke_fresh_llm(
     prompt: str,
-    model: ModelType = ModelType.CLAUDE_SONNET,
+    model: ModelType = ModelType.BALANCED,
     system_prompt: Optional[str] = None,
     timeout: int = 120,
     cwd: Optional[Path] = None
 ) -> tuple[str, float]:
     """
-    Invoke a fresh Claude instance with no prior context.
+    Invoke a fresh LLM instance with no prior context.
 
     Args:
         prompt: The prompt to send
@@ -141,22 +253,48 @@ def invoke_fresh_claude(
     if cwd is None:
         cwd = BASE_DIR
 
+    model = _coerce_model_type(model)
     start_time = time.time()
 
     if model == ModelType.MINI_MIND:
         # Use ollama for local model
         response = _invoke_ollama(prompt, model.value, timeout)
     else:
-        # Use claude CLI for Claude models
-        response = _invoke_claude_cli(prompt, model.value, system_prompt, timeout, cwd)
+        provider = _get_active_llm_provider()
+        resolved_model = _resolve_model_for_provider(model, provider)
+        if provider == "codex":
+            response = _invoke_codex_cli(prompt, resolved_model, system_prompt, timeout, cwd)
+        else:
+            response = _invoke_claude_cli(prompt, resolved_model, system_prompt, timeout, cwd)
 
     elapsed_ms = (time.time() - start_time) * 1000
     return response, elapsed_ms
 
 
+def invoke_fresh_claude(
+    prompt: str,
+    model: ModelType = ModelType.CLAUDE_SONNET,
+    system_prompt: Optional[str] = None,
+    timeout: int = 120,
+    cwd: Optional[Path] = None
+) -> tuple[str, float]:
+    """
+    Backward-compatible wrapper for legacy callers.
+
+    Use invoke_fresh_llm for new call sites.
+    """
+    return invoke_fresh_llm(
+        prompt=prompt,
+        model=model,
+        system_prompt=system_prompt,
+        timeout=timeout,
+        cwd=cwd,
+    )
+
+
 def _invoke_claude_cli(
     prompt: str,
-    model: str,
+    model: Optional[str],
     system_prompt: Optional[str],
     timeout: int,
     cwd: Path
@@ -174,6 +312,64 @@ def _invoke_claude_cli(
         result = subprocess.run(
             cmd,
             input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(cwd),
+            start_new_session=True  # Prevent FD inheritance blocking from background processes
+        )
+
+        if result.returncode == 0:
+            return result.stdout.strip()
+        else:
+            return f"ERROR: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "ERROR: Timeout"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def _invoke_codex_cli(
+    prompt: str,
+    model: Optional[str],
+    system_prompt: Optional[str],
+    timeout: int,
+    cwd: Path
+) -> str:
+    """Invoke Codex via CLI."""
+    cmd = ["codex"]
+    if _codex_web_search_enabled():
+        # `--search` is a top-level Codex flag and must come before `exec`.
+        cmd.append("--search")
+    cmd.extend([
+        "exec",
+        "--color", "never",
+    ])
+    if _codex_autonomous_enabled():
+        cmd.append("--dangerously-bypass-approvals-and-sandbox")
+
+    # Prefer explicit model argument, then global env override.
+    codex_model = (model or "").strip()
+    if not codex_model:
+        codex_model = os.environ.get("ATLASFORGE_CODEX_MODEL", "").strip()
+    if codex_model:
+        cmd.extend(["--model", codex_model])
+    cmd.append("-")
+
+    full_prompt = prompt
+    if system_prompt:
+        # Codex CLI doesn't expose a direct system-prompt flag in this flow.
+        full_prompt = (
+            "System instructions:\n"
+            f"{system_prompt}\n\n"
+            "User task:\n"
+            f"{prompt}"
+        )
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=full_prompt,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -274,7 +470,7 @@ class Experiment:
                     progress_callback(f"Running trial {trial_num}/{total_trials}: {condition}")
 
                 prompt = prompt_gen()
-                response, response_time = invoke_fresh_claude(
+                response, response_time = invoke_fresh_llm(
                     prompt=prompt,
                     model=self.config.model,
                     system_prompt=self.config.system_prompt,
@@ -347,7 +543,7 @@ def load_experiment_results(filepath: Path) -> ExperimentResults:
         name=data["config"]["name"],
         description=data["config"]["description"],
         conditions=data["config"]["conditions"],
-        model=ModelType(data["config"]["model"]),
+        model=_coerce_model_type(data["config"]["model"]),
         timeout_seconds=data["config"].get("timeout_seconds", 120),
         trials_per_condition=data["config"].get("trials_per_condition", 1),
         system_prompt=data["config"].get("system_prompt"),
@@ -401,7 +597,7 @@ def compare_experiments(results_list: List[ExperimentResults]) -> Dict[str, Any]
 def create_accuracy_test_experiment(
     name: str,
     test_cases: List[Dict[str, Any]],
-    model: ModelType = ModelType.CLAUDE_SONNET,
+    model: ModelType = ModelType.BALANCED,
     description: str = ""
 ) -> Experiment:
     """
@@ -532,7 +728,7 @@ if __name__ == "__main__":
         name="framework_self_test",
         description="Test that the experiment framework works",
         conditions=["simple_test"],
-        model=ModelType.CLAUDE_HAIKU,  # Use haiku for fast test
+        model=ModelType.FAST,  # Fast tier for quick self-test
         timeout_seconds=30,
         trials_per_condition=1
     )

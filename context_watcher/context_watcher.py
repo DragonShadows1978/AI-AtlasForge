@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any, Set
+from typing import Callable, Dict, List, Optional, Any, Set, Tuple
 import uuid
 
 # Try to import watchdog for efficient file monitoring
@@ -67,8 +67,13 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# Claude projects directory
+# Transcript source directories
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
+
+# Provider configuration
+DEFAULT_LLM_PROVIDER = "claude"
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
 
 # Token thresholds
 GRACEFUL_THRESHOLD = 130_000  # Trigger HANDOFF.md generation
@@ -97,6 +102,51 @@ TIME_BASED_HANDOFF_ENABLED = os.environ.get(
 TIME_BASED_HANDOFF_MINUTES = int(os.environ.get(
     "TIME_BASED_HANDOFF_MINUTES", "55"
 ))
+
+# Codex scanning
+CODEX_SCAN_INTERVAL_SECONDS = 10.0
+CODEX_MAX_CANDIDATE_FILES = 500
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    """Normalize provider name and fall back to default on unknown values."""
+    candidate = str(provider or "").strip().lower()
+    if candidate in SUPPORTED_LLM_PROVIDERS:
+        return candidate
+    return DEFAULT_LLM_PROVIDER
+
+
+def _load_provider_from_state() -> Optional[str]:
+    """Load persisted provider from state/llm_provider.json if available."""
+    state_path = Path(__file__).resolve().parent.parent / "state" / "llm_provider.json"
+    if not state_path.exists():
+        return None
+
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    return data.get("provider")
+
+
+def get_active_provider(provider: Optional[str] = None) -> str:
+    """Resolve runtime provider with precedence: explicit -> env -> state -> default."""
+    if provider:
+        return _normalize_provider(provider)
+
+    env_provider = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    if env_provider:
+        return _normalize_provider(env_provider)
+
+    state_provider = _load_provider_from_state()
+    if state_provider:
+        return _normalize_provider(state_provider)
+
+    return DEFAULT_LLM_PROVIDER
 
 
 # =============================================================================
@@ -484,43 +534,103 @@ def is_p_mode_session(jsonl_path: Path) -> bool:
         return False
 
 
-def find_transcript_dir(workspace_path: str) -> Optional[Path]:
+def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) -> bool:
+    """Return True when candidate workspace refers to the same or child workspace."""
+    expected = (expected_workspace or "").strip()
+    candidate = (candidate_workspace or "").strip()
+    if not expected or not candidate:
+        return False
+
+    try:
+        expected_path = Path(expected).expanduser().resolve()
+        candidate_path = Path(candidate).expanduser().resolve()
+        return (
+            candidate_path == expected_path
+            or expected_path in candidate_path.parents
+            or candidate_path in expected_path.parents
+        )
+    except OSError:
+        return (
+            candidate == expected
+            or candidate.startswith(expected + os.sep)
+            or expected.startswith(candidate + os.sep)
+        )
+
+
+def _is_codex_file_for_workspace(jsonl_path: Path, workspace_path: str) -> bool:
     """
-    Find the Claude transcript directory for a workspace.
+    Return True if a Codex session file belongs to a workspace.
 
-    Claude stores transcripts in ~/.claude/projects/-{path-with-dashes}
-    where slashes become dashes.
-
-    Args:
-        workspace_path: Absolute path to the mission workspace
-
-    Returns:
-        Path to transcript directory, or None if not found
+    Codex stores workspace metadata in a session_meta event:
+      {"type":"session_meta","payload":{"cwd":"..."}}
     """
-    # Convert workspace path to Claude's format
-    # /home/vader/AI-AtlasForge/workspace/StenoAI
-    # -> -home-vader-AI-AtlasForge-workspace-StenoAI
-    escaped = workspace_path.replace('/', '-')
-    if escaped.startswith('-'):
-        escaped = escaped[1:]  # Remove leading dash
+    try:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for idx, line in enumerate(f):
+                if idx > 40:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if not isinstance(record, dict):
+                    continue
+
+                if record.get("type") != "session_meta":
+                    continue
+
+                payload = record.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+
+                cwd = payload.get("cwd")
+                return _workspace_paths_match(workspace_path, cwd)
+    except (IOError, OSError, UnicodeDecodeError):
+        return False
+
+    return False
+
+
+def find_transcript_dir(workspace_path: str, provider: Optional[str] = None) -> Optional[Path]:
+    """
+    Find transcript storage for the active provider and workspace.
+
+    For Claude, this resolves to a workspace-specific directory under
+    ~/.claude/projects/.
+    For Codex, this resolves to ~/.codex/sessions (file-level filtering
+    is done by SessionMonitor based on session_meta.cwd).
+    """
+    active_provider = get_active_provider(provider)
+
+    if active_provider == "codex":
+        if CODEX_SESSIONS_DIR.exists():
+            logger.debug(f"Using Codex sessions dir: {CODEX_SESSIONS_DIR}")
+            return CODEX_SESSIONS_DIR
+        logger.warning(f"Codex sessions directory not found: {CODEX_SESSIONS_DIR}")
+        return None
+
+    # Claude transcript directory resolution
+    escaped = workspace_path.replace("/", "-")
+    if escaped.startswith("-"):
+        escaped = escaped[1:]
 
     transcript_dir = CLAUDE_PROJECTS_DIR / f"-{escaped}"
-
     if transcript_dir.exists():
-        logger.debug(f"Found transcript dir: {transcript_dir}")
+        logger.debug(f"Found Claude transcript dir: {transcript_dir}")
         return transcript_dir
 
-    # Fallback: search for partial match
     if CLAUDE_PROJECTS_DIR.exists():
-        # Extract workspace name for partial match
         workspace_name = Path(workspace_path).name
-
         for d in CLAUDE_PROJECTS_DIR.iterdir():
             if d.is_dir() and workspace_name in d.name:
-                logger.debug(f"Found transcript dir via partial match: {d}")
+                logger.debug(f"Found Claude transcript dir via partial match: {d}")
                 return d
 
-    logger.warning(f"No transcript directory found for: {workspace_path}")
+    logger.warning(f"No Claude transcript directory found for: {workspace_path}")
     return None
 
 
@@ -541,7 +651,8 @@ class SessionMonitor:
         session_id: str,
         workspace_path: str,
         callback: Callable[[HandoffSignal], None],
-        enable_time_handoff: bool = True
+        enable_time_handoff: bool = True,
+        provider: Optional[str] = None
     ):
         """
         Initialize session monitor.
@@ -555,9 +666,10 @@ class SessionMonitor:
         self.session_id = session_id
         self.workspace_path = workspace_path
         self.callback = callback
+        self.provider = get_active_provider(provider)
 
         # Find transcript directory
-        self.transcript_dir = find_transcript_dir(workspace_path)
+        self.transcript_dir = find_transcript_dir(workspace_path, provider=self.provider)
 
         # File tracking
         self.current_jsonl: Optional[Path] = None
@@ -568,6 +680,9 @@ class SessionMonitor:
         self.last_tokens: Optional[TokenState] = None
         self.peak_tokens = 0
         self.seen_request_ids: Set[str] = set()
+        self._codex_file_match_cache: Dict[str, Tuple[float, int, bool]] = {}
+        self._codex_candidates: List[Path] = []
+        self._codex_last_scan: float = 0.0
 
         # Handoff state
         self.handoff_triggered = False
@@ -584,25 +699,74 @@ class SessionMonitor:
 
         self._lock = threading.Lock()
 
+    def _is_codex_candidate(self, jsonl_path: Path) -> bool:
+        """Return True if a Codex session file belongs to this workspace."""
+        try:
+            stat = jsonl_path.stat()
+        except OSError:
+            return False
+
+        cache_key = str(jsonl_path)
+        cache_value = self._codex_file_match_cache.get(cache_key)
+        if cache_value and cache_value[0] == stat.st_mtime and cache_value[1] == stat.st_size:
+            return cache_value[2]
+
+        matches = _is_codex_file_for_workspace(jsonl_path, self.workspace_path)
+        self._codex_file_match_cache[cache_key] = (stat.st_mtime, stat.st_size, matches)
+        return matches
+
+    def _refresh_codex_candidates(self):
+        """Refresh matching Codex session file candidates for the workspace."""
+        if not self.transcript_dir or not self.transcript_dir.exists():
+            self._codex_candidates = []
+            return
+
+        now = time.time()
+        if (now - self._codex_last_scan) < CODEX_SCAN_INTERVAL_SECONDS and self._codex_candidates:
+            return
+
+        self._codex_last_scan = now
+
+        try:
+            all_files = sorted(
+                self.transcript_dir.rglob("*.jsonl"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+        except OSError:
+            all_files = []
+
+        candidates: List[Path] = []
+        for jsonl_path in all_files[:CODEX_MAX_CANDIDATE_FILES]:
+            if self._is_codex_candidate(jsonl_path):
+                candidates.append(jsonl_path)
+                if len(candidates) >= 20:
+                    break
+
+        self._codex_candidates = candidates
+
     def _find_active_jsonl(self) -> Optional[Path]:
         """Find the most recently modified JSONL file."""
         if not self.transcript_dir or not self.transcript_dir.exists():
             return None
 
+        if self.provider == "codex":
+            self._refresh_codex_candidates()
+            if not self._codex_candidates:
+                return None
+            try:
+                return max(self._codex_candidates, key=lambda p: p.stat().st_mtime)
+            except OSError:
+                return None
+
         jsonl_files = list(self.transcript_dir.glob("*.jsonl"))
         if not jsonl_files:
             return None
 
-        # Filter to -p mode sessions only
-        valid_files = []
-        for f in jsonl_files:
-            if is_p_mode_session(f):
-                valid_files.append(f)
-
+        valid_files = [f for f in jsonl_files if is_p_mode_session(f)]
         if not valid_files:
             return None
 
-        # Return most recently modified
         return max(valid_files, key=lambda p: p.stat().st_mtime)
 
     def _read_new_entries(self) -> List[Dict[str, Any]]:
@@ -687,23 +851,51 @@ class SessionMonitor:
         if not isinstance(record, dict):
             return None
 
-        # Only process assistant responses
-        if record.get('type') != 'assistant':
-            return None
+        usage: Optional[Dict[str, Any]] = None
+        request_id: Optional[str] = None
 
-        message = record.get('message', {})
+        if self.provider == "codex":
+            if record.get("type") != "event_msg":
+                return None
 
-        # Handle case where message is not a dict (malformed entry)
-        if not isinstance(message, dict):
-            return None
+            payload = record.get("payload", {})
+            if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                return None
 
-        usage = message.get('usage', {})
+            info = payload.get("info", {})
+            if not isinstance(info, dict):
+                return None
 
-        # Handle case where usage is not a dict
-        if not isinstance(usage, dict):
-            return None
+            last_usage = info.get("last_token_usage", {})
+            total_usage = info.get("total_token_usage", {})
+            if not isinstance(last_usage, dict):
+                return None
+            if not isinstance(total_usage, dict):
+                total_usage = {}
 
-        request_id = record.get('requestId')
+            usage = {
+                "input_tokens": last_usage.get("input_tokens", 0),
+                "output_tokens": last_usage.get("output_tokens", 0),
+                "cache_read_input_tokens": last_usage.get("cached_input_tokens", 0),
+                "cache_creation_input_tokens": 0,
+            }
+            request_id = (
+                f"token_count:{total_usage.get('total_tokens', 0)}:"
+                f"{last_usage.get('input_tokens', 0)}:{last_usage.get('output_tokens', 0)}"
+            )
+        else:
+            if record.get('type') != 'assistant':
+                return None
+
+            message = record.get('message', {})
+            if not isinstance(message, dict):
+                return None
+
+            usage = message.get('usage', {})
+            if not isinstance(usage, dict):
+                return None
+
+            request_id = record.get('requestId')
 
         if not usage:
             return None
@@ -742,6 +934,11 @@ class SessionMonitor:
         # Update peak
         if total > self.peak_tokens:
             self.peak_tokens = total
+
+        # Codex transcripts do not expose Claude cache-creation/cache-read
+        # signals. Keep token tracking for stats and rely on time-based handoff.
+        if self.provider != "claude":
+            return None
 
         # Early failure detection (startup issue, not exhaustion)
         if total < EARLY_FAILURE_THRESHOLD and cache_read == 0 and cache_creation == 0:
@@ -837,6 +1034,7 @@ class SessionMonitor:
         stats = {
             "session_id": self.session_id,
             "workspace_path": self.workspace_path,
+            "provider": self.provider,
             "transcript_dir": str(self.transcript_dir) if self.transcript_dir else None,
             "current_jsonl": str(self.current_jsonl) if self.current_jsonl else None,
             "peak_tokens": self.peak_tokens,
@@ -995,11 +1193,13 @@ class ContextWatcher:
         with self._lock:
             # Generate session ID
             session_id = str(uuid.uuid4())[:8]
+            active_provider = get_active_provider()
 
             # Create session monitor with time-based handoff option
             monitor = SessionMonitor(
                 session_id, workspace_path, callback,
-                enable_time_handoff=enable_time_handoff
+                enable_time_handoff=enable_time_handoff,
+                provider=active_provider
             )
 
             if not monitor.transcript_dir:
@@ -1293,6 +1493,7 @@ class ContextWatcher:
 
             return {
                 "enabled": CONTEXT_WATCHER_ENABLED,
+                "active_provider": get_active_provider(),
                 "running": self._running,
                 "using_watchdog": HAS_WATCHDOG,
                 "active_sessions": len(self._sessions),
@@ -1463,9 +1664,12 @@ if __name__ == "__main__":
 
     print(f"\nConfiguration:")
     print(f"  Enabled: {CONTEXT_WATCHER_ENABLED}")
+    print(f"  Active provider: {get_active_provider()}")
     print(f"  Watchdog available: {HAS_WATCHDOG}")
     print(f"  Claude projects dir: {CLAUDE_PROJECTS_DIR}")
     print(f"  Projects dir exists: {CLAUDE_PROJECTS_DIR.exists()}")
+    print(f"  Codex sessions dir: {CODEX_SESSIONS_DIR}")
+    print(f"  Codex dir exists: {CODEX_SESSIONS_DIR.exists()}")
     print(f"  Graceful threshold: {GRACEFUL_THRESHOLD:,}")
     print(f"  Emergency threshold: {EMERGENCY_THRESHOLD:,}")
 

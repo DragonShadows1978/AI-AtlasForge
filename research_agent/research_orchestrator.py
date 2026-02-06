@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 from .web_researcher import WebResearcher, WebResearchResult, SearchStrategy
 from .knowledge_synthesizer import (
     KnowledgeSynthesizer,
@@ -41,7 +41,7 @@ from .knowledge_synthesizer import (
 @dataclass
 class ResearchConfig:
     """Configuration for research activities."""
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
     max_topics: int = 5
     max_queries_per_topic: int = 3
     max_results_per_query: int = 5
@@ -190,11 +190,9 @@ Respond in JSON:
         Returns:
             List of topic dicts with topic, why, and priority
         """
-        from experiment_framework import invoke_fresh_claude
-
         prompt = self.TOPIC_EXTRACTION_PROMPT.format(mission=mission)
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=prompt,
             model=self.config.model,
             timeout=60
@@ -443,7 +441,7 @@ Respond in JSON:
 def research_for_mission(
     mission: str,
     topics: Optional[List[str]] = None,
-    model: ModelType = ModelType.CLAUDE_SONNET,
+    model: ModelType = ModelType.BALANCED,
     simulate: bool = False
 ) -> ResearchFindings:
     """
@@ -472,7 +470,7 @@ if __name__ == "__main__":
     print("=" * 50)
 
     config = ResearchConfig(
-        model=ModelType.CLAUDE_HAIKU,
+        model=ModelType.FAST,
         max_topics=2,
         max_queries_per_topic=2,
         simulate_search=True  # Use simulation for self-test

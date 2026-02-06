@@ -33,28 +33,37 @@ class ModelPricing:
     name: str
 
 
-# Approximate pricing as of late 2024 (USD per 1K tokens)
+# Approximate tier pricing (USD per 1K tokens).
+# Legacy Claude model constants are mapped to equivalent tiers for compatibility.
+FAST_TIER_PRICING = ModelPricing(
+    input_price=0.00025,
+    output_price=0.00125,
+    name="Fast Tier"
+)
+BALANCED_TIER_PRICING = ModelPricing(
+    input_price=0.003,
+    output_price=0.015,
+    name="Balanced Tier"
+)
+POWERFUL_TIER_PRICING = ModelPricing(
+    input_price=0.015,
+    output_price=0.075,
+    name="Powerful Tier"
+)
+
 MODEL_PRICING: Dict[ModelType, ModelPricing] = {
-    ModelType.CLAUDE_HAIKU: ModelPricing(
-        input_price=0.00025,
-        output_price=0.00125,
-        name="Claude Haiku"
-    ),
-    ModelType.CLAUDE_SONNET: ModelPricing(
-        input_price=0.003,
-        output_price=0.015,
-        name="Claude Sonnet"
-    ),
-    ModelType.CLAUDE_OPUS: ModelPricing(
-        input_price=0.015,
-        output_price=0.075,
-        name="Claude Opus"
-    ),
+    ModelType.FAST: FAST_TIER_PRICING,
+    ModelType.BALANCED: BALANCED_TIER_PRICING,
+    ModelType.POWERFUL: POWERFUL_TIER_PRICING,
     ModelType.MINI_MIND: ModelPricing(
         input_price=0.0,
         output_price=0.0,
         name="Mini Mind (Local Free)"
     ),
+    # Legacy compatibility
+    ModelType.CLAUDE_HAIKU: FAST_TIER_PRICING,
+    ModelType.CLAUDE_SONNET: BALANCED_TIER_PRICING,
+    ModelType.CLAUDE_OPUS: POWERFUL_TIER_PRICING,
 }
 
 
@@ -180,7 +189,7 @@ class CostEstimator:
 
     def _get_pricing(self, model: ModelType) -> ModelPricing:
         """Get pricing for a model."""
-        return self.pricing.get(model, MODEL_PRICING[ModelType.CLAUDE_SONNET])
+        return self.pricing.get(model, MODEL_PRICING[ModelType.BALANCED])
 
     def _estimate_cost(
         self,
@@ -277,7 +286,7 @@ class CostEstimator:
         code_path: Optional[Path] = None,
         code_text: Optional[str] = None,
         specification: str = "",
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         enable_red_team: bool = True,
         enable_mutation: bool = True,
         enable_property: bool = True,
@@ -342,12 +351,12 @@ class CostEstimator:
         if estimate.cost_tier == CostTier.EXPENSIVE:
             estimate.warnings.append(
                 "This run is estimated to cost more than $1.00. "
-                "Consider using quick mode or a cheaper model."
+                "Consider using quick mode or a cheaper model tier."
             )
         elif estimate.cost_tier == CostTier.VERY_EXPENSIVE:
             estimate.warnings.append(
                 "WARNING: This run is estimated to cost more than $10.00! "
-                "Consider using quick mode with Haiku."
+                "Consider using quick mode with the FAST tier."
             )
 
         if budget_limit and estimate.total_estimated_cost > budget_limit:
@@ -370,14 +379,14 @@ class CostEstimator:
         code_text: Optional[str] = None
     ) -> CostEstimate:
         """
-        Estimate cost for quick mode (Haiku, red team only).
+        Estimate cost for quick mode (FAST tier, red team only).
 
         Quick mode is designed for fast feedback during development.
         """
         return self.estimate_full_suite(
             code_path=code_path,
             code_text=code_text,
-            model=ModelType.CLAUDE_HAIKU,
+            model=ModelType.FAST,
             enable_red_team=True,
             enable_mutation=False,
             enable_property=False,
@@ -401,7 +410,7 @@ class CostEstimator:
             code_path=code_path,
             code_text=code_text,
             specification=specification,
-            model=ModelType.CLAUDE_SONNET
+            model=ModelType.BALANCED
         )
 
         return {
@@ -522,7 +531,7 @@ def validate_input(user_input):
     full_estimate = estimator.estimate_full_suite(
         code_text=sample_code,
         specification="Process data and validate input",
-        model=ModelType.CLAUDE_SONNET
+        model=ModelType.BALANCED
     )
     print(full_estimate)
 

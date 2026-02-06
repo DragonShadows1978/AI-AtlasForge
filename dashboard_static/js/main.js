@@ -35,7 +35,10 @@ function escapeHtml(text) {
 // Socket events (only if socket exists)
 if (socket) {
     socket.on('connect', () => console.log('Connected'));
-    socket.on('message', (data) => addMessage(data.role, data.content, data.timestamp));
+    socket.on('message', (data) => addMessage(data.role, data.content, data.timestamp, {
+        displayRole: data.display_role,
+        provider: data.provider
+    }));
 }
 
 // =============================================================
@@ -1185,10 +1188,12 @@ function processMessageForDownloads(content) {
 }
 
 // Chat
-function addMessage(role, content, timestamp = null) {
+function addMessage(role, content, timestamp = null, metadata = null) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
-    div.className = `message ${role}`;
+    const normalizedRole = (role || '').toString().trim().toLowerCase();
+    const cssRole = normalizedRole === 'codex' ? 'claude' : normalizedRole;
+    div.className = `message ${cssRole}`;
 
     // Use provided timestamp or fall back to current time
     const time = timestamp
@@ -1197,14 +1202,22 @@ function addMessage(role, content, timestamp = null) {
 
     // Process content for download links (only for Claude messages)
     let processedContent = content;
-    if (role === 'claude') {
+    if (normalizedRole === 'claude' || normalizedRole === 'codex') {
         processedContent = processMessageForDownloads(content);
     }
 
     // Store raw content for copy functionality
     div.dataset.rawContent = content;
 
-    div.innerHTML = `<button class="message-copy-btn" onclick="copyMessageText(this)">Copy</button><div class="message-meta">${role} - ${time}</div>${processedContent}`;
+    const meta = metadata || {};
+    const metaProvider = (meta.provider || '').toString().trim().toLowerCase();
+    const metaDisplayRole = (meta.display_role || meta.displayRole || '').toString().trim().toLowerCase();
+    const displayRole = (
+        metaDisplayRole ||
+        (normalizedRole === 'claude' && metaProvider === 'codex' ? 'codex' : normalizedRole)
+    ) || 'unknown';
+
+    div.innerHTML = `<button class="message-copy-btn" onclick="copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;

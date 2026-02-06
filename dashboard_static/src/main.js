@@ -170,6 +170,7 @@ window.expandAllJournal = widgets.expandAllJournal;
 window.collapseAllJournal = widgets.collapseAllJournal;
 window.startClaude = widgets.startClaude;
 window.stopClaude = widgets.stopClaude;
+window.setLlmProvider = widgets.setLlmProvider;
 window.setMission = widgets.setMission;
 window.resetMission = widgets.resetMission;
 window.queueMission = widgets.queueMission;

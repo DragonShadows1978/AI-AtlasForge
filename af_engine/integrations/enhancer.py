@@ -6,6 +6,7 @@ mission continuity tracking and baseline fingerprinting.
 """
 
 import logging
+import os
 from typing import Optional
 
 from .base import (
@@ -48,16 +49,18 @@ class EnhancerIntegration(BaseIntegrationHandler):
             logger.debug("AtlasForge Enhancer not available")
             return False
 
-    def _get_enhancer(self, mission_id: str = None, storage_base = None):
+    def _get_enhancer(self, mission_id: str = None, storage_base = None, llm_provider: Optional[str] = None):
         """Lazy-load the enhancer instance."""
         if self._enhancer is None and mission_id:
             try:
                 from atlasforge_enhancements.atlasforge_enhancer import AtlasForgeEnhancer
                 from pathlib import Path
                 storage = Path(storage_base) / 'af_data' if storage_base else None
+                provider = (llm_provider or os.environ.get("ATLASFORGE_LLM_PROVIDER") or "claude")
                 self._enhancer = AtlasForgeEnhancer(
                     mission_id=mission_id,
-                    storage_base=storage
+                    storage_base=storage,
+                    llm_provider=provider
                 )
             except Exception as e:
                 logger.warning(f"Failed to initialize enhancer: {e}")
@@ -67,8 +70,13 @@ class EnhancerIntegration(BaseIntegrationHandler):
         """Set baseline fingerprint for mission continuity tracking."""
         mission_id = event.mission_id or event.data.get("mission_id")
         workspace = event.data.get("mission_workspace") or event.data.get("workspace")
+        llm_provider = event.data.get("llm_provider")
 
-        enhancer = self._get_enhancer(mission_id=mission_id, storage_base=workspace)
+        enhancer = self._get_enhancer(
+            mission_id=mission_id,
+            storage_base=workspace,
+            llm_provider=llm_provider,
+        )
         if not enhancer:
             return
 
@@ -87,6 +95,8 @@ class EnhancerIntegration(BaseIntegrationHandler):
             return
 
         try:
+            if hasattr(enhancer, "set_llm_provider") and event.data.get("llm_provider"):
+                enhancer.set_llm_provider(event.data.get("llm_provider"))
             enhancer.track_stage_completion(
                 stage=event.stage,
                 status=event.data.get("status", ""),

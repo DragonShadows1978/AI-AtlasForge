@@ -52,6 +52,7 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
         # Initialize _archive_function BEFORE calling super().__init__()
         # because the parent calls _check_availability() which uses this
         self._archive_function = None
+        self._afterimage_ingest_function = None
         super().__init__()
 
     def _get_archive_function(self):
@@ -75,6 +76,28 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
             return self._archive_function
         except ImportError as e:
             logger.warning(f"[TranscriptArchival] Cannot import archive function: {e}")
+            return None
+
+    def _get_afterimage_ingest_function(self):
+        """
+        Lazy-load the AfterImage ingest function to avoid circular imports.
+
+        Returns:
+            ingest_afterimage_from_archive function or None if unavailable
+        """
+        if self._afterimage_ingest_function is not None:
+            return self._afterimage_ingest_function
+
+        try:
+            import sys
+            root_dir = Path(__file__).resolve().parent.parent.parent
+            if str(root_dir) not in sys.path:
+                sys.path.insert(0, str(root_dir))
+
+            from af_engine import ingest_afterimage_from_archive
+            self._afterimage_ingest_function = ingest_afterimage_from_archive
+            return self._afterimage_ingest_function
+        except ImportError:
             return None
 
     def on_mission_completed(self, event: Event) -> None:
@@ -104,6 +127,24 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
                 count = result.get("transcripts_archived", 0)
                 path = result.get("archive_path", "unknown")
                 logger.info(f"[TranscriptArchival] Archived {count} transcripts to {path}")
+
+                ingest_fn = self._get_afterimage_ingest_function()
+                if ingest_fn:
+                    try:
+                        ingest_result = ingest_fn(result.get("archive_path"), mission)
+                        if ingest_result.get("success"):
+                            logger.info(
+                                "[TranscriptArchival] AfterImage stored %s entries from %s files",
+                                ingest_result.get("stored_entries", 0),
+                                ingest_result.get("files_processed", 0),
+                            )
+                        elif ingest_result.get("errors"):
+                            logger.warning(
+                                "[TranscriptArchival] AfterImage ingest errors: %s",
+                                ingest_result.get("errors", [])[:3],
+                            )
+                    except Exception as ingest_error:
+                        logger.warning(f"[TranscriptArchival] AfterImage ingest failed: {ingest_error}")
             else:
                 errors = result.get("errors", [])
                 logger.warning(f"[TranscriptArchival] Archival completed with errors: {errors}")

@@ -28,7 +28,7 @@ from enum import Enum
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 from adversarial_testing.mission_drift_validator import (
     DriftSeverity,
     DriftDecision,
@@ -182,7 +182,7 @@ SEVERITY GUIDE (Phase-Aware):
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         timeout_seconds: int = 120,
         failure_threshold_warn: int = 4,
         failure_threshold_halt: int = 5,
@@ -308,8 +308,8 @@ SEVERITY GUIDE (Phase-Aware):
             cycle_number=cycle_number
         )
 
-        # Invoke fresh Claude instance for unbiased evaluation
-        response, response_ms = invoke_fresh_claude(
+        # Invoke fresh LLM instance for unbiased evaluation
+        response, response_ms = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             system_prompt=self.PHASE_AWARE_EVALUATOR_PROMPT,
@@ -656,7 +656,7 @@ def validate_continuation_phase_aware(
     mission_dir: str,
     tracking_state: Optional[Dict] = None,
     phase_state: Optional[Dict] = None,
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Convenience function to validate a continuation with phase awareness.
@@ -741,7 +741,7 @@ if __name__ == "__main__":
         Next: Complete pixelize post-processor
         """
 
-        validator = PhaseAwareMissionDriftValidator(model=ModelType.CLAUDE_HAIKU)
+        validator = PhaseAwareMissionDriftValidator(model=ModelType.FAST)
         result1, track1, phase1 = validator.validate_continuation_phase_aware(
             original_mission=test_mission,
             continuation_prompt=cycle1_continuation,

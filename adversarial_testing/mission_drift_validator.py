@@ -2,7 +2,7 @@
 """
 Mission Drift Validator - Prevents scope creep in multi-cycle missions.
 
-The key insight: In multi-cycle missions, Claude autonomously generates continuation
+The key insight: In multi-cycle missions, the active agent autonomously generates continuation
 prompts at CYCLE_END. Without validation, these prompts can drift from the original
 mission specification, leading to compounding scope creep.
 
@@ -11,7 +11,7 @@ This validator implements a graduated intervention strategy:
 - Failure 4: Inject critical warning into continuation
 - Failure 5: Halt mission and generate drift recap
 
-The validator uses LLM-as-judge evaluation with a fresh Claude instance that has
+The validator uses LLM-as-judge evaluation with a fresh LLM instance that has
 zero knowledge of the implementation details, ensuring unbiased assessment.
 """
 
@@ -27,7 +27,7 @@ from enum import Enum
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 
 
 class DriftSeverity(Enum):
@@ -211,7 +211,7 @@ class MissionDriftValidator:
     """
     Validates continuation prompts against original mission specification.
 
-    Uses a fresh Claude instance (LLM-as-judge) to assess whether the
+    Uses a fresh LLM instance (LLM-as-judge) to assess whether the
     continuation prompt stays within the scope of the original mission.
     """
 
@@ -278,7 +278,7 @@ SEVERITY GUIDE:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         timeout_seconds: int = 120,
         failure_threshold_warn: int = 4,
         failure_threshold_halt: int = 5
@@ -336,8 +336,8 @@ SEVERITY GUIDE:
             cycle_number=cycle_number
         )
 
-        # Invoke fresh Claude instance for unbiased evaluation
-        response, response_ms = invoke_fresh_claude(
+        # Invoke fresh LLM instance for unbiased evaluation
+        response, response_ms = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             system_prompt=self.EVALUATOR_SYSTEM_PROMPT,
@@ -737,7 +737,7 @@ def validate_mission_continuation(
     continuation_prompt: str,
     cycle_number: int,
     tracking_state: Optional[Dict] = None,
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
 ) -> Tuple[Dict, Dict]:
     """
     Convenience function to validate a mission continuation.
@@ -835,7 +835,7 @@ if __name__ == "__main__":
     print(f"\nOriginal Mission: {original_mission[:100]}...")
     print(f"\nTesting good continuation (expecting no drift)...")
 
-    validator = MissionDriftValidator(model=ModelType.CLAUDE_HAIKU)  # Use Haiku for speed
+    validator = MissionDriftValidator(model=ModelType.FAST)  # Use fast tier for speed
 
     result, state = validator.validate_continuation(
         original_mission=original_mission,

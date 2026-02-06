@@ -141,6 +141,67 @@ running = True
 # Maximum retries when Claude times out or fails to respond
 MAX_CLAUDE_RETRIES = 3
 
+# Supported LLM providers for CLI invocation
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+DEFAULT_LLM_PROVIDER = "claude"
+
+
+def _env_flag_enabled(name: str, default: bool = False) -> bool:
+    """Parse a boolean env flag with tolerant true/false values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _codex_web_search_enabled() -> bool:
+    """Enable Codex web search by default; allow opt-out via env."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=True)
+
+
+def _codex_autonomous_enabled() -> bool:
+    """Run Codex with no approval/sandbox prompts by default."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def get_llm_provider() -> str:
+    """Get the configured LLM provider from environment."""
+    provider = os.environ.get("ATLASFORGE_LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
+    provider = str(provider).strip().lower()
+    if provider not in SUPPORTED_LLM_PROVIDERS:
+        logger.warning(f"Unknown ATLASFORGE_LLM_PROVIDER='{provider}', falling back to {DEFAULT_LLM_PROVIDER}")
+        return DEFAULT_LLM_PROVIDER
+    return provider
+
+
+def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
+    """Build subprocess CLI command for the selected provider."""
+    if provider == "codex":
+        cmd = ["codex"]
+        if _codex_web_search_enabled():
+            # `--search` is a top-level Codex flag and must come before `exec`.
+            cmd.append("--search")
+        cmd.extend([
+            "exec",
+            "--color", "never",
+        ])
+        if _codex_autonomous_enabled():
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append("-")
+        return cmd
+
+    # Default provider: Claude CLI
+    cmd = [
+        "claude", "-p",
+        "--dangerously-skip-permissions",
+        "--disallowedTools", "EnterPlanMode,ExitPlanMode"
+    ]
+    if model:
+        cmd[2:2] = ["--model", model]
+    return cmd
+
 
 def acquire_conductor_lock() -> bool:
     """Acquire exclusive lock to prevent multiple conductor instances.
@@ -258,11 +319,14 @@ def append_journal(entry: dict):
 
 def send_to_chat(message: str):
     """Send a message to the chat history for UI display."""
+    provider = get_llm_provider()
+
     def update_history(history):
         if not isinstance(history, list):
             history = []
         history.append({
             "role": "claude",
+            "provider": provider,
             "content": message,
             "timestamp": datetime.now().isoformat()
         })
@@ -360,11 +424,12 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         cwd = BASE_DIR
 
     try:
-        logger.info(f"Invoking Claude: {prompt[:100]}...")
+        provider = get_llm_provider()
+        command = build_llm_command(provider)
+        logger.info(f"Invoking {provider}: {prompt[:100]}...")
 
         proc = subprocess.Popen(
-            ["claude", "-p", "--dangerously-skip-permissions",
-             "--disallowedTools", "EnterPlanMode,ExitPlanMode"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -390,7 +455,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
                     proc.wait(timeout=5)
                 except (ProcessLookupError, OSError):
                     pass
-            logger.error(f"Claude timed out after {timeout}s")
+            logger.error(f"{provider} timed out after {timeout}s")
             return None, f"timeout:{timeout}s"
         finally:
             with _active_claude_lock:
@@ -398,17 +463,17 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
 
         if proc.returncode == 0:
             response = stdout.strip()
-            logger.info(f"Claude responded: {response[:200]}...")
+            logger.info(f"{provider} responded: {response[:200]}...")
             return response, None
         else:
             stderr_snippet = stderr[:500] if stderr else "No stderr"
-            logger.error(f"Claude error: {stderr}")
+            logger.error(f"{provider} error: {stderr}")
             return None, f"cli_error:{stderr_snippet}"
 
     except Exception as e:
         with _active_claude_lock:
             _active_claude_process = None
-        logger.error(f"Error invoking Claude: {e}")
+        logger.error(f"Error invoking LLM provider: {e}")
         return None, f"exception:{str(e)}"
 
 
@@ -573,9 +638,7 @@ def invoke_haiku_summary(
     timeout: int = HAIKU_TIMEOUT
 ) -> Optional[str]:
     """
-    Invoke Claude Haiku to generate an intelligent handoff summary.
-
-    Uses the Claude CLI with --model flag to leverage subscription instead of API credits.
+    Invoke active LLM provider to generate an intelligent handoff summary.
 
     Args:
         mission_id: Current mission ID
@@ -588,6 +651,7 @@ def invoke_haiku_summary(
         Formatted summary string, or None on failure
     """
     try:
+        provider = get_llm_provider()
         prompt = HAIKU_HANDOFF_PROMPT.format(
             mission_id=mission_id,
             mission_objective=mission_objective or "No mission objective available.",
@@ -595,9 +659,13 @@ def invoke_haiku_summary(
             recent_context=recent_context or "No recent activity context available."
         )
 
+        command = build_llm_command(
+            provider,
+            model=HAIKU_MODEL if provider == "claude" else None
+        )
+
         result = subprocess.run(
-            ["claude", "-p", "--model", HAIKU_MODEL, "--dangerously-skip-permissions",
-             "--disallowedTools", "EnterPlanMode,ExitPlanMode"],
+            command,
             input=prompt,
             capture_output=True,
             text=True,
@@ -609,20 +677,20 @@ def invoke_haiku_summary(
         if result.returncode == 0:
             summary = result.stdout.strip()
             if summary:
-                logger.info(f"Haiku generated handoff summary ({len(summary)} chars)")
+                logger.info(f"{provider} generated handoff summary ({len(summary)} chars)")
                 return summary
             else:
-                logger.warning("Haiku returned empty response")
+                logger.warning(f"{provider} returned empty handoff summary")
                 return None
         else:
-            logger.error(f"Haiku CLI error: {result.stderr}")
+            logger.error(f"{provider} handoff summary error: {result.stderr}")
             return None
 
     except subprocess.TimeoutExpired:
-        logger.warning(f"Haiku CLI call timed out after {timeout}s")
+        logger.warning(f"Handoff summary call timed out after {timeout}s")
         return None
     except Exception as e:
-        logger.error(f"Error invoking Haiku: {e}")
+        logger.error(f"Error generating handoff summary: {e}")
         return None
 
 
@@ -1687,10 +1755,10 @@ def run_free_mode():
 
             # Build and send prompt
             prompt = build_free_mode_prompt(state)
-            response_text = invoke_llm(prompt, timeout=1200, cwd=WORKSPACE_DIR)
+            response_text, error_info = invoke_llm(prompt, timeout=1200, cwd=WORKSPACE_DIR)
 
             if not response_text:
-                logger.warning("No response, retrying...")
+                logger.warning(f"No response, retrying... ({error_info or 'no error info'})")
                 time.sleep(10)
                 continue
 

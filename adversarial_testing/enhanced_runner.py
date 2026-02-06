@@ -48,10 +48,10 @@ from .red_team_agent import RedTeamAgent, RedTeamResult
 
 class AdversarialMode(Enum):
     """Testing modes with different cost/thoroughness tradeoffs."""
-    QUICK = "quick"        # Fast feedback, red team only, Haiku
-    STANDARD = "standard"  # Balanced, all components, Sonnet
-    FULL = "full"          # Comprehensive, all components + extra passes, Sonnet
-    THOROUGH = "thorough"  # Maximum rigor, all components, Opus
+    QUICK = "quick"        # Fast feedback, red team only, FAST tier
+    STANDARD = "standard"  # Balanced, all components, BALANCED tier
+    FULL = "full"          # Comprehensive, all components + extra passes, BALANCED tier
+    THOROUGH = "thorough"  # Maximum rigor, all components, POWERFUL tier
 
 
 @dataclass
@@ -134,7 +134,7 @@ class EnhancedAdversarialRunner:
     # Mode presets
     MODE_CONFIGS = {
         AdversarialMode.QUICK: {
-            "model": ModelType.CLAUDE_HAIKU,
+            "model": ModelType.FAST,
             "enable_red_team": True,
             "enable_mutation": False,
             "enable_property": False,
@@ -143,7 +143,7 @@ class EnhancedAdversarialRunner:
             "timeout_seconds": 120
         },
         AdversarialMode.STANDARD: {
-            "model": ModelType.CLAUDE_SONNET,
+            "model": ModelType.BALANCED,
             "enable_red_team": True,
             "enable_mutation": True,
             "enable_property": True,
@@ -152,7 +152,7 @@ class EnhancedAdversarialRunner:
             "timeout_seconds": 300
         },
         AdversarialMode.FULL: {
-            "model": ModelType.CLAUDE_SONNET,
+            "model": ModelType.BALANCED,
             "enable_red_team": True,
             "enable_mutation": True,
             "enable_property": True,
@@ -163,7 +163,7 @@ class EnhancedAdversarialRunner:
             "max_inputs": 100
         },
         AdversarialMode.THOROUGH: {
-            "model": ModelType.CLAUDE_OPUS,
+            "model": ModelType.POWERFUL,
             "enable_red_team": True,
             "enable_mutation": True,
             "enable_property": True,
@@ -426,7 +426,7 @@ class EnhancedAdversarialRunner:
         """
         Run quick red team analysis only.
 
-        Fast feedback mode using Haiku, returns just red team results.
+        Fast feedback mode using the FAST tier, returns just red team results.
         """
         def log(msg: str):
             if progress_callback:
@@ -436,7 +436,7 @@ class EnhancedAdversarialRunner:
 
         # Create quick-mode agent
         agent = RedTeamAgent(
-            model=ModelType.CLAUDE_HAIKU,
+            model=ModelType.FAST,
             timeout_seconds=120
         )
 

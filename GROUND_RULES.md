@@ -1,4 +1,4 @@
-# Ground Rules for Autonomous Claude R&D
+# Ground Rules for Autonomous AtlasForge R&D
 
 ## Core Directive
 You are FULLY AUTONOMOUS. There is NO human in the loop. Do not ask for clarification, permission, or help. Solve all problems yourself.
@@ -389,7 +389,7 @@ This is **enforced programmatically** - the KB context is injected before you se
 **Data Flow Architecture:**
 
 ```
-Claude Agent
+Active LLM Agent
     │
     ├──────────────────────────────────────────────────────┐
     │                                                      │
@@ -550,14 +550,14 @@ Test at boundaries, not internals:
 
 ## Experiment Framework - POWERFUL TOOL
 
-You have access to `experiment_framework.py` - a controlled experimentation system for spawning fresh Claude instances and running systematic tests.
+You have access to `experiment_framework.py` - a controlled experimentation system for spawning fresh LLM instances and running systematic tests.
 
 **Location:** `$ATLASFORGE_ROOT/experiment_framework.py`
 
 **Capabilities:**
-- Spawn fresh Claude instances with controlled prompts (no prior context)
+- Spawn fresh LLM instances with controlled prompts (no prior context)
 - Run experiments across multiple conditions
-- Compare results across different models (Sonnet, Opus, Haiku, local Llama)
+- Compare results across model tiers/providers (Fast, Balanced, Powerful, local Llama)
 - Score responses and collect timing data
 - Save structured JSON results to `experiments/results/`
 
@@ -576,7 +576,7 @@ config = ExperimentConfig(
     name="algorithm_comparison",
     description="Compare different algorithm approaches",
     conditions=["baseline", "optimized", "experimental"],
-    model=ModelType.CLAUDE_SONNET,
+    model=ModelType.BALANCED,
     trials_per_condition=3
 )
 
@@ -592,7 +592,7 @@ results.save()
 **When to use:**
 - Large missions that should be split into testable pieces
 - When you need to compare multiple approaches systematically
-- When you want to validate changes with fresh Claude instances
+- When you want to validate changes with fresh isolated LLM instances
 - For any task that benefits from controlled, repeatable experiments
 
 ---
@@ -763,7 +763,7 @@ PLANNING -> BUILDING -> TESTING -> ANALYZING -> CYCLE_END -> COMPLETE
 Missions can have a **cycle budget** (1-10 cycles). After ANALYZING success:
 1. Enter **CYCLE_END** stage
 2. Generate cycle report
-3. If cycles remain: Claude writes continuation prompt, returns to PLANNING
+3. If cycles remain: agent writes continuation prompt, returns to PLANNING
 4. If budget exhausted: Generate final report, move to COMPLETE
 
 **Cycle budget** is set when creating a mission via the dashboard.
@@ -808,12 +808,12 @@ A summary is written to `HANDOFF.md` before termination.
 **If HANDOFF.md exists in the workspace, READ IT FIRST.**
 
 The handoff file contains:
-- What the previous Claude was working on
+- What the previous agent was working on
 - What's completed vs in-progress
 - Key decisions made
 - Next steps to continue
 
-This provides continuity beyond filesystem-as-state. The previous Claude
+This provides continuity beyond filesystem-as-state. The previous agent
 left you notes - use them.
 
 **HANDOFF.md is APPEND-ONLY.** Each handoff adds a new timestamped section:

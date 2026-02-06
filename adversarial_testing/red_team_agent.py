@@ -1,8 +1,8 @@
 """
-Red Team Agent - Spawns fresh Claude instances to adversarially test code.
+Red Team Agent - Spawns fresh LLM instances to adversarially test code.
 
 The key insight: The same entity that builds cannot objectively test.
-This module spawns FRESH Claude instances with NO memory of implementation
+This module spawns FRESH LLM instances with NO memory of implementation
 details, giving them a truly adversarial perspective.
 """
 
@@ -18,7 +18,7 @@ from enum import Enum
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from experiment_framework import (
-    invoke_fresh_claude,
+    invoke_fresh_llm,
     ModelType,
     ExperimentConfig,
     Experiment
@@ -88,7 +88,7 @@ class RedTeamResult:
 
 class RedTeamAgent:
     """
-    Spawns fresh Claude instances to adversarially analyze code.
+    Spawns fresh LLM instances to adversarially analyze code.
 
     The agent has NO knowledge of:
     - How the code was built
@@ -171,7 +171,7 @@ Respond in JSON format:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         timeout_seconds: int = 120
     ):
         """
@@ -191,7 +191,7 @@ Respond in JSON format:
         session_id: Optional[str] = None
     ) -> RedTeamResult:
         """
-        Spawn a fresh Claude instance to adversarially analyze code.
+        Spawn a fresh LLM instance to adversarially analyze code.
 
         Args:
             code: The code to analyze
@@ -210,8 +210,8 @@ Respond in JSON format:
             description=description
         )
 
-        # Invoke fresh Claude instance
-        response, duration_ms = invoke_fresh_claude(
+        # Invoke fresh LLM instance
+        response, duration_ms = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             system_prompt=self.RED_TEAM_SYSTEM_PROMPT,
@@ -353,7 +353,7 @@ Respond in JSON format:
 def run_red_team_analysis(
     code: str,
     description: str = "",
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
 ) -> RedTeamResult:
     """
     Convenience function to run red team analysis on code.
@@ -391,7 +391,7 @@ def process_user_input(user_input):
 '''
 
     print("Analyzing vulnerable test code...")
-    agent = RedTeamAgent(model=ModelType.CLAUDE_HAIKU)  # Use Haiku for fast test
+    agent = RedTeamAgent(model=ModelType.FAST)  # Use fast tier for quick test
     result = agent.analyze_code(
         code=test_code,
         description="Utility functions for a web application"

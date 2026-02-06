@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List
 
 from .stages.base import StageContext
 from .state_manager import StateManager
+from ground_rules_loader import load_ground_rules, get_active_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class PromptFactory:
         """
         self.root = atlasforge_root or Path(__file__).parent.parent
         self._ground_rules_cache: Optional[str] = None
+        self._ground_rules_cache_provider: Optional[str] = None
+        self._ground_rules_cache_by_provider: Dict[str, str] = {}
 
     def build_context(self, state: StateManager) -> StageContext:
         """
@@ -70,30 +73,63 @@ class PromptFactory:
             success_criteria=mission.get("success_criteria", []),
         )
 
-    def get_ground_rules(self) -> str:
+    def get_ground_rules(self, provider: Optional[str] = None) -> str:
         """
         Load and cache ground rules from file.
 
         Returns:
             Ground rules content or empty string if not found
         """
-        if self._ground_rules_cache is not None:
+        # Preserve legacy behavior for tests/customized file names.
+        if self.GROUND_RULES_FILE != "GROUND_RULES.md":
+            if self._ground_rules_cache is not None:
+                return self._ground_rules_cache
+
+            ground_rules_path = self.root / self.GROUND_RULES_FILE
+            try:
+                if ground_rules_path.exists():
+                    self._ground_rules_cache = ground_rules_path.read_text()
+                    logger.debug(f"Loaded ground rules from {ground_rules_path}")
+                else:
+                    logger.warning(f"Ground rules not found at {ground_rules_path}")
+                    self._ground_rules_cache = ""
+            except Exception as e:
+                logger.error(f"Failed to load ground rules: {e}")
+                self._ground_rules_cache = ""
             return self._ground_rules_cache
 
-        ground_rules_path = self.root / self.GROUND_RULES_FILE
+        resolved_provider = get_active_llm_provider(provider)
+        cached = self._ground_rules_cache_by_provider.get(resolved_provider)
+        if cached is not None:
+            self._ground_rules_cache = cached
+            self._ground_rules_cache_provider = resolved_provider
+            return cached
 
         try:
-            if ground_rules_path.exists():
-                self._ground_rules_cache = ground_rules_path.read_text()
-                logger.debug(f"Loaded ground rules from {ground_rules_path}")
+            rules, base_path, overlay_path, _ = load_ground_rules(
+                provider=resolved_provider,
+                investigation=False,
+                root=self.root,
+            )
+            if not rules:
+                logger.warning(
+                    f"Ground rules not found for provider '{resolved_provider}' "
+                    f"(base path: {base_path})"
+                )
             else:
-                logger.warning(f"Ground rules not found at {ground_rules_path}")
-                self._ground_rules_cache = ""
+                overlay_msg = f" + overlay {overlay_path}" if overlay_path else ""
+                logger.debug(
+                    f"Loaded ground rules for provider '{resolved_provider}' "
+                    f"from {base_path}{overlay_msg}"
+                )
         except Exception as e:
             logger.error(f"Failed to load ground rules: {e}")
-            self._ground_rules_cache = ""
+            rules = ""
 
-        return self._ground_rules_cache
+        self._ground_rules_cache_by_provider[resolved_provider] = rules
+        self._ground_rules_cache = rules
+        self._ground_rules_cache_provider = resolved_provider
+        return rules
 
     def inject_kb_context(
         self,
@@ -189,11 +225,37 @@ class PromptFactory:
                 from atlasforge_enhancements.afterimage import AfterImage
                 afterimage_provider = AfterImage()
             except ImportError:
-                logger.debug("AfterImage not available")
-                return prompt
+                # Fallback to local AI-AfterImage package when enhancement wrapper
+                # is not present.
+                try:
+                    import sys
+                    from atlasforge_config import BASE_DIR, WORKSPACE_DIR
+
+                    candidates = [
+                        WORKSPACE_DIR / "AI-AfterImage",
+                        WORKSPACE_DIR / "AfterImage",
+                        BASE_DIR.parent / "AI-AfterImage",
+                        Path.home() / "AI-AfterImage",
+                    ]
+                    for candidate in candidates:
+                        if candidate.exists():
+                            candidate_str = str(candidate)
+                            if candidate_str not in sys.path:
+                                sys.path.insert(0, candidate_str)
+
+                    from afterimage.search import HybridSearch
+                    afterimage_provider = HybridSearch()
+                except ImportError:
+                    logger.debug("AfterImage not available")
+                    return prompt
 
         try:
-            memories = afterimage_provider.search(query, max_results=3)
+            try:
+                # Wrapper interface
+                memories = afterimage_provider.search(query, max_results=3)
+            except TypeError:
+                # HybridSearch interface
+                memories = afterimage_provider.search(query, limit=3, threshold=0.01)
 
             if not memories:
                 return prompt
@@ -217,9 +279,15 @@ class PromptFactory:
         ]
 
         for memory in memories:
-            file_path = memory.get("file_path", "unknown")
-            snippet = memory.get("snippet", "")
-            context = memory.get("context", "")
+            if isinstance(memory, dict):
+                file_path = memory.get("file_path", "unknown")
+                snippet = memory.get("snippet", memory.get("new_code", ""))
+                context = memory.get("context", "")
+            else:
+                # SearchResult dataclass/object path.
+                file_path = getattr(memory, "file_path", "unknown")
+                snippet = getattr(memory, "new_code", "") or getattr(memory, "snippet", "")
+                context = getattr(memory, "context", "")
 
             lines.append(f"**{file_path}**")
             if context:
@@ -383,7 +451,7 @@ class PromptFactory:
 
         # Ground rules (if requested and available)
         if include_ground_rules:
-            ground_rules = self.get_ground_rules()
+            ground_rules = self.get_ground_rules(context.mission.get("llm_provider"))
             if ground_rules:
                 parts.append("=== GROUND RULES (READ CAREFULLY) ===")
                 parts.append(ground_rules)

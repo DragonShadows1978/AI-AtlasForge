@@ -395,6 +395,10 @@
                         <span class="stat-value highlight" id="stat-project-name" title="Click to view workspace">-</span>
                     </div>
                     <div class="stat-row">
+                        <span class="stat-label">Provider</span>
+                        <span class="stat-value highlight" id="stat-provider">claude</span>
+                    </div>
+                    <div class="stat-row">
                         <span class="stat-label">Iteration</span>
                         <span class="stat-value" id="stat-iteration">-</span>
                     </div>
@@ -448,6 +452,11 @@
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Project:</label>
                         <input type="text" id="project-name-input" placeholder="Auto-detect from mission" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 180px; font-size: 0.85em;">
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Provider:</label>
+                        <select id="llm-provider-select" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="claude" selected>Claude</option>
+                            <option value="codex">Codex</option>
+                        </select>
                         <label style="font-size: 0.85em; color: var(--text-dim);">Cycles:</label>
                         <select id="cycle-budget-input" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
                             <option value="1">1</option>
@@ -473,7 +482,7 @@
 
                 <!-- Investigation Mode Controls (shown when investigation mode is ON) -->
                 <div id="investigation-mode-controls" style="display: none;">
-                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Subagents:</label>
                         <select id="investigation-subagents" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
                             <option value="3">3 subagents</option>
@@ -487,6 +496,11 @@
                             <option value="10" selected>10 min</option>
                             <option value="15">15 min</option>
                             <option value="20">20 min</option>
+                        </select>
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Provider:</label>
+                        <select id="investigation-llm-provider-select" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                            <option value="claude" selected>Claude</option>
+                            <option value="codex">Codex</option>
                         </select>
                     </div>
                     <div class="btn-group">
@@ -2371,6 +2385,7 @@
                         var fields = {
                             // stat-mode removed - only one mode exists
                             'stat-stage': data.rd_stage || '-',
+                            'stat-provider': data.provider || 'claude',
                             'stat-iteration': data.rd_iteration || 0,
                             'stat-mission-cycle': (data.current_cycle || 1) + '/' + (data.cycle_budget || 1),
                             'stat-cycles': data.total_cycles || '-',

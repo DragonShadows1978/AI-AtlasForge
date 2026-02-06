@@ -23,7 +23,7 @@ from enum import Enum
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 
 
 class SearchStrategy(Enum):
@@ -109,10 +109,10 @@ class WebResearcher:
     3. Filters and ranks results
     4. Extracts key insights
 
-    NOTE: This module uses the Claude API's WebSearch capability
-    through the experiment framework's fresh instance spawning.
-    In the AtlasForge context, the main Claude instance has direct access
-    to WebSearch - this module provides structured research patterns.
+    NOTE: This module depends on a web-search-capable model via the
+    experiment framework's fresh instance spawning.
+    In the AtlasForge context, this module provides structured research
+    patterns for whichever LLM provider is active.
     """
 
     # Prompt for query generation
@@ -187,7 +187,7 @@ Respond in JSON:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         max_results_per_query: int = 5,
         timeout_seconds: int = 60
     ):
@@ -226,7 +226,7 @@ Respond in JSON:
             year=year
         )
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             timeout=self.timeout_seconds
@@ -280,7 +280,7 @@ Respond in JSON:
         if simulate:
             return self._simulate_search(query)
 
-        # Build search prompt that asks Claude to use WebSearch
+        # Build search prompt that asks the active model to use web search
         search_prompt = f"""Use web search to find information about: {query.query}
 
 Look for:
@@ -302,9 +302,9 @@ After searching, provide results in this JSON format:
 }}
 """
 
-        # Note: In actual AtlasForge usage, the main Claude instance has direct
-        # WebSearch access. This is a structured way to organize searches.
-        response, _ = invoke_fresh_claude(
+        # Note: AtlasForge must route this to a provider/model with web access.
+        # This module provides the structure around search and extraction.
+        response, _ = invoke_fresh_llm(
             prompt=search_prompt,
             model=self.model,
             system_prompt="You have access to web search. Find current, reliable information.",
@@ -391,7 +391,7 @@ After searching, provide results in this JSON format:
             results=results_text
         )
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             timeout=self.timeout_seconds
@@ -494,7 +494,7 @@ if __name__ == "__main__":
     print("Web Researcher - Self Test")
     print("=" * 50)
 
-    researcher = WebResearcher(model=ModelType.CLAUDE_HAIKU)
+    researcher = WebResearcher(model=ModelType.FAST)
 
     print("\nGenerating queries for 'mutation testing Python'...")
     queries = researcher.generate_queries(

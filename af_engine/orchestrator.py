@@ -15,6 +15,7 @@ The StageOrchestrator:
 
 import json
 import logging
+import os
 import uuid
 import time
 from datetime import datetime
@@ -562,6 +563,9 @@ Continue the mission from where the previous cycle left off.
 
         # Generate mission ID
         mid = mission_id or f"mission_{uuid.uuid4().hex[:8]}"
+        llm_provider = str(os.environ.get("ATLASFORGE_LLM_PROVIDER", "claude")).strip().lower() or "claude"
+        if llm_provider not in {"claude", "codex"}:
+            llm_provider = "claude"
 
         # Resolve project name for shared workspace
         resolved_project_name = None
@@ -607,6 +611,7 @@ Continue the mission from where the previous cycle left off.
             "mission_dir": str(mission_dir),
             # Project name for workspace deduplication
             "project_name": resolved_project_name,
+            "llm_provider": llm_provider,
             "metadata": {}
         }
         self.save_mission()
@@ -617,7 +622,8 @@ Continue the mission from where the previous cycle left off.
             "mission_id": mid,
             "problem_statement": problem_statement,
             "cycle_budget": max(1, cycle_budget),
-            "created_at": self.mission["created_at"]
+            "created_at": self.mission["created_at"],
+            "llm_provider": llm_provider,
         }
         if resolved_project_name:
             config_data["project_name"] = resolved_project_name
@@ -630,7 +636,11 @@ Continue the mission from where the previous cycle left off.
         # AtlasForge Enhancement: Set baseline fingerprint for mission continuity tracking
         try:
             from atlasforge_enhancements import AtlasForgeEnhancer
-            enhancer = AtlasForgeEnhancer()
+            enhancer = AtlasForgeEnhancer(
+                mission_id=mid,
+                storage_base=mission_workspace / "af_data",
+                llm_provider=llm_provider,
+            )
             enhancer.set_mission_baseline(problem_statement, source="initial_mission")
             logger.info("AtlasForge baseline fingerprint set for mission continuity tracking")
         except Exception as e:
@@ -665,6 +675,8 @@ Continue the mission from where the previous cycle left off.
             data={
                 "problem_statement": problem_statement[:200],
                 "cycle_budget": cycle_budget,
+                "llm_provider": llm_provider,
+                "mission_workspace": str(mission_workspace),
             }
         )
 
@@ -680,7 +692,8 @@ Continue the mission from where the previous cycle left off.
             "iteration": 0,
             "history": [],
             "created_at": datetime.now().isoformat(),
-            "reset_at": datetime.now().isoformat()
+            "reset_at": datetime.now().isoformat(),
+            "llm_provider": self.mission.get("llm_provider", "claude"),
         }
         self.save_mission()
         logger.info("Mission reset to PLANNING")

@@ -41,7 +41,7 @@ class AdversarialConfig:
     """Configuration for adversarial testing run."""
     # General
     mission_id: str = "default"
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
     timeout_seconds: int = 300  # 5 minutes total
 
     # Red team settings
@@ -481,7 +481,7 @@ def run_adversarial_testing(
     test_command: str = "",
     specification: str = "",
     mission_id: str = "default",
-    model: ModelType = ModelType.CLAUDE_SONNET,
+    model: ModelType = ModelType.BALANCED,
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> AdversarialResults:
     """
@@ -551,7 +551,7 @@ Requirements:
 
     config = AdversarialConfig(
         mission_id="self_test",
-        model=ModelType.CLAUDE_HAIKU,  # Use Haiku for speed
+        model=ModelType.FAST,  # Use fast tier for speed
         enable_mutation=False,  # Skip mutation (needs test file)
         enable_property=False,  # Skip property (needs more setup)
         enable_parallel=False

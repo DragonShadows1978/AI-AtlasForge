@@ -23,7 +23,7 @@ from enum import Enum
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 
 
 class PropertyType(Enum):
@@ -335,7 +335,7 @@ Respond in JSON:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         max_inputs: int = 100
     ):
         """
@@ -365,7 +365,7 @@ Respond in JSON:
             function_name=function_name
         )
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             timeout=60

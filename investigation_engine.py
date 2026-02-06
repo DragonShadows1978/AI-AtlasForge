@@ -13,6 +13,7 @@ no mission.json modifications, no iterative cycles.
 """
 
 import json
+import os
 import subprocess
 import time
 import logging
@@ -34,7 +35,54 @@ logger = logging.getLogger("investigation_engine")
 # Base paths - use centralized configuration
 from atlasforge_config import BASE_DIR, STATE_DIR
 INVESTIGATION_STATE_PATH = STATE_DIR / "investigation_state.json"
-INV_GROUND_RULES_PATH = BASE_DIR / "investigations" / "INV_GROUND_RULES.md"
+LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
+from ground_rules_loader import load_ground_rules
+
+# Shared provider routing (dashboard toggle)
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+DEFAULT_LLM_PROVIDER = "claude"
+
+
+def _env_flag_enabled(name: str, default: bool = False) -> bool:
+    """Parse a boolean env flag with tolerant true/false values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _codex_web_search_enabled() -> bool:
+    """Enable Codex web search by default; allow opt-out via env."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=True)
+
+
+def _codex_autonomous_enabled() -> bool:
+    """Run Codex with no approval/sandbox prompts by default."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    """Normalize provider identifier to supported values."""
+    if not provider:
+        return DEFAULT_LLM_PROVIDER
+    normalized = str(provider).strip().lower()
+    if normalized in SUPPORTED_LLM_PROVIDERS:
+        return normalized
+    return DEFAULT_LLM_PROVIDER
+
+
+def _get_active_llm_provider() -> str:
+    """Get provider from env first, then dashboard state file."""
+    env_provider = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    if env_provider:
+        return _normalize_provider(env_provider)
+
+    try:
+        with open(LLM_PROVIDER_PATH, 'r') as f:
+            data = json.load(f)
+        return _normalize_provider(data.get("provider"))
+    except Exception:
+        return DEFAULT_LLM_PROVIDER
 
 
 # =============================================================================
@@ -281,17 +329,29 @@ def format_url_executive_summaries(url_metadata: List[Dict[str, Any]], findings:
 
 def load_investigation_ground_rules() -> str:
     """
-    Load investigation ground rules from file.
+    Load investigation ground rules from provider-aware files.
 
-    Returns the contents of INV_GROUND_RULES.md, or empty string if unavailable.
+    Returns base investigation rules plus an optional provider overlay.
     """
     try:
-        if INV_GROUND_RULES_PATH.exists():
-            content = INV_GROUND_RULES_PATH.read_text()
-            logger.info("Loaded investigation ground rules from INV_GROUND_RULES.md")
+        provider = _get_active_llm_provider()
+        content, base_path, overlay_path, _ = load_ground_rules(
+            provider=provider,
+            investigation=True
+        )
+        if content:
+            if overlay_path:
+                logger.info(
+                    "Loaded investigation ground rules from "
+                    f"{base_path.name} + {overlay_path.name}"
+                )
+            else:
+                logger.info(f"Loaded investigation ground rules from {base_path.name}")
             return content
-        else:
-            logger.warning(f"Investigation ground rules file not found: {INV_GROUND_RULES_PATH}")
+        logger.warning(
+            "Investigation ground rules file not found. "
+            f"Tried base path: {base_path}"
+        )
     except Exception as e:
         logger.warning(f"Failed to load investigation ground rules: {e}")
     return ""
@@ -491,19 +551,46 @@ def invoke_claude(
         cwd = BASE_DIR
 
     start_time = time.time()
+    provider = _get_active_llm_provider()
 
-    cmd = ["claude", "-p", "--dangerously-skip-permissions"]
+    if provider == "codex":
+        cmd = ["codex"]
+        if _codex_web_search_enabled():
+            # `--search` is a top-level Codex flag and must come before `exec`.
+            cmd.append("--search")
+        cmd.extend([
+            "exec",
+            "--color", "never",
+        ])
+        if _codex_autonomous_enabled():
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        # Optional explicit model override for Codex provider.
+        codex_model = os.environ.get("ATLASFORGE_CODEX_MODEL", "").strip()
+        if codex_model:
+            cmd.extend(["--model", codex_model])
+        cmd.append("-")
 
-    if model:
-        cmd.extend(["--model", model.value])
-
-    if system_prompt:
-        cmd.extend(["--system-prompt", system_prompt])
+        full_prompt = prompt
+        if system_prompt:
+            # Codex exec path here does not expose a dedicated system prompt flag.
+            full_prompt = (
+                "System instructions:\n"
+                f"{system_prompt}\n\n"
+                "User task:\n"
+                f"{prompt}"
+            )
+    else:
+        cmd = ["claude", "-p", "--dangerously-skip-permissions"]
+        if model:
+            cmd.extend(["--model", model.value])
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
+        full_prompt = prompt
 
     try:
         result = subprocess.run(
             cmd,
-            input=prompt,
+            input=full_prompt,
             capture_output=True,
             text=True,
             timeout=timeout,

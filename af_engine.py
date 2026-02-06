@@ -103,13 +103,30 @@ except ImportError:
 
 # AI-AfterImage integration (optional - episodic code memory)
 AFTERIMAGE_AVAILABLE = False
+AFTERIMAGE_INGEST_AVAILABLE = False
 try:
     import sys
-    from atlasforge_config import WORKSPACE_DIR
-    afterimage_path = str(WORKSPACE_DIR / "AI-AfterImage")
-    sys.path.insert(0, afterimage_path)
+    from atlasforge_config import BASE_DIR as _AF_BASE_DIR, WORKSPACE_DIR as _AF_WORKSPACE_DIR
+
+    # Try multiple local clone locations so AtlasForge works across layouts.
+    afterimage_candidates = [
+        _AF_WORKSPACE_DIR / "AI-AfterImage",
+        _AF_WORKSPACE_DIR / "AfterImage",
+        _AF_BASE_DIR.parent / "AI-AfterImage",
+        Path.home() / "AI-AfterImage",
+    ]
+    for candidate in afterimage_candidates:
+        if candidate.exists():
+            candidate_str = str(candidate)
+            if candidate_str not in sys.path:
+                sys.path.insert(0, candidate_str)
+
     from afterimage.search import HybridSearch as AfterImageSearch
+    from afterimage.kb import KnowledgeBase as AfterImageKnowledgeBase
+    from afterimage.extract import TranscriptExtractor as AfterImageTranscriptExtractor
+    from afterimage.filter import CodeFilter as AfterImageCodeFilter
     AFTERIMAGE_AVAILABLE = True
+    AFTERIMAGE_INGEST_AVAILABLE = True
 except ImportError:
     pass  # AfterImage module not available
 
@@ -213,8 +230,9 @@ except ImportError:
 # Paths - Import from centralized config
 from atlasforge_config import (
     BASE_DIR, STATE_DIR, WORKSPACE_DIR, ARTIFACTS_DIR, RESEARCH_DIR,
-    MISSION_PATH, GROUND_RULES_PATH, get_transcript_dir
+    MISSION_PATH, get_transcript_dir
 )
+from ground_rules_loader import load_ground_rules
 
 # Auto-advance signaling (file-based IPC)
 AUTO_ADVANCE_SIGNAL_PATH = STATE_DIR / "auto_advance_signal.json"
@@ -222,12 +240,61 @@ AUTO_ADVANCE_SIGNAL_PATH = STATE_DIR / "auto_advance_signal.json"
 # Transcript archival paths
 CLAUDE_TRANSCRIPTS_BASE = Path.home() / ".claude" / "projects"
 CLAUDE_TRANSCRIPTS_DIR = get_transcript_dir()
+CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 TRANSCRIPTS_ARCHIVE_DIR = ARTIFACTS_DIR / "transcripts"
+DEFAULT_LLM_PROVIDER = "claude"
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+
+
+def _normalize_provider(provider: Optional[str]) -> str:
+    """Normalize provider to supported values."""
+    candidate = str(provider or "").strip().lower()
+    if candidate in SUPPORTED_LLM_PROVIDERS:
+        return candidate
+    return DEFAULT_LLM_PROVIDER
+
+
+def _load_provider_from_state() -> Optional[str]:
+    """Load provider from state/llm_provider.json if present."""
+    provider_path = STATE_DIR / "llm_provider.json"
+    if not provider_path.exists():
+        return None
+
+    try:
+        data = io_utils.atomic_read_json(provider_path, {})
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    return data.get("provider")
+
+
+def _get_archive_provider(mission: Optional[Dict] = None) -> str:
+    """
+    Resolve the provider to use when searching transcript sources.
+
+    Precedence: mission field -> env var -> persisted state -> default.
+    """
+    if isinstance(mission, dict):
+        mission_provider = mission.get("llm_provider")
+        if mission_provider:
+            return _normalize_provider(mission_provider)
+
+    env_provider = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    if env_provider:
+        return _normalize_provider(env_provider)
+
+    state_provider = _load_provider_from_state()
+    if state_provider:
+        return _normalize_provider(state_provider)
+
+    return DEFAULT_LLM_PROVIDER
 
 
 def _workspace_to_transcript_dir(workspace_path: str) -> Path:
     """
-    Convert a workspace path to Claude's transcript directory format.
+    Convert a workspace path to Claude transcript directory format.
 
     Claude stores transcripts in: ~/.claude/projects/-{path-with-dashes}
     e.g., /path/to/AI-AtlasForge/missions/mission_xyz/workspace
@@ -292,6 +359,105 @@ def _get_all_transcript_dirs_for_mission(mission: Dict) -> List[Path]:
 
     return dirs_to_check
 
+
+def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) -> bool:
+    """Return True if candidate workspace matches the expected workspace."""
+    expected = (expected_workspace or "").strip()
+    candidate = (candidate_workspace or "").strip()
+    if not expected or not candidate:
+        return False
+
+    try:
+        expected_path = Path(expected).expanduser().resolve()
+        candidate_path = Path(candidate).expanduser().resolve()
+        return (
+            candidate_path == expected_path
+            or expected_path in candidate_path.parents
+            or candidate_path in expected_path.parents
+        )
+    except OSError:
+        return (
+            candidate == expected
+            or candidate.startswith(expected + os.sep)
+            or expected.startswith(candidate + os.sep)
+        )
+
+
+def _codex_transcript_matches_workspace(transcript_path: Path, workspace_path: str) -> bool:
+    """
+    Check whether a Codex transcript belongs to the mission workspace.
+
+    Codex stores workspace context in a session_meta payload with `cwd`.
+    """
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for idx, line in enumerate(f):
+                if idx > 40:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if not isinstance(record, dict):
+                    continue
+                if record.get("type") != "session_meta":
+                    continue
+
+                payload = record.get("payload", {})
+                if not isinstance(payload, dict):
+                    continue
+                cwd = payload.get("cwd")
+                return _workspace_paths_match(workspace_path, cwd)
+    except (OSError, IOError, UnicodeDecodeError):
+        return False
+
+    return False
+
+
+def _find_codex_transcripts_in_window(
+    start_dt: datetime,
+    end_dt: datetime,
+    mission: Optional[Dict] = None
+) -> List[Path]:
+    """Find Codex session JSONL files in the mission time window."""
+    if not CODEX_SESSIONS_DIR.exists():
+        return []
+
+    start_ts = start_dt.timestamp()
+    end_ts = end_dt.timestamp()
+
+    workspace = None
+    if isinstance(mission, dict):
+        workspace = mission.get("mission_workspace")
+        if not workspace:
+            mission_dir = mission.get("mission_dir")
+            if mission_dir:
+                workspace = str(Path(mission_dir) / "workspace")
+
+    matches: List[Path] = []
+    try:
+        for jsonl_file in CODEX_SESSIONS_DIR.rglob("*.jsonl"):
+            try:
+                mtime = os.path.getmtime(jsonl_file)
+            except OSError:
+                continue
+
+            if not (start_ts - 60 <= mtime <= end_ts + 60):
+                continue
+
+            if workspace and not _codex_transcript_matches_workspace(jsonl_file, workspace):
+                continue
+
+            matches.append(jsonl_file)
+    except OSError:
+        return []
+
+    return matches
+
 logger = logging.getLogger("af_engine")
 
 # Valid stages (6-stage workflow with CYCLE_END)
@@ -330,43 +496,74 @@ def _find_transcripts_in_window(
     Returns:
         List of Path objects for matching transcript files
     """
-    # Determine which directories to search
-    if transcript_dirs is None:
-        if mission is not None:
-            transcript_dirs = _get_all_transcript_dirs_for_mission(mission)
-        else:
-            transcript_dirs = [CLAUDE_TRANSCRIPTS_DIR] if CLAUDE_TRANSCRIPTS_DIR.exists() else []
-
-    if not transcript_dirs:
-        logger.warning("No transcript directories found to search")
-        return []
-
-    matching_files = []
+    provider = _get_archive_provider(mission)
+    matching_files: List[Path] = []
     start_ts = start_dt.timestamp()
     end_ts = end_dt.timestamp()
-    seen_files = set()  # Avoid duplicates
+    seen_files = set()  # Full-path dedupe for combined Claude + Codex search
 
-    for transcript_dir in transcript_dirs:
-        if not transcript_dir.exists():
-            logger.debug(f"Transcript directory not found: {transcript_dir}")
-            continue
+    # Claude transcripts
+    if provider == "claude":
+        if transcript_dirs is None:
+            if mission is not None:
+                transcript_dirs = _get_all_transcript_dirs_for_mission(mission)
+            else:
+                transcript_dirs = [CLAUDE_TRANSCRIPTS_DIR] if CLAUDE_TRANSCRIPTS_DIR.exists() else []
 
-        for jsonl_file in transcript_dir.glob("*.jsonl"):
-            # Skip if we've already seen this file (by name, to handle symlinks/duplicates)
-            file_key = jsonl_file.name
-            if file_key in seen_files:
+        for transcript_dir in (transcript_dirs or []):
+            if not transcript_dir.exists():
+                logger.debug(f"Transcript directory not found: {transcript_dir}")
                 continue
 
-            try:
-                mtime = os.path.getmtime(jsonl_file)
-                # Include files modified within the window (with small buffer for edge cases)
+            for jsonl_file in transcript_dir.glob("*.jsonl"):
+                file_key = str(jsonl_file.resolve())
+                if file_key in seen_files:
+                    continue
+                try:
+                    mtime = os.path.getmtime(jsonl_file)
+                except OSError as e:
+                    logger.warning(f"Could not get mtime for {jsonl_file}: {e}")
+                    continue
+
                 if start_ts - 60 <= mtime <= end_ts + 60:
                     matching_files.append(jsonl_file)
                     seen_files.add(file_key)
-            except OSError as e:
-                logger.warning(f"Could not get mtime for {jsonl_file}: {e}")
 
-    logger.info(f"Found {len(matching_files)} transcripts in {len(transcript_dirs)} directories")
+    # Codex transcripts
+    elif provider == "codex":
+        for jsonl_file in _find_codex_transcripts_in_window(start_dt, end_dt, mission):
+            file_key = str(jsonl_file.resolve())
+            if file_key in seen_files:
+                continue
+            matching_files.append(jsonl_file)
+            seen_files.add(file_key)
+
+    # Fallback for migrated/legacy data when provider metadata is missing.
+    if provider == "claude" and not matching_files:
+        for jsonl_file in _find_codex_transcripts_in_window(start_dt, end_dt, mission):
+            file_key = str(jsonl_file.resolve())
+            if file_key in seen_files:
+                continue
+            matching_files.append(jsonl_file)
+            seen_files.add(file_key)
+    elif provider == "codex" and not matching_files:
+        fallback_dirs = transcript_dirs or _get_all_transcript_dirs_for_mission(mission or {})
+        for transcript_dir in fallback_dirs:
+            if not transcript_dir.exists():
+                continue
+            for jsonl_file in transcript_dir.glob("*.jsonl"):
+                file_key = str(jsonl_file.resolve())
+                if file_key in seen_files:
+                    continue
+                try:
+                    mtime = os.path.getmtime(jsonl_file)
+                except OSError:
+                    continue
+                if start_ts - 60 <= mtime <= end_ts + 60:
+                    matching_files.append(jsonl_file)
+                    seen_files.add(file_key)
+
+    logger.info(f"Found {len(matching_files)} transcripts for provider={provider}")
     return matching_files
 
 
@@ -391,6 +588,14 @@ def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
         "total_tokens": 0
     }
 
+    def _to_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    codex_total_seen = -1
+
     try:
         with open(transcript_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -399,15 +604,48 @@ def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
                     continue
                 try:
                     record = json.loads(line)
-                    # Look for assistant messages with usage data
+                    if not isinstance(record, dict):
+                        continue
+
+                    # Claude assistant messages
                     if record.get("type") == "assistant":
                         msg = record.get("message", {})
+                        if not isinstance(msg, dict):
+                            continue
                         msg_usage = msg.get("usage", {})
-                        if msg_usage:
-                            usage["input_tokens"] += msg_usage.get("input_tokens", 0)
-                            usage["output_tokens"] += msg_usage.get("output_tokens", 0)
-                            usage["cache_creation_input_tokens"] += msg_usage.get("cache_creation_input_tokens", 0)
-                            usage["cache_read_input_tokens"] += msg_usage.get("cache_read_input_tokens", 0)
+                        if isinstance(msg_usage, dict) and msg_usage:
+                            usage["input_tokens"] += _to_int(msg_usage.get("input_tokens", 0))
+                            usage["output_tokens"] += _to_int(msg_usage.get("output_tokens", 0))
+                            usage["cache_creation_input_tokens"] += _to_int(msg_usage.get("cache_creation_input_tokens", 0))
+                            usage["cache_read_input_tokens"] += _to_int(msg_usage.get("cache_read_input_tokens", 0))
+                        continue
+
+                    # Codex token events
+                    if record.get("type") == "event_msg":
+                        payload = record.get("payload", {})
+                        if not isinstance(payload, dict) or payload.get("type") != "token_count":
+                            continue
+                        info = payload.get("info", {})
+                        if not isinstance(info, dict):
+                            continue
+
+                        last_usage = info.get("last_token_usage", {})
+                        total_usage = info.get("total_token_usage", {})
+                        if not isinstance(last_usage, dict):
+                            continue
+                        if not isinstance(total_usage, dict):
+                            total_usage = {}
+
+                        total_tokens = _to_int(total_usage.get("total_tokens", 0))
+                        # Token count events can repeat with unchanged totals.
+                        if total_tokens > 0 and total_tokens <= codex_total_seen:
+                            continue
+                        if total_tokens > 0:
+                            codex_total_seen = total_tokens
+
+                        usage["input_tokens"] += _to_int(last_usage.get("input_tokens", 0))
+                        usage["output_tokens"] += _to_int(last_usage.get("output_tokens", 0))
+                        usage["cache_read_input_tokens"] += _to_int(last_usage.get("cached_input_tokens", 0))
                 except json.JSONDecodeError:
                     # Skip malformed lines
                     continue
@@ -579,6 +817,145 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
         logger.error(error_msg)
         result["errors"].append(error_msg)
 
+    return result
+
+
+def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optional[Dict] = None) -> Dict[str, Any]:
+    """
+    Ingest archived transcripts into AI-AfterImage memory.
+
+    This is provider-agnostic: transcript selection is handled by archival logic,
+    then AfterImage extracts code-changing tool events from the archived JSONL files.
+    """
+    result: Dict[str, Any] = {
+        "success": False,
+        "stored_entries": 0,
+        "total_changes": 0,
+        "code_changes": 0,
+        "files_processed": 0,
+        "errors": [],
+    }
+
+    if not (AFTERIMAGE_AVAILABLE and AFTERIMAGE_INGEST_AVAILABLE):
+        result["errors"].append("afterimage_unavailable")
+        return result
+
+    if not archive_path:
+        result["errors"].append("missing_archive_path")
+        return result
+
+    archive_dir = Path(archive_path)
+    if not archive_dir.exists():
+        result["errors"].append(f"archive_not_found:{archive_dir}")
+        return result
+
+    transcript_files = sorted(archive_dir.glob("*.jsonl"))
+    if not transcript_files:
+        result["success"] = True
+        return result
+
+    mission_data = mission or {}
+    workspace_path = mission_data.get("mission_workspace")
+    workspace_resolved: Optional[Path] = None
+    if workspace_path:
+        try:
+            workspace_resolved = Path(workspace_path).expanduser().resolve()
+        except OSError:
+            workspace_resolved = None
+    mission_started_at: Optional[datetime] = None
+    if mission_data.get("created_at"):
+        try:
+            mission_started_at = datetime.fromisoformat(mission_data.get("created_at"))
+        except (TypeError, ValueError):
+            mission_started_at = None
+
+    extractor = AfterImageTranscriptExtractor()
+    code_filter = AfterImageCodeFilter()
+    kb = AfterImageKnowledgeBase()
+
+    try:
+        for transcript in transcript_files:
+            result["files_processed"] += 1
+            try:
+                changes = extractor.extract_from_file(transcript)
+            except Exception as e:
+                result["errors"].append(f"extract_failed:{transcript.name}:{e}")
+                continue
+
+            result["total_changes"] += len(changes)
+
+            for change in changes:
+                # Keep mission memory focused to the active workspace when possible.
+                if workspace_resolved and change.file_path:
+                    try:
+                        change_path = Path(change.file_path).expanduser().resolve()
+                        if change_path != workspace_resolved and workspace_resolved not in change_path.parents:
+                            continue
+                    except OSError:
+                        pass
+
+                if not code_filter.is_code(change.file_path, change.new_code):
+                    continue
+
+                result["code_changes"] += 1
+                try:
+                    kb.store(
+                        file_path=change.file_path,
+                        new_code=change.new_code,
+                        old_code=change.old_code,
+                        context=change.context,
+                        session_id=change.session_id or mission_data.get("mission_id"),
+                        timestamp=change.timestamp,
+                    )
+                    result["stored_entries"] += 1
+                except Exception as e:
+                    # Keep ingest robust even when duplicates or individual rows fail.
+                    result["errors"].append(f"store_failed:{change.file_path}:{e}")
+
+        # Fallback path: if transcript extraction yields nothing, capture code files
+        # directly from mission workspace so Codex/Claude memory still accumulates.
+        if result["stored_entries"] == 0 and workspace_resolved and workspace_resolved.exists():
+            for file_path in workspace_resolved.rglob("*"):
+                if not file_path.is_file():
+                    continue
+
+                try:
+                    if mission_started_at is not None:
+                        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+                        if file_mtime < mission_started_at:
+                            continue
+                except OSError:
+                    continue
+
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+
+                rel_path = str(file_path)
+                if not code_filter.is_code(rel_path, content):
+                    continue
+
+                try:
+                    kb.store(
+                        file_path=rel_path,
+                        new_code=content[:12000],
+                        old_code=None,
+                        context="mission_workspace_fallback",
+                        session_id=mission_data.get("mission_id"),
+                        timestamp=datetime.now().isoformat(),
+                    )
+                    result["stored_entries"] += 1
+                    result["code_changes"] += 1
+                except Exception as e:
+                    result["errors"].append(f"workspace_store_failed:{rel_path}:{e}")
+    finally:
+        try:
+            kb.close()
+        except Exception:
+            pass
+
+    result["success"] = True
     return result
 
 
@@ -758,9 +1135,13 @@ class RDMissionController:
             "cycle_budget": 1,
             "current_cycle": 1,
             "cycle_history": [],
-            "original_problem_statement": None  # Keeps root mission for multi-cycle
+            "original_problem_statement": None,  # Keeps root mission for multi-cycle
+            "llm_provider": _get_archive_provider(None),
         }
-        return io_utils.atomic_read_json(MISSION_PATH, default_mission)
+        mission = io_utils.atomic_read_json(MISSION_PATH, default_mission)
+        if not mission.get("llm_provider"):
+            mission["llm_provider"] = _get_archive_provider(mission)
+        return mission
 
     def save_mission(self):
         """Save mission to disk."""
@@ -779,11 +1160,13 @@ class RDMissionController:
         if self._enhancer is None and AtlasForge_ENHANCER_AVAILABLE:
             mission_id = self.mission.get('mission_id')
             workspace = self.mission.get('mission_workspace')
+            llm_provider = _get_archive_provider(self.mission)
             if mission_id and workspace:
                 try:
                     self._enhancer = AtlasForgeEnhancer(
                         mission_id=mission_id,
-                        storage_base=Path(workspace) / 'af_data'
+                        storage_base=Path(workspace) / 'af_data',
+                        llm_provider=llm_provider,
                     )
                     logger.info(f"AtlasForge Enhancer initialized for mission {mission_id}")
                 except Exception as e:
@@ -942,6 +1325,34 @@ class RDMissionController:
                     "Transcript archival failed",
                     {"errors": archival_result["errors"]}
                 )
+
+            # Ingest archived transcripts into AfterImage episodic memory.
+            if AFTERIMAGE_AVAILABLE and AFTERIMAGE_INGEST_AVAILABLE:
+                try:
+                    afterimage_result = ingest_afterimage_from_archive(
+                        archival_result.get("archive_path"),
+                        mission=self.mission,
+                    )
+                    if afterimage_result.get("success"):
+                        self.log_history(
+                            "AfterImage ingested mission transcripts",
+                            {
+                                "stored_entries": afterimage_result.get("stored_entries", 0),
+                                "code_changes": afterimage_result.get("code_changes", 0),
+                            }
+                        )
+                        logger.info(
+                            "AfterImage: Ingested %s entries from %s archived transcripts",
+                            afterimage_result.get("stored_entries", 0),
+                            afterimage_result.get("files_processed", 0),
+                        )
+                    elif afterimage_result.get("errors"):
+                        logger.warning(
+                            "AfterImage ingestion skipped/failed: %s",
+                            ", ".join(afterimage_result.get("errors", [])[:3]),
+                        )
+                except Exception as e:
+                    logger.warning(f"AfterImage ingestion failed: {e}")
 
             # Notify narrative workflow module if this was a workflow step mission
             self._notify_narrative_completion()
@@ -1341,16 +1752,24 @@ class RDMissionController:
             for h in recent:
                 history_str += f"[{h.get('stage')}] {h.get('entry', '')[:100]}\n"
 
-        # Load ground rules
+        # Load provider-aware ground rules (base + optional overlay).
+        provider = _get_archive_provider(self.mission)
         ground_rules = ""
-        if GROUND_RULES_PATH.exists():
-            try:
-                ground_rules = GROUND_RULES_PATH.read_text()
-            except Exception as e:
-                logger.warning(f"Failed to read ground rules: {e}")
+        try:
+            ground_rules, base_path, overlay_path, _ = load_ground_rules(provider=provider)
+            if not ground_rules:
+                logger.warning(f"No ground rules found (base path: {base_path})")
+            elif overlay_path:
+                logger.info(
+                    f"Loaded ground rules for provider '{provider}' "
+                    f"with overlay {overlay_path.name}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to read ground rules: {e}")
 
         # Base prompt
-        prompt_content = f"""You are Claude, operating as an Autonomous R&D Engineer.
+        agent_name = "Codex" if provider == "codex" else "Claude"
+        prompt_content = f"""You are {agent_name}, operating as an Autonomous R&D Engineer.
 
 === GROUND RULES (READ CAREFULLY) ===
 {ground_rules}
@@ -1672,7 +2091,7 @@ from experiment_framework import ModelType
 
 config = AdversarialConfig(
     mission_id="your_mission",
-    model=ModelType.CLAUDE_HAIKU,  # Use Haiku for speed
+    model=ModelType.FAST,  # Use fast tier for speed
     enable_mutation=False,  # Enable if you have tests
     enable_property=True,
     enable_blind_validation=True
@@ -2171,6 +2590,7 @@ Respond with JSON:
                 )
                 # Add AtlasForge data to cycle entry
                 cycle_entry['rde_enhancement'] = {
+                    'llm_provider': enhancer.get_llm_provider() if hasattr(enhancer, "get_llm_provider") else _get_archive_provider(self.mission),
                     'drift_similarity': rde_report.get('drift', {}).get('similarity'),
                     'drift_severity': rde_report.get('drift', {}).get('severity'),
                     'healing_needed': rde_report.get('drift', {}).get('healing_needed', False),
@@ -2245,7 +2665,7 @@ Respond with JSON:
         Validate continuation prompt against original mission for drift.
 
         This is the key checkpoint that prevents scope creep in multi-cycle missions.
-        Uses an LLM-as-judge evaluation with a fresh Claude instance.
+        Uses an LLM-as-judge evaluation with a fresh LLM instance.
 
         For multi-phase missions (>=2 phases detected), uses phase-aware validation
         which compares against the ACTIVE phase rather than the full mission, preventing
@@ -2948,7 +3368,8 @@ Respond with JSON:
             "iteration": 0,
             "history": [],
             "created_at": datetime.now().isoformat(),
-            "reset_at": datetime.now().isoformat()
+            "reset_at": datetime.now().isoformat(),
+            "llm_provider": self.mission.get("llm_provider", _get_archive_provider(self.mission)),
         }
         self.save_mission()
         logger.info("Mission reset to PLANNING")
@@ -3011,6 +3432,7 @@ Respond with JSON:
             "mission_dir": str(mission_dir),
             # Project name for workspace deduplication
             "project_name": resolved_project_name,
+            "llm_provider": _get_archive_provider(None),
             "metadata": {}
         }
         self.save_mission()
@@ -3021,7 +3443,8 @@ Respond with JSON:
             "mission_id": mid,
             "problem_statement": problem_statement,
             "cycle_budget": max(1, cycle_budget),
-            "created_at": self.mission["created_at"]
+            "created_at": self.mission["created_at"],
+            "llm_provider": self.mission.get("llm_provider", _get_archive_provider(self.mission)),
         }
         if resolved_project_name:
             config_data["project_name"] = resolved_project_name

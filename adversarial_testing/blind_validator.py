@@ -26,7 +26,7 @@ from enum import Enum
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from experiment_framework import invoke_fresh_claude, ModelType
+from experiment_framework import invoke_fresh_llm, ModelType
 
 
 class ValidationStatus(Enum):
@@ -197,7 +197,7 @@ Respond in JSON:
 
     def __init__(
         self,
-        model: ModelType = ModelType.CLAUDE_SONNET,
+        model: ModelType = ModelType.BALANCED,
         timeout_seconds: int = 180
     ):
         """
@@ -250,8 +250,8 @@ Respond in JSON:
             interface=interface_description or "Standard API/function interface"
         )
 
-        # Invoke fresh Claude instance for blind validation
-        response, duration_ms = invoke_fresh_claude(
+        # Invoke fresh LLM instance for blind validation
+        response, duration_ms = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             system_prompt=self.VALIDATOR_SYSTEM_PROMPT,
@@ -381,7 +381,7 @@ Respond in JSON:
 }}
 """
 
-        response, _ = invoke_fresh_claude(
+        response, _ = invoke_fresh_llm(
             prompt=extraction_prompt,
             model=self.model,
             timeout=60
@@ -428,7 +428,7 @@ Respond in JSON:
 def validate_implementation(
     specification: str,
     implementation: str,
-    model: ModelType = ModelType.CLAUDE_SONNET
+    model: ModelType = ModelType.BALANCED
 ) -> ValidationResult:
     """
     Convenience function to validate implementation against specification.
@@ -479,7 +479,7 @@ def multiply(a, b):
     print("\nImplementation has a deliberate bug (no div-by-zero handling)")
     print("\nRunning blind validation...")
 
-    validator = BlindValidator(model=ModelType.CLAUDE_HAIKU)  # Use Haiku for speed
+    validator = BlindValidator(model=ModelType.FAST)  # Use fast tier for speed
     result = validator.validate(test_spec, test_impl)
 
     print(f"\nOverall Status: {result.overall_status.value}")

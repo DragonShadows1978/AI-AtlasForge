@@ -8,7 +8,7 @@ tests, perform mutation analysis, and validate implementations against original 
 Key Components:
     - AdversarialRunner: Main orchestrator for adversarial testing
     - EnhancedAdversarialRunner: Production-ready runner with cost estimation & resilience
-    - RedTeamAgent: Spawns fresh Claude instances to break code
+    - RedTeamAgent: Spawns fresh LLM instances to break code
     - PropertyTesting: Generates edge cases via property-based testing
     - MutationTesting: Verifies test quality through code mutation
     - BlindValidator: Independent validation against original specification
