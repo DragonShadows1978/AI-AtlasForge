@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_c28b8945",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-06T16:28:06.987834",
+  "snapshot_number": 18,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "Codex-backed adversarial runner timed out on full/targeted retest artifacts, reducing adversarial-depth confidence for that channel.",
+      "Mutation testing still has 6 surviving mutants (non-blocking under current threshold)."
+    ]
+  }
+}
