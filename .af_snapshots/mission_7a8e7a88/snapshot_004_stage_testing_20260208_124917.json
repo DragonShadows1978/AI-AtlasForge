@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_7a8e7a88",
+  "stage": "TESTING",
+  "timestamp": "2026-02-08T12:49:17.408697",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "tests/test_math_engines.py::TestSymbolicManipulation::test_canonical_form failed. Inconsistent canonical form for equivalent expressions.",
+        "reproduce_timeout.py showed check_equivalent returned False for equivalent complex expressions (no timeout, but logic weak)."
+      ],
+      "property_violations": [
+        "76 RuntimeWarnings in test_pipeline.py: 'invalid value encountered in sqrt'. Damped oscillator predictions likely hitting negative values in sqrt during parameter sweeps."
+      ],
+      "mutation_score": null,
+      "spec_alignment": 0.95,
+      "epistemic_score": 0.8,
+      "rigor_level": "strong"
+    }
+  }
+}
