@@ -73,7 +73,7 @@ CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 
 # Provider configuration
 DEFAULT_LLM_PROVIDER = "claude"
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 
 # Token thresholds
 GRACEFUL_THRESHOLD = 130_000  # Trigger HANDOFF.md generation
@@ -603,6 +603,8 @@ def find_transcript_dir(workspace_path: str, provider: Optional[str] = None) -> 
     ~/.claude/projects/.
     For Codex, this resolves to ~/.codex/sessions (file-level filtering
     is done by SessionMonitor based on session_meta.cwd).
+    For Gemini, transcript token monitoring is optional via
+    ATLASFORGE_GEMINI_SESSIONS_DIR; otherwise time-based handoff is used.
     """
     active_provider = get_active_provider(provider)
 
@@ -611,6 +613,20 @@ def find_transcript_dir(workspace_path: str, provider: Optional[str] = None) -> 
             logger.debug(f"Using Codex sessions dir: {CODEX_SESSIONS_DIR}")
             return CODEX_SESSIONS_DIR
         logger.warning(f"Codex sessions directory not found: {CODEX_SESSIONS_DIR}")
+        return None
+
+    if active_provider == "gemini":
+        gemini_sessions = os.environ.get("ATLASFORGE_GEMINI_SESSIONS_DIR", "").strip()
+        if not gemini_sessions:
+            logger.info("Gemini transcript directory not configured; using time-based handoff only")
+            return None
+
+        gemini_dir = Path(gemini_sessions).expanduser()
+        if gemini_dir.exists():
+            logger.debug(f"Using Gemini sessions dir: {gemini_dir}")
+            return gemini_dir
+
+        logger.warning(f"Gemini sessions directory not found: {gemini_dir}")
         return None
 
     # Claude transcript directory resolution
@@ -883,7 +899,7 @@ class SessionMonitor:
                 f"token_count:{total_usage.get('total_tokens', 0)}:"
                 f"{last_usage.get('input_tokens', 0)}:{last_usage.get('output_tokens', 0)}"
             )
-        else:
+        elif self.provider == "claude":
             if record.get('type') != 'assistant':
                 return None
 
@@ -896,6 +912,9 @@ class SessionMonitor:
                 return None
 
             request_id = record.get('requestId')
+        else:
+            # Gemini token metadata schema is not yet standardized in watcher feeds.
+            return None
 
         if not usage:
             return None
@@ -1202,9 +1221,14 @@ class ContextWatcher:
                 provider=active_provider
             )
 
-            if not monitor.transcript_dir:
+            if not monitor.transcript_dir and monitor.provider != "gemini":
                 logger.warning(f"Cannot watch {workspace_path}: no transcript dir found")
                 return None
+            if not monitor.transcript_dir and monitor.provider == "gemini":
+                logger.info(
+                    f"Starting watcher for {workspace_path} with provider=gemini "
+                    "(time-based handoff only; transcript tokens unavailable)"
+                )
 
             self._sessions[session_id] = monitor
 

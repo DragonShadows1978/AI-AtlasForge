@@ -142,7 +142,7 @@ running = True
 MAX_CLAUDE_RETRIES = 3
 
 # Supported LLM providers for CLI invocation
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 
 
@@ -162,6 +162,11 @@ def _codex_web_search_enabled() -> bool:
 def _codex_autonomous_enabled() -> bool:
     """Run Codex with no approval/sandbox prompts by default."""
     return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _gemini_autonomous_enabled() -> bool:
+    """Run Gemini with auto-approvals by default."""
+    return _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True)
 
 
 def get_llm_provider() -> str:
@@ -190,6 +195,18 @@ def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
         if model:
             cmd.extend(["--model", model])
         cmd.append("-")
+        return cmd
+
+    if provider == "gemini":
+        # Force non-interactive prompt mode; prompt content is provided via stdin.
+        cmd = ["gemini", "-p", ""]
+        if _gemini_autonomous_enabled():
+            cmd.append("--yolo")
+        cmd.extend(["--output-format", "json"])
+
+        selected_model = model or os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
+        if selected_model:
+            cmd.extend(["-m", selected_model])
         return cmd
 
     # Default provider: Claude CLI
@@ -426,6 +443,15 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
     try:
         provider = get_llm_provider()
         command = build_llm_command(provider)
+        env = os.environ.copy()
+        if provider == "gemini":
+            # Gemini CLI is more reliable in headless mode when both HOME and
+            # GEMINI_API_KEY are explicit in the spawned environment.
+            env.setdefault("HOME", str(Path.home()))
+            if not env.get("GEMINI_API_KEY"):
+                google_api_key = env.get("GOOGLE_API_KEY", "").strip()
+                if google_api_key:
+                    env["GEMINI_API_KEY"] = google_api_key
         logger.info(f"Invoking {provider}: {prompt[:100]}...")
 
         proc = subprocess.Popen(
@@ -435,6 +461,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
             stderr=subprocess.PIPE,
             text=True,
             cwd=str(cwd),
+            env=env,
             start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
@@ -463,11 +490,50 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
 
         if proc.returncode == 0:
             response = stdout.strip()
+            # Handle Gemini CLI JSON wrapper
+            if provider == "gemini":
+                try:
+                    data = json.loads(response)
+                    if isinstance(data, dict) and "response" in data:
+                        response = data["response"]
+                except json.JSONDecodeError:
+                    pass
             logger.info(f"{provider} responded: {response[:200]}...")
             return response, None
         else:
-            stderr_snippet = stderr[:500] if stderr else "No stderr"
-            logger.error(f"{provider} error: {stderr}")
+            stderr_text = (stderr or "").strip()
+            stderr_snippet = stderr_text[:500] if stderr_text else "No stderr"
+
+            if provider == "gemini":
+                lines = [ln.strip() for ln in stderr_text.splitlines() if ln.strip()]
+                noise_prefixes = (
+                    "YOLO mode is enabled.",
+                    "Hook registry initialized",
+                    "Both GOOGLE_API_KEY and GEMINI_API_KEY are set.",
+                )
+                filtered = [ln for ln in lines if not ln.startswith(noise_prefixes)]
+                candidate_lines = filtered or lines
+                best_line = next(
+                    (ln for ln in candidate_lines if "error" in ln.lower() or "failed" in ln.lower()),
+                    candidate_lines[0] if candidate_lines else "Gemini CLI failed",
+                )
+                lower = stderr_text.lower()
+                if "error authenticating" in lower or "listen eperm" in lower:
+                    stderr_snippet = (
+                        "Gemini authentication failed in headless mode. "
+                        "Set GEMINI_API_KEY for the dashboard runtime."
+                    )
+                elif "fetch failed" in lower or "error generating content via api" in lower:
+                    stderr_snippet = (
+                        "Gemini API request failed (network/API). "
+                        "Verify outbound internet access and API key validity."
+                    )
+                elif "no input provided via stdin" in lower:
+                    stderr_snippet = "Gemini CLI did not receive prompt input via stdin."
+                else:
+                    stderr_snippet = best_line[:500]
+
+            logger.error(f"{provider} error: {stderr_text}")
             return None, f"cli_error:{stderr_snippet}"
 
     except Exception as e:
@@ -676,6 +742,15 @@ def invoke_haiku_summary(
 
         if result.returncode == 0:
             summary = result.stdout.strip()
+            # Handle Gemini CLI JSON wrapper
+            if provider == "gemini":
+                try:
+                    data = json.loads(summary)
+                    if isinstance(data, dict) and "response" in data:
+                        summary = data["response"]
+                except json.JSONDecodeError:
+                    pass
+
             if summary:
                 logger.info(f"{provider} generated handoff summary ({len(summary)} chars)")
                 return summary
@@ -1721,9 +1796,11 @@ def run_free_mode():
     Original autonomous behavior without directed missions.
     """
     global running
+    provider = get_llm_provider()
+    provider_label = provider.capitalize()
 
     logger.info("=" * 60)
-    logger.info("CLAUDE AUTONOMOUS - FREE MODE")
+    logger.info(f"{provider_label} AUTONOMOUS - FREE MODE")
     logger.info("=" * 60)
 
     save_pid()
@@ -1734,7 +1811,7 @@ def run_free_mode():
     state["last_boot"] = datetime.now().isoformat()
     save_state(state)
 
-    send_to_chat(f"Claude Free Mode starting (Boot #{state['boot_count']})")
+    send_to_chat(f"{provider_label} Free Mode starting (Boot #{state['boot_count']})")
 
     cycle_count = 0
 

@@ -1,0 +1,97 @@
+{
+  "code_path": "/home/vader/Project Tensor/tensor_gpu_v2.py",
+  "test_command": "python3 test_autograd_regressions_phase6.py && python3 test_phase4_adversarial.py && python3 test_phase4_features.py && python3 test_phase5_integration.py && python3 test_tensor_gpu_v2_phase5.py && python3 /home/vader/AI-AtlasForge/workspace/ProjectTensor/tests/phase6_property_tests.py",
+  "timestamp": "2026-02-06T15:54:32.101772",
+  "duration_ms": 89676.871,
+  "mutants": [
+    {
+      "id": "m_f3e26dd0",
+      "operator": "condition_negate",
+      "location": "line:2762",
+      "description": "Negate if condition",
+      "killed": false,
+      "error": null
+    },
+    {
+      "id": "m_7e436437",
+      "operator": "constant_replace",
+      "location": "line:3144",
+      "description": "Replace True with False",
+      "killed": false,
+      "error": null
+    },
+    {
+      "id": "m_3612350b",
+      "operator": "arithmetic_replace",
+      "location": "line:2578",
+      "description": "Replace Add with Sub",
+      "killed": true,
+      "error": null
+    },
+    {
+      "id": "m_f20b2f6b",
+      "operator": "arithmetic_replace",
+      "location": "line:2638",
+      "description": "Replace Mult with FloorDiv",
+      "killed": true,
+      "error": null
+    },
+    {
+      "id": "m_c4277943",
+      "operator": "condition_negate",
+      "location": "line:215",
+      "description": "Negate if condition",
+      "killed": true,
+      "error": null
+    },
+    {
+      "id": "m_827fff2d",
+      "operator": "arithmetic_replace",
+      "location": "line:187",
+      "description": "Replace Add with Sub",
+      "killed": false,
+      "error": null
+    },
+    {
+      "id": "m_01a610c9",
+      "operator": "constant_replace",
+      "location": "line:805",
+      "description": "Replace False with True",
+      "killed": true,
+      "error": null
+    },
+    {
+      "id": "m_2eec9510",
+      "operator": "constant_replace",
+      "location": "line:818",
+      "description": "Replace True with False",
+      "killed": false,
+      "error": null
+    },
+    {
+      "id": "m_4d5f4f65",
+      "operator": "arithmetic_replace",
+      "location": "line:948",
+      "description": "Replace Mult with FloorDiv",
+      "killed": true,
+      "error": null
+    },
+    {
+      "id": "m_f590a0ba",
+      "operator": "comparison_replace",
+      "location": "line:3679",
+      "description": "Replace Eq with NotEq",
+      "killed": false,
+      "error": null
+    }
+  ],
+  "score": {
+    "total": 10,
+    "killed": 5,
+    "survived": 5,
+    "errors": 0,
+    "score": 0.5
+  },
+  "success": true,
+  "error": null
+}

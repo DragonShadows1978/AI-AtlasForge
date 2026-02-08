@@ -79,7 +79,7 @@ export function addMessage(role, content, timestamp = null, metadata = null) {
     if (!container) return;
 
     const normalizedRole = (role || '').toString().trim().toLowerCase();
-    const cssRole = normalizedRole === 'codex' ? 'claude' : normalizedRole;
+    const cssRole = (normalizedRole === 'codex' || normalizedRole === 'gemini') ? 'claude' : normalizedRole;
 
     const div = document.createElement('div');
     div.className = `message ${cssRole}`;
@@ -89,7 +89,7 @@ export function addMessage(role, content, timestamp = null, metadata = null) {
         : new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 
     let processedContent = content;
-    if (normalizedRole === 'claude' || normalizedRole === 'codex') {
+    if (normalizedRole === 'claude' || normalizedRole === 'codex' || normalizedRole === 'gemini') {
         processedContent = processMessageForDownloads(content);
     }
 
@@ -100,7 +100,7 @@ export function addMessage(role, content, timestamp = null, metadata = null) {
     const metaDisplayRole = (meta.display_role || meta.displayRole || '').toString().trim().toLowerCase();
     const displayRole = (
         metaDisplayRole ||
-        (normalizedRole === 'claude' && metaProvider === 'codex' ? 'codex' : normalizedRole)
+        (normalizedRole === 'claude' && (metaProvider === 'codex' || metaProvider === 'gemini') ? metaProvider : normalizedRole)
     ) || 'unknown';
 
     div.innerHTML = `<button class="message-copy-btn" onclick="window.copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;

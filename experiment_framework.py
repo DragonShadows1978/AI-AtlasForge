@@ -38,8 +38,8 @@ EXPERIMENTS_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
 
 
-# Provider routing for shared Claude/Codex dashboard toggle
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+# Provider routing for shared dashboard toggle
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 
 
@@ -59,6 +59,11 @@ def _codex_web_search_enabled() -> bool:
 def _codex_autonomous_enabled() -> bool:
     """Run Codex with no approval/sandbox prompts by default."""
     return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _gemini_autonomous_enabled() -> bool:
+    """Run Gemini in autonomous mode by default."""
+    return _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True)
 
 
 def _normalize_provider(provider: Optional[str]) -> str:
@@ -156,6 +161,21 @@ def _resolve_model_for_provider(model: ModelType, provider: str) -> Optional[str
             ModelType.POWERFUL: os.environ.get("ATLASFORGE_CODEX_MODEL_POWERFUL", "").strip(),
         }
         resolved = codex_tier_map.get(model, "")
+        return resolved or None
+
+    if provider == "gemini":
+        # Global override is handled first.
+        gemini_override = os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
+        if gemini_override:
+            return gemini_override
+
+        # Optional per-tier overrides.
+        gemini_tier_map = {
+            ModelType.FAST: os.environ.get("ATLASFORGE_GEMINI_MODEL_FAST", "").strip(),
+            ModelType.BALANCED: os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED", "").strip(),
+            ModelType.POWERFUL: os.environ.get("ATLASFORGE_GEMINI_MODEL_POWERFUL", "").strip(),
+        }
+        resolved = gemini_tier_map.get(model, "")
         return resolved or None
 
     return None
@@ -264,6 +284,8 @@ def invoke_fresh_llm(
         resolved_model = _resolve_model_for_provider(model, provider)
         if provider == "codex":
             response = _invoke_codex_cli(prompt, resolved_model, system_prompt, timeout, cwd)
+        elif provider == "gemini":
+            response = _invoke_gemini_cli(prompt, resolved_model, system_prompt, timeout, cwd)
         else:
             response = _invoke_claude_cli(prompt, resolved_model, system_prompt, timeout, cwd)
 
@@ -381,6 +403,62 @@ def _invoke_codex_cli(
             return result.stdout.strip()
         else:
             return f"ERROR: {result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "ERROR: Timeout"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+
+def _invoke_gemini_cli(
+    prompt: str,
+    model: Optional[str],
+    system_prompt: Optional[str],
+    timeout: int,
+    cwd: Path
+) -> str:
+    """Invoke Gemini via CLI."""
+    cmd = ["gemini"]
+    if _gemini_autonomous_enabled():
+        cmd.append("--yolo")
+    cmd.extend(["--output-format", "json"])
+
+    gemini_model = (model or "").strip()
+    if not gemini_model:
+        gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
+    if gemini_model:
+        cmd.extend(["-m", gemini_model])
+
+    full_prompt = prompt
+    if system_prompt:
+        full_prompt = (
+            "System instructions:\n"
+            f"{system_prompt}\n\n"
+            "User task:\n"
+            f"{prompt}"
+        )
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=full_prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(cwd),
+            start_new_session=True
+        )
+
+        if result.returncode == 0:
+            response = result.stdout.strip()
+            # Handle Gemini CLI JSON wrapper
+            try:
+                data = json.loads(response)
+                if isinstance(data, dict) and "response" in data:
+                    return data["response"]
+            except json.JSONDecodeError:
+                pass
+            return response
+        return f"ERROR: {result.stderr}"
     except subprocess.TimeoutExpired:
         return "ERROR: Timeout"
     except Exception as e:

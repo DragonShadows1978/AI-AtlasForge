@@ -257,7 +257,10 @@ export function collapseAllJournal() {
 
 function normalizeProvider(provider) {
     const value = (provider || '').toString().trim().toLowerCase();
-    return value === 'codex' ? 'codex' : 'claude';
+    if (value === 'codex' || value === 'gemini') {
+        return value;
+    }
+    return 'claude';
 }
 
 function getProviderSelectElements() {

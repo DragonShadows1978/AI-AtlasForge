@@ -39,7 +39,7 @@ LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 from ground_rules_loader import load_ground_rules
 
 # Shared provider routing (dashboard toggle)
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 
 
@@ -59,6 +59,11 @@ def _codex_web_search_enabled() -> bool:
 def _codex_autonomous_enabled() -> bool:
     """Run Codex with no approval/sandbox prompts by default."""
     return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _gemini_autonomous_enabled() -> bool:
+    """Run Gemini with no approval prompts by default."""
+    return _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True)
 
 
 def _normalize_provider(provider: Optional[str]) -> str:
@@ -552,6 +557,7 @@ def invoke_claude(
 
     start_time = time.time()
     provider = _get_active_llm_provider()
+    env = os.environ.copy()
 
     if provider == "codex":
         cmd = ["codex"]
@@ -579,6 +585,41 @@ def invoke_claude(
                 "User task:\n"
                 f"{prompt}"
             )
+    elif provider == "gemini":
+        cmd = ["gemini", "-p", ""]
+        if _gemini_autonomous_enabled():
+            cmd.append("--yolo")
+        cmd.extend(["--output-format", "json"])
+
+        # Model resolution for Gemini
+        gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
+        if not gemini_model:
+            # Map Claude model tiers to Gemini tiers if no global override
+            if model == ModelType.CLAUDE_HAIKU:
+                gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL_FAST", "").strip()
+            elif model == ModelType.CLAUDE_OPUS:
+                gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL_POWERFUL", "").strip()
+            else:  # CLAUDE_SONNET or default
+                gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED", "").strip()
+
+        if gemini_model:
+            cmd.extend(["-m", gemini_model])
+
+        full_prompt = prompt
+        if system_prompt:
+            full_prompt = (
+                "System instructions:\n"
+                f"{system_prompt}\n\n"
+                "User task:\n"
+                f"{prompt}"
+            )
+        # Gemini CLI may rely on GEMINI_API_KEY in non-interactive/headless mode.
+        if not env.get("GEMINI_API_KEY"):
+            google_api_key = env.get("GOOGLE_API_KEY", "").strip()
+            if google_api_key:
+                env["GEMINI_API_KEY"] = google_api_key
+        # Keep HOME explicit so Gemini resolves local auth/config consistently.
+        env.setdefault("HOME", str(Path.home()))
     else:
         cmd = ["claude", "-p", "--dangerously-skip-permissions"]
         if model:
@@ -595,14 +636,52 @@ def invoke_claude(
             text=True,
             timeout=timeout,
             cwd=str(cwd),
+            env=env,
             start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
         elapsed = time.time() - start_time
 
         if result.returncode == 0:
-            return result.stdout.strip(), elapsed
+            response = result.stdout.strip()
+            # Handle Gemini CLI JSON wrapper
+            if provider == "gemini":
+                try:
+                    data = json.loads(response)
+                    if isinstance(data, dict) and "response" in data:
+                        response = data["response"]
+                except json.JSONDecodeError:
+                    pass
+            return response, elapsed
         else:
+            if provider == "gemini":
+                stderr_text = (result.stderr or "").strip()
+                lines = [ln.strip() for ln in stderr_text.splitlines() if ln.strip()]
+                noise_prefixes = (
+                    "YOLO mode is enabled.",
+                    "Hook registry initialized",
+                    "Both GOOGLE_API_KEY and GEMINI_API_KEY are set.",
+                )
+                filtered = [ln for ln in lines if not ln.startswith(noise_prefixes)]
+                candidate_lines = filtered or lines
+                best_line = next(
+                    (ln for ln in candidate_lines if "error" in ln.lower() or "failed" in ln.lower()),
+                    candidate_lines[0] if candidate_lines else "Gemini CLI failed",
+                )
+                lower = stderr_text.lower()
+                if "error authenticating" in lower or "listen eperm" in lower:
+                    return (
+                        "ERROR: Gemini authentication failed in headless mode. "
+                        "Set GEMINI_API_KEY for the dashboard process (or run `gemini` login in the same runtime environment).",
+                        elapsed,
+                    )
+                if "fetch failed" in lower or "error generating content via api" in lower:
+                    return (
+                        "ERROR: Gemini API request failed (network/API). "
+                        "Verify outbound internet access and API key validity for this runtime.",
+                        elapsed,
+                    )
+                return (f"ERROR: {best_line}", elapsed)
             return f"ERROR: {result.stderr}", elapsed
     except subprocess.TimeoutExpired:
         return "ERROR: Timeout", time.time() - start_time
@@ -1480,6 +1559,7 @@ class InvestigationRunner:
         self.subagent_results: List[SubagentResult] = []
         self.started_at: Optional[str] = None
         self.progress_callback: Optional[Callable[[str], None]] = None
+        self._last_lead_error: Optional[str] = None
         # Load ground rules at startup
         self.ground_rules = load_investigation_ground_rules()
         # URL metadata extracted from query (GitHub repos, GitLab projects, docs, etc.)
@@ -1537,7 +1617,7 @@ class InvestigationRunner:
 
             research_directions = self._run_lead_agent()
             if not research_directions:
-                raise Exception("Lead agent failed to provide research directions")
+                raise Exception(self._last_lead_error or "Lead agent failed to provide research directions")
 
             # Step 2: Spawn parallel subagents
             self._log(f"Spawning {len(research_directions)} subagents...")
@@ -1692,6 +1772,7 @@ class InvestigationRunner:
 
     def _run_lead_agent(self) -> List[Dict[str, str]]:
         """Run the lead agent to decompose the query."""
+        self._last_lead_error = None
         prompt = build_lead_agent_prompt(
             self.config.query,
             self.config.max_subagents,
@@ -1725,6 +1806,11 @@ class InvestigationRunner:
 
         # Parse response
         try:
+            stripped = (response or "").strip()
+            if stripped.startswith("ERROR:"):
+                self._last_lead_error = stripped.splitlines()[0]
+                return []
+
             # Try to extract JSON from response
             import re
             json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
@@ -1738,12 +1824,32 @@ class InvestigationRunner:
                     data = json.loads(response[start:end])
                 else:
                     raise ValueError("No JSON found in response")
+            directions = data.get("research_directions", []) if isinstance(data, dict) else []
+            if not isinstance(directions, list) or not directions:
+                if isinstance(data, dict) and data.get("error"):
+                    err = data.get("error")
+                    if isinstance(err, dict):
+                        msg = str(err.get("message") or err.get("type") or "Unknown lead-agent error")
+                    else:
+                        msg = str(err)
+                    if not msg or msg == "[object Object]":
+                        msg = "Gemini returned an opaque error payload (likely API/network/auth issue)"
+                    self._last_lead_error = f"Lead agent error: {msg}"
+                else:
+                    self._last_lead_error = "Lead agent returned no research directions"
+                return []
 
-            return data.get("research_directions", [])
+            return directions
 
         except Exception as e:
             logger.error(f"Failed to parse lead agent response: {e}")
             logger.error(f"Response was: {response[:500]}")
+            response_head = (response or "").strip()
+            if response_head.startswith("ERROR:"):
+                first_line = response_head.splitlines()[0]
+                self._last_lead_error = first_line
+            else:
+                self._last_lead_error = "Lead agent failed to provide parseable JSON research directions"
             return []
 
     def _run_subagents(self, research_directions: List[Dict[str, str]]) -> List[SubagentResult]:

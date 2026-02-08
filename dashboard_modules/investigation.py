@@ -22,6 +22,7 @@ Endpoints:
 
 import threading
 import re
+import subprocess
 from flask import Blueprint, jsonify, request, Response
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -38,6 +39,25 @@ socketio = None
 
 # Track running investigation thread
 _investigation_thread = None
+
+
+def _has_external_investigation_process() -> bool:
+    """
+    Return True if an investigation_engine.py process appears to be running.
+
+    This catches CLI/background runs that are not tracked by the in-process
+    dashboard thread object.
+    """
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "investigation_engine.py"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        return bool((result.stdout or "").strip())
+    except Exception:
+        return False
 
 
 def init_investigation_blueprint(base_dir, state_dir, io_utils_module, socketio_instance=None):
@@ -92,7 +112,11 @@ def api_investigation_start():
     deliverable_format = data.get('deliverable_format')  # e.g., "HTML", "JSON", "markdown"
 
     # Check if an investigation is already running
-    from investigation_engine import load_investigation_state, InvestigationStatus
+    from investigation_engine import (
+        load_investigation_state,
+        save_investigation_state,
+        InvestigationStatus,
+    )
 
     state = load_investigation_state()
     if state.get("current"):
@@ -101,10 +125,25 @@ def api_investigation_start():
             InvestigationStatus.COMPLETED.value,
             InvestigationStatus.FAILED.value
         ]:
-            return jsonify({
-                "success": False,
-                "message": f"Investigation already running: {state['current'].get('investigation_id')}"
-            }), 409
+            thread_running = _investigation_thread is not None and _investigation_thread.is_alive()
+            external_running = _has_external_investigation_process()
+
+            if thread_running or external_running:
+                return jsonify({
+                    "success": False,
+                    "message": f"Investigation already running: {state['current'].get('investigation_id')}"
+                }), 409
+
+            # Recover stale non-terminal state after crash/restart/interrupted run.
+            stale = dict(state["current"])
+            now = datetime.now().isoformat()
+            stale["status"] = InvestigationStatus.FAILED.value
+            stale["error"] = "Recovered stale investigation state (no active worker process)"
+            stale["completed_at"] = now
+            stale["last_updated"] = now
+            state.setdefault("history", []).append(stale)
+            state["current"] = None
+            save_investigation_state(state)
 
     # Start investigation in background thread
     from investigation_engine import InvestigationConfig, InvestigationRunner

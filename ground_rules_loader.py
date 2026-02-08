@@ -18,7 +18,7 @@ from typing import Optional, Tuple
 import io_utils
 from atlasforge_config import BASE_DIR, STATE_DIR, INVESTIGATIONS_DIR
 
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 

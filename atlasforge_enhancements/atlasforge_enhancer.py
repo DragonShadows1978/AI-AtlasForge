@@ -47,7 +47,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Set up logging
 logger = logging.getLogger(__name__)
 
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 
 
@@ -140,7 +140,7 @@ class AtlasForgeEnhancer:
         Args:
             mission_id: Unique identifier for the current mission
             storage_base: Base path for storing data (default: ./atlasforge_data/)
-            llm_provider: Active LLM provider (claude/codex); auto-detected if None
+            llm_provider: Active LLM provider (claude/codex/gemini); auto-detected if None
 
         Raises:
             ValueError: If mission_id is empty or invalid

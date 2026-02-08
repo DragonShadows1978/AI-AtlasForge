@@ -208,7 +208,7 @@ def api_llm_provider():
             provider = get_llm_provider()
         else:
             provider = "claude"
-        return jsonify({"provider": provider, "supported": ["claude", "codex"]})
+        return jsonify({"provider": provider, "supported": ["claude", "codex", "gemini"]})
 
     if not set_llm_provider:
         return jsonify({"success": False, "message": "Provider configuration unavailable"}), 503

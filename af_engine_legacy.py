@@ -1357,7 +1357,12 @@ class RDMissionController:
             logger.warning(f"Failed to read ground rules: {e}")
 
         # Base prompt
-        agent_name = "Codex" if provider == "codex" else "Claude"
+        if provider == "codex":
+            agent_name = "Codex"
+        elif provider == "gemini":
+            agent_name = "Gemini"
+        else:
+            agent_name = "Claude"
         prompt_content = f"""You are {agent_name}, operating as an Autonomous R&D Engineer.
 
 === GROUND RULES (READ CAREFULLY) ===

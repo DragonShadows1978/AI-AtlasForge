@@ -160,7 +160,7 @@ def classify_error(error_info: str, response_text: Optional[str] = None) -> Tupl
         timeout_value = error_info[8:]  # Extract "3600s" part
         return (
             RestartReason.CLI_TIMEOUT,
-            f"Claude CLI did not respond within timeout period ({error_info})"
+            f"LLM CLI did not respond within timeout period ({error_info})"
         )
 
     # === Rate limit detection ===
@@ -307,6 +307,9 @@ def classify_error(error_info: str, response_text: Optional[str] = None) -> Tupl
         "read timeout",
         "econnrefused",
         "dns",
+        "fetch failed",
+        "error generating content via api",
+        "error when talking to gemini api",
     ]
     if any(pattern in combined for pattern in network_patterns):
         return (
@@ -319,7 +322,7 @@ def classify_error(error_info: str, response_text: Optional[str] = None) -> Tupl
         stderr_snippet = error_info[10:110]  # 100 char snippet
         return (
             RestartReason.CLI_CRASH,
-            f"Claude CLI error: {stderr_snippet}"
+            f"LLM CLI error: {stderr_snippet}"
         )
 
     # === Exception (generic) ===

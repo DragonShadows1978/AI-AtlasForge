@@ -243,7 +243,7 @@ CLAUDE_TRANSCRIPTS_DIR = get_transcript_dir()
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 TRANSCRIPTS_ARCHIVE_DIR = ARTIFACTS_DIR / "transcripts"
 DEFAULT_LLM_PROVIDER = "claude"
-SUPPORTED_LLM_PROVIDERS = {"claude", "codex"}
+SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 
 
 def _normalize_provider(provider: Optional[str]) -> str:
@@ -529,8 +529,8 @@ def _find_transcripts_in_window(
                     matching_files.append(jsonl_file)
                     seen_files.add(file_key)
 
-    # Codex transcripts
-    elif provider == "codex":
+    # Codex-compatible transcript storage
+    elif provider in {"codex", "gemini"}:
         for jsonl_file in _find_codex_transcripts_in_window(start_dt, end_dt, mission):
             file_key = str(jsonl_file.resolve())
             if file_key in seen_files:
@@ -546,7 +546,7 @@ def _find_transcripts_in_window(
                 continue
             matching_files.append(jsonl_file)
             seen_files.add(file_key)
-    elif provider == "codex" and not matching_files:
+    elif provider in {"codex", "gemini"} and not matching_files:
         fallback_dirs = transcript_dirs or _get_all_transcript_dirs_for_mission(mission or {})
         for transcript_dir in fallback_dirs:
             if not transcript_dir.exists():
@@ -1768,7 +1768,12 @@ class RDMissionController:
             logger.warning(f"Failed to read ground rules: {e}")
 
         # Base prompt
-        agent_name = "Codex" if provider == "codex" else "Claude"
+        if provider == "codex":
+            agent_name = "Codex"
+        elif provider == "gemini":
+            agent_name = "Gemini"
+        else:
+            agent_name = "Claude"
         prompt_content = f"""You are {agent_name}, operating as an Autonomous R&D Engineer.
 
 === GROUND RULES (READ CAREFULLY) ===

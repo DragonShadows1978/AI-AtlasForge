@@ -564,7 +564,7 @@ Continue the mission from where the previous cycle left off.
         # Generate mission ID
         mid = mission_id or f"mission_{uuid.uuid4().hex[:8]}"
         llm_provider = str(os.environ.get("ATLASFORGE_LLM_PROVIDER", "claude")).strip().lower() or "claude"
-        if llm_provider not in {"claude", "codex"}:
+        if llm_provider not in {"claude", "codex", "gemini"}:
             llm_provider = "claude"
 
         # Resolve project name for shared workspace
