@@ -1,6 +1,6 @@
 # AI-AtlasForge
 
-An autonomous AI research and development platform powered by Claude. Run long-duration missions, accumulate cross-session knowledge, and build software autonomously.
+An autonomous AI research and development platform with multi-provider LLM support (Claude, Codex, Gemini). Run long-duration missions, accumulate cross-session knowledge, and build software autonomously.
 
 ## What is AI-AtlasForge?
 
@@ -11,7 +11,7 @@ AI-AtlasForge is not a chatbot wrapper. It's an **autonomous research engine** t
 - Accumulates knowledge that persists across sessions
 - Self-corrects when drifting from objectives
 - Adversarially tests its own outputs
-- **Multi-provider**: Supports Claude and OpenAI Codex as LLM backends
+- **Multi-provider**: Supports Claude, OpenAI Codex, and Google Gemini as LLM backends
 
 ## Quick Start
 
@@ -92,6 +92,13 @@ make run          # Start autonomous agent
 make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
+
+## What's New in v1.8.0
+
+- **Google Gemini Support** - Full provider integration with subscription-based API access. Gemini missions validated on complex codebases (custom autograd implementations). Code generation, testing, and iteration loops proven functional
+- **Provider-Agnostic Architecture** - Three LLM backends (Claude, Codex, Gemini) running through unified orchestration with provider-specific hardening
+- **Enhanced Gemini Integration** - Defensive API invocation, clear error parsing, subscription auth support (API key or OAuth)
+- **Mission Validation** - Tested Gemini on Project Tensor (custom autograd) - improved code robustness and performance through multi-cycle iteration
 
 ## What's New in v1.7.0
 
