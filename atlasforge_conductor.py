@@ -25,6 +25,7 @@ import logging
 import os
 import threading
 import fcntl
+import shlex
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -181,6 +182,7 @@ def get_llm_provider() -> str:
 
 def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
     """Build subprocess CLI command for the selected provider."""
+    logger.info(f"Building command for provider: {provider}, model: {model}")
     if provider == "codex":
         cmd = ["codex"]
         if _codex_web_search_enabled():
@@ -204,9 +206,13 @@ def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
             cmd.append("--yolo")
         cmd.extend(["--output-format", "json"])
 
-        selected_model = model or os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
+        selected_model = (model or os.environ.get("ATLASFORGE_GEMINI_MODEL", "")).strip()
+        if not selected_model:
+            # Fallback to balanced tier when no explicit override is provided.
+            selected_model = os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED", "").strip()
         if selected_model:
             cmd.extend(["-m", selected_model])
+            logger.info(f"Using Gemini model: {selected_model}")
         return cmd
 
     # Default provider: Claude CLI
@@ -218,6 +224,15 @@ def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
     if model:
         cmd[2:2] = ["--model", model]
     return cmd
+
+
+def _llm_command_preview(provider: str) -> str:
+    """Build a safe, user-visible command preview for activity feed."""
+    try:
+        cmd = build_llm_command(provider)
+        return shlex.join(cmd)
+    except Exception as e:
+        return f"<command unavailable: {e}>"
 
 
 def acquire_conductor_lock() -> bool:
@@ -725,6 +740,7 @@ def invoke_haiku_summary(
             recent_context=recent_context or "No recent activity context available."
         )
 
+        logger.info(f"Invoking Haiku summary with provider: {provider}")
         command = build_llm_command(
             provider,
             model=HAIKU_MODEL if provider == "claude" else None
@@ -1281,6 +1297,8 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
         setup_enhanced_signal_handlers(shutdown_callback)
 
     send_to_chat(f"AtlasForge starting Mission Launch #{state['boot_count']}")
+    provider = get_llm_provider()
+    send_to_chat(f"[LLM] Launch command ({provider}): {_llm_command_preview(provider)}")
 
     # Initialize R&D controller
     controller = atlasforge_engine.RDMissionController()
@@ -1908,4 +1926,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logger.info("Conductor main entry point reached.")
     main()

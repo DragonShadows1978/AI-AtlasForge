@@ -1,0 +1,23 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_7a8e7a88",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-08T18:12:43.953528",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [
+      "atlaslab/validation/consistency.py",
+      "hypotheses/adversarial_dimensional_inconsistency.yaml",
+      "hypotheses/adversarial_physics.yaml"
+    ],
+    "files_modified": [
+      "atlaslab/data/reference_equations.json",
+      "atlaslab/knowledge/equation_matcher.py",
+      "atlaslab/engine/stages/integration.py",
+      "atlaslab/engine/stages/analysis.py",
+      "tests/test_adversarial.py",
+      "README.md"
+    ]
+  }
+}

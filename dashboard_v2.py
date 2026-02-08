@@ -205,6 +205,33 @@ def _resolve_chat_provider(msg: dict, fallback_provider: str) -> str:
     return _normalize_provider(msg.get("provider") or fallback_provider)
 
 
+def _load_env_file_values(env_path: Path) -> dict:
+    """Load KEY=VALUE pairs from a local .env file (best-effort)."""
+    values = {}
+    if not env_path.exists():
+        return values
+
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                values[key] = value
+    except Exception:
+        # Never block dashboard operations on optional .env parsing.
+        return {}
+
+    return values
+
+
 def _resolve_chat_display_role(msg: dict, fallback_provider: str) -> str:
     """
     Resolve display role for chat activity.
@@ -303,6 +330,10 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
         log_file = LOG_DIR / "atlasforge_conductor.log"
         provider = get_llm_provider()
         env = os.environ.copy()
+        # Ensure dashboard-launched processes receive local .env overrides even
+        # when dashboard itself is started via systemd without those variables.
+        for k, v in _load_env_file_values(BASE_DIR / ".env").items():
+            env.setdefault(k, v)
         env["ATLASFORGE_LLM_PROVIDER"] = provider
 
         subprocess.Popen(
