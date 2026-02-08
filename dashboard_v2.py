@@ -331,9 +331,8 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
         provider = get_llm_provider()
         env = os.environ.copy()
         # Ensure dashboard-launched processes receive local .env overrides even
-        # when dashboard itself is started via systemd without those variables.
-        for k, v in _load_env_file_values(BASE_DIR / ".env").items():
-            env.setdefault(k, v)
+        # when dashboard itself is started via systemd with stale env values.
+        env.update(_load_env_file_values(BASE_DIR / ".env"))
         env["ATLASFORGE_LLM_PROVIDER"] = provider
 
         subprocess.Popen(
