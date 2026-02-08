@@ -2,10 +2,10 @@
   "pid": 2694683,
   "hostname": "x-wing",
   "acquired_at": "2026-02-08T10:26:31.446274",
-  "expires_at": "2026-02-08T15:12:31.572845",
-  "heartbeat_at": "2026-02-08T15:02:31.572845",
+  "expires_at": "2026-02-08T15:41:31.586425",
+  "heartbeat_at": "2026-02-08T15:31:31.586425",
   "mission_id": "mission_7a8e7a88",
-  "current_stage": "BUILDING",
+  "current_stage": "CYCLE_END",
   "boot_count": 417,
   "lock_version": 1
 }
