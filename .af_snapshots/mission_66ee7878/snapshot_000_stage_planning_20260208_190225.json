@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_66ee7878",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-08T19:02:25.455523",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "AtlasLab foundation is solid and verified (Cycle 2 complete).",
+      "Previous services like Email Investigation are running on separate ports (5001) and integrated into the dashboard."
+    ],
+    "steps_planned": 6
+  }
+}

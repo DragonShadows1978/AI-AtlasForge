@@ -313,6 +313,11 @@
                     <span id="atlasforge-service-state" class="service-state">Offline</span>
                 </div>
                 <div id="investigation-service-status" class="service-status offline" title="Investigation Engine status">
+                <div id="atlaslab-service-status" class="service-status offline" title="Atlas Lab API status">
+                    <span class="service-label">Atlas Lab:</span>
+                    <span class="service-dot"></span>
+                    <span id="atlaslab-service-state" class="service-state">Offline</span>
+                </div>
                     <span class="service-label">Investigations:</span>
                     <span class="service-dot"></span>
                     <span id="investigation-service-state" class="service-state">Offline</span>
@@ -2430,6 +2435,11 @@
 
                 // Fetch email investigation status
                 fetchEmailInvestigationStatus();
+                // Fetch Atlas Lab status
+                fetch("/api/services/status/atlaslab")
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) { updateAtlasLabServiceStatus(data.online); })
+                    .catch(function(e) { updateAtlasLabServiceStatus(false); });
 
                 // Fetch journal
                 fetch('/api/journal')
@@ -2526,6 +2536,20 @@
                 } else {
                     container.classList.add('offline');
                     stateEl.textContent = 'Offline';
+                }
+            }
+
+            function updateAtlasLabServiceStatus(online) {
+                var container = document.getElementById("atlaslab-service-status");
+                var stateEl = document.getElementById("atlaslab-service-state");
+                if (!container || !stateEl) return;
+                container.classList.remove("online", "offline");
+                if (online) {
+                    container.classList.add("online");
+                    stateEl.textContent = "Online";
+                } else {
+                    container.classList.add("offline");
+                    stateEl.textContent = "Offline";
                 }
             }
 
