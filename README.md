@@ -93,6 +93,14 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
+## What's New in v1.8.2
+
+- **Bug Fixes** - Fixed null handling in suggestion analyzer, improved storage fallback in dashboard similarity analysis
+
+## What's New in v1.8.1
+
+- **Dashboard Services Config** - Added Atlas Lab service configuration to services registry
+
 ## What's New in v1.8.0
 
 - **Google Gemini Support** - Full provider integration with subscription-based API access. Gemini missions validated on complex codebases (custom autograd implementations). Code generation, testing, and iteration loops proven functional

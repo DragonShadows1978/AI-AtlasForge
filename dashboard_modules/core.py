@@ -661,8 +661,15 @@ def api_add_recommendation():
 @core_bp.route('/api/recommendations/similarity-analysis', methods=['GET'])
 def api_similarity_analysis():
     """Analyze recommendations for similarity and suggest groupings."""
-    recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-    items = recommendations.get("items", [])
+    storage = _get_suggestion_storage()
+    if storage:
+        try:
+            items = storage.get_all()
+        except Exception:
+            items = []
+    else:
+        recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+        items = recommendations.get("items", [])
 
     if len(items) < 2:
         return jsonify({"groups": [], "message": "Need at least 2 suggestions for similarity analysis"})

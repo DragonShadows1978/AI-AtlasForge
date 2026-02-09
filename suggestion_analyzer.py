@@ -269,8 +269,8 @@ class Prioritizer:
         recent_words = set()
         for mission in recent_missions[:5]:  # Last 5 missions
             mission_text = ' '.join([
-                mission.get('original_mission', ''),
-                mission.get('problem_statement', '')
+                str(mission.get('original_mission') or ''),
+                str(mission.get('problem_statement') or '')
             ])
             recent_words.update(mission_text.lower().split())
 
@@ -412,7 +412,7 @@ class HealthAnalyzer:
 
         for mission in archived_missions:
             mission_text = ' '.join([
-                mission.get('original_mission', ''),
+                str(mission.get('original_mission') or ''),
                 str(mission.get('problem_statement', ''))
             ]).lower()
             mission_words = set(mission_text.split())
