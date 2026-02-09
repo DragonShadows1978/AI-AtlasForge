@@ -1205,8 +1205,13 @@ def get_glassbox_archive_status() -> dict:
 def get_recommendations_summary() -> dict:
     """Get recommendations summary for WebSocket push."""
     try:
-        recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-        items = recommendations_data.get("items", [])
+        try:
+            from suggestion_storage import get_storage
+            storage = get_storage()
+            items = storage.get_all()
+        except Exception:
+            recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+            items = recommendations_data.get("items", [])
         return {
             'count': len(items),
             'recent': items[-5:] if items else [],
