@@ -26,7 +26,7 @@ services_bp = Blueprint('services', __name__, url_prefix='/api/services')
 #         'working_dir': '/path/to/working/dir'
 #     }
 # }
-SERVICES = {}
+SERVICES = {'atlaslab': {'name': 'Atlas Lab', 'port': 5011, 'process_pattern': 'python3 atlaslab_api.py', 'start_script': '/home/vader/AI-AtlasForge/workspace/AtlasForge/start_atlaslab.sh', 'working_dir': '/home/vader/AI-AtlasForge/workspace/AtlasForge'}}
 
 
 def find_service_process(service_id: str) -> dict | None:
