@@ -3120,6 +3120,119 @@ Respond with JSON:
         self.save_mission()
         logger.info(f"Advanced to cycle {current_cycle + 1}")
 
+    def _coerce_suggested_cycles(self, value: Any, default: int = 3) -> int:
+        """Convert a cycle value to a safe integer in the allowed range."""
+        try:
+            cycles = int(value)
+        except (TypeError, ValueError):
+            cycles = default
+        return max(1, min(10, cycles))
+
+    def _normalize_recommendation_payload(self, payload: Any) -> Optional[dict]:
+        """Normalize model recommendation variants to the expected schema."""
+        if not isinstance(payload, dict):
+            return None
+
+        mission_title = (
+            payload.get("mission_title")
+            or payload.get("title")
+            or payload.get("name")
+            or payload.get("mission")
+        )
+        mission_description = (
+            payload.get("mission_description")
+            or payload.get("description")
+            or payload.get("problem_statement")
+            or payload.get("objective")
+        )
+        rationale = (
+            payload.get("rationale")
+            or payload.get("reason")
+            or payload.get("why")
+            or payload.get("justification")
+            or ""
+        )
+
+        if isinstance(mission_description, list):
+            mission_description = "\n".join(str(item) for item in mission_description if item)
+
+        if mission_title is not None:
+            mission_title = str(mission_title).strip()
+        if mission_description is not None:
+            mission_description = str(mission_description).strip()
+
+        if not mission_title and mission_description:
+            mission_title = mission_description.splitlines()[0][:100]
+        if not mission_description and mission_title:
+            mission_description = mission_title
+        if not mission_title and not mission_description:
+            return None
+
+        return {
+            "mission_title": mission_title or "Untitled Mission",
+            "mission_description": mission_description or "",
+            "suggested_cycles": self._coerce_suggested_cycles(
+                payload.get("suggested_cycles", payload.get("cycle_budget", payload.get("cycles"))),
+                default=3
+            ),
+            "rationale": str(rationale).strip(),
+        }
+
+    def _extract_next_mission_recommendation(self, response: dict) -> Optional[dict]:
+        """Extract next mission recommendation from multiple common response shapes."""
+        if not isinstance(response, dict):
+            return None
+
+        candidate_keys = [
+            "next_mission_recommendation",
+            "next_mission_suggestion",
+            "follow_up_mission",
+            "recommended_next_mission",
+            "next_mission",
+        ]
+        for key in candidate_keys:
+            normalized = self._normalize_recommendation_payload(response.get(key))
+            if normalized:
+                return normalized
+
+        recommendations = response.get("recommendations")
+        if isinstance(recommendations, list):
+            for rec in recommendations:
+                normalized = self._normalize_recommendation_payload(rec)
+                if normalized:
+                    return normalized
+
+        return None
+
+    def _build_fallback_recommendation(self, final_report: dict) -> dict:
+        """Create a deterministic follow-up recommendation when the model omits one."""
+        mission_id = self.mission.get("mission_id", "unknown")
+        project_name = self.mission.get("project_name") or mission_id
+        original_mission = (
+            self.mission.get("original_problem_statement")
+            or self.mission.get("problem_statement")
+            or ""
+        ).strip()
+        summary = (final_report.get("final_summary") or "").strip()
+
+        description_parts = [
+            f"Continue mission {mission_id} by hardening and extending the delivered implementation."
+        ]
+        if summary:
+            description_parts.append(f"Starting point: {summary[:400]}")
+        elif original_mission:
+            description_parts.append(f"Original objective: {original_mission[:400]}")
+        description_parts.append(
+            "Focus on reliability gaps, edge-case testing, operational safeguards, and concise documentation updates."
+        )
+
+        return {
+            "mission_title": f"Follow-up: Harden and Extend {project_name}"[:100],
+            "mission_description": " ".join(description_parts),
+            "suggested_cycles": self._coerce_suggested_cycles(self.mission.get("cycle_budget", 1) + 1, default=2),
+            "rationale": "Auto-generated fallback because the model response omitted a structured next mission recommendation.",
+        }
+
     def _generate_final_report(self, response: dict):
         """Generate and save the final mission report with full file manifest."""
         mission_id = self.mission.get("mission_id", "unknown")
@@ -3233,6 +3346,20 @@ Respond with JSON:
             ftype = f.get("file_type", "unknown")
             final_report["statistics"]["file_types"][ftype] = final_report["statistics"]["file_types"].get(ftype, 0) + 1
 
+        # Keep recommendation generation resilient across providers and response shapes.
+        next_rec = self._extract_next_mission_recommendation(response)
+        if next_rec:
+            final_report["next_mission_recommendation"] = next_rec
+            final_report["next_mission_recommendation_source"] = "model"
+        else:
+            fallback_rec = self._build_fallback_recommendation(final_report)
+            final_report["next_mission_recommendation"] = fallback_rec
+            final_report["next_mission_recommendation_source"] = "fallback"
+            logger.warning(
+                "No structured next mission recommendation found for %s; generated fallback recommendation",
+                mission_id
+            )
+
         # Save to mission_logs
         report_path = MISSION_LOGS_DIR / f"{mission_id}_report.json"
         with open(report_path, 'w') as f:
@@ -3274,8 +3401,8 @@ Respond with JSON:
             except Exception as e:
                 logger.warning(f"Knowledge Base: Failed to ingest mission: {e}")
 
-        # Save next mission recommendation if provided
-        next_rec = response.get("next_mission_recommendation")
+        # Save next mission recommendation (model-provided or fallback)
+        next_rec = final_report.get("next_mission_recommendation")
         if next_rec:
             self._save_recommendation(next_rec, mission_id, final_report.get("final_summary", ""))
 
