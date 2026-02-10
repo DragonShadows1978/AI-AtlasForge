@@ -68,15 +68,15 @@ STAGE_POLICIES = {
     RDStage.PLANNING: StageToolPolicy(
         stage=RDStage.PLANNING,
         allowed_tools={
-            "Read",
-            "Glob",
-            "Grep",
+            "Read", "read_file",
+            "Glob", "list_directory",
+            "Grep", "search_file_content",
             "WebFetch",
             "WebSearch",
             "Task",  # For research subagents
-            "Write",  # Only for artifacts
-            "Edit",   # Only for artifacts
-            "Bash",  # Read-only bash commands allowed for exploration
+            "Write", "write_file",  # Only for artifacts
+            "Edit", "replace",   # Only for artifacts
+            "Bash", "run_shell_command",  # Read-only bash commands allowed for exploration
         },
         blocked_tools={
             "NotebookEdit",  # No notebook changes
@@ -105,14 +105,15 @@ STAGE_POLICIES = {
     RDStage.ANALYZING: StageToolPolicy(
         stage=RDStage.ANALYZING,
         allowed_tools={
-            "Read",
-            "Glob",
-            "Grep",
+            "Read", "read_file",
+            "Glob", "list_directory",
+            "Grep", "search_file_content",
             "WebFetch",
             "WebSearch",
             "Task",
-            "Write",  # Only for reports
-            "Edit",   # Only for reports
+            "Write", "write_file",  # Only for reports
+            "Edit", "replace",   # Only for reports
+            "run_shell_command",
         },
         blocked_tools=set(),
         write_paths_allowed=[
@@ -127,11 +128,11 @@ STAGE_POLICIES = {
     RDStage.CYCLE_END: StageToolPolicy(
         stage=RDStage.CYCLE_END,
         allowed_tools={
-            "Read",
-            "Glob",
-            "Grep",
-            "Write",  # Only for reports and continuation prompts
-            "Edit",   # Only for reports
+            "Read", "read_file",
+            "Glob", "list_directory",
+            "Grep", "search_file_content",
+            "Write", "write_file",  # Only for reports and continuation prompts
+            "Edit", "replace",   # Only for reports
             "Task",   # For research subagents if needed
         },
         blocked_tools=set(),  # Path restrictions handle write blocking
@@ -148,15 +149,15 @@ STAGE_POLICIES = {
     RDStage.COMPLETE: StageToolPolicy(
         stage=RDStage.COMPLETE,
         allowed_tools={
-            "Read",
-            "Glob",
-            "Grep",
+            "Read", "read_file",
+            "Glob", "list_directory",
+            "Grep", "search_file_content",
         },
         blocked_tools={
-            "Edit",
-            "Write",
+            "Edit", "replace",
+            "Write", "write_file",
             "NotebookEdit",
-            "Bash",
+            "Bash", "run_shell_command",
         },
         write_paths_allowed=[]
     ),
@@ -211,15 +212,15 @@ Your job is to understand the mission AND create an implementation plan.
 ### WRITE RESTRICTIONS:
 - You may write **ONLY to artifacts/ or research/ directories**
 - Creating or modifying code files (*.py, *.js, *.ts, etc.) is FORBIDDEN
-- Using `NotebookEdit` is FORBIDDEN
+- Using `NotebookEdit` or Gemini `replace` on code files is FORBIDDEN
 - Writing anywhere except artifacts/ or research/ is FORBIDDEN
 
 ### ALLOWED ACTIONS:
-- Reading any files to understand the codebase
-- Searching and grepping for relevant code
-- Using `Bash` for read-only commands (ls, git status, pwd, etc.)
-- Writing to `artifacts/implementation_plan.md`
-- Writing to `research/*.md`
+- Reading any files to understand the codebase (Claude `Read`, Gemini `read_file`)
+- Searching and grepping for relevant code (Claude `Glob`/`Grep`, Gemini `list_directory`/`search_file_content`)
+- Using `Bash` or Gemini `run_shell_command` for read-only commands (ls, git status, pwd, etc.)
+- Writing to `artifacts/implementation_plan.md` (Claude `Write`, Gemini `write_file`)
+- Writing to `research/*.md` (Claude `Write`, Gemini `write_file`)
 - Spawning research subagents with `Task`
 - Using `WebFetch` and `WebSearch` for research
 
@@ -249,15 +250,15 @@ All actual code implementation happens in the BUILDING stage.
 You are in the ANALYZING stage. You may write **ONLY reports and analysis**.
 
 ### FORBIDDEN in ANALYZING:
-- Modifying source code
-- Creating new features
+- Modifying source code (FORBIDDEN Claude `Edit`, Gemini `replace`)
+- Creating new features (FORBIDDEN Claude `Write`, Gemini `write_file`)
 - Bug fixes (those go in next BUILDING iteration)
 
 ### ALLOWED in ANALYZING:
-- Reading any files
-- Running tests (read-only verification)
-- Writing analysis to `research/analysis.md`
-- Writing test results to `artifacts/test_results.md`
+- Reading any files (Claude `Read`, Gemini `read_file`)
+- Running tests (read-only verification via Claude `Bash`, Gemini `run_shell_command`)
+- Writing analysis to `research/analysis.md` (Claude `Write`, Gemini `write_file`)
+- Writing test results to `artifacts/test_results.md` (Claude `Write`, Gemini `write_file`)
 
 ### Your ONLY goals in ANALYZING:
 1. Evaluate test results
@@ -278,13 +279,13 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
 
 ### WRITE RESTRICTIONS:
 - You may write **ONLY to artifacts/, research/, or mission_logs/ directories**
-- Modifying source code is FORBIDDEN
+- Modifying source code is FORBIDDEN (FORBIDDEN Claude `Edit`, Gemini `replace`)
 - All code changes belong in the BUILDING stage of the next cycle
 
 ### ALLOWED ACTIONS:
-- Reading any files to gather cycle summary information
-- Writing cycle reports to artifacts/
-- Writing to mission_logs/ for archival
+- Reading any files to gather cycle summary information (Claude `Read`, Gemini `read_file`)
+- Writing cycle reports to artifacts/ (Claude `Write`, Gemini `write_file`)
+- Writing to mission_logs/ for archival (Claude `Write`, Gemini `write_file`)
 - Generating continuation prompts for the next cycle
 
 ### Your GOALS in CYCLE_END:
