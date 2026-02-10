@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_9fc8b0a7",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-09T23:56:14.580750",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Next Step: - Set up Bungie API authentication and manifest pa... (General idea of setting up API authentication)"
+    ],
+    "steps_planned": 4
+  }
+}
