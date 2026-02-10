@@ -52,7 +52,7 @@ COPY --chown=atlasforge:atlasforge . /app/
 
 # Create required directories with proper permissions
 RUN mkdir -p /app/state /app/missions /app/logs /app/workspace /app/knowledge_base /app/investigations \
-    && chown -R atlasforge:atlasforge /app/state /app/missions /app/logs /app/workspace /app/knowledge_base /app/investigations
+    && chown -R atlasforge:atlasforge /app
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
