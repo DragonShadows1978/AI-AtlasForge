@@ -93,6 +93,11 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
+## What's New in v1.8.3
+
+- **Test Harness Improvements** - Refactored subprocess mocking in conductor timeout tests, improved phase-aware drift validation, provider-aware ground rules caching
+- **Stability Fixes** - Enhanced test coverage for timeout scenarios, improved error handling in stage handlers, Gemini provider integration tests
+
 ## What's New in v1.8.2
 
 - **Bug Fixes** - Fixed null handling in suggestion analyzer, improved storage fallback in dashboard similarity analysis
