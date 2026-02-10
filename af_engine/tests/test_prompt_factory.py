@@ -318,10 +318,10 @@ class TestPromptAssembly:
         from af_engine.stages.base import StageContext
 
         pf = PromptFactory()
-        pf._ground_rules_cache = "# Rules\nBe good."
+        pf._ground_rules_cache_by_provider = {"gemini": "# Rules\nBe good."}
 
         context = StageContext(
-            mission={"current_stage": "BUILDING"},
+            mission={"current_stage": "BUILDING", "llm_provider": "gemini"},
             mission_id="test",
             original_mission="Build stuff",
             problem_statement="Build stuff now",

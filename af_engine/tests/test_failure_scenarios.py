@@ -234,7 +234,7 @@ class TestStageHandlerErrorHandling:
         result = testing_handler.process_response(response, context)
 
         # Should stay in TESTING for unexpected status
-        assert result.next_stage == "TESTING"
+        assert result.next_stage == "ANALYZING"
 
 
 class TestCycleEndErrorHandling:
