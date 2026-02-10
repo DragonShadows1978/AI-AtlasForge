@@ -1,0 +1,19 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_fe131665",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-09T22:57:39.860632",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [],
+    "files_modified": [
+      "requirements.txt",
+      "Dockerfile",
+      "adversarial_testing/phase_aware_drift.py",
+      "af_engine/tests/test_conductor_timeout.py",
+      "af_engine/tests/test_failure_scenarios.py",
+      "af_engine/tests/test_prompt_factory.py"
+    ]
+  }
+}
