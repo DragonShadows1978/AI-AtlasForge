@@ -1700,7 +1700,9 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     error_msg = format_error_message(error_reason, error_explanation, timeout_retries - 1, MAX_CLAUDE_RETRIES)
                     send_to_chat(error_msg)
                     logger.warning(f"Error ({error_reason.value}): {error_explanation}, retrying ({timeout_retries}/{MAX_CLAUDE_RETRIES})")
-                    time.sleep(10)
+                    # Exponential backoff: 10s, 20s, 40s...
+                    backoff_time = min(60, 10 * (2 ** (timeout_retries - 1)))
+                    time.sleep(backoff_time)
                     continue
 
             # Parse response
@@ -1709,12 +1711,22 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             if not response:
                 # If we can't parse JSON, log the raw response and retry
                 logger.warning("Could not parse response as JSON")
+                timeout_retries += 1
+                if timeout_retries >= MAX_CLAUDE_RETRIES:
+                    logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively to produce valid JSON")
+                    break
+                timeout_retries += 1
+                if timeout_retries >= MAX_CLAUDE_RETRIES:
+                    logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively to produce valid JSON")
+                    break
                 append_journal({
                     "type": "rd_raw_response",
                     "stage": current_stage,
                     "response": response_text[:1000]
                 })
-                time.sleep(5)
+                # Exponential backoff: 10s, 20s, 40s...
+                backoff_time = min(60, 10 * (2 ** (timeout_retries - 1)))
+                time.sleep(backoff_time)
                 continue
 
             # Reset timeout counter on successful response

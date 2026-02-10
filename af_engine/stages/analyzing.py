@@ -88,7 +88,7 @@ If recommending COMPLETE, also include:
         recommendation = response.get("recommendation", "").upper()
 
         # Log unrecognized status values for debugging
-        valid_statuses = ["success", "needs_revision", "needs_replanning"]
+        valid_statuses = ["success", "needs_revision", "needs_replanning", "complete", "mission_complete", "done", "finished"]
         if status and status not in valid_statuses:
             logger.warning(f"ANALYZING: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
@@ -105,7 +105,8 @@ If recommending COMPLETE, also include:
             )
         ]
 
-        if status == "success" or recommendation == "COMPLETE":
+        success_signals = ["success", "complete", "mission_complete", "done", "finished"]
+        if status in success_signals or recommendation == "COMPLETE":
             # Go to CYCLE_END instead of COMPLETE to handle cycle iteration
             return StageResult(
                 success=True,

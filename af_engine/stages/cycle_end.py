@@ -128,11 +128,14 @@ Respond with JSON:
         cycles_remaining = cycle_budget - current_cycle
 
         # Log unrecognized status values for debugging
-        valid_statuses = ["cycle_complete", "mission_complete"]
+        valid_statuses = ["cycle_complete", "mission_complete", "success", "continue", "complete", "done", "finished"]
         if status and status not in valid_statuses:
             logger.warning(f"CYCLE_END: Unrecognized status '{raw_status}' (normalized: '{status}')")
 
-        if status == "cycle_complete" and cycles_remaining > 0:
+        cycle_success_signals = ["cycle_complete", "success", "continue"]
+        mission_success_signals = ["mission_complete", "complete", "done", "finished", "success"]
+
+        if status in cycle_success_signals and cycles_remaining > 0:
             # More cycles remaining - continue
             continuation_prompt = response.get("continuation_prompt", "")
             cycle_report = response.get("cycle_report", {})
@@ -164,7 +167,7 @@ Respond with JSON:
                 message=response.get("message_to_human", f"Cycle {current_cycle} complete, continuing")
             )
 
-        elif status == "mission_complete" or cycles_remaining <= 0:
+        elif status in mission_success_signals or cycles_remaining <= 0:
             # Mission complete
             final_report = response.get("final_report", {})
             deliverables = response.get("deliverables", [])

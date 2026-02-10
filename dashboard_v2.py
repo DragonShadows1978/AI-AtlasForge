@@ -148,10 +148,25 @@ except ImportError:
 # =============================================================================
 
 def find_process(script_name: str) -> dict | None:
-    """Find a running process by script name."""
+    """Find a running process by script name with PID file priority."""
+    # First check PID file for exact match
+    if PID_PATH.exists():
+        try:
+            pid = int(PID_PATH.read_text().strip())
+            cmdline_path = Path(f"/proc/{pid}/cmdline")
+            if cmdline_path.exists():
+                cmdline = cmdline_path.read_text().replace('\x00', ' ')
+                if script_name in cmdline and 'python' in cmdline:
+                    return {"pid": pid, "cmd": cmdline}
+        except:
+            pass
+
+    # Fallback to pgrep with strict pattern
     try:
+        # Use ^python3.*script_name to avoid matching 'tail -f' etc.
+        pattern = f"python3.*{script_name}"
         result = subprocess.run(
-            ["pgrep", "-af", script_name],
+            ["pgrep", "-af", pattern],
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.strip().split('\n'):
