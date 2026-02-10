@@ -644,7 +644,8 @@ class PhaseCompletionDetector:
             # Check if objective keywords appear near completion words
             if obj_words:
                 for indicator in completed_indicators:
-                    pattern = rf'\b{indicator}\b.{{0,50}}({'|'.join(obj_words[:3])})'
+                    obj_pattern = '|'.join(obj_words[:3])
+                    pattern = rf'\b{indicator}\b.{{0,50}}({obj_pattern})'
                     if re.search(pattern, text_lower):
                         evidence.append(f"Objective appears completed: {objective[:50]}")
                         break

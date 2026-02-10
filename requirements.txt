@@ -22,3 +22,6 @@ scikit-learn>=1.0.0  # Used for TF-IDF in knowledge base
 # Optional: GUI system tray (Linux)
 # Uncomment to enable system tray indicator:
 # PyGObject>=3.42.0
+
+requests
+pyyaml

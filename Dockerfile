@@ -51,25 +51,25 @@ WORKDIR /app
 COPY --chown=atlasforge:atlasforge . /app/
 
 # Create required directories with proper permissions
-RUN mkdir -p /app/state /app/missions /app/logs /app/workspace /app/knowledge_base \
-    && chown -R atlasforge:atlasforge /app/state /app/missions /app/logs /app/workspace /app/knowledge_base
+RUN mkdir -p /app/state /app/missions /app/logs /app/workspace /app/knowledge_base /app/investigations \
+    && chown -R atlasforge:atlasforge /app/state /app/missions /app/logs /app/workspace /app/knowledge_base /app/investigations
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV ATLASFORGE_ROOT=/app
-ENV ATLASFORGE_PORT=5050
+ENV ATLASFORGE_PORT=5010
 ENV ATLASFORGE_HOST=0.0.0.0
 
 # Switch to non-root user
 USER atlasforge
 
 # Expose dashboard port
-EXPOSE 5050
+EXPOSE 5010
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${ATLASFORGE_PORT}/health || exit 1
+    CMD curl -f http://localhost:${ATLASFORGE_PORT}/api/health || exit 1
 
 # Default command - run dashboard
 CMD ["python", "dashboard_v2.py"]

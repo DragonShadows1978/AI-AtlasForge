@@ -40,12 +40,16 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None when Claude times out."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=5)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=5)
+            mock_proc.pid = 12345
+            mock_popen.return_value = mock_proc
 
-            result = conductor.invoke_llm("test prompt", timeout=5)
+            result, error = conductor.invoke_llm("test prompt", timeout=5)
 
             assert result is None
+            assert "timeout" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -53,12 +57,13 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None on subprocess error."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.run') as mock_run:
-            mock_run.side_effect = Exception("Subprocess failed")
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.side_effect = Exception("Subprocess failed")
 
-            result = conductor.invoke_llm("test prompt", timeout=5)
+            result, error = conductor.invoke_llm("test prompt", timeout=5)
 
             assert result is None
+            assert "exception" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -66,15 +71,16 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None when subprocess returns non-zero."""
         import atlasforge_conductor as conductor
 
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Error from Claude CLI"
-        mock_result.stdout = ""
+        with patch('subprocess.Popen') as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.returncode = 1
+            mock_proc.communicate.return_value = ("", "Error from Claude CLI")
+            mock_popen.return_value = mock_proc
 
-        with patch('subprocess.run', return_value=mock_result):
-            result = conductor.invoke_llm("test prompt", timeout=5)
+            result, error = conductor.invoke_llm("test prompt", timeout=5)
 
             assert result is None
+            assert "cli_error" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -82,15 +88,16 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns response text on success."""
         import atlasforge_conductor as conductor
 
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = '{"status": "success"}'
-        mock_result.stderr = ""
+        with patch('subprocess.Popen') as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.communicate.return_value = ('{"status": "success"}', "")
+            mock_popen.return_value = mock_proc
 
-        with patch('subprocess.run', return_value=mock_result):
-            result = conductor.invoke_llm("test prompt", timeout=5)
+            result, error = conductor.invoke_llm("test prompt", timeout=5)
 
             assert result == '{"status": "success"}'
+            assert error is None
 
 
 # ===========================================================================
