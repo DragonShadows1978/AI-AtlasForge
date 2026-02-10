@@ -1715,10 +1715,6 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 if timeout_retries >= MAX_CLAUDE_RETRIES:
                     logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively to produce valid JSON")
                     break
-                timeout_retries += 1
-                if timeout_retries >= MAX_CLAUDE_RETRIES:
-                    logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively to produce valid JSON")
-                    break
                 append_journal({
                     "type": "rd_raw_response",
                     "stage": current_stage,

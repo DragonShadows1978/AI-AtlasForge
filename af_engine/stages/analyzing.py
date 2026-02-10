@@ -85,7 +85,8 @@ If recommending COMPLETE, also include:
         # Normalize status for case-insensitive matching
         raw_status = response.get("status", "")
         status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
-        recommendation = response.get("recommendation", "").upper()
+        raw_rec = response.get("recommendation", "")
+        recommendation = raw_rec.upper().strip() if isinstance(raw_rec, str) else ""
 
         # Log unrecognized status values for debugging
         valid_statuses = ["success", "needs_revision", "needs_replanning", "complete", "mission_complete", "done", "finished"]

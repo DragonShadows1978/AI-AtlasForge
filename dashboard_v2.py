@@ -170,7 +170,7 @@ def find_process(script_name: str) -> dict | None:
             capture_output=True, text=True, timeout=5
         )
         for line in result.stdout.strip().split('\n'):
-            if line and script_name in line and 'grep' not in line and 'pgrep' not in line:
+            if line and script_name in line and 'python' in line and 'grep' not in line and 'pgrep' not in line:
                 parts = line.split(None, 1)
                 if parts:
                     return {"pid": int(parts[0]), "cmd": parts[1] if len(parts) > 1 else ""}
