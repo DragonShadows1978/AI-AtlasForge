@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_d6daf03c",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-10T01:52:13.887891",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Deliverable: Modified dashboard CSS/JS for Activity Log visual ...",
+      "Deliverable: Real-time progress updates via WebSocket..."
+    ],
+    "steps_planned": 5
+  }
+}
