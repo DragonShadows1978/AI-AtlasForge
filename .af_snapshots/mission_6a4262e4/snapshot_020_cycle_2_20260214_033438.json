@@ -1,0 +1,73 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_6a4262e4",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-14T03:34:38.460351",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "final": true,
+    "final_report": {
+      "summary": "Cycle 1 established the hybrid production architecture end-to-end: RESEARCH genre calls were parallelized with asyncio.gather and routed to Claude Haiku, psychology research remained on Claude Sonnet, downstream ROLES/OUTLINE/MATRIX/PROFILES were pinned to Sonnet, and project creation was locked to claude/sonnet with provider/model controls removed from UI. Cycle 2 then hardened and validated that baseline for production readiness: deterministic input sanitization and bounds were added for story title/genres/concept lines before prompt/file use, RESEARCH gained explicit per-genre attempt diagnostics and isolated retry observability, adversarial expectations were aligned to lock-and-ignore semantics, and functional/spec/adversarial/mutation validation artifacts were regenerated. Final evidence includes real 4-genre run telemetry showing concurrent behavior (wall-clock materially below summed attempt durations) and fresh Firefox :99 screenshots confirming provider/model controls remain absent and create flow still works.",
+      "all_files": [
+        "sf_engine/input_sanitization.py",
+        "sf_engine/stages/stage_research.py",
+        "sf_engine/stages/stage_roles.py",
+        "sf_engine/stages/stage_outline.py",
+        "sf_engine/stages/stage_matrix.py",
+        "sf_engine/stages/stage_profiles.py",
+        "web/routes.py",
+        "web/templates/index.html",
+        "tests/test_research_hybrid_stage.py",
+        "tests/test_multi_provider.py",
+        "tests/test_spec_alignment.py",
+        "tests/test_functional.py",
+        "tests/test_adversarial.py",
+        "artifacts/implementation_plan.md",
+        "artifacts/test_results.md",
+        "artifacts/test_results_functional.json",
+        "artifacts/test_results_adversarial.json",
+        "artifacts/test_results_adversarial_runner_cycle2.json",
+        "artifacts/test_results_spec_alignment.json",
+        "artifacts/test_results_mutation_current.json",
+        "artifacts/test_results_blind_validation_current.json",
+        "artifacts/test_results_red_team_fresh_current.json",
+        "artifacts/cycle2_parallel_performance.md",
+        "artifacts/cycle2_parallel_performance_raw.json",
+        "artifacts/cycle2_ui_firefox_create_form.png",
+        "artifacts/cycle2_ui_firefox_progress.png",
+        "artifacts/cycle2_ui_firefox_create_form_20260214_033022.png",
+        "artifacts/cycle2_ui_firefox_progress_20260214_033022.png",
+        "artifacts/ui_verify_model_locked_20260214.png",
+        "artifacts/ui_verify_model_locked_20260214_v2.png",
+        "artifacts/ui_verify_model_locked_firefox_headless.png",
+        "artifacts/ui_capture_test_red.png",
+        "research/research_findings.md",
+        "research/analysis.md"
+      ],
+      "key_achievements": [
+        "Parallel genre research implemented and operationalized with Haiku subagents plus Sonnet psychology sequencing.",
+        "Production model policy enforced: project creation locked to provider=claude and model=sonnet while inbound overrides are ignored.",
+        "Core generation stages (ROLES, OUTLINE, MATRIX, PROFILES) pinned internally to Sonnet for quality consistency.",
+        "Security hardening added for user-controlled research inputs with deterministic normalization and bounded sanitization.",
+        "RESEARCH observability upgraded with per-genre attempt timelines/error context and isolated retry semantics.",
+        "Validation suite completed with passing functional/spec alignment/adversarial checks and 100% mutation score on target tests.",
+        "Firefox :99 UI regression evidence captured showing provider/model controls remain removed and create flow remains functional.",
+        "Parallelism evidence documented from real workflow telemetry (concurrency factor consistent with concurrent execution)."
+      ],
+      "challenges_overcome": [
+        "Resolved policy mismatch in adversarial expectations by shifting from reject-on-override to ignore-and-lock semantics.",
+        "Handled transient external Claude CLI failures during real run while still extracting reliable concurrency/attempt telemetry evidence.",
+        "Improved diagnosability of RESEARCH failures by replacing ambiguous stage-level failure reporting with explicit per-genre attempt traces.",
+        "Added hardening without regressing stage transitions, token accounting, or hybrid routing behavior."
+      ],
+      "lessons_learned": [
+        "Locking model policy is strongest when enforced at API persistence boundaries and mirrored by UI removal of mutable controls.",
+        "Parallel pipelines need per-task retry isolation and per-task diagnostics; global retries obscure root cause and inflate latency.",
+        "Input sanitization for LLM workflows should be deterministic and bounded, but preserve semantic payload to avoid output-quality regressions.",
+        "End-to-end timing and log artifacts are essential to prove real concurrency when external dependencies are noisy.",
+        "Combining functional/spec/adversarial/mutation checks provides better production confidence than any single test modality."
+      ]
+    }
+  }
+}
