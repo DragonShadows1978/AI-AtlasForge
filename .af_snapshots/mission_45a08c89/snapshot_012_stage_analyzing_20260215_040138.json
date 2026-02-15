@@ -1,0 +1,16 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_45a08c89",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-15T04:01:38.585809",
+  "snapshot_number": 12,
+  "event_data": {
+    "status": "needs_revision",
+    "recommendation": "BUILDING",
+    "issues_found": [
+      "Current TESTING result is `tests_failed` due blind validation failure (2/8 requirements passed, high spec drift).",
+      "Adversarial red-team phase was inconclusive due timeout, reducing confidence in hardening quality.",
+      "Implementation is too narrow/generalization is weak (focused on one failure signature and limited robustness coverage)."
+    ]
+  }
+}
