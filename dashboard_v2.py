@@ -134,6 +134,7 @@ VALID_WS_ROOMS = [
     'recommendations',   # Mission recommendations (next mission suggestions)
     'file_events',       # File creation/modification events during missions
     'glassbox_archive',  # GlassBox transcript archival events
+    'subprocess_gate',   # Intelligent Subprocess Gate status
 ]
 
 # Register websocket_events module with socketio reference
@@ -1067,6 +1068,8 @@ def get_initial_room_data(room: str) -> dict:
             return get_glassbox_archive_status()
         elif room == 'recommendations':
             return get_recommendations_summary()
+        elif room == 'subprocess_gate':
+            return get_subprocess_gate_status()
     except Exception as e:
         return {'error': str(e)}
     return {}
@@ -1236,6 +1239,38 @@ def get_recommendations_summary() -> dict:
         return {'error': str(e), 'count': 0, 'recent': []}
 
 
+def get_subprocess_gate_status() -> dict:
+    """Get Intelligent Subprocess Gate status for WebSocket push."""
+    try:
+        import sys as _sys
+        _gate_path = os.path.join(os.path.dirname(__file__), 'workspace', 'project_bbf2ba08')
+        if os.path.isdir(_gate_path) and _gate_path not in _sys.path:
+            _sys.path.insert(0, _gate_path)
+        from orchestration.intelligent_gate import IntelligentSubprocessGate
+        gate = IntelligentSubprocessGate(
+            monitored_pid=os.getpid(),
+            workspace_path=str(WORKSPACE_DIR),
+        )
+        decision = gate.should_defer_handoff()
+        status = gate.get_status_summary()
+        return {
+            'available': True,
+            'should_defer': decision.should_defer,
+            'process_type': decision.process_type.value if decision.process_type else None,
+            'confidence': decision.confidence,
+            'timeout_seconds': decision.timeout_seconds,
+            'is_stalled': decision.is_stalled,
+            'reason': decision.reason,
+            'active_children': status.get('active_children', 0),
+            'stalled_pids': status.get('stalled_pids', []),
+            'timestamp': datetime.now().isoformat(),
+        }
+    except ImportError:
+        return {'available': False, 'timestamp': datetime.now().isoformat()}
+    except Exception as e:
+        return {'available': False, 'error': str(e), 'timestamp': datetime.now().isoformat()}
+
+
 def emit_widget_update(room: str, data: dict):
     """Emit update to specific widget room."""
     socketio.emit('update', {
@@ -1362,6 +1397,18 @@ def check_and_emit_widget_updates():
     except Exception:
         pass
 
+    # Subprocess gate check (every 5 seconds)
+    try:
+        if now - _widget_state.get('gate_last_check', 0) > 5:
+            _widget_state['gate_last_check'] = now
+            gate_data = get_subprocess_gate_status()
+            gate_key = f"{gate_data.get('should_defer')}:{gate_data.get('process_type')}:{gate_data.get('is_stalled')}"
+            if _widget_state.get('gate_key') != gate_key:
+                _widget_state['gate_key'] = gate_key
+                emit_widget_update('subprocess_gate', gate_data)
+    except Exception:
+        pass
+
 
 # =============================================================================
 # WEBSOCKET CONNECTION STATUS API
@@ -1419,6 +1466,16 @@ def api_context_watcher_stats():
             'running': False,
             'timestamp': datetime.now().isoformat()
         }), 500
+
+
+# =============================================================================
+# SUBPROCESS GATE API
+# =============================================================================
+
+@app.route('/api/subprocess-gate/status')
+def api_subprocess_gate_status():
+    """Get Intelligent Subprocess Gate status."""
+    return jsonify(get_subprocess_gate_status())
 
 
 # =============================================================================

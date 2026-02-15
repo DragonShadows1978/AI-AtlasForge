@@ -133,6 +133,20 @@ SUBPROCESS_CPU_THRESHOLD_PERCENT = float(os.environ.get(
     "SUBPROCESS_CPU_THRESHOLD_PERCENT", "1.0"
 ))
 
+# Intelligent Subprocess Gate integration (Cycle 2)
+_INTELLIGENT_GATE_AVAILABLE = False
+try:
+    import sys as _sys
+    _gate_path = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                               'workspace', 'project_bbf2ba08')
+    if os.path.isdir(_gate_path) and _gate_path not in _sys.path:
+        _sys.path.insert(0, _gate_path)
+    from orchestration.intelligent_gate import IntelligentSubprocessGate
+    from interfaces.contracts import GateConfig as _GateConfig
+    _INTELLIGENT_GATE_AVAILABLE = True
+except ImportError:
+    pass
+
 # Codex scanning
 CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
@@ -583,6 +597,8 @@ class ActivityAwareHandoffMonitor:
         self._last_known_mtimes: Dict[str, float] = {}
         self._lock = threading.Lock()
         self._monitored_pid: Optional[int] = None
+        self._intelligent_gate = None  # Lazy-initialized IntelligentSubprocessGate
+        self._workspace_path = Path(workspace_path) if workspace_path else None
 
         logger.info(
             f"ActivityAwareHandoffMonitor created for session {session_id}: "
@@ -674,16 +690,43 @@ class ActivityAwareHandoffMonitor:
     def _has_active_children(self) -> bool:
         """Check whether the monitored process has children consuming CPU.
 
-        Returns True only when:
-          - psutil is available AND the feature is enabled
-          - The root process (explicit PID or self) has live children
-          - Those children collectively exceed SUBPROCESS_CPU_THRESHOLD_PERCENT
+        Uses the IntelligentSubprocessGate when available for rich classification
+        (process type, confidence, adaptive timeout, stall detection). Falls back
+        to the original CPU-threshold check when the gate is unavailable.
 
         Fail-open: returns False on any error so the handoff proceeds.
         """
         if not _PSUTIL_AVAILABLE or not SUBPROCESS_CHECK_ENABLED:
             return False
 
+        # Use intelligent gate if available
+        if _INTELLIGENT_GATE_AVAILABLE:
+            try:
+                if self._intelligent_gate is None:
+                    root_pid = self._monitored_pid or os.getpid()
+                    workspace = str(self._workspace_path) if self._workspace_path else "."
+                    self._intelligent_gate = IntelligentSubprocessGate(
+                        monitored_pid=root_pid, workspace_path=workspace
+                    )
+                elif self._monitored_pid:
+                    self._intelligent_gate._monitored_pid = self._monitored_pid
+
+                decision = self._intelligent_gate.should_defer_handoff()
+                if decision.should_defer:
+                    logger.info(
+                        f"Session {self.session_id}: intelligent gate defers handoff - "
+                        f"type={decision.process_type.value}, confidence={decision.confidence:.2f}, "
+                        f"timeout={decision.timeout_seconds:.0f}s, reason={decision.reason}"
+                        + (", STALLED" if decision.is_stalled else "")
+                    )
+                return decision.should_defer and not decision.is_stalled
+            except Exception as exc:
+                logger.debug(
+                    f"Session {self.session_id}: intelligent gate failed ({exc!r}), "
+                    f"falling back to CPU threshold check"
+                )
+
+        # Fallback to original CPU threshold check
         try:
             root_pid = self._monitored_pid or os.getpid()
             try:
@@ -692,7 +735,6 @@ class ActivityAwareHandoffMonitor:
                 return False
 
             children = root_proc.children(recursive=True)
-            # Filter out zombies
             alive = []
             for child in children:
                 try:
@@ -704,14 +746,12 @@ class ActivityAwareHandoffMonitor:
             if not alive:
                 return False
 
-            # Prime CPU counters (interval=None returns value since last call)
             for child in alive:
                 try:
                     child.cpu_percent(interval=None)
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-            # Brief pause then sample again
             time.sleep(0.3)
 
             total_cpu = 0.0
