@@ -11,6 +11,7 @@ from .context_watcher import (
     HandoffSignal,
     HandoffLevel,
     TimeBasedHandoffMonitor,
+    ActivityAwareHandoffMonitor,
     get_context_watcher,
     start_context_watching,
     stop_context_watching,
@@ -25,6 +26,10 @@ from .context_watcher import (
     CONTEXT_WATCHER_ENABLED,
     TIME_BASED_HANDOFF_ENABLED,
     TIME_BASED_HANDOFF_MINUTES,
+    STAGE_TIMEOUT_MINUTES,
+    INACTIVITY_THRESHOLD_MINUTES,
+    ACTIVITY_CHECK_INTERVAL_SECONDS,
+    MAX_ABSOLUTE_TIMEOUT_MINUTES,
 )
 
 __all__ = [
@@ -34,6 +39,7 @@ __all__ = [
     "HandoffSignal",
     "HandoffLevel",
     "TimeBasedHandoffMonitor",
+    "ActivityAwareHandoffMonitor",
     "get_context_watcher",
     "start_context_watching",
     "stop_context_watching",
@@ -48,4 +54,8 @@ __all__ = [
     "CONTEXT_WATCHER_ENABLED",
     "TIME_BASED_HANDOFF_ENABLED",
     "TIME_BASED_HANDOFF_MINUTES",
+    "STAGE_TIMEOUT_MINUTES",
+    "INACTIVITY_THRESHOLD_MINUTES",
+    "ACTIVITY_CHECK_INTERVAL_SECONDS",
+    "MAX_ABSOLUTE_TIMEOUT_MINUTES",
 ]

@@ -61,6 +61,7 @@ try:
         HandoffLevel,
         write_handoff_state,
         TIME_BASED_HANDOFF_ENABLED,
+        MAX_ABSOLUTE_TIMEOUT_MINUTES,
     )
     HAS_CONTEXT_WATCHER = True
 except ImportError:
@@ -70,6 +71,7 @@ except ImportError:
     HandoffLevel = None
     write_handoff_state = None
     TIME_BASED_HANDOFF_ENABLED = False
+    MAX_ABSOLUTE_TIMEOUT_MINUTES = 360
 
 # Enhanced conductor singleton with takeover support
 try:
@@ -1492,20 +1494,30 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     logger.info(f"Terminated Claude subprocess for {signal.level.value} handoff")
 
             # Start ContextWatcher if available
+            # Pass current_stage so ActivityAwareHandoffMonitor is used for
+            # long-running stages (TESTING, BUILDING) instead of fixed 55min timer
             if HAS_CONTEXT_WATCHER:
                 try:
                     watcher = get_context_watcher()
                     context_session_id = watcher.start_watching(
                         str(workspace),
                         on_context_handoff,
-                        enable_time_handoff=TIME_BASED_HANDOFF_ENABLED
+                        enable_time_handoff=TIME_BASED_HANDOFF_ENABLED,
+                        stage=current_stage
                     )
                     if context_session_id:
-                        logger.info(f"ContextWatcher started for session {context_session_id}")
+                        logger.info(f"ContextWatcher started for session {context_session_id} (stage={current_stage})")
                 except Exception as e:
                     logger.warning(f"Failed to start ContextWatcher: {e}")
 
-            response_text, error_info = invoke_llm(prompt, timeout=3600, cwd=workspace)
+            # Adaptive subprocess timeout: TESTING/BUILDING get longer timeouts
+            # to match the activity-aware handoff monitor's extended window
+            llm_timeout = 3600  # Default 1 hour
+            if current_stage == "TESTING":
+                llm_timeout = MAX_ABSOLUTE_TIMEOUT_MINUTES * 60 if HAS_CONTEXT_WATCHER else 3600
+            elif current_stage == "BUILDING":
+                llm_timeout = 7200  # 2 hours for builds
+            response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace)
 
             # Stop ContextWatcher
             if context_session_id and HAS_CONTEXT_WATCHER:

@@ -103,6 +103,20 @@ TIME_BASED_HANDOFF_MINUTES = int(os.environ.get(
     "TIME_BASED_HANDOFF_MINUTES", "55"
 ))
 
+# Stage-aware adaptive timeout: base timeout per stage (minutes)
+STAGE_TIMEOUT_MINUTES = {
+    "PLANNING": int(os.environ.get("STAGE_TIMEOUT_PLANNING", "55")),
+    "BUILDING": int(os.environ.get("STAGE_TIMEOUT_BUILDING", "120")),
+    "TESTING": int(os.environ.get("STAGE_TIMEOUT_TESTING", "240")),
+    "ANALYZING": int(os.environ.get("STAGE_TIMEOUT_ANALYZING", "55")),
+    "CYCLE_END": int(os.environ.get("STAGE_TIMEOUT_CYCLE_END", "55")),
+    "COMPLETE": int(os.environ.get("STAGE_TIMEOUT_COMPLETE", "55")),
+}
+ACTIVITY_CHECK_INTERVAL_SECONDS = int(os.environ.get("ACTIVITY_CHECK_INTERVAL_SECONDS", "30"))
+INACTIVITY_THRESHOLD_MINUTES = int(os.environ.get("INACTIVITY_THRESHOLD_MINUTES", "15"))
+MAX_ABSOLUTE_TIMEOUT_MINUTES = int(os.environ.get("MAX_ABSOLUTE_TIMEOUT_MINUTES", "360"))
+ACTIVITY_IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache", "venv", ".venv"}
+
 # Codex scanning
 CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
@@ -501,6 +515,301 @@ class TimeBasedHandoffMonitor:
 
 
 # =============================================================================
+# ACTIVITY-AWARE HANDOFF MONITOR (ADAPTIVE TIMEOUT)
+# =============================================================================
+
+class ActivityAwareHandoffMonitor:
+    """
+    Monitors workspace file activity to decide when to trigger handoff.
+
+    Instead of a fixed wall-clock timer, this monitor:
+    1. Polls the workspace for recently modified files every N seconds
+    2. Resets an inactivity counter whenever new file writes are detected
+    3. Only fires the handoff when inactivity exceeds a configurable threshold
+       AND the minimum stage-based runtime has elapsed
+    4. Has an absolute maximum timeout as a hard safety ceiling
+
+    This prevents long-running TESTING stages from being killed while the
+    agent is still actively producing output (writing files, running tests).
+
+    The monitor is model-agnostic: it watches filesystem activity, not
+    LLM-specific signals, so it works with Claude, Codex, Gemini, or any
+    other provider.
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        workspace_path: str,
+        callback: Callable[[HandoffSignal], None],
+        stage: str = "TESTING",
+        timeout_minutes: Optional[int] = None,
+        inactivity_minutes: Optional[int] = None,
+        max_absolute_minutes: Optional[int] = None,
+    ):
+        self.session_id = session_id
+        self.workspace_path = workspace_path
+        self.callback = callback
+        self.stage = stage.upper() if stage else "TESTING"
+
+        # Resolve timeouts from stage config, explicit args, or defaults
+        # Use "is None" check (not truthiness) so explicit 0 values are respected
+        self.timeout_minutes = timeout_minutes if timeout_minutes is not None else STAGE_TIMEOUT_MINUTES.get(self.stage, TIME_BASED_HANDOFF_MINUTES)
+        self.inactivity_minutes = inactivity_minutes if inactivity_minutes is not None else INACTIVITY_THRESHOLD_MINUTES
+        self.max_absolute_minutes = max_absolute_minutes if max_absolute_minutes is not None else MAX_ABSOLUTE_TIMEOUT_MINUTES
+
+        self._stop_event = threading.Event()
+        self._fired = False
+        self._cancelled = False
+        self._thread: Optional[threading.Thread] = None
+        self._started_at: Optional[datetime] = None
+        self._last_activity_time: Optional[float] = None
+        self._last_known_mtimes: Dict[str, float] = {}
+        self._lock = threading.Lock()
+
+        logger.info(
+            f"ActivityAwareHandoffMonitor created for session {session_id}: "
+            f"stage={self.stage}, base_timeout={self.timeout_minutes}min, "
+            f"inactivity={self.inactivity_minutes}min, "
+            f"max_absolute={self.max_absolute_minutes}min"
+        )
+
+    def start(self):
+        """Start the activity-aware handoff monitor."""
+        with self._lock:
+            if self._thread is not None:
+                return
+            self._started_at = datetime.now()
+            self._last_activity_time = time.time()
+            self._stop_event.clear()
+            self._fired = False
+            self._cancelled = False
+
+            self._thread = threading.Thread(
+                target=self._activity_loop,
+                daemon=True,
+                name=f"ActivityAwareHandoff-{self.session_id}"
+            )
+            self._thread.start()
+            logger.info(
+                f"Activity-aware handoff monitor started for session {self.session_id} "
+                f"(stage: {self.stage}, base timeout: {self.timeout_minutes}min, "
+                f"inactivity threshold: {self.inactivity_minutes}min)"
+            )
+
+    def _scan_workspace_activity(self) -> float:
+        """Scan workspace files for the most recent modification time.
+
+        Returns the max mtime found across workspace files (up to 2 levels deep),
+        ignoring directories in ACTIVITY_IGNORE_DIRS.
+        """
+        max_mtime = 0.0
+        workspace = Path(self.workspace_path)
+        if not workspace.exists():
+            return max_mtime
+
+        try:
+            for depth0 in workspace.iterdir():
+                if depth0.name in ACTIVITY_IGNORE_DIRS:
+                    continue
+                try:
+                    st = depth0.stat()
+                    if st.st_mtime > max_mtime:
+                        max_mtime = st.st_mtime
+                    if depth0.is_dir():
+                        for depth1 in depth0.iterdir():
+                            if depth1.name in ACTIVITY_IGNORE_DIRS:
+                                continue
+                            try:
+                                st1 = depth1.stat()
+                                if st1.st_mtime > max_mtime:
+                                    max_mtime = st1.st_mtime
+                                if depth1.is_dir():
+                                    for depth2 in depth1.iterdir():
+                                        if depth2.name in ACTIVITY_IGNORE_DIRS:
+                                            continue
+                                        try:
+                                            st2 = depth2.stat()
+                                            if st2.st_mtime > max_mtime:
+                                                max_mtime = st2.st_mtime
+                                        except OSError:
+                                            continue
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+        except OSError:
+            pass
+
+        return max_mtime
+
+    def _activity_loop(self):
+        """Core polling loop that checks workspace for file activity."""
+        baseline_mtime = self._scan_workspace_activity()
+        if baseline_mtime > 0:
+            self._last_activity_time = max(self._last_activity_time or 0, baseline_mtime)
+
+        while not self._stop_event.is_set():
+            self._stop_event.wait(timeout=ACTIVITY_CHECK_INTERVAL_SECONDS)
+            if self._stop_event.is_set():
+                break
+
+            now = time.time()
+            elapsed_minutes = (now - (self._started_at.timestamp() if self._started_at else now)) / 60.0
+
+            # Scan for new file activity
+            current_max_mtime = self._scan_workspace_activity()
+            if current_max_mtime > (self._last_activity_time or 0):
+                logger.debug(
+                    f"Session {self.session_id}: workspace activity detected "
+                    f"(mtime delta: {current_max_mtime - (self._last_activity_time or 0):.1f}s)"
+                )
+                self._last_activity_time = current_max_mtime
+
+            # Calculate inactivity duration
+            inactivity_seconds = now - (self._last_activity_time or now)
+            inactivity_minutes = inactivity_seconds / 60.0
+
+            # DECISION: Should we fire the handoff?
+            should_fire = False
+            fire_reason = ""
+
+            # Check 1: Absolute maximum timeout (hard ceiling, always enforced)
+            if elapsed_minutes >= self.max_absolute_minutes:
+                should_fire = True
+                fire_reason = f"absolute max timeout ({self.max_absolute_minutes}min)"
+
+            # Check 2: Inactivity threshold exceeded AND minimum runtime passed
+            elif (inactivity_minutes >= self.inactivity_minutes
+                  and elapsed_minutes >= self.timeout_minutes):
+                should_fire = True
+                fire_reason = (
+                    f"inactivity ({inactivity_minutes:.1f}min) after "
+                    f"base timeout ({self.timeout_minutes}min)"
+                )
+
+            # Check 3: Extended inactivity even before base timeout
+            # If the agent has been completely silent for 2x the inactivity threshold,
+            # it's probably hung regardless of elapsed time (but only after 30 min minimum)
+            elif (inactivity_minutes >= self.inactivity_minutes * 2
+                  and elapsed_minutes >= 30):
+                should_fire = True
+                fire_reason = (
+                    f"extended inactivity ({inactivity_minutes:.1f}min, "
+                    f"2x threshold) after {elapsed_minutes:.1f}min"
+                )
+
+            if not should_fire:
+                if int(elapsed_minutes) % 10 == 0 and int(elapsed_minutes) > 0:
+                    logger.debug(
+                        f"Session {self.session_id}: alive at {elapsed_minutes:.0f}min, "
+                        f"last activity {inactivity_minutes:.1f}min ago"
+                    )
+                continue
+
+            # Fire the handoff
+            with self._lock:
+                if self._fired or self._cancelled:
+                    return
+
+                # Defense-in-depth: validate session is still active
+                try:
+                    global _watcher_instance
+                    if _watcher_instance is not None:
+                        if self.session_id not in _watcher_instance._sessions:
+                            logger.warning(
+                                f"Activity-aware handoff for {self.session_id} skipped: "
+                                f"session no longer active (zombie detected)"
+                            )
+                            self._cancelled = True
+                            return
+                except Exception:
+                    pass
+
+                self._fired = True
+
+            logger.info(
+                f"Activity-aware handoff triggered for session {self.session_id}: "
+                f"{fire_reason} (elapsed: {elapsed_minutes:.1f}min)"
+            )
+
+            signal = HandoffSignal(
+                level=HandoffLevel.TIME_BASED,
+                session_id=self.session_id,
+                workspace_path=self.workspace_path,
+                tokens_used=0,
+                cache_read=0,
+                cache_creation=0,
+                elapsed_minutes=elapsed_minutes
+            )
+
+            try:
+                self.callback(signal)
+            except Exception as e:
+                logger.error(f"Activity-aware handoff callback error: {e}")
+            return
+
+        # Loop exited via stop event
+        with self._lock:
+            if not self._fired:
+                self._cancelled = True
+                logger.debug(f"Activity-aware handoff cancelled for session {self.session_id}")
+
+    def cancel(self):
+        """Cancel the activity-aware handoff monitor."""
+        with self._lock:
+            if self._fired:
+                return
+            self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        logger.debug(f"Activity-aware handoff monitor cancelled for session {self.session_id}")
+
+    def stop(self):
+        """Alias for cancel()."""
+        self.cancel()
+
+    @property
+    def has_fired(self) -> bool:
+        with self._lock:
+            return self._fired
+
+    @property
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
+    @property
+    def elapsed_seconds(self) -> float:
+        if self._started_at is None:
+            return 0.0
+        return (datetime.now() - self._started_at).total_seconds()
+
+    @property
+    def remaining_seconds(self) -> float:
+        return max(0.0, self.max_absolute_minutes * 60 - self.elapsed_seconds)
+
+    def get_stats(self) -> Dict[str, Any]:
+        with self._lock:
+            inactivity_sec = time.time() - (self._last_activity_time or time.time())
+            return {
+                "session_id": self.session_id,
+                "monitor_type": "activity_aware",
+                "stage": self.stage,
+                "timeout_minutes": self.timeout_minutes,
+                "inactivity_threshold_minutes": self.inactivity_minutes,
+                "max_absolute_minutes": self.max_absolute_minutes,
+                "elapsed_seconds": self.elapsed_seconds,
+                "remaining_seconds": self.remaining_seconds,
+                "current_inactivity_seconds": inactivity_sec,
+                "fired": self._fired,
+                "cancelled": self._cancelled,
+                "started_at": self._started_at.isoformat() if self._started_at else None
+            }
+
+
+# =============================================================================
 # SESSION CLASSIFICATION
 # =============================================================================
 
@@ -668,7 +977,8 @@ class SessionMonitor:
         workspace_path: str,
         callback: Callable[[HandoffSignal], None],
         enable_time_handoff: bool = True,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        stage: Optional[str] = None
     ):
         """
         Initialize session monitor.
@@ -678,11 +988,15 @@ class SessionMonitor:
             workspace_path: Path to the workspace being monitored
             callback: Function to call when handoff is triggered
             enable_time_handoff: Whether to enable time-based handoff (default True)
+            stage: Current R&D stage (PLANNING, BUILDING, TESTING, etc.)
+                   When provided, uses ActivityAwareHandoffMonitor instead of
+                   the fixed TimeBasedHandoffMonitor.
         """
         self.session_id = session_id
         self.workspace_path = workspace_path
         self.callback = callback
         self.provider = get_active_provider(provider)
+        self.stage = stage
 
         # Find transcript directory
         self.transcript_dir = find_transcript_dir(workspace_path, provider=self.provider)
@@ -1074,19 +1388,39 @@ class SessionMonitor:
         return stats
 
     def start_time_handoff_monitor(self):
-        """Start the time-based handoff monitor for this session."""
+        """Start the time-based or activity-aware handoff monitor for this session.
+
+        When a stage is provided and recognized, uses ActivityAwareHandoffMonitor
+        which watches workspace file modifications instead of a fixed timer.
+        Falls back to TimeBasedHandoffMonitor when no stage is set (backward compat).
+        """
         if not self._enable_time_handoff:
             return
 
         if self._time_handoff_monitor is not None:
             return  # Already running
 
-        self._time_handoff_monitor = TimeBasedHandoffMonitor(
-            session_id=self.session_id,
-            workspace_path=self.workspace_path,
-            callback=self._on_time_handoff,
-            timeout_minutes=TIME_BASED_HANDOFF_MINUTES
-        )
+        if self.stage and self.stage.upper() in STAGE_TIMEOUT_MINUTES:
+            # Use activity-aware monitor for stage-aware adaptive timeout
+            self._time_handoff_monitor = ActivityAwareHandoffMonitor(
+                session_id=self.session_id,
+                workspace_path=self.workspace_path,
+                callback=self._on_time_handoff,
+                stage=self.stage,
+            )
+            logger.info(
+                f"Session {self.session_id}: using ActivityAwareHandoffMonitor "
+                f"for stage {self.stage} (base timeout: "
+                f"{STAGE_TIMEOUT_MINUTES.get(self.stage.upper(), 55)}min)"
+            )
+        else:
+            # No stage or unrecognized stage: use fixed timer (backward compat)
+            self._time_handoff_monitor = TimeBasedHandoffMonitor(
+                session_id=self.session_id,
+                workspace_path=self.workspace_path,
+                callback=self._on_time_handoff,
+                timeout_minutes=TIME_BASED_HANDOFF_MINUTES
+            )
         self._time_handoff_monitor.start()
 
     def _on_time_handoff(self, signal: HandoffSignal):
@@ -1192,7 +1526,8 @@ class ContextWatcher:
         self,
         workspace_path: str,
         callback: Callable[[HandoffSignal], None],
-        enable_time_handoff: bool = True
+        enable_time_handoff: bool = True,
+        stage: Optional[str] = None
     ) -> Optional[str]:
         """
         Start monitoring a workspace for context exhaustion.
@@ -1201,6 +1536,8 @@ class ContextWatcher:
             workspace_path: Path to the workspace to monitor
             callback: Function to call when handoff is triggered
             enable_time_handoff: Whether to enable time-based handoff (default True)
+            stage: Current R&D stage (e.g. "TESTING"). When provided, uses
+                   activity-aware adaptive timeout instead of fixed 55-min timer.
 
         Returns:
             Session ID if started successfully, None on failure
@@ -1218,7 +1555,8 @@ class ContextWatcher:
             monitor = SessionMonitor(
                 session_id, workspace_path, callback,
                 enable_time_handoff=enable_time_handoff,
-                provider=active_provider
+                provider=active_provider,
+                stage=stage
             )
 
             if not monitor.transcript_dir and monitor.provider != "gemini":
@@ -1576,7 +1914,8 @@ def get_context_watcher() -> ContextWatcher:
 
 def start_context_watching(
     workspace_path: str,
-    callback: Callable[[HandoffSignal], None]
+    callback: Callable[[HandoffSignal], None],
+    stage: Optional[str] = None
 ) -> Optional[str]:
     """
     Convenience function to start watching a workspace.
@@ -1584,11 +1923,12 @@ def start_context_watching(
     Args:
         workspace_path: Path to workspace
         callback: Handoff callback function
+        stage: Current R&D stage for adaptive timeout (optional)
 
     Returns:
         Session ID or None
     """
-    return get_context_watcher().start_watching(workspace_path, callback)
+    return get_context_watcher().start_watching(workspace_path, callback, stage=stage)
 
 
 def stop_context_watching(session_id: str):
