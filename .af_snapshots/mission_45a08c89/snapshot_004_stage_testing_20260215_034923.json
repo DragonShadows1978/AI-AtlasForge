@@ -1,0 +1,29 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_45a08c89",
+  "stage": "TESTING",
+  "timestamp": "2026-02-15T03:49:23.721311",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_failed",
+    "tests_passed": false,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "Arbitrary file overwrite via output path arguments",
+        "Symlink clobber attack on report outputs",
+        "Conductor event collection is not mission-isolated",
+        "chat/journal events are window-filtered but not mission-filtered",
+        "Root-cause inference is spoofable via substring injection",
+        "Missing or unreadable input files cause hard crash",
+        "Malformed conductor timestamp can crash parser",
+        "Memory DoS from full-file loading",
+        "Time window truncates evidence outside \u00b12 hours"
+      ],
+      "property_violations": [],
+      "mutation_score": 0.8333,
+      "spec_alignment": 0.3333,
+      "epistemic_score": 0.6667,
+      "rigor_level": "weak"
+    }
+  }
+}
