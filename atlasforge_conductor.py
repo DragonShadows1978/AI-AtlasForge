@@ -45,6 +45,21 @@ from atlasforge_conductor_errors import (
     format_restart_message,
 )
 
+# Response adapter for deterministic fallback when JSON parsing fails
+try:
+    import sys as _sys
+    _adapter_path = str(Path(__file__).resolve().parent / "workspace" / "AtlasLab")
+    if _adapter_path not in _sys.path:
+        _sys.path.insert(0, _adapter_path)
+    from core.response_adapter import (
+        construct_fallback_response,
+        build_format_correction_prompt,
+        adapt_response,
+    )
+    HAS_RESPONSE_ADAPTER = True
+except ImportError:
+    HAS_RESPONSE_ADAPTER = False
+
 # Anthropic SDK for Haiku-powered handoff summaries
 try:
     import anthropic
@@ -143,6 +158,11 @@ running = True
 
 # Maximum retries when Claude times out or fails to respond
 MAX_CLAUDE_RETRIES = 3
+
+# Maximum consecutive JSON parse failures before warning (separate from transport retries).
+# Unlike transport failures, parse failures use a deterministic fallback adapter so they
+# never kill the mission - this threshold only controls warning frequency.
+MAX_PARSE_FAILURES = 5
 
 # Supported LLM providers for CLI invocation
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
@@ -1248,6 +1268,33 @@ def get_mission_workspace(controller) -> Path:
     return WORKSPACE_DIR
 
 
+def _log_parse_failure(stage: str, raw_text: str, attempt: int, controller) -> None:
+    """Log a JSON parse failure to both journal and chat for diagnostics.
+
+    Called whenever the response adapter produces a synthetic fallback response.
+    Provides visibility into parse failures via the dashboard chat and the
+    persistent journal file.
+    """
+    mission_id = controller.mission.get("mission_id", "unknown") if controller else "unknown"
+    preview = (raw_text or "")[:200]
+
+    append_journal({
+        "type": "json_parse_failure",
+        "stage": stage,
+        "attempt": attempt,
+        "max_attempts": MAX_PARSE_FAILURES,
+        "mission_id": mission_id,
+        "raw_response_preview": preview,
+        "resolution": "fallback_adapter",
+    })
+
+    send_to_chat(
+        f"[WARN:JSON_PARSE] Stage {stage}: Response was not valid JSON "
+        f"(attempt {attempt}/{MAX_PARSE_FAILURES}). Using adapter fallback. "
+        f"Preview: {preview[:100]}..."
+    )
+
+
 def run_rd_mode(takeover: bool = False, force: bool = False):
     """
     Run Claude in directed R&D mode.
@@ -1316,6 +1363,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
     cycle_count = 0
     timeout_retries = 0  # Track consecutive timeout failures
+    parse_failure_count = 0  # Track consecutive JSON parse failures (separate from transport)
 
     try:
         while running:
@@ -1726,27 +1774,60 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     time.sleep(backoff_time)
                     continue
 
-            # Parse response
+            # Parse response - hardened with fallback adapter
             response = extract_json_from_response(response_text)
 
-            if not response:
-                # If we can't parse JSON, log the raw response and retry
-                logger.warning("Could not parse response as JSON")
-                timeout_retries += 1
-                if timeout_retries >= MAX_CLAUDE_RETRIES:
-                    logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times consecutively to produce valid JSON")
-                    break
-                append_journal({
-                    "type": "rd_raw_response",
-                    "stage": current_stage,
-                    "response": response_text[:1000]
-                })
-                # Exponential backoff: 10s, 20s, 40s...
-                backoff_time = min(60, 10 * (2 ** (timeout_retries - 1)))
-                time.sleep(backoff_time)
-                continue
+            if not response and HAS_RESPONSE_ADAPTER:
+                # Layer 1 failed - try format correction re-prompt (one shot)
+                logger.warning("JSON extraction failed, attempting format correction re-prompt")
+                correction_prompt = build_format_correction_prompt(current_stage, response_text)
+                try:
+                    corrected_text, _corr_err = invoke_llm(correction_prompt, timeout=120, cwd=WORKSPACE_DIR)
+                    if corrected_text:
+                        response = extract_json_from_response(corrected_text)
+                        if response:
+                            logger.info("Format correction re-prompt succeeded")
+                except Exception as e:
+                    logger.warning(f"Format correction re-prompt failed: {e}")
 
-            # Reset timeout counter on successful response
+            if not response:
+                # Layer 2 failed (or adapter not available) - use deterministic fallback
+                parse_failure_count += 1
+
+                if HAS_RESPONSE_ADAPTER:
+                    response = construct_fallback_response(current_stage, response_text)
+                    logger.warning(
+                        f"Using fallback adapter for stage {current_stage} "
+                        f"(parse failure {parse_failure_count}/{MAX_PARSE_FAILURES})"
+                    )
+                else:
+                    # No adapter available - fall back to old behavior
+                    timeout_retries += 1
+                    if timeout_retries >= MAX_CLAUDE_RETRIES:
+                        logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times to produce valid JSON (no adapter)")
+                        break
+                    append_journal({
+                        "type": "rd_raw_response",
+                        "stage": current_stage,
+                        "response": response_text[:1000]
+                    })
+                    backoff_time = min(60, 10 * (2 ** (timeout_retries - 1)))
+                    time.sleep(backoff_time)
+                    continue
+
+                # Rich diagnostics - journal + chat (always, even with fallback)
+                _log_parse_failure(current_stage, response_text, parse_failure_count, controller)
+
+                if parse_failure_count >= MAX_PARSE_FAILURES:
+                    send_to_chat(
+                        f"[WARN:PARSE] {parse_failure_count} consecutive non-JSON responses. "
+                        f"Using fallback adapter to keep mission alive."
+                    )
+            else:
+                # Successful JSON parse - reset parse failure counter
+                parse_failure_count = 0
+
+            # Reset timeout counter on successful response (transport-level)
             timeout_retries = 0
 
             # Log the response

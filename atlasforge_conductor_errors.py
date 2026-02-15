@@ -67,6 +67,7 @@ class RestartReason(Enum):
     CLI_CRASH = "cli_crash"
     NETWORK_ERROR = "network_error"
     OVERLOADED = "overloaded"
+    JSON_PARSE_FAILURE = "json_parse_failure"
 
     # === Blocking (halt immediately with specific message) ===
     RATE_LIMITED = "rate_limited"
