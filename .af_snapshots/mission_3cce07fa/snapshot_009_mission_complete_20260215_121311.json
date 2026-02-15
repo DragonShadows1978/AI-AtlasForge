@@ -1,0 +1,63 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_3cce07fa",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-15T12:13:07.965169",
+  "snapshot_number": 9,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "ActivityAwareHandoffMonitor class in context_watcher/context_watcher.py",
+      "Stage-aware timeout configuration with sensible defaults",
+      "Conductor integration passing stage context to the watcher",
+      "83 comprehensive tests (integration, functional, adversarial)",
+      "Research findings and implementation plan documentation",
+      "Full analysis report with success criteria validation"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Implement Structured Health Reporting for Long-Running Stages",
+      "mission_description": "The adaptive timeout fix ensures long-running TESTING sessions aren't killed prematurely, but the dashboard currently has no visibility into WHAT the agent is doing during those extended periods. Implement a structured health reporting system where: (1) The ActivityAwareHandoffMonitor emits periodic health events (every 60s) to the dashboard WebSocket with activity metrics (files changed, last active file, inactivity duration), (2) The dashboard displays a real-time 'Agent Health' widget showing heartbeat status, activity sparkline, and estimated stage completion, (3) Add a 'soft warning' system that alerts the dashboard observer when inactivity approaches the threshold (e.g., 10 of 15 minutes elapsed) before any handoff fires, giving humans a chance to intervene if desired, (4) Log all health events to the decision graph for post-mission analysis of activity patterns across stages.",
+      "suggested_cycles": 3,
+      "rationale": "The timeout fix solves crashes but creates an observability gap \u2014 during a 4-hour TESTING session, the dashboard shows nothing about agent health. This follow-up mission closes that gap by surfacing the activity data the monitor already collects, making long runs transparent rather than opaque. It directly builds on the ActivityAwareHandoffMonitor infrastructure and integrates with the existing dashboard WebSocket and decision graph systems."
+    },
+    "final_report": {
+      "summary": "Successfully implemented an activity-aware adaptive handoff monitor that replaces the rigid 55-minute timeout with intelligent filesystem-based activity detection. The core problem was that AtlasForge's fixed timeout would kill long-running TESTING sessions even when the LLM was actively working, causing cascading failures after 3 timeouts. The solution monitors workspace file modifications every 30 seconds and only triggers a handoff after sustained inactivity (15 minutes with no file changes), with stage-aware base timeouts (TESTING gets 4 hours, BUILDING gets 2 hours, others keep 55 minutes). The implementation is fully model-agnostic \u2014 it watches the filesystem, not LLM output \u2014 so it works identically with Claude, Codex, Gemini, or any other provider. All 83 tests pass including 28 adversarial tests designed to break the system.",
+      "all_files": [
+        "context_watcher/context_watcher.py (modified, +364 lines - ActivityAwareHandoffMonitor class)",
+        "context_watcher/__init__.py (modified, +10 lines - new exports)",
+        "atlasforge_conductor.py (modified, +18/-15 lines - stage-aware integration)",
+        "workspace/AtlasForge/tests/test_adaptive_timeout.py (new, 329 lines, 10 tests)",
+        "workspace/AtlasForge/tests/test_timeout_fixes.py (new, 344 lines, 36 tests)",
+        "workspace/AtlasForge/tests/test_timeout_adversarial.py (new, 418 lines, 28 tests)",
+        "workspace/AtlasForge/research/research_findings.md (new, 5.4 KB)",
+        "workspace/AtlasForge/artifacts/implementation_plan.md (new, 7.3 KB)",
+        "workspace/AtlasForge/artifacts/test_results.md (new, 5.3 KB)",
+        "workspace/AtlasForge/research/analysis.md (new, 5.4 KB)",
+        ".af_snapshots/mission_3cce07fa/ (8 snapshot files)"
+      ],
+      "key_achievements": [
+        "Built ActivityAwareHandoffMonitor (~290 lines) that detects real filesystem activity instead of using wall-clock time",
+        "Stage-aware timeout configuration: TESTING=240min, BUILDING=120min, default=55min, absolute max=360min",
+        "Model-agnostic design \u2014 monitors file mtimes only, zero LLM-specific dependencies",
+        "Full backward compatibility \u2014 falls back to TimeBasedHandoffMonitor when no stage is provided",
+        "Environment variable overrides for all timeout constants (AF_TESTING_TIMEOUT_MINUTES, AF_INACTIVITY_THRESHOLD_MINUTES, etc.)",
+        "83/83 tests passing including adversarial tests for race conditions and boundary cases",
+        "Integrated into atlasforge_conductor.py with stage passthrough and adaptive subprocess timeouts"
+      ],
+      "challenges_overcome": [
+        "Designing activity detection that is truly model-agnostic (filesystem watching vs. output parsing)",
+        "Balancing safety (detecting genuinely hung sessions) with flexibility (allowing legitimate long runs)",
+        "Three-tier handoff trigger system: absolute max, inactivity-after-base-timeout, and extended-inactivity",
+        "Maintaining backward compatibility so non-stage-aware callers get original 55-minute behavior",
+        "Ensuring the subprocess timeout in conductor matches the stage-aware timeout to prevent premature kills"
+      ],
+      "lessons_learned": [
+        "Filesystem activity (mtime monitoring) is the most reliable model-agnostic liveness signal \u2014 it works regardless of LLM provider",
+        "Fixed timeouts are fundamentally wrong for variable-duration stages; activity-based detection is strictly superior",
+        "The three-timeout-out shutdown logic was the real culprit \u2014 it treated expected long runs as errors",
+        "Stage-aware configuration is essential: different R&D stages have fundamentally different timing profiles",
+        "Environment variable overrides are critical for tuning without code changes in production"
+      ]
+    }
+  }
+}
