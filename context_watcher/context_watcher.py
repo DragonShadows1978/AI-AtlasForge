@@ -117,6 +117,22 @@ INACTIVITY_THRESHOLD_MINUTES = int(os.environ.get("INACTIVITY_THRESHOLD_MINUTES"
 MAX_ABSOLUTE_TIMEOUT_MINUTES = int(os.environ.get("MAX_ABSOLUTE_TIMEOUT_MINUTES", "360"))
 ACTIVITY_IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache", "venv", ".venv"}
 
+# Subprocess activity detection (gate before handoff)
+# When filesystem is quiet but child processes are burning CPU, defer the handoff.
+try:
+    import psutil
+    _PSUTIL_AVAILABLE = True
+except ImportError:
+    _PSUTIL_AVAILABLE = False
+
+SUBPROCESS_CHECK_ENABLED = os.environ.get(
+    "SUBPROCESS_CHECK_ENABLED", "1"
+).lower() in ("1", "true", "yes")
+
+SUBPROCESS_CPU_THRESHOLD_PERCENT = float(os.environ.get(
+    "SUBPROCESS_CPU_THRESHOLD_PERCENT", "1.0"
+))
+
 # Codex scanning
 CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
@@ -566,6 +582,7 @@ class ActivityAwareHandoffMonitor:
         self._last_activity_time: Optional[float] = None
         self._last_known_mtimes: Dict[str, float] = {}
         self._lock = threading.Lock()
+        self._monitored_pid: Optional[int] = None
 
         logger.info(
             f"ActivityAwareHandoffMonitor created for session {session_id}: "
@@ -643,6 +660,91 @@ class ActivityAwareHandoffMonitor:
 
         return max_mtime
 
+    def set_monitored_pid(self, pid: int):
+        """Set the PID of the monitored LLM subprocess (thread-safe).
+
+        When set, _has_active_children() inspects this process tree.
+        When unset, falls back to os.getpid() (conductor's own children).
+        """
+        self._monitored_pid = pid
+        logger.debug(
+            f"Session {self.session_id}: monitored PID set to {pid}"
+        )
+
+    def _has_active_children(self) -> bool:
+        """Check whether the monitored process has children consuming CPU.
+
+        Returns True only when:
+          - psutil is available AND the feature is enabled
+          - The root process (explicit PID or self) has live children
+          - Those children collectively exceed SUBPROCESS_CPU_THRESHOLD_PERCENT
+
+        Fail-open: returns False on any error so the handoff proceeds.
+        """
+        if not _PSUTIL_AVAILABLE or not SUBPROCESS_CHECK_ENABLED:
+            return False
+
+        try:
+            root_pid = self._monitored_pid or os.getpid()
+            try:
+                root_proc = psutil.Process(root_pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                return False
+
+            children = root_proc.children(recursive=True)
+            # Filter out zombies
+            alive = []
+            for child in children:
+                try:
+                    if child.status() != psutil.STATUS_ZOMBIE:
+                        alive.append(child)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if not alive:
+                return False
+
+            # Prime CPU counters (interval=None returns value since last call)
+            for child in alive:
+                try:
+                    child.cpu_percent(interval=None)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            # Brief pause then sample again
+            time.sleep(0.3)
+
+            total_cpu = 0.0
+            live_count = 0
+            for child in alive:
+                try:
+                    total_cpu += child.cpu_percent(interval=None)
+                    live_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            active = total_cpu > SUBPROCESS_CPU_THRESHOLD_PERCENT
+            if active:
+                logger.info(
+                    f"Session {self.session_id}: active child processes detected "
+                    f"(root_pid={root_pid}, children={live_count}, "
+                    f"total_cpu={total_cpu:.1f}%)"
+                )
+            else:
+                logger.debug(
+                    f"Session {self.session_id}: child processes idle "
+                    f"(root_pid={root_pid}, children={live_count}, "
+                    f"total_cpu={total_cpu:.1f}%)"
+                )
+            return active
+
+        except Exception as exc:
+            logger.debug(
+                f"Session {self.session_id}: subprocess check failed "
+                f"({exc!r}), allowing handoff"
+            )
+            return False
+
     def _activity_loop(self):
         """Core polling loop that checks workspace for file activity."""
         baseline_mtime = self._scan_workspace_activity()
@@ -672,11 +774,13 @@ class ActivityAwareHandoffMonitor:
 
             # DECISION: Should we fire the handoff?
             should_fire = False
+            is_absolute_max = False
             fire_reason = ""
 
             # Check 1: Absolute maximum timeout (hard ceiling, always enforced)
             if elapsed_minutes >= self.max_absolute_minutes:
                 should_fire = True
+                is_absolute_max = True
                 fire_reason = f"absolute max timeout ({self.max_absolute_minutes}min)"
 
             # Check 2: Inactivity threshold exceeded AND minimum runtime passed
@@ -698,6 +802,16 @@ class ActivityAwareHandoffMonitor:
                     f"extended inactivity ({inactivity_minutes:.1f}min, "
                     f"2x threshold) after {elapsed_minutes:.1f}min"
                 )
+
+            # Subprocess activity gate: defer handoff if children are consuming CPU.
+            # Absolute max timeout is NEVER gated (safety ceiling).
+            if should_fire and not is_absolute_max:
+                if self._has_active_children():
+                    logger.info(
+                        f"Session {self.session_id}: handoff deferred — "
+                        f"active child processes detected ({fire_reason})"
+                    )
+                    should_fire = False
 
             if not should_fire:
                 if int(elapsed_minutes) % 10 == 0 and int(elapsed_minutes) > 0:
@@ -805,7 +919,9 @@ class ActivityAwareHandoffMonitor:
                 "current_inactivity_seconds": inactivity_sec,
                 "fired": self._fired,
                 "cancelled": self._cancelled,
-                "started_at": self._started_at.isoformat() if self._started_at else None
+                "started_at": self._started_at.isoformat() if self._started_at else None,
+                "subprocess_check_enabled": SUBPROCESS_CHECK_ENABLED and _PSUTIL_AVAILABLE,
+                "monitored_pid": self._monitored_pid,
             }
 
 
@@ -1447,6 +1563,16 @@ class SessionMonitor:
             self._time_handoff_monitor.cancel()
             self._time_handoff_monitor = None
 
+    def set_monitored_pid(self, pid: int):
+        """Propagate monitored PID to the activity-aware handoff monitor.
+
+        Only effective when the monitor is an ActivityAwareHandoffMonitor.
+        Silently ignored for TimeBasedHandoffMonitor (backward compat).
+        """
+        monitor = self._time_handoff_monitor
+        if isinstance(monitor, ActivityAwareHandoffMonitor):
+            monitor.set_monitored_pid(pid)
+
 
 # =============================================================================
 # WATCHDOG EVENT HANDLER
@@ -1883,6 +2009,39 @@ class ContextWatcher:
     def get_metrics_dict(self) -> Dict[str, Any]:
         """Get metrics as a dictionary for JSON serialization."""
         return self._metrics.to_dict()
+
+    def set_monitored_pid(self, session_id: str, pid: int):
+        """Set the monitored subprocess PID for a specific session.
+
+        Propagates through SessionMonitor -> ActivityAwareHandoffMonitor.
+        """
+        with self._lock:
+            monitor = self._sessions.get(session_id)
+            if monitor:
+                monitor.set_monitored_pid(pid)
+                logger.debug(
+                    f"ContextWatcher: set monitored PID {pid} for session {session_id}"
+                )
+
+    def set_monitored_pid_for_active_session(self, pid: int):
+        """Set monitored PID on the most recently started session.
+
+        Convenience method when the caller doesn't track session IDs
+        (e.g. invoke_llm in the conductor).
+        """
+        with self._lock:
+            if not self._sessions:
+                return
+            # Pick the session with the latest start time
+            latest_sid = max(
+                self._sessions,
+                key=lambda sid: self._sessions[sid].started_at
+            )
+            monitor = self._sessions[latest_sid]
+            monitor.set_monitored_pid(pid)
+            logger.debug(
+                f"ContextWatcher: set monitored PID {pid} for active session {latest_sid}"
+            )
 
 
 # =============================================================================

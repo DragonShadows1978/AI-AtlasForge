@@ -485,6 +485,15 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         with _active_claude_lock:
             _active_claude_process = proc
 
+        # Propagate LLM subprocess PID to activity monitor for subprocess detection
+        try:
+            from context_watcher import get_context_watcher as _get_cw
+            _cw = _get_cw()
+            if hasattr(proc, 'pid') and proc.pid:
+                _cw.set_monitored_pid_for_active_session(proc.pid)
+        except Exception:
+            pass  # Non-critical enhancement
+
         try:
             stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
