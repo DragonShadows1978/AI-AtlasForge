@@ -1,0 +1,64 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_8bcc6b4c",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-15T13:25:44.338694",
+  "snapshot_number": 9,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "Enhanced ActivityAwareHandoffMonitor with subprocess gate in context_watcher.py",
+      "PID propagation integration in atlasforge_conductor.py",
+      "22 functional tests (test_subprocess_gate.py) covering unit, real-process, integration, and PID chain scenarios",
+      "22 adversarial tests (test_subprocess_gate_adversarial.py) covering edge cases, spec alignment, and property testing",
+      "Implementation plan (artifacts/implementation_plan.md)",
+      "Research findings (research/research_findings.md)",
+      "Analysis report (research/analysis.md)",
+      "Test results documentation (artifacts/test_results.md)"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Implement Adaptive Inactivity Thresholds Based on Subprocess Type Classification",
+      "mission_description": "The current subprocess gate uses a single CPU threshold (1%) to determine if a child process is active. This is a binary decision - either defer handoff or allow it. A more sophisticated approach would classify the type of subprocess (training run vs compilation vs data processing vs idle) and dynamically adjust the inactivity timeout based on the expected duration profile of that process type. For example, a detected GPU training run (identifiable by nvidia-smi process trees or CUDA memory usage) might warrant a 60-minute extended timeout, while a compilation process might only get 30 minutes. The system should learn typical subprocess durations over time and build a profile database. This would also include monitoring subprocess progress signals (output file growth, log activity, GPU utilization changes) to detect truly stalled subprocesses that are consuming CPU but making no forward progress - a blind spot in the current gate-only approach.",
+      "suggested_cycles": 3,
+      "rationale": "The current binary gate (active children = defer, no children = allow) is a solid foundation but lacks nuance. Real-world subprocesses have vastly different expected durations and progress patterns. A training run that has been running for 2 hours with steady GPU utilization is healthy; one that has been running for 2 hours with 0% GPU utilization is likely stalled. This mission would build on the subprocess detection infrastructure to add intelligence about what the subprocess is doing, not just whether it exists. Three cycles allows: (1) subprocess type classification and progress signal detection, (2) adaptive timeout calculation with historical profiling, (3) integration testing with simulated long-running workloads."
+    },
+    "final_report": {
+      "summary": "Successfully implemented subprocess activity detection as a secondary gate in the ActivityAwareHandoffMonitor. The enhancement solves the false-positive handoff problem where LLM sessions babysitting long-running subprocesses (training runs, compilation, data processing) were incorrectly flagged as hung. The implementation uses psutil to detect live child processes consuming CPU before triggering handoff, while preserving 100% backward compatibility when no child processes are present. The design follows gate-only semantics (subprocess check only fires when handoff would otherwise trigger), fail-open safety (all error paths allow handoff), and remains fully model-agnostic. PID propagation flows from atlasforge_conductor.py through ContextWatcher to SessionMonitor to ActivityAwareHandoffMonitor via a clean chain. Configuration is controlled via environment variables (SUBPROCESS_CHECK_ENABLED, SUBPROCESS_CPU_THRESHOLD_PERCENT) with sensible defaults. All 11 success criteria were met with zero regressions across 51 existing tests.",
+      "all_files": [
+        "context_watcher/context_watcher.py (modified: +~100 lines - _has_active_children(), set_monitored_pid(), gate logic in _activity_loop(), updated get_stats())",
+        "context_watcher/__init__.py (modified: +4 lines - new exports)",
+        "atlasforge_conductor.py (modified: +12 lines - PID propagation in invoke_llm())",
+        "tests/test_subprocess_gate.py (new: 509 lines - 22 functional tests)",
+        "tests/test_subprocess_gate_adversarial.py (new: 465 lines - 22 adversarial tests)",
+        "artifacts/implementation_plan.md (new: 224 lines)",
+        "research/research_findings.md (new: 144 lines)",
+        "research/analysis.md (new: 103 lines)",
+        "artifacts/test_results.md (new: 167 lines)"
+      ],
+      "key_achievements": [
+        "Subprocess gate prevents false handoffs when LLM is babysitting active child processes consuming CPU",
+        "Zero behavioral change when no child processes are present - existing behavior completely preserved",
+        "Fail-open design ensures safety: missing psutil, dead processes, exceptions all allow handoff to proceed",
+        "Absolute max timeout (360 min) remains ungated as a hard safety ceiling",
+        "Clean PID propagation chain from conductor through ContextWatcher to monitor",
+        "44 new tests (22 functional + 22 adversarial) all passing, plus 51 regression tests passing",
+        "Feature flag (SUBPROCESS_CHECK_ENABLED) allows runtime disable without code changes",
+        "Model-agnostic: no LLM-specific dependencies, works with any orchestrated process"
+      ],
+      "challenges_overcome": [
+        "Thread-safe PID propagation across multiple layers without introducing race conditions",
+        "Handling zombie and idle child processes correctly (they should NOT block handoff)",
+        "Graceful degradation when psutil is unavailable (fail-open to preserve existing behavior)",
+        "Testing real subprocess behavior with CPU-burning children while keeping test suite fast (~52s total)",
+        "Ensuring the gate only fires at the right moment (when handoff would otherwise trigger, not continuously)"
+      ],
+      "lessons_learned": [
+        "Gate-only architecture is cleaner than polling: checking subprocess state only at decision points minimizes overhead and complexity",
+        "Fail-open is the correct default for monitoring gates - a stuck gate should never prevent the safety mechanism from firing",
+        "PID propagation through existing abstractions (ContextWatcher -> SessionMonitor -> Monitor) works cleanly when each layer exposes a simple set_monitored_pid() interface",
+        "Adversarial testing with real processes (zombie creation, race conditions, boundary values) catches edge cases that unit tests with mocks would miss",
+        "Environment variable configuration with sensible defaults enables runtime tuning without requiring restarts or code changes"
+      ]
+    }
+  }
+}
