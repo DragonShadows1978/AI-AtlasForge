@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_7681bb77",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-16T16:46:19.766792",
+  "snapshot_number": 14,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [],
+    "files_modified": [
+      "atlaslab/data/reference_equations.json"
+    ]
+  }
+}
