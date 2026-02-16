@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_ea5be74c",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-15T21:30:27.330643",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "AtlasLab architecture analysis from past missions informed understanding of the 6-stage pipeline and YAML schema",
+      "Past mission on conductor runtime hardening informed retry/validation patterns"
+    ],
+    "steps_planned": 5
+  }
+}
