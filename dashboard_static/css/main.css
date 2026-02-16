@@ -5340,6 +5340,141 @@ h1 { color: var(--accent); font-size: 1.3em; }
 }
 
 /* =============================================================================
+   WIDGET VISIBILITY DROPDOWN
+   Checkbox-based dropdown for toggling widget visibility
+   ============================================================================= */
+
+.widget-vis-selector {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: var(--text);
+    transition: all 0.2s ease;
+    position: relative;
+    user-select: none;
+}
+
+.widget-vis-selector:hover {
+    border-color: var(--accent);
+}
+
+.widget-vis-selector:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.widget-vis-selector[aria-expanded="true"] {
+    border-color: var(--accent);
+    background: rgba(88, 166, 255, 0.1);
+}
+
+.widget-vis-selector[aria-expanded="true"] .preset-arrow {
+    transform: rotate(180deg);
+}
+
+.widget-vis-label {
+    white-space: nowrap;
+}
+
+.widget-vis-dropdown {
+    position: fixed;
+    min-width: 220px;
+    max-width: 280px;
+    max-height: 420px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    z-index: 10000;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+    padding: 6px 0;
+}
+
+.widget-vis-dropdown.show {
+    display: block !important;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.widget-vis-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    user-select: none;
+}
+
+.widget-vis-item:hover {
+    background: rgba(88, 166, 255, 0.08);
+}
+
+.widget-vis-item label {
+    flex: 1;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.widget-vis-item input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.widget-vis-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 10px;
+}
+
+.widget-vis-actions {
+    display: flex;
+    gap: 6px;
+    padding: 6px 14px;
+    justify-content: flex-end;
+}
+
+.widget-vis-action-btn {
+    font-size: 0.78em;
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.widget-vis-action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+@media (max-width: 768px) {
+    .widget-vis-selector .widget-vis-label {
+        display: none;
+    }
+}
+
+/* =============================================================================
    LAYOUT MODAL DIALOGS (Cycle 3)
    Save preset and delete confirmation modals
    ============================================================================= */

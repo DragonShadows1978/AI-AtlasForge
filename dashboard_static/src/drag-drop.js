@@ -19,6 +19,27 @@
 const STORAGE_KEY = 'atlasforgeWidgetLayout';
 const PRESETS_KEY = 'atlasforgeLayoutPresets';
 const LOCK_STORAGE_KEY = 'atlasforgeTilesLocked';
+const VISIBILITY_STORAGE_KEY = 'atlasforgeWidgetVisibility';
+
+const WIDGET_REGISTRY = [
+    { id: 'status-card', label: 'Status' },
+    { id: 'mission-card', label: 'Mission Control' },
+    { id: 'mission-suggestions-card', label: 'Mission Suggestions' },
+    { id: 'queue-card', label: 'Mission Queue' },
+    { id: 'investigation-status-card', label: 'Investigation Status' },
+    { id: 'files-card', label: 'Created Files' },
+    { id: 'backup-status-card', label: 'Backup Status' },
+    { id: 'conductor-status-card', label: 'Conductor' },
+    { id: 'analytics-widget-card', label: 'Cost Analytics' },
+    { id: 'artifact-health-widget-card', label: 'Artifact Health' },
+    { id: 'kb-analytics-widget-card', label: 'Knowledge Analytics' },
+    { id: 'recommendations-widget-card', label: 'Recommendations' },
+    { id: 'glassbox-card', label: 'GlassBox' },
+    { id: 'atlasforge-exploration-card', label: 'Exploration Memory' },
+    { id: 'atlasforge-drift-card', label: 'Drift Monitor' },
+    { id: 'semantic-mini-widget-card', label: 'Semantic Health' },
+    { id: 'atlasforge-recent-card', label: 'Recent Explorations' },
+];
 const COLUMN_SELECTORS = ['.widget-column-1', '.widget-column-2'];
 const CARD_SELECTOR = '.card[id]'; // Only cards with IDs can be dragged
 
@@ -121,6 +142,9 @@ export function initDragDrop() {
 
     // Initialize toolbar UI (Cycle 3)
     initToolbarUI();
+
+    // Initialize widget visibility dropdown
+    initWidgetVisibility();
 
     // Expose functions to window for external use
     exposeToWindow();
@@ -1920,6 +1944,168 @@ function trapFocusInModal(modal) {
 }
 
 // =============================================================================
+// WIDGET VISIBILITY DROPDOWN
+// =============================================================================
+
+function getHiddenWidgets() {
+    try {
+        const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch {
+        return [];
+    }
+}
+
+function setHiddenWidgets(hiddenIds) {
+    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(hiddenIds));
+}
+
+function isWidgetVisible(cardId) {
+    return !getHiddenWidgets().includes(cardId);
+}
+
+function setWidgetVisible(cardId, visible) {
+    const hidden = getHiddenWidgets();
+    const idx = hidden.indexOf(cardId);
+    if (visible && idx !== -1) {
+        hidden.splice(idx, 1);
+    } else if (!visible && idx === -1) {
+        hidden.push(cardId);
+    }
+    setHiddenWidgets(hidden);
+    applyWidgetVisibility(cardId, visible);
+}
+
+function applyWidgetVisibility(cardId, visible) {
+    const el = document.getElementById(cardId);
+    if (el) {
+        el.style.display = visible ? '' : 'none';
+    }
+}
+
+function loadWidgetVisibility() {
+    const hidden = getHiddenWidgets();
+    hidden.forEach(cardId => applyWidgetVisibility(cardId, false));
+}
+
+function populateWidgetVisibilityDropdown() {
+    const dropdown = document.getElementById('widget-vis-dropdown');
+    if (!dropdown) return;
+
+    const hidden = getHiddenWidgets();
+    const existingWidgets = WIDGET_REGISTRY.filter(w => document.getElementById(w.id));
+
+    let html = '';
+
+    html += '<div class="widget-vis-actions">';
+    html += '<button class="widget-vis-action-btn" onclick="event.stopPropagation(); showAllWidgets()">Show All</button>';
+    html += '<button class="widget-vis-action-btn" onclick="event.stopPropagation(); hideAllWidgets()">Hide All</button>';
+    html += '</div>';
+    html += '<div class="widget-vis-divider"></div>';
+
+    existingWidgets.forEach(widget => {
+        const checked = !hidden.includes(widget.id) ? 'checked' : '';
+        html += `<div class="widget-vis-item" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
+        html += `<input type="checkbox" id="vis-cb-${widget.id}" ${checked} tabindex="-1" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
+        html += `<label for="vis-cb-${widget.id}" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">${widget.label}</label>`;
+        html += '</div>';
+    });
+
+    dropdown.innerHTML = html;
+}
+
+function toggleWidgetCheckbox(cardId) {
+    const cb = document.getElementById('vis-cb-' + cardId);
+    if (!cb) return;
+    const newVisible = !cb.checked;
+    cb.checked = newVisible;
+    setWidgetVisible(cardId, newVisible);
+}
+
+function showWidgetVisDropdown() {
+    const dropdown = document.getElementById('widget-vis-dropdown');
+    const selector = document.getElementById('widget-vis-selector');
+    if (!dropdown || !selector) return;
+
+    hidePresetDropdown();
+
+    const rect = selector.getBoundingClientRect();
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.minWidth = Math.max(220, rect.width) + 'px';
+
+    populateWidgetVisibilityDropdown();
+
+    dropdown.style.display = 'block';
+    requestAnimationFrame(() => {
+        dropdown.classList.add('show');
+    });
+    selector.setAttribute('aria-expanded', 'true');
+}
+
+function hideWidgetVisDropdown() {
+    const dropdown = document.getElementById('widget-vis-dropdown');
+    const selector = document.getElementById('widget-vis-selector');
+
+    if (dropdown) {
+        dropdown.classList.remove('show');
+        setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    }
+    if (selector) {
+        selector.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function toggleWidgetVisDropdown() {
+    const dropdown = document.getElementById('widget-vis-dropdown');
+    if (!dropdown) return;
+    if (dropdown.classList.contains('show')) {
+        hideWidgetVisDropdown();
+    } else {
+        showWidgetVisDropdown();
+    }
+}
+
+function showAllWidgets() {
+    setHiddenWidgets([]);
+    WIDGET_REGISTRY.forEach(w => applyWidgetVisibility(w.id, true));
+    populateWidgetVisibilityDropdown();
+}
+
+function hideAllWidgets() {
+    const allIds = WIDGET_REGISTRY.filter(w => document.getElementById(w.id)).map(w => w.id);
+    setHiddenWidgets(allIds);
+    allIds.forEach(id => applyWidgetVisibility(id, false));
+    populateWidgetVisibilityDropdown();
+}
+
+function initWidgetVisibility() {
+    loadWidgetVisibility();
+
+    const selector = document.getElementById('widget-vis-selector');
+    if (selector) {
+        selector.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleWidgetVisDropdown();
+        });
+        selector.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleWidgetVisDropdown();
+            } else if (e.key === 'Escape') {
+                hideWidgetVisDropdown();
+            }
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#widget-vis-selector') && !e.target.closest('#widget-vis-dropdown')) {
+            hideWidgetVisDropdown();
+        }
+    });
+}
+
+// =============================================================================
 // WINDOW EXPOSURE
 // =============================================================================
 
@@ -1954,6 +2140,17 @@ function exposeToWindow() {
     window.lockTiles = lockTiles;
     window.unlockTiles = unlockTiles;
     window.areTilesLocked = areTilesLocked;
+
+    // Widget visibility functions
+    window.toggleWidgetVisDropdown = toggleWidgetVisDropdown;
+    window.showWidgetVisDropdown = showWidgetVisDropdown;
+    window.hideWidgetVisDropdown = hideWidgetVisDropdown;
+    window.toggleWidgetCheckbox = toggleWidgetCheckbox;
+    window.setWidgetVisible = setWidgetVisible;
+    window.isWidgetVisible = isWidgetVisible;
+    window.getHiddenWidgets = getHiddenWidgets;
+    window.showAllWidgets = showAllWidgets;
+    window.hideAllWidgets = hideAllWidgets;
 }
 
 // =============================================================================
