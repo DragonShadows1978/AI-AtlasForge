@@ -93,6 +93,14 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
+## What's New in v1.8.4
+
+- **Handoff System Overhaul** - Complete rework of the conductor handoff system for improved reliability across mission cycles
+- **Widget Visibility Toggles** - Dashboard widgets can now be hidden/shown without disabling backend services
+- **Dashboard Drag & Drop** - Drag-and-drop widget reordering with layout presets, undo/redo, and touch support
+- **Context Watcher Improvements** - Enhanced token tracking and handoff logic
+- **Systemd Auto-Start** - Fixed graphical-session.target dependency on Linux Mint, Dashboard and Tray services now auto-start on boot via default.target
+
 ## What's New in v1.8.3
 
 - **Test Harness Improvements** - Refactored subprocess mocking in conductor timeout tests, improved phase-aware drift validation, provider-aware ground rules caching
