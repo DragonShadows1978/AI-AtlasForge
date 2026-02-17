@@ -205,6 +205,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
         background: var(--bg);
     }
 
+    /* Header row 2: scrollable on mobile so Lock/Unlock is accessible */
+    .header-row-2 {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        white-space: nowrap;
+    }
+
     /* NEW: Mobile scroll wrapper - this is what scrolls horizontally */
     .mobile-scroll-wrapper {
         width: 100vw;
@@ -214,6 +222,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
         scroll-snap-type: x mandatory;
         scroll-behavior: smooth;
         box-sizing: border-box;
+        overscroll-behavior-x: contain;
     }
 
     /* Container inside scroll wrapper - holds the 3 columns */
@@ -286,12 +295,12 @@ h1 { color: var(--accent); font-size: 1.3em; }
     display: none;
 }
 
-/* Mobile scroll indicators (dots) - shown on mobile */
+/* Mobile column navigation buttons - shown on mobile */
 @media (max-width: 600px) {
     .mobile-scroll-dots {
         display: flex;
         justify-content: center;
-        gap: 8px;
+        gap: 6px;
         position: fixed;
         bottom: 10px;
         left: 50%;
@@ -299,34 +308,49 @@ h1 { color: var(--accent); font-size: 1.3em; }
         z-index: 1000;
         background: rgba(22, 27, 34, 0.95);
         border-radius: 20px;
-        padding: 6px 12px;
+        padding: 6px 10px;
         border: 1px solid var(--border);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     }
-    .scroll-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--text-dim);
-        transition: all 0.3s ease;
+    .column-nav-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 12px;
+        border-radius: 16px;
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text-dim);
         cursor: pointer;
-        /* Button reset for accessibility - now using <button> element */
-        border: none;
-        padding: 0;
+        font-size: 0.75em;
+        transition: all 0.3s ease;
+        white-space: nowrap;
         outline: none;
+        font-family: inherit;
     }
-    .scroll-dot:focus-visible {
+    .column-nav-btn .column-nav-num {
+        font-weight: 700;
+        font-size: 1.1em;
+    }
+    .column-nav-btn .column-nav-label {
+        font-size: 0.85em;
+    }
+    .column-nav-btn:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 2px;
     }
-    .scroll-dot.active {
+    .column-nav-btn.active {
         background: var(--accent);
-        transform: scale(1.3);
+        border-color: var(--accent);
+        color: var(--bg);
         box-shadow: 0 0 8px var(--accent);
     }
-    .scroll-dot:hover {
-        background: var(--accent);
-        opacity: 0.7;
+    .column-nav-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+    .column-nav-btn.active:hover {
+        color: var(--bg);
     }
 }
 
@@ -335,11 +359,8 @@ h1 { color: var(--accent); font-size: 1.3em; }
     #atlasforge-tab {
         scroll-behavior: auto !important;
     }
-    .scroll-dot {
+    .column-nav-btn {
         transition: none !important;
-    }
-    .scroll-dot.active {
-        transform: none !important;
     }
 }
 

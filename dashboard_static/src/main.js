@@ -729,7 +729,7 @@ function initMobileScrollDots() {
     const mobileScrollWrapper = document.querySelector('#atlasforge-tab .mobile-scroll-wrapper');
     const container = document.querySelector('#atlasforge-tab .container');
     const dotsContainer = document.getElementById('mobile-scroll-dots');
-    const dots = document.querySelectorAll('#mobile-scroll-dots .scroll-dot');
+    const dots = document.querySelectorAll('#mobile-scroll-dots .column-nav-btn');
 
     if (!mobileScrollWrapper || !container || !dotsContainer || dots.length === 0) {
         console.log('Mobile scroll dots: missing elements', {
