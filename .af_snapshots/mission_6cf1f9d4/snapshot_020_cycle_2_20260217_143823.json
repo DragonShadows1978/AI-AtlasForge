@@ -1,0 +1,77 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_6cf1f9d4",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-17T14:38:23.627875",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "final": true,
+    "final_report": {
+      "summary": "Restored a completely broken personal email investigation service that had been stripped from AtlasForge and left dormant. The pipeline was scattered across retired repos (mini-mind-v2, AtlasForge), with hardcoded dead paths, a race-condition-plagued daemon, broken Prometheus metrics, and a disconnected system tray. Across 2 cycles, consolidated all code into /home/vader/Email_Investigations/, fixed 7 bugs (4 critical in Cycle 1, 3 in Cycle 2), verified the full pipeline end-to-end with 57 real emails processed and 17 investigations completed with PDF reports. The service is now production-grade: auto-starts on login, daemon self-recovers, metrics persist across restarts, and the dashboard shows real-time data.",
+      "all_files": [
+        "/home/vader/Email_Investigations/api/app.py",
+        "/home/vader/Email_Investigations/api/routes.py",
+        "/home/vader/Email_Investigations/api/metrics.py",
+        "/home/vader/Email_Investigations/api/audit.py",
+        "/home/vader/Email_Investigations/api/auth.py",
+        "/home/vader/Email_Investigations/api/kb_analytics.py",
+        "/home/vader/Email_Investigations/api/oauth2.py",
+        "/home/vader/Email_Investigations/api/terminal.py",
+        "/home/vader/Email_Investigations/daemon/email_inbox.py",
+        "/home/vader/Email_Investigations/daemon/queue_manager.py",
+        "/home/vader/Email_Investigations/daemon/run_investigation.py",
+        "/home/vader/Email_Investigations/daemon/connection_pool.py",
+        "/home/vader/Email_Investigations/daemon/pty_manager.py",
+        "/home/vader/Email_Investigations/dashboard/templates/index.html",
+        "/home/vader/Email_Investigations/email_investigation_tray.py",
+        "/home/vader/Email_Investigations/config/config.yaml",
+        "/home/vader/Email_Investigations/tests/test_api.py",
+        "/home/vader/Email_Investigations/tests/test_adversarial.py",
+        "/home/vader/Email_Investigations/tests/test_integration.py",
+        "/home/vader/Email_Investigations/tests/test_benchmark.py",
+        "/home/vader/Email_Investigations/tests/conftest.py",
+        "/home/vader/Email_Investigations/deploy/email-investigation.service",
+        "/home/vader/Email_Investigations/deploy/email-investigation-tray.service",
+        "/home/vader/Email_Investigations/gunicorn.conf.py",
+        "/home/vader/Email_Investigations/requirements.txt",
+        "/home/vader/Email_Investigations/Dockerfile",
+        "/home/vader/Email_Investigations/docker-compose.yml",
+        "/home/vader/Email_Investigations/README.md",
+        "/home/vader/.config/systemd/user/email-investigation.service",
+        "/home/vader/.config/systemd/user/email-investigation-tray.service",
+        "/home/vader/AI-AtlasForge/workspace/Email_Investigation/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/Email_Investigation/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/Email_Investigation/research/research_findings.md",
+        "/home/vader/AI-AtlasForge/workspace/Email_Investigation/research/analysis.md"
+      ],
+      "key_achievements": [
+        "Consolidated scattered email investigation code from retired repos into /home/vader/Email_Investigations/",
+        "Fixed broken investigation pipeline - emails now flow from IMAP detection through investigation execution to PDF delivery and completion email",
+        "Fixed daemon race condition with _start_lock mutex - daemon starts reliably every time",
+        "Fixed Prometheus metrics by resolving dual-registry bug via sys.modules sharing pattern",
+        "Added daemon auto-start thread so supervisor launches 3 seconds after Flask startup without manual API call",
+        "Fixed dashboard JS field mapping mismatches (investigations vs history, rde_id vs investigation_id)",
+        "Rewired system tray to port 5001 and correct systemd unit paths",
+        "Verified metrics persist across 3+ service restarts (35 -> 37 -> 48 -> 57+)",
+        "57 real emails processed, 17 investigations completed with PDF reports, 5 concurrent at peak",
+        "79 automated tests passing (36 unit + 26 adversarial + 17 integration)",
+        "Dashboard verified via screenshot with all 14 widgets showing real data"
+      ],
+      "challenges_overcome": [
+        "Code was scattered across mini-mind-v2 and AtlasForge repos with hardcoded dead paths - required full path audit and consolidation",
+        "Prometheus metrics had a subtle dual-registry bug where naive imports created a second module instance with separate counters - solved with sys.modules lazy loader",
+        "Dashboard JS expected different field names than the API provided - required careful mapping of both old and new field names with fallbacks",
+        "Daemon wouldn't auto-start after service restart - added background startup thread with 3-second delay for Flask readiness",
+        "System tray requires DISPLAY :0 (user's actual display) but service runs headless - solved with proper environment configuration in systemd unit"
+      ],
+      "lessons_learned": [
+        "When consolidating code from multiple repos, audit ALL path references early - hardcoded paths are the #1 silent failure mode",
+        "Prometheus registries are per-module-instance in Python; importing the same file from different sys.path entries creates separate registries with duplicate metric names",
+        "Dashboard field mapping issues are invisible without actual screenshot verification - code review alone cannot catch JS rendering bugs",
+        "Auto-start threads with short delays are more reliable than systemd ExecStartPost for daemon initialization",
+        "Email services that send completion emails to themselves create infinite investigation loops - always filter outbound addresses from inbox monitoring"
+      ]
+    }
+  }
+}
