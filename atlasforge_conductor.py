@@ -481,6 +481,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         provider = get_llm_provider()
         command = build_llm_command(provider)
         env = os.environ.copy()
+        env.pop("CLAUDECODE", None)  # Prevent "nested session" error when spawning Claude CLI
         if provider == "gemini":
             # Gemini CLI is more reliable in headless mode when both HOME and
             # GEMINI_API_KEY are explicit in the spawned environment.
@@ -777,6 +778,8 @@ def invoke_haiku_summary(
             model=HAIKU_MODEL if provider == "claude" else None
         )
 
+        haiku_env = os.environ.copy()
+        haiku_env.pop("CLAUDECODE", None)
         result = subprocess.run(
             command,
             input=prompt,
@@ -784,6 +787,7 @@ def invoke_haiku_summary(
             text=True,
             timeout=timeout,
             cwd=str(BASE_DIR),
+            env=haiku_env,
             start_new_session=True
         )
 
