@@ -1,0 +1,16 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_6cf1f9d4",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-17T13:22:32.476185",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Previous mission_3215a3ee built the email investigation tray application",
+      "Previous mission_ae9735bd built the email monitor dashboard page",
+      "Previous mission_a92c94f8 did a migration script"
+    ],
+    "steps_planned": 7
+  }
+}
