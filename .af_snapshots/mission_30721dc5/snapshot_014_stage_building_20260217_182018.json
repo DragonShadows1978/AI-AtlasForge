@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_building",
+  "mission_id": "mission_30721dc5",
+  "stage": "BUILDING",
+  "timestamp": "2026-02-17T18:20:18.835582",
+  "snapshot_number": 14,
+  "event_data": {
+    "status": "build_complete",
+    "files_created": [],
+    "files_modified": [
+      "tests/test_round2.py",
+      "web/templates/app.html"
+    ]
+  }
+}
