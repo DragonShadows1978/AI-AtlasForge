@@ -1,0 +1,77 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_2fc02ae5",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-18T17:57:10.272067",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "cycles_remaining": 1,
+    "continuation_prompt": "CYCLE 2 CONTINUATION: AI-StoryForge User Profiles \u2014 Polish, Integration Validation & UX Completeness\n\nBUILDING ON CYCLE 1:\nCycle 1 implemented the full backend and template layer for user profiles, per-user file storage, document library, and admin project content review. All 59 tests passed. The following files were created/modified:\n- database/models.py \u2014 migrations, per-user paths, download_log, get_user_profile/update_user_profile/get_project_files/get_admin_project_detail/log_download/increment_download_count\n- web/routes.py \u2014 /profile GET+POST, /profile/password POST, /api/projects/{id}/files GET, /api/projects/{id}/files/{filename} GET (with download logging)\n- web/admin_routes.py \u2014 /admin/projects/{id} GET, /admin/projects/{id}/download GET, /admin/projects/{id}/files/{filename} GET\n- web/templates/profile.html \u2014 full profile page (stats, account info, writing prefs, password change, quick links)\n- web/templates/admin/project_detail.html \u2014 stage log table, file browser, download buttons\n- web/templates/base.html \u2014 Profile nav link + display_name in nav\n- web/templates/history.html \u2014 View Files modal per project + download count badge\n\nCYCLE 2 OBJECTIVES:\n\n1. FUNCTIONAL END-TO-END VALIDATION (highest priority)\n   - Start the actual StoryForge server (run.py or uvicorn)\n   - Create a test user, create a project, navigate the app end-to-end\n   - Confirm: profile page renders with correct stats\n   - Confirm: display_name save/load works and appears in nav\n   - Confirm: writing preferences persist across sessions\n   - Confirm: new project files land in outputs/users/{user_id}/{project_id}/\n   - Confirm: View Files modal in history page shows real file listing\n   - Confirm: admin /admin/projects/{id} renders with stage logs and file list\n   - Capture screenshots to /tmp/ and visually verify all UI elements populate correctly (not just '-' or empty)\n\n2. DISPLAY NAME IN MORE PLACES\n   - The display_name currently shows in top nav. Also show it:\n     a. On the admin users list table (display_name column or tooltip)\n     b. On admin user_detail.html page header (\"Profile: John Doe (john@example.com)\")\n     c. In the project ownership info on admin/project_detail.html\n\n3. DOCUMENT LIBRARY PAGE (dedicated page, not just modal)\n   - Create GET /documents \u2014 dedicated document library page for the logged-in user\n   - List all completed projects with their files in an expandable accordion\n   - Show file name, type icon, size, modified date\n   - Individual download buttons per file\n   - Bulk \"Download All\" button (ZIP) per project\n   - Add \"Documents\" link to nav and to profile quick links\n   - Template: web/templates/documents.html\n\n4. ADMIN AUDIT LOG IMPROVEMENTS\n   - On /admin/projects/{id}, the download_log entries should be shown in a table below the file list\n   - Show: timestamp, user (email or 'admin'), IP address, is_admin flag\n   - Add GET /admin/projects/{id}/download-log API endpoint returning JSON for AJAX refresh\n\n5. CLEANUP & EDGE CASES\n   - Handle project with no workspace_path (legacy projects) gracefully on file listing endpoints \u2014 return empty list, not 500\n   - Handle workspace_path that points to a directory that no longer exists \u2014 return empty list\n   - Ensure the per-user directory is created when a project is created (mkdir parents=True, exist_ok=True)\n   - Confirm backward compat: old projects (workspace_path not under users/) still accessible via file API\n\n6. FINAL TEST PASS\n   - Run existing tests: tests/test_user_profiles.py and tests/test_adversarial_profiles.py \u2014 all must still pass\n   - Add tests for new document library page and download-log admin endpoint\n   - Fix any regressions discovered during functional testing\n\nSUCCESS CRITERIA FOR CYCLE 2:\n1. Server starts clean with no import errors\n2. Screenshots confirm profile page, document library, and admin project detail all render correctly with real data\n3. All existing 59 tests still pass\n4. New tests for document library and admin download log pass\n5. display_name visible in admin views\n6. Legacy projects (no per-user path) handled gracefully",
+    "cycle_report": {
+      "summary": "Cycle 1 implemented the complete User Profiles feature for AI-StoryForge. This included database schema migrations for display_name and writing_preferences columns on users, a new download_log table, per-user file directory organization (outputs/users/{user_id}/{project_id}/), a full user profile page with editable display name, writing preferences, and password change for local-auth users. The admin side received a project detail page with stage execution logs, file browser, and individual file download. All user-facing file API endpoints include path traversal protection and ownership checks. Download events are logged and counted. 59 tests (44 functional + 15 adversarial) all passed.",
+      "files_created": [
+        "web/templates/profile.html",
+        "web/templates/admin/project_detail.html",
+        "artifacts/implementation_plan.md",
+        "artifacts/test_results.md",
+        "tests/test_user_profiles.py",
+        "tests/test_adversarial_profiles.py"
+      ],
+      "files_modified": [
+        "database/models.py",
+        "web/routes.py",
+        "web/admin_routes.py",
+        "web/templates/base.html",
+        "web/templates/history.html",
+        "web/templates/admin/user_detail.html",
+        "web/templates/admin/projects.html",
+        "web/templates/admin/dashboard.html",
+        "web/templates/admin/users.html",
+        "web/templates/admin/financials.html",
+        "web/static/css/style.css",
+        "web/static/js/app.js",
+        "web/templates/app.html",
+        "web/templates/receipt.html",
+        "web/templates/emails/verification.html",
+        "web/templates/emails/purchase_confirmation.html",
+        "web/templates/emails/password_reset.html",
+        "web/templates/emails/welcome.html",
+        "web/templates/500.html",
+        "web/templates/landing.html",
+        "web/templates/admin_billing.html",
+        "web/templates/signup.html",
+        "web/templates/auth_result.html",
+        "web/templates/login.html",
+        "web/templates/progress.html",
+        "web/templates/reset_password.html",
+        "web/templates/billing.html",
+        "web/templates/forgot_password.html"
+      ],
+      "achievements": [
+        "Database: Added display_name and writing_preferences columns to users table via safe ALTER TABLE migration",
+        "Database: Added download_count column to projects table",
+        "Database: Created download_log table with indexes for per-project and per-user download tracking",
+        "Database: Per-user file directories \u2014 new projects routed to outputs/users/{user_id}/{project_id}/",
+        "Database: Added get_user_profile(), update_user_profile(), get_project_files(), get_admin_project_detail(), log_download(), increment_download_count() functions",
+        "Routes: GET/POST /profile \u2014 view and edit display name, writing preferences, password change (local auth only)",
+        "Routes: GET /api/projects/{id}/files \u2014 list files in completed project workspace (ownership-checked)",
+        "Routes: GET /api/projects/{id}/files/{filename} \u2014 download individual file (path traversal protected)",
+        "Routes: GET /admin/projects/{project_id} \u2014 admin project detail with metadata, stage logs, file listing",
+        "Routes: GET /admin/projects/{project_id}/download \u2014 admin ZIP download (no ownership check, logged as admin)",
+        "Routes: GET /admin/projects/{project_id}/files/{filename} \u2014 admin view/download individual file inline or attachment",
+        "Templates: profile.html \u2014 stats row, account info, writing preferences, password section, quick links",
+        "Templates: admin/project_detail.html \u2014 project metadata, concept lines, stage execution log table, generated files browser",
+        "Templates: base.html updated \u2014 Profile nav link, display_name shown in nav (falls back to email prefix)",
+        "Templates: history.html updated \u2014 View Files modal triggered per project, download count badge",
+        "Tests: 44/44 functional tests passed (per-user paths, profile CRUD, file listing, download logging, admin detail, isolation, path traversal)",
+        "Tests: 15/15 adversarial tests passed (SQL injection, path traversal via symlinks, credit race condition, malformed JSON, per-user isolation)"
+      ],
+      "issues": [
+        "Architecture chose shared SQLite DB + per-user file directories over per-user SQLite DBs \u2014 this is intentional and documented in the plan; cross-user admin queries work cleanly",
+        "File viewing (inline in browser) only works for text/plain and text/html MIME types; binary/other files serve as download attachments \u2014 expected behavior",
+        "Live end-to-end test of the file download flow requires a running server instance with a real completed project \u2014 verified structurally via unit/integration tests"
+      ]
+    }
+  }
+}
