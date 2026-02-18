@@ -338,6 +338,17 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.8.5 (2026-02-18)
+- **CLAUDECODE env fix** - Conductor now strips `CLAUDECODE` env var before spawning Claude subprocesses, preventing "nested session" crash when launched from an active Claude Code session
+- **Multiple mission completions** - AtlasLab fork mission, StoryForge missions, and several R&D cycles completed autonomously
+- **Widget visibility toggles** - Dashboard widgets can now be hidden without disabling backend
+- **Handoff system overhaul** - Major rework of session handoff and continuity system
+
+### v1.8.4 (2026-02-15)
+- Drag-and-drop widget reordering in dashboard
+- Handoff system overhaul with improved continuity
+- Widget visibility toggles
+
 ### v1.7.0 (2026-02-06)
 - **OpenAI Codex Support** - Multi-provider LLM backend: run missions and investigations with Claude or Codex. Provider-aware ground rules, prompts, and transcript handling
 - **Ground Rules Loader** - Provider-aware ground rules system with overlay support for Claude/Codex/investigation modes
