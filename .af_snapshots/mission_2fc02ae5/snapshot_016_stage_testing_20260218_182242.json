@@ -1,0 +1,23 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_2fc02ae5",
+  "stage": "TESTING",
+  "timestamp": "2026-02-18T18:22:42.703151",
+  "snapshot_number": 16,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "FIXED: create_project() computed workspace_path but never called mkdir() \u2014 directory was never created on disk"
+      ],
+      "property_violations": [
+        "Per-user directory not created on project creation (FIXED: added workspace_path.mkdir(parents=True, exist_ok=True))"
+      ],
+      "mutation_score": null,
+      "spec_alignment": 0.97,
+      "epistemic_score": 0.9,
+      "rigor_level": "strong"
+    }
+  }
+}
