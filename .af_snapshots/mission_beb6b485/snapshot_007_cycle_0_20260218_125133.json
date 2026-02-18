@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_beb6b485",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-18T12:51:33.343984",
+  "snapshot_number": 7,
+  "event_data": {
+    "current_cycle": 1,
+    "cycle_budget": 3,
+    "cycles_remaining": 2,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [],
+    "summary": "STORYFORGE SECURITY HARDENING \u2014 CYCLE 2 OF 3\n\nContext: Cycle 1 successfully hardened the four primary attack surfaces in AI-StoryForge:\n  - run.py: sys.path.insert removed, TOCTOU-free _preflight_port",
+    "next_stage": "PLANNING"
+  }
+}
