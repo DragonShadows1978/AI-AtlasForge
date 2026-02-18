@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_beb6b485",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-18T13:15:23.641437",
+  "snapshot_number": 19,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 3,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-02-18T12:51:33.462577",
+        "iteration_count": 0,
+        "continuation_prompt": "STORYFORGE SECURITY HARDENING \u2014 CYCLE 2 OF 3\n\nContext: Cycle 1 successfully hardened the four primary attack surfaces in AI-StoryForge:\n  - run.py: sys.path.insert removed, TOCTOU-free _preflight_port_bind(), _validate_sys_path_security(), _parse_port()\n  - config.py: _parse_port() with actionable errors, single-source port via STORYFORGE_PORT\n  - web/app.py: sys.path.insert removed\n  - tests/test_security_regression.py: 28KB, 24 tests across categories A/B/C/D\n\nProject location: /home/vader/AI-AtlasForge/workspace/AI-StoryForge/\n\nCYCLE 2 OBJECTIVES:\n\n1. DEPTH: Extend security hardening beyond the four Cycle-1 surfaces to secondary surfaces:\n   a. Secret exposure in logs: Ensure STORYFORGE_SESSION_SECRET, API keys (ANTHROPIC_API_KEY, GOOGLE_API_KEY, STRIPE_SECRET_KEY, SMTP_PASSWORD) are never logged in plain text. Audit all logging calls in web/routes.py, web/app.py, sf_engine/ modules for accidental secret leakage. Add redaction to the logging setup.\n   b. Session secret strength: Config.SESSION_SECRET defaults to \"change-me-storyforge-dev-secret\". Add a startup check that raises a loud warning (or refuses to start in non-DEBUG mode) if the default secret is used in production.\n   c. Database path traversal: Config.DB_PATH is user-controllable via STORYFORGE_DB_PATH env var. Add validation that the resolved DB_PATH does not escape STORYFORGE_HOME (prevent ../../../etc/passwd style attacks).\n   d. Output directory injection: Config.OUTPUTS_DIR is derived from STORYFORGE_HOME. Validate that generated output file paths cannot escape OUTPUTS_DIR via story title or user-supplied filenames.\n\n2. REGRESSION SUITE EXPANSION: Extend test_security_regression.py with:\n   E. Secret redaction tests (verify logs do not contain secret values)\n   F. Default secret detection tests (verify loud warning when SESSION_SECRET is default)\n   G. DB path traversal tests (STORYFORGE_DB_PATH=../../../tmp/evil.db should be rejected)\n   H. Output path escape tests (story titles containing ../ should be sanitized)\n\n3. LIVE RUNTIME VERIFICATION: Start StoryForge on port 5100, run the expanded test suite (all categories A-H), confirm 0 failures. The live server is started with:\n   cd /home/vader/AI-AtlasForge/workspace/AI-StoryForge && STORYFORGE_PORT=5100 python run.py\n\n4. DOCUMENTATION: Update workspace/StoryForge/research/analysis.md with Cycle 2 findings and write a Cycle 2 summary to workspace/StoryForge/research/cycle2_analysis.md.\n\nSuccess criteria for Cycle 2:\n  - All categories A-H pass (0 failures)\n  - No API keys / secrets visible in log files after a test run\n  - Default secret triggers warning (or exit) in non-DEBUG mode\n  - DB_PATH traversal attempts are rejected with a clear error\n  - Output filename sanitization prevents escape from OUTPUTS_DIR\n  - Live server on port 5100 responds correctly throughout"
+      }
+    ],
+    "summary": "STORYFORGE SECURITY HARDENING \u2014 CYCLE 3 OF 3 (FINAL)\n\nContext: Cycles 1 and 2 hardened eight attack surfaces in AI-StoryForge located at /home/vader/AI-AtlasForge/workspace/AI-StoryForge/.\n\nCycle 1 ha",
+    "next_stage": "PLANNING"
+  }
+}
