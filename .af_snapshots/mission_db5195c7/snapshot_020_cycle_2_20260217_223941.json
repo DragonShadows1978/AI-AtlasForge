@@ -1,0 +1,50 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_db5195c7",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-17T22:39:41.606175",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "final": true,
+    "final_report": {
+      "summary": "Across 2 cycles, the Email Investigation Service at /home/vader/Email_Investigations/ was hardened with 4 core features in Cycle 1 (self-send filter, duration tracking, query param validation, daily digest method) and 4 integration tasks in Cycle 2 (digest scheduling in daemon main loop with persistent state, self-send filter end-to-end verification, digest preview API endpoint, full regression testing). The service processes emails via IMAP, classifies them, and runs autonomous investigations. All changes were validated with 71 tests (13 self-tests, 39 adversarial, 19 live regression) achieving 100% pass rate. The live service remained healthy throughout with 431 completed investigations and a 99.3% success rate.",
+      "all_files": [
+        "/home/vader/Email_Investigations/daemon/email_inbox.py",
+        "/home/vader/Email_Investigations/api/routes.py",
+        "/home/vader/Email_Investigations/config/config.yaml",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/tests/test_all_fixes.py",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/tests/test_adversarial.py",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/research/analysis.md",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/research/research_findings.md"
+      ],
+      "key_achievements": [
+        "Self-send email filter prevents infinite investigation loops by classifying emails from the service's own address as PURGE before any subject-based routing",
+        "Investigation duration tracking via elapsed_seconds field on ProcessedEmail, set at completion in both thread-based and sync-based code paths",
+        "Analytics duration_distribution populates correctly with <5m/5-10m/10-20m/20-30m/>30m bucketing using elapsed_seconds with RFC 2822 timestamp fallback",
+        "Centralized query parameter validation (_parse_int_param) on inbox/processed/investigations endpoints blocks injection attacks, type confusion, and out-of-range values",
+        "Daily digest method sends HTML email summary with per-investigation details, success rate, and average duration",
+        "Digest scheduling wired into daemon main loop with _last_digest_date persisted to state file, surviving restarts and preventing duplicate sends",
+        "GET /api/email/digest/preview endpoint returns JSON digest stats for dashboard integration",
+        "HTML escaping in digest email subjects prevents XSS injection",
+        "71/71 tests passing across self-test, adversarial, and live regression categories"
+      ],
+      "challenges_overcome": [
+        "RFC 2822 vs ISO date format mismatch - received_at timestamps used RFC 2822 format while analytics code expected ISO; added email.utils.parsedate_to_datetime() fallback",
+        "Duration tracking write-back gap - elapsed_seconds was computed but not always persisted back to state; fixed in both _run_investigation_thread() and _handle_investigation_completion()",
+        "Digest retry storms - without error-path state persistence, a failed digest send would retry every poll cycle; fixed by persisting _last_digest_date even on failure",
+        "Edge cases in duration analytics - NaN, Infinity, negative values, and corrupted timestamps all required careful handling to prevent analytics corruption",
+        "Self-send filter positioning - filter must execute before subject-based routing to prevent emails with 'investigation' in subject from bypassing the self-send check"
+      ],
+      "lessons_learned": [
+        "Position security filters (like self-send) at the TOP of classification logic, before any content-based routing that could match and bypass them",
+        "Always persist scheduling state to survive process restarts - in-memory-only tracking is fragile for daemon processes",
+        "Adversarial testing catches real bugs: Unicode lookalikes, null bytes, scientific notation, and type confusion are all real attack vectors on query parameters",
+        "Duration tracking requires write-back at EVERY completion code path, not just the primary one - async/thread/sync paths all need coverage",
+        "Functional testing against the live service (19 endpoint tests) catches integration issues that unit tests miss entirely"
+      ]
+    }
+  }
+}
