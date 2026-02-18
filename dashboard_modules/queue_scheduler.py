@@ -1021,7 +1021,8 @@ def update_queue_item(queue_id):
             # Update allowed fields
             allowed_fields = [
                 "priority", "scheduled_start", "start_condition",
-                "depends_on", "cycle_budget", "tags", "problem_statement"
+                "depends_on", "cycle_budget", "tags", "problem_statement",
+                "project_name"
             ]
             for field in allowed_fields:
                 if field in data:
@@ -1337,6 +1338,29 @@ def get_dependency_tree():
             'nodes': [],
             'edges': []
         })
+
+
+
+# =============================================================================
+# WORKSPACE PROJECTS ENDPOINT
+# =============================================================================
+
+@queue_scheduler_bp.route('/workspace-projects')
+def list_workspace_projects():
+    """List existing project directories in the workspace for autocomplete."""
+    try:
+        workspace_dir = BASE_DIR / "workspace"
+        if not workspace_dir.exists():
+            return jsonify({"projects": []})
+
+        projects = sorted([
+            d.name for d in workspace_dir.iterdir()
+            if d.is_dir() and not d.name.startswith('.')
+        ])
+        return jsonify({"projects": projects})
+    except Exception as e:
+        logger.error(f"Error listing workspace projects: {e}")
+        return jsonify({"projects": [], "error": str(e)})
 
 
 # =============================================================================

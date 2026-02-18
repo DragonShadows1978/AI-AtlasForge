@@ -802,6 +802,13 @@ function showEditModal(mission) {
                     <textarea id="edit-problem-statement" class="form-input" rows="4" placeholder="Describe the mission...">${escapeHtml(mission.problem_statement || '')}</textarea>
                 </div>
                 <div class="form-group">
+                    <label>Project Name (optional)</label>
+                    <input type="text" id="edit-project-name" class="form-input" list="edit-project-list"
+                           placeholder="Type or select a project..." value="${escapeHtml(mission.project_name || '')}">
+                    <datalist id="edit-project-list"></datalist>
+                    <small class="form-help">Select an existing workspace project or type a new name.</small>
+                </div>
+                <div class="form-group">
                     <label>Priority</label>
                     <select id="edit-priority" class="form-input">
                         <option value="critical" ${mission.priority === 'critical' ? 'selected' : ''}>🔴 Critical</option>
@@ -845,6 +852,27 @@ function showEditModal(mission) {
     `;
 
     document.body.appendChild(modal);
+    modal.style.display = 'flex';
+
+    // Fetch workspace project names for autocomplete
+    fetchWorkspaceProjects();
+}
+
+/**
+ * Fetch workspace project names and populate the datalist
+ */
+async function fetchWorkspaceProjects() {
+    try {
+        const data = await api('/api/queue/workspace-projects');
+        const datalist = document.getElementById('edit-project-list');
+        if (datalist && data.projects) {
+            datalist.innerHTML = data.projects
+                .map(p => `<option value="${escapeHtml(p)}">`)
+                .join('');
+        }
+    } catch (e) {
+        console.error('Failed to fetch workspace projects:', e);
+    }
 }
 
 /**
@@ -852,6 +880,7 @@ function showEditModal(mission) {
  */
 export async function saveQueueItemEdit(queueId) {
     const problemStatement = document.getElementById('edit-problem-statement')?.value;
+    const projectName = document.getElementById('edit-project-name')?.value?.trim() || null;
     const priority = document.getElementById('edit-priority')?.value;
     const cycles = parseInt(document.getElementById('edit-cycles')?.value) || 3;
     const dependsOn = document.getElementById('edit-depends-on')?.value;
@@ -861,6 +890,7 @@ export async function saveQueueItemEdit(queueId) {
     try {
         const data = await api(`/api/queue/update/${queueId}`, 'PUT', {
             problem_statement: problemStatement,
+            project_name: projectName,
             priority,
             cycle_budget: cycles,
             depends_on: dependsOn || null,
@@ -956,6 +986,7 @@ function showSuggestionsModal(suggestions) {
     `;
 
     document.body.appendChild(modal);
+    modal.style.display = 'flex';
 }
 
 /**
@@ -1726,6 +1757,7 @@ export function showBulkActionModal(action) {
     `;
 
     document.body.appendChild(modal);
+    modal.style.display = 'flex';
 }
 
 /**
