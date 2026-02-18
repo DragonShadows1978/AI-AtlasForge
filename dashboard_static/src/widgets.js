@@ -565,28 +565,134 @@ export async function loadFiles() {
         container.innerHTML = files.slice(0, 20).map(f => `
             <div class="file-item">
                 <div class="file-info">
-                    <a href="#" class="download-link file-name" data-download-url="${f.download_url}" data-filename="${f.name}" title="${f.path}">${f.name}</a>
+                    <a href="#" class="download-link file-name"
+                       data-content-url="${f.content_url || ''}"
+                       data-download-url="${f.download_url}"
+                       data-filename="${f.name}"
+                       data-file-type="${f.file_type || 'binary'}"
+                       title="${f.path}">${f.name}</a>
                     <span class="file-meta">${formatBytes(f.size)} - ${formatTimeAgo(f.modified)}</span>
                 </div>
             </div>
         `).join('');
 
-        // Attach click handlers for fetch-based downloads (bypasses Chrome's strict cert checks)
-        container.querySelectorAll('.download-link[data-download-url]').forEach(link => {
-            link.addEventListener('click', async (e) => {
+        // Open preview modal on click instead of downloading
+        container.querySelectorAll('.download-link[data-content-url]').forEach(link => {
+            link.addEventListener('click', (e) => {
                 e.preventDefault();
-                const url = link.dataset.downloadUrl;
-                const filename = link.dataset.filename;
-                try {
-                    await downloadFileViaFetch(url, filename);
-                } catch (err) {
-                    // Error already shown via toast in downloadFileViaFetch
-                }
+                openFilePreviewModal(
+                    link.dataset.filename,
+                    link.dataset.contentUrl,
+                    link.dataset.downloadUrl,
+                    link.dataset.fileType
+                );
             });
         });
     } catch (e) {
         console.error('Error loading files:', e);
     }
+}
+
+// =============================================================================
+// FILE PREVIEW MODAL
+// =============================================================================
+
+let _fpCurrentDownloadUrl = null;
+let _fpCurrentTextContent = null;
+
+export function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
+    const modal = document.getElementById('file-preview-modal');
+    if (!modal) return;
+    const title = document.getElementById('file-preview-title');
+    const body = document.getElementById('file-preview-body');
+    const copyBtn = document.getElementById('file-preview-copy-btn');
+    const dlBtn = document.getElementById('file-preview-download-btn');
+
+    title.textContent = name;
+    body.innerHTML = '<div class="file-preview-loading">Loading\u2026</div>';
+    copyBtn.style.display = 'none';
+    dlBtn.href = downloadUrl;
+    _fpCurrentDownloadUrl = downloadUrl;
+    _fpCurrentTextContent = null;
+
+    modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+
+    fetch(contentUrl)
+        .then(r => r.json())
+        .then(data => {
+            if (data.file_type === 'image') {
+                body.innerHTML = `<img src="data:${data.mime_type};base64,${data.content}" alt="${_escFp(name)}">`;
+                copyBtn.style.display = 'none';
+            } else if (data.file_type === 'text') {
+                const truncNote = data.truncated
+                    ? '<div class="file-preview-truncated">\u26a0 File truncated \u2014 showing first 100\u202fKB</div>'
+                    : '';
+                body.innerHTML = `<pre>${_escFp(data.content)}</pre>${truncNote}`;
+                _fpCurrentTextContent = data.content;
+                copyBtn.style.display = '';
+            } else {
+                body.innerHTML = `<div class="file-preview-binary">
+                    <p>Binary file \u2014 cannot display inline.</p>
+                    <p style="color:var(--text-dim);font-size:0.85em;">${_escFp(name)}</p>
+                </div>`;
+                copyBtn.style.display = 'none';
+            }
+        })
+        .catch(err => {
+            body.innerHTML = `<div class="file-preview-binary">Error loading file: ${_escFp(err.message)}</div>`;
+        });
+}
+
+export function closeFilePreviewModal() {
+    const modal = document.getElementById('file-preview-modal');
+    if (modal) modal.style.display = 'none';
+    _fpCurrentTextContent = null;
+    _fpCurrentDownloadUrl = null;
+    const anyOpen = document.querySelectorAll('.modal[style*="display: flex"], .modal[style*="display:flex"]').length > 0;
+    if (!anyOpen) document.body.classList.remove('modal-open');
+}
+
+export function copyFileContent() {
+    if (!_fpCurrentTextContent) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(_fpCurrentTextContent)
+            .then(() => showToast('Copied to clipboard', 'success'))
+            .catch(() => _fpFallbackCopy(_fpCurrentTextContent));
+    } else {
+        _fpFallbackCopy(_fpCurrentTextContent);
+    }
+}
+
+export function downloadCurrentFile() {
+    if (_fpCurrentDownloadUrl) {
+        downloadFileViaFetch(_fpCurrentDownloadUrl, null).catch(() => {});
+    }
+    return false;
+}
+
+function _fpFallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand('copy');
+        showToast('Copied to clipboard', 'success');
+    } catch (e) {
+        showToast('Copy failed', 'error');
+    }
+    document.body.removeChild(ta);
+}
+
+function _escFp(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
 
 // =============================================================================

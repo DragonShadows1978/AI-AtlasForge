@@ -12524,3 +12524,58 @@ body.modal-open {
     max-width: 180px;
     height: auto;
 }
+
+/* ============================================================
+   File Preview Modal
+   ============================================================ */
+.file-preview-modal-content {
+    max-width: 900px;
+    width: 92%;
+    max-height: 88vh;
+}
+.file-preview-body {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 100px;
+}
+.file-preview-body pre {
+    margin: 0;
+    padding: 16px;
+    overflow: auto;
+    flex: 1;
+    background: var(--bg);
+    font-family: 'Courier New', monospace;
+    font-size: 0.82em;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 62vh;
+    color: var(--text);
+}
+.file-preview-body img {
+    max-width: 100%;
+    max-height: 65vh;
+    object-fit: contain;
+    display: block;
+    margin: 16px auto;
+}
+.file-preview-binary {
+    padding: 30px;
+    text-align: center;
+    color: var(--text-dim);
+}
+.file-preview-loading {
+    padding: 30px;
+    text-align: center;
+    color: var(--text-dim);
+}
+.file-preview-truncated {
+    padding: 6px 16px;
+    background: rgba(255, 165, 0, 0.1);
+    color: orange;
+    font-size: 0.8em;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}

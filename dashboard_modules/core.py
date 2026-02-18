@@ -1206,6 +1206,91 @@ def download_file(filepath):
     )
 
 
+_TEXT_MIME_TYPES = {
+    'application/json', 'application/javascript', 'application/xml',
+    'application/yaml', 'application/x-yaml', 'application/toml',
+    'application/x-sh', 'application/x-python',
+}
+
+
+def _classify_file_type(mime_type):
+    """Return 'image', 'text', or 'binary' for a given mime type."""
+    if mime_type.startswith('image/'):
+        return 'image'
+    if mime_type.startswith('text/') or mime_type in _TEXT_MIME_TYPES:
+        return 'text'
+    return 'binary'
+
+
+@core_bp.route('/api/file-content/<path:filepath>')
+def get_file_content(filepath):
+    """Return file content as JSON for inline preview (text) or base64 (image)."""
+    import base64 as _b64
+    MAX_TEXT_BYTES = 100 * 1024  # 100KB truncation limit
+
+    if filepath.startswith('mission/'):
+        parts = filepath.split('/', 2)
+        if len(parts) < 3:
+            return jsonify({"error": "Invalid path"}), 400
+        mission_id = parts[1]
+        relative_path = parts[2]
+        from .workspace_resolver import resolve_mission_workspace
+        missions_dir = BASE_DIR / "missions"
+        mission_workspace = resolve_mission_workspace(mission_id, missions_dir, WORKSPACE_DIR, io_utils)
+        full_path = mission_workspace / relative_path
+        allowed_base = mission_workspace
+    else:
+        full_path = WORKSPACE_DIR / filepath
+        allowed_base = WORKSPACE_DIR
+
+    try:
+        full_path.resolve().relative_to(allowed_base.resolve())
+    except ValueError:
+        return jsonify({"error": "Access denied"}), 403
+
+    if not full_path.exists() or not full_path.is_file():
+        return jsonify({"error": "File not found"}), 404
+
+    mime_type, _ = mimetypes.guess_type(str(full_path))
+    mime_type = mime_type or 'application/octet-stream'
+    stat = full_path.stat()
+    file_type = _classify_file_type(mime_type)
+
+    if file_type == 'image':
+        data = _b64.b64encode(full_path.read_bytes()).decode('utf-8')
+        return jsonify({
+            "name": full_path.name,
+            "file_type": "image",
+            "mime_type": mime_type,
+            "size": stat.st_size,
+            "content": data,
+            "truncated": False
+        })
+    elif file_type == 'text':
+        raw = full_path.read_bytes()
+        truncated = len(raw) > MAX_TEXT_BYTES
+        if truncated:
+            raw = raw[:MAX_TEXT_BYTES]
+        content = raw.decode('utf-8', errors='replace')
+        return jsonify({
+            "name": full_path.name,
+            "file_type": "text",
+            "mime_type": mime_type,
+            "size": stat.st_size,
+            "content": content,
+            "truncated": truncated
+        })
+    else:
+        return jsonify({
+            "name": full_path.name,
+            "file_type": "binary",
+            "mime_type": mime_type,
+            "size": stat.st_size,
+            "content": None,
+            "truncated": False
+        })
+
+
 @core_bp.route('/api/files')
 def list_files():
     """List files in current mission workspace (or global workspace if no mission)."""
@@ -1242,11 +1327,15 @@ def list_files():
                         seen_paths.add(path_str)
 
                         stat = f.stat()
-                        # Build download URL with mission context if needed
+                        # Build download/content URLs with mission context if needed
                         if mission_workspace:
                             download_path = f"mission/{mission_id}/{path_str}"
                         else:
                             download_path = path_str
+
+                        mime_type, _ = mimetypes.guess_type(str(f))
+                        mime_type = mime_type or 'application/octet-stream'
+                        file_type = _classify_file_type(mime_type)
 
                         files.append({
                             "name": f.name,
@@ -1254,6 +1343,9 @@ def list_files():
                             "size": stat.st_size,
                             "modified": stat.st_mtime,
                             "download_url": f"/api/download/{download_path}",
+                            "content_url": f"/api/file-content/{download_path}",
+                            "mime_type": mime_type,
+                            "file_type": file_type,
                             "mission_id": mission_id if mission_workspace else None
                         })
                     except (OSError, IOError, ValueError):
