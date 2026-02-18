@@ -1,0 +1,40 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_db5195c7",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-17T22:19:16.186025",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "cycles_remaining": 1,
+    "continuation_prompt": "Continue hardening the Email Investigation Service at /home/vader/Email_Investigations/. Cycle 1 completed all 4 core features (self-send filter, duration tracking, query param validation, daily digest). For Cycle 2, focus on: (1) Add digest scheduling to the daemon's main loop - the send_daily_digest() method exists but is not yet wired into the daemon's periodic processing cycle. Add _last_digest_sent tracking to persistent state and check in the main loop whether 24 hours have elapsed since last send. Use the send_hour from config.yaml (default: 8 AM). (2) Verify the self-send filter works end-to-end by checking that completion notification emails sent by the service (which CC or reply to investigate@sigmaloop.io) are properly classified as PURGE when they arrive back in the inbox. (3) Add the daily digest endpoint to the API (GET /api/email/digest/preview) that returns the same stats as the digest email in JSON format, useful for dashboard integration. (4) Run a full regression test of the running service to verify no existing functionality was broken by the changes - test inbox polling, investigation creation, completion flow, and analytics endpoints. All source code is in /home/vader/Email_Investigations/ with daemon in daemon/email_inbox.py, API in api/routes.py, config in config/config.yaml.",
+    "cycle_report": {
+      "summary": "Successfully implemented all 4 requested features: (1) self-send email filter to prevent infinite investigation loops, (2) duration tracking fix so avg_duration_seconds and duration_distribution populate correctly in analytics, (3) query parameter validation returning 400 instead of 500 for malformed inputs, and (4) daily digest email summarizing investigations completed in the last 24 hours. All 56 tests passed including 39 adversarial tests. Found and fixed 2 additional issues during testing: RFC 2822 date parsing for duration calculations, and HTML injection vulnerability in daily digest emails.",
+      "files_created": [
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/tests/test_all_fixes.py",
+        "/home/vader/AI-AtlasForge/workspace/duration_distribution/tests/test_adversarial.py"
+      ],
+      "files_modified": [
+        "/home/vader/Email_Investigations/daemon/email_inbox.py",
+        "/home/vader/Email_Investigations/api/routes.py",
+        "/home/vader/Email_Investigations/config/config.yaml"
+      ],
+      "achievements": [
+        "Self-send filter: classify_email() returns PURGE for emails from investigate@sigmaloop.io, preventing infinite nesting chains",
+        "Duration tracking: Added elapsed_seconds field to ProcessedEmail, wired into _complete_investigation and _run_investigation, analytics now shows avg_duration_seconds=10929.9s with populated duration_distribution buckets",
+        "Query param validation: Added _parse_int_param() helper, all endpoints with limit/offset params now return 400 with clear error messages for malformed values",
+        "Daily digest: send_daily_digest() method computes last-24h stats (total, completed, failed, success rate, avg duration) and sends HTML email to configured recipients",
+        "Fixed RFC 2822 date parsing bug discovered during live API testing - timestamps like 'Wed, 21 Jan 2026 16:02:54 -0500' now parse correctly using email.utils.parsedate_to_datetime()",
+        "Fixed HTML injection vulnerability in daily digest - investigation subjects are now escaped with html.escape()",
+        "Comprehensive adversarial testing: 39 attack vectors tested including SQL injection, XSS, null bytes, scientific notation, Unicode lookalikes, infinity/NaN edge cases"
+      ],
+      "issues": [
+        "RFC 2822 date format mismatch: Initial implementation assumed ISO format for timestamps but received_at uses RFC 2822 format - fixed during testing phase",
+        "HTML injection in digest: Subject lines containing script tags were not escaped in the HTML email body - fixed and verified",
+        "Daily digest was tested with mocked email sending rather than actual SMTP delivery since we cannot trigger real email sends in testing"
+      ]
+    }
+  }
+}
