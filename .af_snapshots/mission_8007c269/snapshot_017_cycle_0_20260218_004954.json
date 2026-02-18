@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_8007c269",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-18T00:49:54.789071",
+  "snapshot_number": 17,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 3,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-02-18T00:19:54.554306",
+        "iteration_count": 0,
+        "continuation_prompt": "CYCLE 2 MISSION: Finalize and harden the Stripe credit payment flow implemented in Cycle 1 for AI-StoryForge at /home/vader/AI-AtlasForge/workspace/AI-StoryForge/.\n\nCycle 1 completed the core implementation. Cycle 2 must address the three remaining gaps:\n\n1. WIRE UP EMAIL CONFIRMATION (HIGH PRIORITY)\n   - File: web/routes.py \u2014 find _send_purchase_confirmation_email() stub\n   - File: web/templates/emails/purchase_confirmation.html \u2014 template exists\n   - Task: Connect the stub to the existing SMTP email sender already in the codebase (search for send_email or similar in web/routes.py or sf_engine/). The function should send the purchase_confirmation.html template with: user email, pack name, credits granted, amount paid, new balance, billing dashboard link.\n   - Do NOT build a new email system. Find and reuse the existing one.\n\n2. LIVE UI VERIFICATION (HIGH PRIORITY)\n   - Start the AI-StoryForge application: cd /home/vader/AI-AtlasForge/workspace/AI-StoryForge && python run.py &\n   - Capture a screenshot of the billing page at http://localhost:8000/billing (requires login \u2014 use test credentials or check existing test user in the DB)\n   - Verify the credit store, purchase history table, usage analytics, and transaction log sections all render correctly (not empty, not broken JS)\n   - Fix any rendering bugs found\n   - Take a final verification screenshot\n\n3. STRIPE TEST MODE END-TO-END VALIDATION (MEDIUM PRIORITY)\n   - Check if STRIPE_SECRET_KEY is set in the environment or .env file: cat /home/vader/AI-AtlasForge/workspace/AI-StoryForge/.env.example\n   - If test keys are available (sk_test_...), run a full checkout flow using Stripe's test card 4242424242424242\n   - Use stripe CLI (stripe listen --forward-to localhost:8000/api/billing/webhook) if available, or manually construct a test webhook event\n   - Verify credits are correctly provisioned after simulated payment\n   - Document results in workspace/AtlasForge/artifacts/e2e_test_results.md\n\n4. POLISH AND HARDENING (LOW PRIORITY, if time allows)\n   - Add a 'Copy to clipboard' button for the Stripe session ID on the receipt page\n   - Add purchase success toast notification on billing page when ?success=1 query param is present (billing.html already has JS framework, just needs the handler)\n   - Ensure the billing page gracefully handles empty purchase history for new users (show 'No purchases yet' message)\n   - Add rate limiting to POST /api/billing/checkout (prevent checkout spam)\n\nKey files to review before starting:\n- /home/vader/AI-AtlasForge/workspace/AI-StoryForge/web/routes.py (all billing routes)\n- /home/vader/AI-AtlasForge/workspace/AI-StoryForge/web/templates/billing.html (dashboard UI)\n- /home/vader/AI-AtlasForge/workspace/AI-StoryForge/database/models.py (stripe_payments table)\n- /home/vader/AI-AtlasForge/workspace/AI-StoryForge/config.py (CREDIT_PACKS, Stripe config)\n\nSuccess criteria for Cycle 2:\n1. Email confirmation actually sends (not just stubs) using existing SMTP infrastructure\n2. Billing dashboard UI verified via screenshot \u2014 all 4 sections visible and populated\n3. At least one end-to-end payment simulation (test mode or mock) confirms credit provisioning works\n4. No regressions: all 54 original tests still pass after changes"
+      }
+    ],
+    "summary": "CYCLE 3 MISSION: Complete Stripe live test validation and production readiness for AI-StoryForge credit payment system at /home/vader/AI-AtlasForge/workspace/AI-StoryForge/.\n\nCycles 1 and 2 implemente",
+    "next_stage": "PLANNING"
+  }
+}
