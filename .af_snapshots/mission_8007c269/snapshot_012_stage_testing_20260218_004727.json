@@ -1,0 +1,29 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_8007c269",
+  "stage": "TESTING",
+  "timestamp": "2026-02-18T00:47:27.991865",
+  "snapshot_number": 12,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 1.0,
+      "epistemic_score": 0.92,
+      "rigor_level": "strong",
+      "details": {
+        "sql_injection_tests": "3/3 PASSED - parameterized queries protect all inputs (session_id, pack_id, event_id)",
+        "negative_credits": "REJECTED with ValueError - add_credits validates amount > 0",
+        "zero_credits": "REJECTED with ValueError",
+        "deduct_below_zero": "BLOCKED - returns False, balance stays at 0",
+        "race_condition": "5 concurrent threads, exactly 1 credit granted - SQLite locking works",
+        "large_values": "1,000,000 credits handled without overflow",
+        "cross_user_isolation": "User payments are correctly isolated per user_id",
+        "webhook_security": "_verify_stripe_signature() and is_event_processed() both confirmed in routes.py"
+      }
+    }
+  }
+}
