@@ -1,0 +1,24 @@
+{
+  "snapshot_type": "cycle_0",
+  "mission_id": "mission_3b8cadf1",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-18T15:48:37.802714",
+  "snapshot_number": 21,
+  "event_data": {
+    "current_cycle": 2,
+    "cycle_budget": 3,
+    "cycles_remaining": 1,
+    "is_last_cycle": false,
+    "iteration": 0,
+    "cycle_history": [
+      {
+        "cycle": 1,
+        "completed_at": "2026-02-18T15:28:49.803612",
+        "iteration_count": 0,
+        "continuation_prompt": "StoryForge Observability Mission \u2014 Cycle 2 of 3\n\nCycle 1 successfully implemented and verified all 6 core observability requirements for the StoryForge FastAPI application (AI-StoryForge project at /home/vader/AI-AtlasForge/workspace/AI-StoryForge/). The following are now working:\n- web/audit.py: audit_log(), _check_login_alert() (N=5/M=300s), get_client_ip(), RotatingFileHandler on logs/audit.jsonl\n- web/app.py: JsonFormatter (structured JSONL), request_id_middleware (UUID per request, ContextVar), /health endpoint (db/disk/session_store checks, HTTP 200 always), /readyz endpoint (200 or 503, for load balancers)\n- tests/test_security_regression.py: 78 tests, categories A-P + LIVE, all passing\n\nCycle 2 objectives \u2014 harden, extend, and production-ready the observability layer:\n\n(1) LOG SAMPLING AND PERFORMANCE: The current JsonFormatter logs every request. Under high load this can saturate disk I/O. Implement configurable log sampling: a STORYFORGE_LOG_SAMPLE_RATE env var (0.0\u20131.0, default 1.0) that probabilistically samples non-error, non-audit request logs while always logging errors and all audit events. Add a Category Q test (5 tests) validating sampling behavior.\n\n(2) METRICS ENDPOINT: Add a /metrics endpoint returning Prometheus-compatible text format (or JSON fallback) with counters for: total_requests, auth_failures_total (per IP bucket), security_alerts_total, health_check_total, request_duration_p50/p95/p99 (using a simple streaming histogram). No external dependencies \u2014 implement the histogram and text formatter from scratch using stdlib. Add Category R tests (5 tests).\n\n(3) AUDIT LOG ROTATION VERIFICATION: The RotatingFileHandler is configured but its rotation behavior under disk pressure has not been stress-tested. Write a stress test that generates 1000+ audit records and verifies: (a) audit.jsonl file size remains bounded, (b) backup files are created (audit.jsonl.1, .2, etc.), (c) all records remain valid JSONL after rotation. Add these as Category S tests.\n\n(4) ALERT WEBHOOK ROBUSTNESS: The STORYFORGE_ALERT_WEBHOOK_URL webhook fires on SECURITY_ALERT but uses a fire-and-forget approach. Harden it: (a) add a configurable timeout (STORYFORGE_ALERT_WEBHOOK_TIMEOUT, default 5s), (b) catch all network exceptions so webhook failure never crashes the request handler, (c) log webhook send success/failure as a structured JSON log line with outcome field, (d) add a retry with exponential backoff (1 attempt, max 2 retries, cap at 10s). Add Category T tests (4 tests) using a local HTTP mock server (stdlib http.server) to verify webhook delivery and retry behavior.\n\n(5) HEALTH ENDPOINT DEGRADATION MODE: Currently /health always returns HTTP 200. Production load balancers often need to distinguish 'degraded but serving' from 'fully healthy'. Extend /health to return HTTP 207 (Multi-Status) when one or more checks fail but the server is still serving requests, with a top-level status of 'degraded' and per-check status. /readyz should return 503 on any check failure. Document the status codes in a comment block. Add Category U tests (4 tests).\n\n(6) STRUCTURED ERROR RESPONSES: Currently some error paths (500, 422 validation errors, rate limit 429) may return non-JSON or inconsistently structured responses. Audit all exception handlers in web/app.py and ensure every error response is a JSON object with fields: request_id, error_code, message, timestamp. The X-Request-ID header must be present on all error responses. Add Category V tests (4 tests).\n\nAll existing 78 tests (categories A-P + LIVE) must continue to pass. No regressions.\nTarget: 78 + 26 new = 104+ tests passing, 0 failing.\nAll implementations use stdlib only \u2014 no new pip dependencies.\nTest using: STORYFORGE_PORT=5100 python3 tests/test_security_regression.py"
+      }
+    ],
+    "summary": "StoryForge Observability Mission \u2014 Cycle 3 of 3 (FINAL HARDENING)\n\nCycles 1 and 2 established a full observability stack for the AI-StoryForge FastAPI application at /home/vader/AI-AtlasForge/workspac",
+    "next_stage": "PLANNING"
+  }
+}

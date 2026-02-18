@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_3b8cadf1",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-18T15:52:40.493342",
+  "snapshot_number": 24,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Integration test pattern: start server, fire mixed requests, assert non-zero counters and audit records \u2014 consistent with past missions",
+      "Three-cycle final summary pattern: mission report summarizing all architecture components"
+    ],
+    "steps_planned": 8
+  }
+}
