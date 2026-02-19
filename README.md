@@ -338,6 +338,11 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.8.7 (2026-02-19)
+- **Widget Settings Popup** - Mobile panel reordering via widget settings buttons
+- **Collapsed Card Improvements** - Stage indicator and health summary remain visible when widgets are collapsed
+- **Dashboard CSS** - Refined collapsed card styling and status card layout
+
 ### v1.8.6 (2026-02-19)
 - **Widget Control Mechanism** - Overhauled widget visibility toggle system; widgets can be hidden/shown independently of backend services
 - **Token Sanity Check** - New integration that validates token counts before handoff to prevent corrupt context windows
