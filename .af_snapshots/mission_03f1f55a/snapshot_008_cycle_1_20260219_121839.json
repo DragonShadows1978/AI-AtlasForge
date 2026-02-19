@@ -1,0 +1,42 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_03f1f55a",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-19T12:18:39.909660",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "final": true,
+    "final_report": {
+      "summary": "Successfully diagnosed and fixed the widget control dropdown z-index/stacking context bug in the AtlasForge dashboard. The widget control toolbar (lock/unlock + widget visibility dropdown) was rendering beneath the main tab navigation bar due to CSS stacking context hierarchy. The fix used the DOM Portal pattern \u2014 moving #widget-vis-dropdown and #preset-dropdown to be direct children of <body> at initialization, assigning z-index: 10000 and position: fixed, thereby escaping all ancestor stacking contexts. All 15 functional tests passed confirming the fix is complete and regression-free.",
+      "all_files": [
+        "workspace/DashboardWidgetControl/artifacts/implementation_plan.md",
+        "workspace/DashboardWidgetControl/artifacts/test_results.md",
+        "workspace/DashboardWidgetControl/research/research_findings.md",
+        "workspace/DashboardWidgetControl/research/analysis.md",
+        "workspace/DashboardWidgetControl/tests/test_dropdown_z_fix.py"
+      ],
+      "key_achievements": [
+        "Identified root cause: CSS stacking context hierarchy where .main-tabs nav (z-index 99) painted over the header dropdown regardless of declared z-index on the dropdown elements",
+        "Diagnosed three contributing factors: DOM paint order, overflow-x: auto on .header-row-2 creating a clipping stacking context, and sticky nav creating its own stacking context outranking the dropdown's parent",
+        "Implemented DOM Portal pattern: moved #widget-vis-dropdown and #preset-dropdown to document.body at init time, escaping all ancestor stacking contexts",
+        "Applied position: fixed + z-index: 10000 to both portaled dropdowns ensuring they always render above all page layers",
+        "Verified fix with a 15-test Selenium/Firefox functional test suite covering portal attachment, z-index values, overflow clipping, open/close behavior, viewport visibility, positioning, and adversarial regressions",
+        "All 15/15 tests passed \u2014 no regressions on lock button or preset dropdown functionality"
+      ],
+      "challenges_overcome": [
+        "Stacking context complexity: multiple overlapping stacking contexts (overflow-x: auto container, sticky nav) combined to trap the dropdown regardless of z-index on the dropdown itself",
+        "Mobile vs desktop divergence: overflow-x: auto on the header row created a clipping context that would have prevented position: absolute solutions from escaping",
+        "Rejected simpler approaches (increasing header z-index, reordering HTML) as insufficient \u2014 only the portal pattern fully escapes all ancestor stacking contexts",
+        "Ensuring outside-click close behavior still worked correctly after moving dropdowns out of their original DOM parent context"
+      ],
+      "lessons_learned": [
+        "When a dropdown renders beneath a sibling element despite high z-index, the issue is almost always a stacking context on an ancestor \u2014 not the z-index value itself",
+        "overflow-x: auto/scroll on a container creates a stacking context, which is a common and easily missed culprit in header/nav layout bugs",
+        "The DOM Portal pattern (appending to document.body + position: fixed) is the definitive solution for any dropdown/modal that must escape ancestor stacking contexts",
+        "Functional Selenium tests are far more reliable than unit tests for verifying CSS stacking context fixes \u2014 CSS behavior cannot be reliably tested without a real rendering engine",
+        "Three-option analysis (increase z-index / reorder HTML / portal to body) before implementing avoids wasted effort on approaches that don't fully solve the problem"
+      ]
+    }
+  }
+}
