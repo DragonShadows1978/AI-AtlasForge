@@ -1,0 +1,14 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_1bd372de",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-19T17:57:18.310900",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Multiple past missions (mission_2991527c, mission_2d43fae5, mission_33bf716a, mission_220bf0ee, mission_7091ee78) built the Mission Suggestions widget - confirming SQLite storage and the modals.js sort pattern"
+    ],
+    "steps_planned": 4
+  }
+}
