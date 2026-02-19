@@ -24,6 +24,7 @@ let savedScrollY = 0;
 
 // Sort order state
 let currentSortField = 'priority_score';
+let currentSortDirection = 'desc'; // 'asc' or 'desc'
 
 // Merge candidates state (for auto-prompt)
 let pendingMergeCandidates = [];
@@ -735,18 +736,32 @@ export function sortRecommendations() {
 }
 
 /**
+ * Toggle sort direction between ascending and descending
+ */
+export function toggleSortDirection() {
+    currentSortDirection = currentSortDirection === 'desc' ? 'asc' : 'desc';
+    const btn = document.getElementById('rec-sort-dir-btn');
+    if (btn) {
+        btn.textContent = currentSortDirection === 'desc' ? '\u2193 Desc' : '\u2191 Asc';
+    }
+    applySortToRecommendations();
+    renderRecommendations();
+}
+
+/**
  * Apply current sort order to recommendations array
  */
 function applySortToRecommendations() {
+    const dir = currentSortDirection === 'asc' ? 1 : -1;
     recommendations.sort((a, b) => {
         if (currentSortField === 'priority_score') {
-            return (b.priority_score || 0) - (a.priority_score || 0);
+            return dir * ((b.priority_score || 0) - (a.priority_score || 0));
         } else if (currentSortField === 'created_at') {
-            return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+            return dir * (new Date(b.created_at || 0) - new Date(a.created_at || 0));
         } else if (currentSortField === 'health_status') {
             // Order: hot > needs_review > healthy > stale > orphaned
             const order = { hot: 0, needs_review: 1, healthy: 2, stale: 3, orphaned: 4 };
-            return (order[a.health_status] || 5) - (order[b.health_status] || 5);
+            return dir * ((order[a.health_status] || 5) - (order[b.health_status] || 5));
         }
         return 0;
     });

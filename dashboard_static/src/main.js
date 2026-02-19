@@ -134,6 +134,7 @@ window.closeMergeModal = modals.closeMergeModal;
 window.executeMerge = modals.executeMerge;
 // Sorting and health functions
 window.sortRecommendations = modals.sortRecommendations;
+window.toggleSortDirection = modals.toggleSortDirection;
 window.loadHealthSummary = modals.loadHealthSummary;
 // Merge candidates auto-prompt functions
 window.showMergeCandidatesPrompt = modals.showMergeCandidatesPrompt;
