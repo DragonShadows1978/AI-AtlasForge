@@ -338,6 +338,14 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.8.6 (2026-02-19)
+- **Widget Control Mechanism** - Overhauled widget visibility toggle system; widgets can be hidden/shown independently of backend services
+- **Token Sanity Check** - New integration that validates token counts before handoff to prevent corrupt context windows
+- **Transcript Archival** - Improved automatic transcript archival integration
+- **Orchestrator Updates** - Enhanced stage orchestration reliability
+- **Dashboard Queue Scheduler** - Improved mission queue scheduling and priority handling
+- **Dashboard Drag-Drop** - Refined drag-and-drop widget reordering with better touch support
+
 ### v1.8.5 (2026-02-18)
 - **CLAUDECODE env fix** - Conductor now strips `CLAUDECODE` env var before spawning Claude subprocesses, preventing "nested session" crash when launched from an active Claude Code session
 - **Multiple mission completions** - AtlasLab fork mission, StoryForge missions, and several R&D cycles completed autonomously
