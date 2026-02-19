@@ -1596,6 +1596,11 @@ function initToolbarUI() {
     const redoBtn = document.getElementById('layout-redo-btn');
     const presetSelector = document.getElementById('preset-selector');
     const presetDropdown = document.getElementById('preset-dropdown');
+
+    // PORTAL: Move preset dropdown to body to escape header stacking context.
+    if (presetDropdown && presetDropdown.parentElement !== document.body) {
+        document.body.appendChild(presetDropdown);
+    }
     const savePresetBtn = document.getElementById('save-preset-btn');
 
     // Undo button
@@ -2100,6 +2105,15 @@ function hideAllWidgets() {
 
 function initWidgetVisibility() {
     loadWidgetVisibility();
+
+    // PORTAL: Move dropdown to body to escape header stacking context.
+    // The dropdown uses position:fixed + getBoundingClientRect pixel positioning,
+    // so visual position is unaffected; moving to <body> removes all ancestor
+    // stacking context constraints that cause it to render under the nav bar.
+    const visDropdown = document.getElementById('widget-vis-dropdown');
+    if (visDropdown && visDropdown.parentElement !== document.body) {
+        document.body.appendChild(visDropdown);
+    }
 
     const selector = document.getElementById('widget-vis-selector');
     if (selector) {

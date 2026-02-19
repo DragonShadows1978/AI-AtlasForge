@@ -5265,9 +5265,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
 
 /* Preset dropdown */
 .preset-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
+    position: fixed;
     min-width: 200px;
     max-width: 280px;
     max-height: 300px;
@@ -5276,7 +5274,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 1000;
+    z-index: 10000;
     opacity: 0;
     transform: translateY(-10px);
     transition: opacity 0.15s ease, transform 0.15s ease;
