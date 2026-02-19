@@ -2629,6 +2629,85 @@
                 }, 5000);
             });
         })();
+
+        // ===== TOKEN INTEGRITY WIDGET =====
+        (function() {
+            var INTEGRITY_URL = '/api/glassbox/integrity';
+            var INTEGRITY_INTERVAL = 60000; // poll every 60s
+
+            function updateTokenIntegrityWidget(data) {
+                var badge = document.getElementById('token-integrity-badge');
+                var summaryEl = document.getElementById('token-integrity-summary');
+                var anomalyList = document.getElementById('token-integrity-anomaly-list');
+                if (!badge || !summaryEl || !anomalyList) return;
+
+                var summary = data.summary || {};
+                var anomalies = data.anomalies || [];
+                var zeroCount = summary.zero_token_count || 0;
+                var lowCount = summary.low_token_count || 0;
+                var totalAnomalies = zeroCount + lowCount;
+                var totalScanned = summary.total_scanned || 0;
+
+                // Update badge
+                if (totalAnomalies > 0) {
+                    badge.textContent = totalAnomalies + ' anomalous';
+                    badge.style.background = 'var(--red)';
+                    badge.style.color = '#fff';
+                } else {
+                    badge.textContent = 'healthy';
+                    badge.style.background = 'var(--green)';
+                    badge.style.color = '#fff';
+                }
+
+                // Update summary grid
+                summaryEl.innerHTML =
+                    '<div style="display:flex;gap:16px;flex-wrap:wrap;">' +
+                    '<div style="text-align:center;">' +
+                        '<div style="font-size:1.4em;font-weight:bold;color:' + (zeroCount > 0 ? 'var(--red)' : 'var(--green)') + '">' + zeroCount + '</div>' +
+                        '<div style="font-size:0.75em;color:var(--text-dim);">Zero-token</div>' +
+                    '</div>' +
+                    '<div style="text-align:center;">' +
+                        '<div style="font-size:1.4em;font-weight:bold;color:' + (lowCount > 0 ? 'var(--yellow)' : 'var(--text-dim)') + '">' + lowCount + '</div>' +
+                        '<div style="font-size:0.75em;color:var(--text-dim);">Low-token</div>' +
+                    '</div>' +
+                    '<div style="text-align:center;">' +
+                        '<div style="font-size:1.4em;font-weight:bold;color:var(--text-dim)">' + totalScanned + '</div>' +
+                        '<div style="font-size:0.75em;color:var(--text-dim);">Scanned</div>' +
+                    '</div>' +
+                    '</div>';
+
+                // Update anomaly list
+                if (anomalies.length === 0) {
+                    anomalyList.innerHTML = '<div style="color:var(--green);font-size:0.82em;padding:4px 0;">No anomalies detected.</div>';
+                } else {
+                    var rows = anomalies.slice(0, 20).map(function(a) {
+                        var color = a.category === 'zero_token' ? 'var(--red)' : 'var(--yellow)';
+                        var date = a.created_at ? a.created_at.substring(0, 10) : '?';
+                        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border);font-size:0.8em;">' +
+                            '<span style="color:var(--text);font-family:monospace;">' + a.mission_id + '</span>' +
+                            '<span style="color:var(--text-dim);">' + date + '</span>' +
+                            '<span style="color:' + color + ';font-weight:bold;">' + a.category.replace('_', ' ') + '</span>' +
+                            '</div>';
+                    });
+                    anomalyList.innerHTML = rows.join('');
+                }
+            }
+
+            function fetchTokenIntegrity() {
+                fetch(INTEGRITY_URL)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) { updateTokenIntegrityWidget(data); })
+                    .catch(function(err) {
+                        var badge = document.getElementById('token-integrity-badge');
+                        if (badge) { badge.textContent = 'error'; badge.style.background = 'var(--yellow)'; }
+                    });
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                fetchTokenIntegrity();
+                setInterval(fetchTokenIntegrity, INTEGRITY_INTERVAL);
+            });
+        })();
     </script>
 
     <!-- Save Preset Modal -->
