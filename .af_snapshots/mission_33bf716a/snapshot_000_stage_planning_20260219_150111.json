@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_33bf716a",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-19T15:01:11.197339",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Health status system (Hot/Stale/Needs Review/Healthy) from mission_e10c225c \u2014 the #rec-health-summary element with these counts already exists in the DOM",
+      "Mission Suggestions widget implementation from missions_7091ee78 and 2d43fae5 \u2014 familiar with the existing widget structure"
+    ],
+    "steps_planned": 7
+  }
+}
