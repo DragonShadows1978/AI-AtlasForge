@@ -101,6 +101,11 @@ export function switchTab(tabName, updateUrl = true) {
     // Save preference
     localStorage.setItem('activeTab', tabName);
 
+    // Update mobile nav dots visibility (only shown on AtlasForge tab)
+    if (typeof window.updateMobileNavDots === 'function') {
+        window.updateMobileNavDots();
+    }
+
     // Update URL hash for deep linking
     if (updateUrl) {
         updateHash(tabName);

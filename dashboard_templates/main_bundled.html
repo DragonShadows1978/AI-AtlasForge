@@ -402,42 +402,46 @@
             <!-- Controls -->
             <!-- Status -->
             <div class="card" id="status-card">
-                <h3>Status</h3>
-                <div id="status-info">
-                    <div class="stat-row">
-                        <span class="stat-label">Stage</span>
-                        <span class="stat-value highlight" id="stat-stage">-</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Project</span>
-                        <span class="stat-value highlight" id="stat-project-name" title="Click to view workspace">-</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Provider</span>
-                        <span class="stat-value highlight" id="stat-provider">claude</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Iteration</span>
-                        <span class="stat-value" id="stat-iteration">-</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Mission Cycle</span>
-                        <span class="stat-value highlight" id="stat-mission-cycle">1/1</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Total Cycles</span>
-                        <span class="stat-value" id="stat-cycles">-</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">User Launches</span>
-                        <span class="stat-value" id="stat-boots">-</span>
-                    </div>
-                    <div class="stat-row" id="backup-age-row">
-                        <span class="stat-label">Backup</span>
-                        <span class="stat-value backup-age-badge fresh" id="stat-backup-age">-</span>
+                <div class="card-header" onclick="toggleCard('status')">
+                    <h3>Status</h3>
+                    <span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content" id="status-card-body">
+                    <div id="status-info">
+                        <div class="stat-row">
+                            <span class="stat-label">Stage</span>
+                            <span class="stat-value highlight" id="stat-stage">-</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Project</span>
+                            <span class="stat-value highlight" id="stat-project-name" title="Click to view workspace">-</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Provider</span>
+                            <span class="stat-value highlight" id="stat-provider">claude</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Iteration</span>
+                            <span class="stat-value" id="stat-iteration">-</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Mission Cycle</span>
+                            <span class="stat-value highlight" id="stat-mission-cycle">1/1</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">Total Cycles</span>
+                            <span class="stat-value" id="stat-cycles">-</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">User Launches</span>
+                            <span class="stat-value" id="stat-boots">-</span>
+                        </div>
+                        <div class="stat-row" id="backup-age-row">
+                            <span class="stat-label">Backup</span>
+                            <span class="stat-value backup-age-badge fresh" id="stat-backup-age">-</span>
+                        </div>
                     </div>
                 </div>
-
                 <div class="stage-indicator" id="stage-indicator">
                     <div class="stage" data-stage="PLANNING">PLAN</div>
                     <div class="stage" data-stage="BUILDING">BUILD</div>
@@ -532,37 +536,14 @@
 
             <!-- Mission Suggestions (legacy - from mission completion) -->
             <div class="card" id="mission-suggestions-card">
-                <h3>Mission Suggestions <span id="rec-count" class="badge">0</span>
-                    <button class="btn btn-small similarity-audit-btn" onclick="openSimilarityAudit()" title="Find and merge similar suggestions">Audit Similarities</button>
-                    <button class="btn btn-small" onclick="refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
-                </h3>
-                <!-- Quick-Add Form -->
-                <div class="rec-quick-add">
-                    <input type="text" id="rec-quick-add-title" class="rec-quick-add-input" placeholder="Add new suggestion..." onkeypress="if(event.key==='Enter')submitQuickAdd()">
-                    <button class="btn btn-small primary" onclick="submitQuickAdd()">Add</button>
+                <div class="card-header" onclick="toggleCard('mission-suggestions')">
+                    <h3>Mission Suggestions <span id="rec-count" class="badge">0</span>
+                        <button class="btn btn-small similarity-audit-btn" onclick="event.stopPropagation();openSimilarityAudit()" title="Find and merge similar suggestions">Audit Similarities</button>
+                        <button class="btn btn-small" onclick="event.stopPropagation();refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
+                    </h3>
+                    <span class="collapse-toggle">&#9660;</span>
                 </div>
-                <!-- Sort and Filter Controls -->
-                <div class="rec-sort-controls">
-                    <label>Sort:</label>
-                    <select id="rec-sort-select" class="rec-sort-select" onchange="sortRecommendations()">
-                        <option value="priority_score">Priority Score</option>
-                        <option value="created_at">Date Created</option>
-                        <option value="health_status">Health Status</option>
-                    </select>
-                    <label>Tag:</label>
-                    <select id="rec-tag-filter" class="rec-filter-select" onchange="filterByTag()">
-                        <option value="">All Tags</option>
-                        <option value="feature">feature</option>
-                        <option value="bugfix">bugfix</option>
-                        <option value="infrastructure">infrastructure</option>
-                        <option value="refactor">refactor</option>
-                        <option value="documentation">documentation</option>
-                        <option value="performance">performance</option>
-                        <option value="security">security</option>
-                        <option value="ui">ui</option>
-                    </select>
-                </div>
-                <!-- Health Summary Bar (clickable for filtering) -->
+                <!-- Health Summary Bar - outside card-content so visible when collapsed -->
                 <div id="rec-health-summary" class="rec-health-summary" style="display: none;">
                     <div class="rec-health-stat hot" onclick="filterByHealth('hot')" title="Click to filter hot items">
                         <span class="label">Hot</span>
@@ -583,14 +564,42 @@
                     <span id="rec-filter-count" class="rec-filter-count" style="display: none;"></span>
                     <button class="btn btn-tiny" onclick="clearAllFilters()" title="Clear all filters" style="margin-left: auto;">Clear</button>
                 </div>
-                <div id="legacy-recommendations-list" class="recommendations-list">
-                    <div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>
-                </div>
-                <!-- Pagination Controls -->
-                <div id="rec-pagination" class="rec-pagination" style="display: none;">
-                    <button class="btn btn-tiny" onclick="goToRecPage('prev')" id="rec-prev-btn" disabled>Prev</button>
-                    <span id="rec-page-info">Page 1 of 1</span>
-                    <button class="btn btn-tiny" onclick="goToRecPage('next')" id="rec-next-btn" disabled>Next</button>
+                <div class="card-content">
+                    <!-- Quick-Add Form -->
+                    <div class="rec-quick-add">
+                        <input type="text" id="rec-quick-add-title" class="rec-quick-add-input" placeholder="Add new suggestion..." onkeypress="if(event.key==='Enter')submitQuickAdd()">
+                        <button class="btn btn-small primary" onclick="submitQuickAdd()">Add</button>
+                    </div>
+                    <!-- Sort and Filter Controls -->
+                    <div class="rec-sort-controls">
+                        <label>Sort:</label>
+                        <select id="rec-sort-select" class="rec-sort-select" onchange="sortRecommendations()">
+                            <option value="priority_score">Priority Score</option>
+                            <option value="created_at">Date Created</option>
+                            <option value="health_status">Health Status</option>
+                        </select>
+                        <label>Tag:</label>
+                        <select id="rec-tag-filter" class="rec-filter-select" onchange="filterByTag()">
+                            <option value="">All Tags</option>
+                            <option value="feature">feature</option>
+                            <option value="bugfix">bugfix</option>
+                            <option value="infrastructure">infrastructure</option>
+                            <option value="refactor">refactor</option>
+                            <option value="documentation">documentation</option>
+                            <option value="performance">performance</option>
+                            <option value="security">security</option>
+                            <option value="ui">ui</option>
+                        </select>
+                    </div>
+                    <div id="legacy-recommendations-list" class="recommendations-list">
+                        <div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>
+                    </div>
+                    <!-- Pagination Controls -->
+                    <div id="rec-pagination" class="rec-pagination" style="display: none;">
+                        <button class="btn btn-tiny" onclick="goToRecPage('prev')" id="rec-prev-btn" disabled>Prev</button>
+                        <span id="rec-page-info">Page 1 of 1</span>
+                        <button class="btn btn-tiny" onclick="goToRecPage('next')" id="rec-next-btn" disabled>Next</button>
+                    </div>
                 </div>
             </div>
 

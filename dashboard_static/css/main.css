@@ -1923,6 +1923,21 @@ h1 { color: var(--accent); font-size: 1.3em; }
     margin-top: 12px;
 }
 
+/* Status card: stage indicator lives outside card-content, always visible */
+#status-card .stage-indicator {
+    margin-top: 8px;
+}
+#status-card.collapsed .stage-indicator {
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
+/* Mission suggestions card: health summary lives outside card-content, always visible */
+#mission-suggestions-card .rec-health-summary {
+    margin-top: 8px;
+}
+
 /* Main tabs navigation */
 .main-tabs {
     display: flex;

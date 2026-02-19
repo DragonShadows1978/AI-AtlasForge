@@ -751,11 +751,14 @@ function initMobileScrollDots() {
         return window.innerWidth <= 600 ? mobileScrollWrapper : container;
     }
 
-    // Only show dots on mobile (handled by CSS, but also check here)
+    // Only show dots on mobile AND only on the AtlasForge tab
     function updateDotsVisibility() {
         const isMobile = window.innerWidth <= 600;
-        dotsContainer.style.display = isMobile ? 'flex' : 'none';
+        const atlasforgeTab = document.getElementById('atlasforge-tab');
+        const isAtlasforgeActive = atlasforgeTab && atlasforgeTab.classList.contains('active');
+        dotsContainer.style.display = (isMobile && isAtlasforgeActive) ? 'flex' : 'none';
     }
+    window.updateMobileNavDots = updateDotsVisibility;
 
     // Update active dot based on scroll position
     function updateActiveDot() {
