@@ -165,6 +165,9 @@ export function initDragDrop() {
     // Initialize widget visibility dropdown
     initWidgetVisibility();
 
+    // Initialize widget settings buttons (mobile panel reordering)
+    initWidgetSettingsButtons();
+
     // Expose functions to window for external use
     exposeToWindow();
 
@@ -2139,6 +2142,133 @@ function initWidgetVisibility() {
 }
 
 // =============================================================================
+// WIDGET SETTINGS POPUP (Mobile Panel Reordering)
+// =============================================================================
+
+let widgetSettingsCard = null;
+
+function initWidgetSettingsButtons() {
+    // Move popup to body to escape stacking contexts
+    const popup = document.getElementById('widget-settings-popup');
+    if (popup && popup.parentElement !== document.body) {
+        document.body.appendChild(popup);
+    }
+
+    // Close popup on outside click
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#widget-settings-popup') &&
+            !e.target.closest('.widget-settings-btn')) {
+            hideWidgetSettingsPopup();
+        }
+    });
+
+    // Close on Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideWidgetSettingsPopup();
+    });
+}
+
+function openWidgetSettings(btn) {
+    const card = btn.closest('.card[id]');
+    if (!card) return;
+
+    widgetSettingsCard = card;
+
+    const popup = document.getElementById('widget-settings-popup');
+    if (!popup) return;
+
+    // Determine current column and position
+    const currentColumn = card.closest(COLUMN_SELECTORS.join(','));
+    const currentColIndex = COLUMN_SELECTORS.findIndex(sel => currentColumn?.matches(sel));
+    const cardsInCol = currentColumn ? [...currentColumn.querySelectorAll(CARD_SELECTOR)] : [];
+    const posInCol = cardsInCol.indexOf(card);
+
+    const leftBtn = document.getElementById('wsp-left');
+    const middleBtn = document.getElementById('wsp-middle');
+    const upBtn = document.getElementById('wsp-up');
+    const downBtn = document.getElementById('wsp-down');
+
+    if (leftBtn) leftBtn.classList.toggle('disabled', currentColIndex === 0);
+    if (middleBtn) middleBtn.classList.toggle('disabled', currentColIndex === 1);
+    if (upBtn) upBtn.classList.toggle('disabled', posInCol === 0);
+    if (downBtn) downBtn.classList.toggle('disabled', posInCol === cardsInCol.length - 1);
+
+    // Show popup briefly to measure it, then position
+    popup.style.display = 'block';
+    const popupW = popup.offsetWidth || 168;
+    const popupH = popup.offsetHeight || 200;
+
+    const rect = btn.getBoundingClientRect();
+    let top = rect.bottom + 4;
+    if (top + popupH > window.innerHeight - 10) {
+        top = rect.top - popupH - 4;
+    }
+    let left = rect.right - popupW;
+    if (left < 8) left = 8;
+
+    popup.style.left = left + 'px';
+    popup.style.top = top + 'px';
+    popup.classList.add('show');
+
+    if (navigator.vibrate) navigator.vibrate(10);
+}
+
+function hideWidgetSettingsPopup() {
+    const popup = document.getElementById('widget-settings-popup');
+    if (popup) {
+        popup.classList.remove('show');
+        popup.style.display = 'none';
+    }
+    widgetSettingsCard = null;
+}
+
+function widgetSettingsAction(action) {
+    const card = widgetSettingsCard;
+    if (!card) return;
+
+    hideWidgetSettingsPopup();
+    pushHistoryBeforeDrag();
+
+    const currentColumn = card.closest(COLUMN_SELECTORS.join(','));
+
+    if (action === 'left') {
+        const targetCol = document.querySelector(COLUMN_SELECTORS[0]);
+        if (targetCol && currentColumn !== targetCol) {
+            targetCol.appendChild(card);
+            saveLayout();
+            showToast('Moved to Left Panel');
+        }
+    } else if (action === 'middle') {
+        const targetCol = document.querySelector(COLUMN_SELECTORS[1]);
+        if (targetCol && currentColumn !== targetCol) {
+            targetCol.appendChild(card);
+            saveLayout();
+            showToast('Moved to Middle Panel');
+        }
+    } else if (action === 'up') {
+        if (!currentColumn) return;
+        const cards = [...currentColumn.querySelectorAll(CARD_SELECTOR)];
+        const idx = cards.indexOf(card);
+        if (idx > 0) {
+            currentColumn.insertBefore(card, cards[idx - 1]);
+            saveLayout();
+            showToast('Moved up');
+        }
+    } else if (action === 'down') {
+        if (!currentColumn) return;
+        const cards = [...currentColumn.querySelectorAll(CARD_SELECTOR)];
+        const idx = cards.indexOf(card);
+        if (idx < cards.length - 1) {
+            currentColumn.insertBefore(cards[idx + 1], card);
+            saveLayout();
+            showToast('Moved down');
+        }
+    }
+
+    if (navigator.vibrate) navigator.vibrate(15);
+}
+
+// =============================================================================
 // WINDOW EXPOSURE
 // =============================================================================
 
@@ -2184,6 +2314,11 @@ function exposeToWindow() {
     window.getHiddenWidgets = getHiddenWidgets;
     window.showAllWidgets = showAllWidgets;
     window.hideAllWidgets = hideAllWidgets;
+
+    // Widget settings popup (mobile panel reordering)
+    window.openWidgetSettings = openWidgetSettings;
+    window.widgetSettingsAction = widgetSettingsAction;
+    window.hideWidgetSettingsPopup = hideWidgetSettingsPopup;
 }
 
 // =============================================================================

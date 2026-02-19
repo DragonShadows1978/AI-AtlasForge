@@ -404,7 +404,7 @@
             <div class="card" id="status-card">
                 <div class="card-header" onclick="toggleCard('status')">
                     <h3>Status</h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content" id="status-card-body">
                     <div id="status-info">
@@ -541,7 +541,7 @@
                         <button class="btn btn-small similarity-audit-btn" onclick="event.stopPropagation();openSimilarityAudit()" title="Find and merge similar suggestions">Audit Similarities</button>
                         <button class="btn btn-small" onclick="event.stopPropagation();refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
                     </h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <!-- Health Summary Bar - outside card-content so visible when collapsed -->
                 <div id="rec-health-summary" class="rec-health-summary" style="display: none;">
@@ -607,7 +607,7 @@
             <div class="card" id="queue-card">
                 <div class="card-header" id="queue-widget-header" onclick="toggleCard('queue')">
                     <h3>Mission Queue <span id="queue-count" class="badge" style="display: none;">0</span></h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="queue-controls">
@@ -770,7 +770,7 @@
             <div class="card files-card" id="files-card">
                 <div class="card-header" onclick="toggleCard('files')">
                     <h3>Created Files <span id="files-count" class="badge">0</span></h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div id="files-list" class="files-list">
@@ -806,7 +806,7 @@
             <div class="card" id="backup-status-card">
                 <div class="card-header" onclick="toggleCard('backup-status')">
                     <h3>Backup Status</h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content">
                     <div id="backup-status-container" class="backup-status-container">
@@ -822,7 +822,7 @@
             <div class="card" id="conductor-status-card">
                 <div class="card-header" onclick="toggleCard('conductor-status')">
                     <h3>Conductor <span id="conductor-status-badge" class="badge">-</span></h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content">
                     <div id="conductor-status-container">
@@ -837,7 +837,7 @@
             <div class="card" id="analytics-widget-card">
                 <div class="card-header" onclick="toggleCard('analytics-widget')">
                     <h3>Cost Analytics</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="analytics-stat-grid">
@@ -870,7 +870,7 @@
             <div class="card" id="artifact-health-widget-card">
                 <div class="card-header" onclick="toggleCard('artifact-health-widget')">
                     <h3>Artifact Health</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="artifact-health-score">
@@ -920,7 +920,7 @@
             <div class="card" id="kb-analytics-widget-card">
                 <div class="card-header" onclick="toggleCard('kb-analytics-widget')">
                     <h3>Knowledge Analytics</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <!-- Time Range Filter -->
@@ -1055,7 +1055,7 @@
             <div class="card" id="recommendations-widget-card">
                 <div class="card-header" onclick="toggleCard('recommendations-widget')">
                     <h3>Recommendations <span id="recommendations-badge" class="badge" style="display: none;">0</span></h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content">
                     <div class="recommendations-header">
@@ -1216,7 +1216,7 @@
             <div class="card" id="glassbox-card">
                 <div class="card-header" onclick="toggleCard('glassbox')">
                     <h3>GlassBox <span id="glassbox-mission-count" class="badge">0</span></h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div style="margin-bottom: 10px;">
@@ -1236,7 +1236,7 @@
             <div class="card" id="atlasforge-exploration-card">
                 <div class="card-header" onclick="toggleCard('atlasforge-exploration')">
                     <h3>Exploration Memory</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="atlasforge-stat-grid">
@@ -1267,7 +1267,7 @@
             <div class="card" id="atlasforge-drift-card">
                 <div class="card-header" onclick="toggleCard('atlasforge-drift')">
                     <h3>Drift Monitor</h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content">
                     <div class="atlasforge-drift-status">
@@ -1288,7 +1288,7 @@
             <div class="card" id="semantic-mini-widget-card">
                 <div class="card-header" onclick="toggleCard('semantic-mini-widget')">
                     <h3>Semantic Health</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div class="atlasforge-stat-grid">
@@ -1324,7 +1324,7 @@
             <div class="card" id="atlasforge-recent-card">
                 <div class="card-header" onclick="toggleCard('atlasforge-recent')">
                     <h3>Recent Explorations</h3>
-                    <span class="collapse-toggle">▼</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
                 </div>
                 <div class="card-content">
                     <div id="atlasforge-recent-list" style="max-height: 200px; overflow-y: auto;">
@@ -1341,7 +1341,7 @@
             <div class="card" id="token-integrity-card">
                 <div class="card-header" onclick="toggleCard('token-integrity')">
                     <h3>Token Integrity <span id="token-integrity-badge" class="badge">loading...</span></h3>
-                    <span class="collapse-toggle">&#9660;</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
                 </div>
                 <div class="card-content">
                     <div class="atlasforge-stat-grid" id="token-integrity-summary" style="margin-bottom:10px;">
@@ -2959,6 +2959,24 @@
                 <button class="btn" onclick="closeFilePreviewModal()">Close</button>
             </div>
         </div>
+    </div>
+
+
+    <!-- Widget Settings Popup (shared, mobile panel reordering) -->
+    <div id="widget-settings-popup" role="menu" aria-label="Widget panel settings">
+        <button class="widget-settings-popup-item" id="wsp-left" onclick="widgetSettingsAction('left')">
+            <span class="widget-settings-popup-icon">&#8592;</span> Left Panel
+        </button>
+        <button class="widget-settings-popup-item" id="wsp-middle" onclick="widgetSettingsAction('middle')">
+            <span class="widget-settings-popup-icon">&#8594;</span> Middle Panel
+        </button>
+        <div class="widget-settings-popup-divider"></div>
+        <button class="widget-settings-popup-item" id="wsp-up" onclick="widgetSettingsAction('up')">
+            <span class="widget-settings-popup-icon">&#8593;</span> Move Up
+        </button>
+        <button class="widget-settings-popup-item" id="wsp-down" onclick="widgetSettingsAction('down')">
+            <span class="widget-settings-popup-icon">&#8595;</span> Move Down
+        </button>
     </div>
 
 </body>
