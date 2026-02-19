@@ -21,25 +21,44 @@ const PRESETS_KEY = 'atlasforgeLayoutPresets';
 const LOCK_STORAGE_KEY = 'atlasforgeTilesLocked';
 const VISIBILITY_STORAGE_KEY = 'atlasforgeWidgetVisibility';
 
-const WIDGET_REGISTRY = [
-    { id: 'status-card', label: 'Status' },
-    { id: 'mission-card', label: 'Mission Control' },
-    { id: 'mission-suggestions-card', label: 'Mission Suggestions' },
-    { id: 'queue-card', label: 'Mission Queue' },
-    { id: 'investigation-status-card', label: 'Investigation Status' },
-    { id: 'files-card', label: 'Created Files' },
-    { id: 'backup-status-card', label: 'Backup Status' },
-    { id: 'conductor-status-card', label: 'Conductor' },
-    { id: 'analytics-widget-card', label: 'Cost Analytics' },
-    { id: 'artifact-health-widget-card', label: 'Artifact Health' },
-    { id: 'kb-analytics-widget-card', label: 'Knowledge Analytics' },
-    { id: 'recommendations-widget-card', label: 'Recommendations' },
-    { id: 'glassbox-card', label: 'GlassBox' },
-    { id: 'atlasforge-exploration-card', label: 'Exploration Memory' },
-    { id: 'atlasforge-drift-card', label: 'Drift Monitor' },
-    { id: 'semantic-mini-widget-card', label: 'Semantic Health' },
-    { id: 'atlasforge-recent-card', label: 'Recent Explorations' },
-];
+/**
+ * Dynamically discovers all widget cards present in the DOM at call time.
+ * Scans both widget columns for elements matching `.card[id]` and derives
+ * a human-readable label from the card's header heading text (stripping
+ * badge spans). Falls back to humanizing the element ID.
+ *
+ * Any widget added to the HTML is automatically included — no manual
+ * registry update required.
+ *
+ * @returns {Array<{id: string, label: string}>}
+ */
+function getWidgetRegistry() {
+    const cards = document.querySelectorAll(
+        '.widget-column-1 .card[id], .widget-column-2 .card[id]'
+    );
+    return Array.from(cards).map(card => {
+        let label = '';
+
+        // Prefer text from an <h3> or <h4> inside .card-header, stripping badge spans
+        const heading = card.querySelector('.card-header h3, .card-header h4');
+        if (heading) {
+            const clone = heading.cloneNode(true);
+            clone.querySelectorAll('span').forEach(s => s.remove());
+            label = clone.textContent.trim();
+        }
+
+        // Fallback: humanize the element ID
+        if (!label) {
+            label = card.id
+                .replace(/-card$/, '')
+                .replace(/-widget$/, '')
+                .replace(/-/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        return { id: card.id, label };
+    });
+}
 const COLUMN_SELECTORS = ['.widget-column-1', '.widget-column-2'];
 const CARD_SELECTOR = '.card[id]'; // Only cards with IDs can be dragged
 
@@ -1993,7 +2012,7 @@ function populateWidgetVisibilityDropdown() {
     if (!dropdown) return;
 
     const hidden = getHiddenWidgets();
-    const existingWidgets = WIDGET_REGISTRY.filter(w => document.getElementById(w.id));
+    const existingWidgets = getWidgetRegistry();
 
     let html = '';
 
@@ -2068,12 +2087,12 @@ function toggleWidgetVisDropdown() {
 
 function showAllWidgets() {
     setHiddenWidgets([]);
-    WIDGET_REGISTRY.forEach(w => applyWidgetVisibility(w.id, true));
+    getWidgetRegistry().forEach(w => applyWidgetVisibility(w.id, true));
     populateWidgetVisibilityDropdown();
 }
 
 function hideAllWidgets() {
-    const allIds = WIDGET_REGISTRY.filter(w => document.getElementById(w.id)).map(w => w.id);
+    const allIds = getWidgetRegistry().map(w => w.id);
     setHiddenWidgets(allIds);
     allIds.forEach(id => applyWidgetVisibility(id, false));
     populateWidgetVisibilityDropdown();
