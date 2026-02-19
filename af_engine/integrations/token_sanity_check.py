@@ -137,7 +137,11 @@ class TokenSanityCheckIntegration(BaseIntegrationHandler):
             self._emit_anomaly_event(mission_id, token_count=0, reason="manifest_missing")
             return
 
-        total_tokens = manifest.get("total_tokens", 0)
+        # Support both manifest formats:
+        # - New format: totals.total_tokens (mission_archiver output)
+        # - Legacy format: top-level total_tokens
+        totals = manifest.get("totals") or {}
+        total_tokens = totals.get("total_tokens") or manifest.get("total_tokens", 0)
 
         if total_tokens < MIN_TOKEN_THRESHOLD:
             logger.warning(
