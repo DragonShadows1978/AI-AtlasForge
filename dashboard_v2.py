@@ -1111,7 +1111,7 @@ def get_glassbox_summary() -> dict:
         mission = io_utils.atomic_read_json(MISSION_PATH, {})
         mission_id = mission.get('mission_id')
         if mission_id:
-            from glassbox.archive_loader import load_mission_archive
+            from glassbox.mission_archiver import load_mission_archive
             archive = load_mission_archive(mission_id)
             if archive:
                 return {

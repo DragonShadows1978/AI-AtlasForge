@@ -185,6 +185,11 @@ class StageOrchestrator:
                     "final_stage": old_stage,
                     "total_iterations": self.state.iteration,
                     "cycle_count": self.cycles.current_cycle,
+                    "mission_workspace": self.state.mission.get("mission_workspace"),
+                    "mission_dir": self.state.mission.get("mission_dir"),
+                    "project_name": self.state.mission.get("project_name"),
+                    "created_at": self.state.mission.get("created_at"),
+                    "started_at": self.state.mission.get("created_at"),
                 }
             )
 

@@ -166,12 +166,15 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
 
         mission = {"mission_id": mission_id}
 
+        # Load config as fallback for missing event data fields
+        config = self._load_mission_config(mission_id)
+
         # Get created_at from event data or config file
         created_at = (
             event_data.get("started_at") or
             event_data.get("created_at") or
             event_data.get("mission_created_at") or
-            self._get_created_at_from_config(mission_id)
+            config.get("created_at")
         )
 
         if not created_at and event.timestamp:
@@ -183,34 +186,69 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
             else datetime.now().isoformat()
         )
 
-        # Get workspace and directory paths
-        mission_workspace = event_data.get("mission_workspace")
-        mission_dir = event_data.get("mission_dir")
+        # Get workspace and directory paths - event data first, then config fallback
+        mission_workspace = (
+            event_data.get("mission_workspace") or
+            config.get("mission_workspace") or
+            config.get("project_workspace")
+        )
+        mission_dir = (
+            event_data.get("mission_dir") or
+            config.get("mission_dir")
+        )
 
-        if not mission_workspace or not mission_dir:
-            root_dir = Path(__file__).resolve().parent.parent.parent
-            missions_dir = root_dir / "missions"
-            workspace_dir = root_dir / "workspace"
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        missions_dir = root_dir / "missions"
+        workspace_dir = root_dir / "workspace"
 
-            if not mission_dir:
-                mission_dir = str(missions_dir / mission_id)
+        if not mission_dir:
+            mission_dir = str(missions_dir / mission_id)
 
-            if not mission_workspace:
-                inferred_workspace = missions_dir / mission_id / "workspace"
-                if inferred_workspace.exists():
-                    mission_workspace = str(inferred_workspace)
+        if not mission_workspace:
+            inferred_workspace = missions_dir / mission_id / "workspace"
+            if inferred_workspace.exists():
+                mission_workspace = str(inferred_workspace)
+            else:
+                project_name = (
+                    event_data.get("project_name") or
+                    config.get("project_name")
+                )
+                if project_name:
+                    mission_workspace = str(workspace_dir / project_name)
+                    logger.debug(
+                        f"[TranscriptArchival] Inferred workspace from project_name "
+                        f"'{project_name}': {mission_workspace}"
+                    )
                 else:
-                    project_name = event_data.get("project_name")
-                    if project_name:
-                        mission_workspace = str(workspace_dir / project_name)
-                    else:
-                        mission_workspace = str(inferred_workspace)
+                    mission_workspace = str(inferred_workspace)
 
         mission["mission_workspace"] = mission_workspace
         mission["mission_dir"] = mission_dir
 
         logger.debug(f"[TranscriptArchival] Built mission dict: {mission}")
         return mission
+
+    def _load_mission_config(self, mission_id: str) -> Dict[str, Any]:
+        """
+        Load mission_config.json for a given mission ID.
+
+        Args:
+            mission_id: The mission ID
+
+        Returns:
+            Config dict (may be empty if file not found)
+        """
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        config_path = root_dir / "missions" / mission_id / "mission_config.json"
+
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logger.debug(f"[TranscriptArchival] Could not read config for {mission_id}: {e}")
+
+        return {}
 
     def _get_created_at_from_config(self, mission_id: str) -> Optional[str]:
         """
@@ -222,18 +260,7 @@ class TranscriptArchivalIntegration(BaseIntegrationHandler):
         Returns:
             ISO timestamp string or None
         """
-        root_dir = Path(__file__).resolve().parent.parent.parent
-        config_path = root_dir / "missions" / mission_id / "mission_config.json"
-
-        if config_path.exists():
-            try:
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                return config.get("created_at")
-            except (json.JSONDecodeError, IOError):
-                pass
-
-        return None
+        return self._load_mission_config(mission_id).get("created_at")
 
     def _check_availability(self) -> bool:
         """Check if required dependencies are available."""
