@@ -179,22 +179,44 @@ class StageOrchestrator:
 
         # Handle special stage transitions
         if new_stage == "COMPLETE":
+            mission_completed_data = {
+                "final_stage": old_stage,
+                "total_iterations": self.state.iteration,
+                "cycle_count": self.cycles.current_cycle,
+                "mission_workspace": self.state.mission.get("mission_workspace"),
+                "mission_dir": self.state.mission.get("mission_dir"),
+                "project_name": self.state.mission.get("project_name"),
+                "created_at": self.state.mission.get("created_at"),
+                "started_at": self.state.mission.get("created_at"),
+            }
+            self._validate_mission_completed_data(mission_completed_data)
             self.integrations.emit_mission_completed(
                 mission_id=self.mission_id,
-                data={
-                    "final_stage": old_stage,
-                    "total_iterations": self.state.iteration,
-                    "cycle_count": self.cycles.current_cycle,
-                    "mission_workspace": self.state.mission.get("mission_workspace"),
-                    "mission_dir": self.state.mission.get("mission_dir"),
-                    "project_name": self.state.mission.get("project_name"),
-                    "created_at": self.state.mission.get("created_at"),
-                    "started_at": self.state.mission.get("created_at"),
-                }
+                data=mission_completed_data,
             )
 
             # Process mission queue - start next queued mission
             self._process_mission_queue()
+
+    def _validate_mission_completed_data(self, data: Dict[str, Any]) -> None:
+        """
+        Validate required fields in MISSION_COMPLETED event data.
+
+        Logs a WARNING for any required fields that are None or missing.
+        This prevents silent failures where missing workspace data causes
+        transcript archival to record zero tokens.
+
+        Required fields: mission_workspace, mission_dir, project_name, created_at
+        """
+        required_fields = ["mission_workspace", "mission_dir", "project_name", "created_at"]
+        missing = [f for f in required_fields if not data.get(f)]
+        if missing:
+            logger.warning(
+                "[Orchestrator] MISSION_COMPLETED event missing required fields: %s "
+                "for mission %s — transcript archival may record zero tokens.",
+                missing,
+                self.mission_id,
+            )
 
     def build_rd_prompt(self, context: str = "") -> str:
         """

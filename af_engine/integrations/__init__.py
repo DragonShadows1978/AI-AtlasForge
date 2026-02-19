@@ -59,6 +59,7 @@ from .enhancer import EnhancerIntegration
 from .decision_graph import DecisionGraphIntegration
 from .mission_report import MissionReportIntegration
 from .transcript_archival import TranscriptArchivalIntegration
+from .token_sanity_check import TokenSanityCheckIntegration
 
 __all__ = [
     # Protocol and data classes
@@ -84,6 +85,7 @@ __all__ = [
     'DecisionGraphIntegration',
     'MissionReportIntegration',
     'TranscriptArchivalIntegration',
+    'TokenSanityCheckIntegration',
 ]
 
 # Default integrations to load (in priority order)
@@ -105,6 +107,7 @@ DEFAULT_INTEGRATIONS = [
     EnhancerIntegration,
     MissionReportIntegration,
     TranscriptArchivalIntegration,
+    TokenSanityCheckIntegration,
 ]
 
 
