@@ -816,5 +816,53 @@ async function showMissionAnalytics(missionId) {
     showToast('Mission: ' + missionId);
 }
 
+// =============================================================================
+// TOKEN INTEGRITY WIDGET
+// =============================================================================
+
+async function refreshTokenIntegrityWidget() {
+    const badge = document.getElementById('token-integrity-badge');
+    const summary = document.getElementById('token-integrity-summary');
+    const anomalyList = document.getElementById('token-integrity-anomaly-list');
+    if (!badge || !summary || !anomalyList) return;
+
+    try {
+        const resp = await fetch('/api/glassbox/integrity');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+
+        const zeroCt = (data.summary || {}).zero_token_count || 0;
+        const lowCt = (data.summary || {}).low_token_count || 0;
+        const anomalyCt = zeroCt + lowCt;
+        const scanned = (data.summary || {}).total_scanned || 0;
+        const normal = (data.summary || {}).normal_count || 0;
+
+        badge.textContent = anomalyCt + ' anomalous';
+        badge.className = 'badge ' + (anomalyCt > 0 ? 'badge-danger' : 'badge-success');
+
+        summary.innerHTML =
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + scanned + '</div><div class="atlasforge-stat-label">Scanned</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + normal + '</div><div class="atlasforge-stat-label">Normal</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value" style="color:' + (zeroCt > 0 ? 'var(--danger,#f85149)' : 'var(--accent-green,#3fb950)') + '">' + zeroCt + '</div><div class="atlasforge-stat-label">Zero-Token</div></div>';
+
+        const anomalies = (data.anomalies || []).filter(function(a) { return !a.mission_id.startsWith('test_'); });
+        if (anomalies.length === 0) {
+            anomalyList.innerHTML = '<div style="color:var(--accent-green,#3fb950);font-size:0.85em;">All missions healthy</div>';
+        } else {
+            anomalyList.innerHTML = anomalies.map(function(a) {
+                const date = (a.created_at || '').slice(0, 10);
+                const cat = a.category === 'zero_token' ? 'ZERO' : 'LOW';
+                const col = a.category === 'zero_token' ? 'var(--danger,#f85149)' : 'var(--accent-yellow,#d29922)';
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border,#30363d);font-size:0.8em;">' +
+                    '<span style="color:var(--text-primary,#c9d1d9);font-family:monospace;">' + (a.mission_id || '-') + '</span>' +
+                    '<span><span style="color:' + col + ';margin-right:6px;">[' + cat + ']</span><span style="color:var(--text-dim,#8b949e);">' + date + '</span></span>' +
+                    '</div>';
+            }).join('');
+        }
+    } catch (e) {
+        if (badge) { badge.textContent = 'error'; badge.className = 'badge badge-danger'; }
+    }
+}
+
 // Debug: mark widgets module loaded
 console.log('Widgets module loaded');

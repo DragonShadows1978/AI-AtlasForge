@@ -192,6 +192,7 @@ window.refresh = widgets.refresh;
 window.refreshAtlasForgeWidgets = widgets.refreshAtlasForgeWidgets;
 window.refreshAnalyticsWidget = widgets.refreshAnalyticsWidget;
 window.refreshArtifactHealthWidget = widgets.refreshArtifactHealthWidget;
+window.refreshTokenIntegrityWidget = widgets.refreshTokenIntegrityWidget;
 window.refreshFullAnalytics = widgets.refreshFullAnalytics;
 window.showMissionAnalytics = widgets.showMissionAnalytics;
 window.applyAnalyticsPeriodFilter = widgets.applyAnalyticsPeriodFilter;
@@ -936,6 +937,12 @@ function setupMinimalPolling() {
         widgets.refreshAnalyticsWidget();
     }, 60000));
 
+    // Token integrity initial load + backup polling
+    widgets.refreshTokenIntegrityWidget();
+    pollingIntervals.push(setInterval(() => {
+        widgets.refreshTokenIntegrityWidget();
+    }, 60000));
+
     // Git widgets backup polling (infrequent when WebSocket is connected)
     pollingIntervals.push(setInterval(() => {
         const state = getConnectionState();
@@ -958,6 +965,10 @@ function setupFullPolling() {
     // Artifact health widget - every 60 seconds
     widgets.refreshArtifactHealthWidget();
     pollingIntervals.push(setInterval(widgets.refreshArtifactHealthWidget, 60000));
+
+    // Token integrity widget - every 60 seconds
+    widgets.refreshTokenIntegrityWidget();
+    pollingIntervals.push(setInterval(widgets.refreshTokenIntegrityWidget, 60000));
 
     // Decision graph refresh - every 10 seconds
     decisionGraph.refreshDecisionGraph();

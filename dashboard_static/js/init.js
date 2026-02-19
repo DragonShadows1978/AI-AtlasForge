@@ -76,6 +76,12 @@ function setupPeriodicRefreshes() {
         refreshDecisionGraph();
         setInterval(refreshDecisionGraph, 10000);
     }
+
+    // Token integrity widget - every 60 seconds
+    if (typeof refreshTokenIntegrityWidget === 'function') {
+        refreshTokenIntegrityWidget();
+        setInterval(refreshTokenIntegrityWidget, 60000);
+    }
 }
 
 // =============================================================================

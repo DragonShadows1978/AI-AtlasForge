@@ -1327,6 +1327,24 @@
             <!-- AtlasForge: Exploration Graph Visualization -->
             <!-- AtlasForge: Insight Search Widget -->
             <!-- Decision Graph Widget -->
+
+            <!-- Token Integrity Widget -->
+            <div class="card" id="token-integrity-card">
+                <div class="card-header" onclick="toggleCard('token-integrity')">
+                    <h3>Token Integrity <span id="token-integrity-badge" class="badge">loading...</span></h3>
+                    <span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div class="atlasforge-stat-grid" id="token-integrity-summary" style="margin-bottom:10px;">
+                        <div style="color:var(--text-dim);font-size:0.85em;">Loading...</div>
+                    </div>
+                    <details style="margin-top:6px;">
+                        <summary style="cursor:pointer;font-size:0.82em;color:var(--text-dim);user-select:none;">Anomalous missions</summary>
+                        <div id="token-integrity-anomaly-list" style="margin-top:6px;max-height:180px;overflow-y:auto;"></div>
+                    </details>
+                </div>
+            </div>
+
             </div><!-- End widget-column-2 -->
 
         <!-- Right Panel - AtlasForge Activity Log -->
