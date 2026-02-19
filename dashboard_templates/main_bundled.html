@@ -258,6 +258,14 @@
         .restart-modal h3{color:var(--accent);margin-bottom:16px}
         .restart-modal p{color:var(--text);margin-bottom:20px;line-height:1.5}
         .restart-modal .modal-btns{display:flex;gap:12px;justify-content:flex-end}
+
+        /* Queue add-form project name row */
+        .queue-add-project-row{display:flex;gap:4px;align-items:center;width:100%;margin-top:4px}
+        .queue-project-input{flex:1;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:0.85em;min-width:0}
+        .queue-project-input:focus{outline:none;border-color:var(--accent)}
+        .queue-project-hint{font-size:0.75em;padding:2px 6px;border-radius:3px;width:100%;margin-top:2px}
+        .queue-project-hint.new-project{color:#f0a500;background:rgba(240,165,0,0.1);border:1px solid rgba(240,165,0,0.3)}
+        .btn-create-project{white-space:nowrap;flex-shrink:0}
     </style>
 </head>
 <body>
@@ -632,6 +640,17 @@
                         <input type="number" id="queue-add-cycles" class="queue-cycles-input" min="1" max="10" value="3" title="Cycle Budget">
                         <input type="text" id="queue-add-input" class="queue-input" placeholder="Quick add mission to queue...">
                         <button class="btn btn-small" onclick="quickAddEnhanced()">Add</button>
+                        <div class="queue-add-project-row">
+                            <input type="text" id="queue-add-project-name" class="queue-project-input"
+                                   list="queue-add-project-list"
+                                   placeholder="Project name (optional)..."
+                                   oninput="onQueueProjectNameInput(this)">
+                            <datalist id="queue-add-project-list"></datalist>
+                            <button id="queue-create-project-btn" class="btn btn-small btn-create-project"
+                                    onclick="createQueueProject()" title="Create this project directory now"
+                                    style="display:none">+ Create</button>
+                        </div>
+                        <div id="queue-project-name-hint" class="queue-project-hint" style="display:none"></div>
                     </div>
 
                     <!-- Timeline Visualization (Gantt-style) -->

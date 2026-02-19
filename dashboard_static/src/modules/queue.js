@@ -148,6 +148,9 @@ export async function initQueueWidget() {
     // Load queue health on startup
     loadQueueHealth();
 
+    // Populate project autocomplete for quick-add form
+    fetchQuickAddProjects();
+
     console.log('Mission Queue widget initialized');
 }
 
@@ -876,6 +879,83 @@ async function fetchWorkspaceProjects() {
 }
 
 /**
+ * Fetch workspace projects and populate the quick-add datalist
+ */
+async function fetchQuickAddProjects() {
+    try {
+        const data = await api('/api/queue/workspace-projects');
+        const datalist = document.getElementById('queue-add-project-list');
+        if (datalist && data.projects) {
+            datalist.innerHTML = data.projects
+                .map(p => `<option value="${escapeHtml(p)}">`)
+                .join('');
+        }
+    } catch (e) {
+        console.error('Failed to fetch workspace projects for quick-add:', e);
+    }
+}
+
+/**
+ * Handle project name input in quick-add form: show validation hint + Create button
+ */
+export function onQueueProjectNameInput(input) {
+    const value = input.value.trim();
+    const hint = document.getElementById('queue-project-name-hint');
+    const createBtn = document.getElementById('queue-create-project-btn');
+    const datalist = document.getElementById('queue-add-project-list');
+
+    if (!value) {
+        if (hint) hint.style.display = 'none';
+        if (createBtn) createBtn.style.display = 'none';
+        return;
+    }
+
+    const options = datalist ? [...datalist.options].map(o => o.value) : [];
+    const exists = options.includes(value);
+
+    if (!exists) {
+        if (hint) {
+            hint.textContent = `"${value}" is a new project — will be created when mission starts`;
+            hint.className = 'queue-project-hint new-project';
+            hint.style.display = 'block';
+        }
+        if (createBtn) createBtn.style.display = 'inline-block';
+    } else {
+        if (hint) hint.style.display = 'none';
+        if (createBtn) createBtn.style.display = 'none';
+    }
+}
+
+/**
+ * Create the project directory now from the quick-add form input
+ */
+export async function createQueueProject() {
+    const input = document.getElementById('queue-add-project-name');
+    const name = input?.value?.trim();
+    if (!name) return;
+
+    try {
+        const data = await api('/api/queue/create-project', 'POST', { name });
+        if (data.status === 'created') {
+            showToast(`Project "${name}" created`, 'success');
+            await fetchQuickAddProjects();
+            const hint = document.getElementById('queue-project-name-hint');
+            const createBtn = document.getElementById('queue-create-project-btn');
+            if (hint) hint.style.display = 'none';
+            if (createBtn) createBtn.style.display = 'none';
+        } else if (data.status === 'exists') {
+            showToast(`Project "${name}" already exists`, 'info');
+            await fetchQuickAddProjects();
+        } else if (data.error) {
+            showToast(`Failed to create project: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        console.error('Failed to create project:', e);
+        showToast('Failed to create project', 'error');
+    }
+}
+
+/**
  * Save edits to a queue item
  */
 export async function saveQueueItemEdit(queueId) {
@@ -1248,8 +1328,8 @@ export async function quickAddEnhanced() {
     const cyclesInput = document.getElementById('queue-add-cycles');
     const cycleBudget = cyclesInput ? parseInt(cyclesInput.value, 10) || 3 : 3;
 
-    // Get project name from main project input (carries over to queued missions)
-    const projectNameInput = document.getElementById('project-name-input');
+    // Get project name from queue's own dedicated project field
+    const projectNameInput = document.getElementById('queue-add-project-name');
     const projectName = projectNameInput ? projectNameInput.value.trim() : '';
 
     try {
@@ -1271,6 +1351,11 @@ export async function quickAddEnhanced() {
             showToast(`Mission added at position ${data.position}${projectInfo} (est. ${formatEstimatedTime(data.estimated_minutes)})`);
             input.value = '';
             if (prioritySelect) prioritySelect.value = 'normal';
+            if (projectNameInput) projectNameInput.value = '';
+            const hint = document.getElementById('queue-project-name-hint');
+            const createBtn = document.getElementById('queue-create-project-btn');
+            if (hint) hint.style.display = 'none';
+            if (createBtn) createBtn.style.display = 'none';
             await refreshQueueWidget();
         } else if (data.error) {
             showToast(`Failed: ${data.error}`, 'error');
@@ -2270,6 +2355,8 @@ window.toggleQueueTimeline = toggleQueueTimeline;
 window.toggleQueueAnalytics = toggleQueueAnalytics;
 
 // New exports for Cycle 3 features
+window.onQueueProjectNameInput = onQueueProjectNameInput;
+window.createQueueProject = createQueueProject;
 window.toggleNotifications = toggleNotifications;
 window.requestNotificationPermission = requestNotificationPermission;
 window.toggleItemSelection = toggleItemSelection;

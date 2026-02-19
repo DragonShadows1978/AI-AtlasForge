@@ -1363,6 +1363,38 @@ def list_workspace_projects():
         return jsonify({"projects": [], "error": str(e)})
 
 
+@queue_scheduler_bp.route('/create-project', methods=['POST'])
+def create_workspace_project():
+    """Create a new project directory in the workspace."""
+    import re
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing request body"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Project name is required"}), 400
+
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', name):
+            return jsonify({"error": "Invalid project name. Use only letters, numbers, hyphens, underscores"}), 400
+
+        workspace_dir = BASE_DIR / "workspace" / name
+        if workspace_dir.exists():
+            return jsonify({"status": "exists", "message": f"Project '{name}' already exists"})
+
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        (workspace_dir / "artifacts").mkdir(exist_ok=True)
+        (workspace_dir / "research").mkdir(exist_ok=True)
+        (workspace_dir / "tests").mkdir(exist_ok=True)
+
+        logger.info(f"Created workspace project: {name}")
+        return jsonify({"status": "created", "name": name, "path": str(workspace_dir)})
+    except Exception as e:
+        logger.error(f"Error creating workspace project: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # =============================================================================
 # BULK OPERATIONS ENDPOINTS
 # =============================================================================
