@@ -1,0 +1,72 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_4659a768",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-18T23:54:22.153852",
+  "snapshot_number": 21,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "Fixed af_engine/orchestrator.py \u2014 MISSION_COMPLETED event now includes all workspace path fields",
+      "Fixed af_engine/integrations/transcript_archival.py \u2014 multi-layer defensive fallback for path resolution",
+      "Fixed dashboard_v2.py \u2014 correct glassbox.mission_archiver import",
+      "rearchive_missions.py \u2014 data recovery script that re-archived 3 historical zero-token missions",
+      "13,171 tokens recovered across missions: mission_398c0f96, mission_4659a768, mission_6b4072c5",
+      "Comprehensive adversarial test suite (8 tests) for regression prevention",
+      "Implementation plan, test results, and analysis reports in workspace/GlassBox/artifacts/"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Token Counting Integrity Monitor: Automated Regression Detection",
+      "mission_description": "Build an automated integrity monitoring system for GlassBox token counting that prevents silent failures from recurring. The system should: (1) Add a post-mission token sanity check that runs immediately after transcript archival and alerts if a completed mission records fewer than a configurable minimum token threshold (e.g., 500 tokens for any non-trivial mission); (2) Add event schema validation to orchestrator.py's emit_mission_completed() so that missing required fields (mission_workspace, mission_dir, etc.) raise a logged warning rather than silently producing zero-token archives; (3) Create a periodic health check script that scans all mission archives for suspiciously low token counts and flags them for re-archival; (4) Add a dashboard widget or indicator that shows recent missions with zero or anomalously low token counts so regressions are visible at a glance; (5) Write a regression test suite that verifies the full token counting pipeline end-to-end by creating a mock mission, running it through the orchestrator, and asserting the resulting archive contains non-zero tokens. This system would have caught the 2/15/2026 regression within the first affected mission rather than allowing it to accumulate across 3+ missions.",
+      "suggested_cycles": 2,
+      "rationale": "The GlassBox fix was reactive \u2014 we repaired the damage after it had already affected multiple missions. A proactive monitoring system would catch this class of regression immediately and automatically, making the token counting infrastructure self-healing rather than requiring manual investigation. This directly extends the current mission's work by hardening the fix with automated detection."
+    },
+    "final_report": {
+      "summary": "Successfully diagnosed and fixed the GlassBox token counting failure that began on 2/15/2026. The root cause was identified as missing workspace path data in the `emit_mission_completed` event emitted by `StageOrchestrator.update_stage()` in `af_engine/orchestrator.py`. Without `mission_workspace` in the event payload, `transcript_archival.py` could not locate the Claude project directory containing `.jsonl` transcript files, causing all missions since 2/15 to record 0 tokens. Four targeted fixes were implemented and validated: (1) orchestrator.py now emits all required workspace fields, (2) transcript_archival.py has multi-layer defensive fallback logic, (3) dashboard_v2.py uses the correct `mission_archiver` module import, and (4) a re-archival script recovered 13,171 tokens across 3 affected historical missions. All 8 adversarial edge-case tests passed and 3 functional integration tests verified the end-to-end fix.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/af_engine/orchestrator.py",
+        "/home/vader/AI-AtlasForge/af_engine/integrations/transcript_archival.py",
+        "/home/vader/AI-AtlasForge/dashboard_v2.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/rearchive_missions.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/test_adversarial_healing.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/test_healing_pipeline_live.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/run_cycle3_validation.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/healing_metrics.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/verify_dashboard_healing.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/live_drift_injection_harness.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/drift_injector.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/tests/__init__.py",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/artifacts/cycle3_final_validation_report.md",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/artifacts/adversarial_test_results.json",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/research/analysis.md",
+        "/home/vader/AI-AtlasForge/workspace/GlassBox/research/research_findings.md"
+      ],
+      "key_achievements": [
+        "Identified root cause: orchestrator.py emitted MISSION_COMPLETED events without workspace path fields, causing transcript_archival.py to search in the wrong location",
+        "Fixed orchestrator.py to include mission_workspace, mission_dir, project_name, created_at, started_at in MISSION_COMPLETED event data",
+        "Added multi-layer defensive fallback to transcript_archival.py: event data \u2192 mission_config.json \u2192 project_name path inference",
+        "Fixed broken dashboard_v2.py import: changed `from glassbox.archive_loader` to `from glassbox.mission_archiver`",
+        "Recovered 13,171 tokens across 3 historical missions (mission_398c0f96: 5,333; mission_4659a768: 3,648; mission_6b4072c5: 4,190) that had been recording 0 tokens since 2/15/2026",
+        "All 8 adversarial edge-case tests passed, confirming robustness for empty event data, malformed JSON configs, missing manifests, and partial event data scenarios",
+        "Future missions will automatically record accurate token counts through the fixed orchestrator event pipeline"
+      ],
+      "challenges_overcome": [
+        "Tracing the failure through multiple layers: from the orchestrator event emission, through the integration handler, to the path resolution logic in transcript_archival.py",
+        "Locating the correct Claude project directory naming convention (URL-encoded path format: -home-vader-AI-AtlasForge-workspace-GlassBox)",
+        "Ensuring historical re-archival did not corrupt existing data while recovering the lost token counts",
+        "Designing adversarial tests that validated real system behavior rather than mocked scenarios",
+        "Correcting 2 path issues discovered during adversarial test harness execution before final validation"
+      ],
+      "lessons_learned": [
+        "Event-driven integrations are fragile: when an event schema changes (fields are removed or renamed), downstream handlers silently fail rather than raising errors \u2014 adding schema validation or required-field assertions to event emission would catch this class of bug immediately",
+        "Defensive fallback chains in path resolution are essential: the 3-layer fallback (event data \u2192 config file \u2192 name inference) means a single missing field does not break the entire pipeline",
+        "Token counting failures are silent and cumulative: zero-token missions appear valid in the dashboard but cause compounding data loss over time \u2014 an alerting threshold (e.g., warn if new mission archives <100 tokens) would surface this class of regression faster",
+        "Historical data recovery is viable if transcript .jsonl files are preserved: the Claude project directory structure is deterministic, making retroactive re-archival reliable",
+        "Import errors in dashboard_v2.py can silently fail token display without raising visible errors at startup \u2014 import verification tests for dashboard modules would prevent this",
+        "The correct GlassBox module for archive loading is `glassbox.mission_archiver`, not `glassbox.archive_loader`"
+      ]
+    }
+  }
+}
