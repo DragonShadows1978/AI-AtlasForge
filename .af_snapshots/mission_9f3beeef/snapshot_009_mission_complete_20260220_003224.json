@@ -1,0 +1,52 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_9f3beeef",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-20T00:32:19.938176",
+  "snapshot_number": 9,
+  "event_data": {
+    "total_cycles": 1,
+    "deliverables": [
+      "Complete root cause analysis of Activity log suggestion display failure",
+      "5 specific bugs identified with file locations and line numbers",
+      "Data flow diagram from af_engine.py to browser Activity log",
+      "Actionable fix recommendations for each bug"
+    ],
+    "next_mission_recommendation": {
+      "mission_title": "Fix Activity Log: Suggestions Now Appear in Real-Time",
+      "mission_description": "Apply the 5 bug fixes identified in the Activity log investigation: (1) Fix watch_chat() startup pre-seeding in dashboard_v2.py to emit messages to existing connected clients before adding to seen_messages set - not after. (2) Change the watch_chat() poll window from history[-10:] to history[-30:] to match the REST API window size. (3) Update _normalize_provider() to preserve 'system' as a valid provider type and add a corresponding UI style in the Activity log for system/suggestion messages. (4) Fix legacy dashboard_static/js/socket.js socket.on('message') handler to pass metadata (display_role, provider) as a 4th argument to addMessage(). (5) Update af_engine.py to use a recognized provider value or add 'suggestion' as a first-class provider type in the dashboard's normalization and styling pipeline. After all fixes, validate end-to-end: trigger a suggestion from af_engine.py and confirm it appears styled distinctly in the Activity log within 5 seconds.",
+      "suggested_cycles": 2,
+      "rationale": "The investigation is complete and all bugs are fully understood with precise line-number references. The fixes are straightforward and well-scoped. Two cycles allows one cycle for implementing all 5 fixes and a second cycle for end-to-end validation and any edge cases (e.g., reconnection behavior, historical suggestion replay on fresh page load)."
+    },
+    "final_report": {
+      "summary": "Investigated why af_engine.py suggestions are not appearing in the AtlasForge Activity log (dashboard chat feed). Root cause analysis revealed 5 bugs across af_engine.py and dashboard_v2.py. The primary cause is a startup pre-seeding bug in watch_chat() that marks all existing chat history as 'seen' without emitting to clients, permanently suppressing any suggestions that existed when the dashboard was last restarted. Secondary causes include: the watch_chat loop only scanning the last 10 messages (vs 30 in the REST endpoint), the _normalize_provider() function silently mapping 'system' to 'claude' (losing suggestion metadata), the legacy socket.js handler dropping metadata arguments, and a design mismatch where af_engine.py uses provider='system' which no dashboard handler recognizes.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/af_engine.py",
+        "/home/vader/AI-AtlasForge/dashboard_v2.py",
+        "/home/vader/AI-AtlasForge/dashboard_static/js/socket.js",
+        "/home/vader/AI-AtlasForge/state/chat_history.json"
+      ],
+      "key_achievements": [
+        "Identified 5 distinct bugs causing the Activity log to not display suggestions",
+        "Traced the complete data flow from af_engine.py._save_recommendation() through chat_history.json to the dashboard WebSocket emission",
+        "Identified the primary root cause: watch_chat() startup pre-seeding marks all existing messages as 'seen' without emitting them",
+        "Identified secondary cause: watch_chat() only scans last 10 messages per poll cycle while the REST API returns 30",
+        "Identified provider normalization bug: 'system' provider silently becomes 'claude', losing suggestion styling",
+        "Identified legacy socket.js as missing metadata argument in addMessage() calls",
+        "Confirmed that the /api/chat-history REST polling fallback DOES show suggestions (explaining intermittent behavior)"
+      ],
+      "challenges_overcome": [
+        "Tracing indirect IPC through shared JSON file (chat_history.json) rather than direct function calls",
+        "Distinguishing between WebSocket push path and REST polling fallback path - both had different behaviors",
+        "Identifying the pre-seeding anti-pattern that marks messages as seen before emitting them"
+      ],
+      "lessons_learned": [
+        "Startup pre-seeding of deduplication sets should EMIT messages to clients before marking as seen, not after",
+        "All polling loops scanning recent history should use the same window size as the initial replay (30, not 10)",
+        "Provider/role normalization functions should preserve special values like 'system' rather than silently downgrading them",
+        "When two code paths (WebSocket push vs REST polling) handle the same data differently, the one with more filters will cause intermittent-looking bugs",
+        "The _normalize_provider guard should whitelist known providers but pass through unknown ones rather than mapping to a default"
+      ]
+    }
+  }
+}
