@@ -3467,7 +3467,7 @@ Respond with JSON:
                     history = []
                 history.append({
                     "role": "claude",
-                    "provider": "system",
+                    "provider": "suggestion",
                     "content": notification,
                     "timestamp": rec_entry["created_at"]
                 })

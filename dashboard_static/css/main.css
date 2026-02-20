@@ -467,6 +467,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
     color: var(--text-dim);
     font-size: 0.8em;
 }
+.message.suggestion {
+    align-self: center;
+    background: rgba(188, 140, 255, 0.1);
+    border: 1px solid rgba(188, 140, 255, 0.3);
+    color: var(--purple, #bc8cff);
+    font-size: 0.85em;
+    font-style: italic;
+}
 .message-meta {
     font-size: 0.75em;
     opacity: 0.7;

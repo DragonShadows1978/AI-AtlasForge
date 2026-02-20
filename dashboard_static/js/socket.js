@@ -30,7 +30,7 @@ if (socket) {
     socket.on('connect', () => console.log('Connected'));
     socket.on('message', (data) => {
         if (typeof addMessage === 'function') {
-            addMessage(data.role, data.content, data.timestamp);
+            addMessage(data.role, data.content, data.timestamp, {display_role: data.display_role, provider: data.provider});
         }
     });
 }

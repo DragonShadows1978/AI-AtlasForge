@@ -186,7 +186,7 @@ def _normalize_provider(provider: str | None) -> str:
         return "claude"
 
     normalized = str(provider).strip().lower()
-    if normalized in ("claude", "codex", "gemini"):
+    if normalized in ("claude", "codex", "gemini", "system", "suggestion"):
         return normalized
     return "claude"
 
@@ -258,7 +258,7 @@ def _resolve_chat_display_role(msg: dict, fallback_provider: str) -> str:
     role = str((msg or {}).get("role", "")).strip().lower()
     if role == "claude":
         provider = _resolve_chat_provider(msg, fallback_provider)
-        if provider in ("codex", "gemini"):
+        if provider in ("codex", "gemini", "system", "suggestion"):
             return provider
         return "claude"
     return role or "unknown"
@@ -922,10 +922,10 @@ def handle_connect():
     fallback_provider = get_llm_provider()
     for msg in history[-30:]:
         role = str(msg.get('role', '')).strip().lower()
-        if role in ('claude', 'codex', 'gemini'):
+        emit('message', _serialize_chat_message(msg, fallback_provider))
+        if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
             msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
             seen_messages.add(msg_id)
-        emit('message', _serialize_chat_message(msg, fallback_provider))
 
 
 @socketio.on('send_message')
@@ -1611,7 +1611,7 @@ def watch_chat():
         history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
         for msg in history:
             role = str(msg.get('role', '')).strip().lower()
-            if role in ('claude', 'codex', 'gemini'):
+            if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
                 msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
                 seen_messages.add(msg_id)
     except:
@@ -1622,9 +1622,9 @@ def watch_chat():
             history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
             fallback_provider = get_llm_provider()
 
-            for msg in history[-10:]:
+            for msg in history[-30:]:
                 role = str(msg.get('role', '')).strip().lower()
-                if role in ('claude', 'codex', 'gemini'):
+                if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
                     msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
                     if msg_id not in seen_messages:
                         seen_messages.add(msg_id)
