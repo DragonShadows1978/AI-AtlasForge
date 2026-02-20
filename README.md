@@ -338,6 +338,15 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.9.1 (2026-02-20)
+- **Dashboard Filter Persistence** - All dashboard filters, sorts, and search state now persist across page reloads via versioned localStorage schema
+- **Mission Suggestion Sort/Filter Persistence** - Sort field, sort direction, tag filter, and health filter all persist (schema v2 with migration from legacy flat-map)
+- **Analytics Period Persistence** - Selected analytics time period persists across sessions
+- **Glassbox UI Persistence** - Search query, date range, and selected mission persist in Glassbox viewer
+- **Global Preference Registry** - Centralized `ALL_PREFERENCE_KEYS` list and `clearAllPreferences()` for one-click reset
+- **Stage Gate Lock File Fix** - Hook now bypasses all enforcement when no active Conductor process is detected via lock file; fixes normal Claude Code terminal usage being blocked post-mission
+- **Stage Normalization** - Stage names normalized to uppercase when read from lock file; prevents silent bypass on lowercase stage values
+
 ### v1.9.0 (2026-02-20)
 - **Modular Engine Only** - Retired legacy monolithic `af_engine.py` (3,688 lines); modular `af_engine/` package is now the sole engine implementation
 - **Archival Module** - Migrated transcript archival functions to `af_engine/core/archival.py`; removed `importlib.util` dynamic loading hack
