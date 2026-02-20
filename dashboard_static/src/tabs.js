@@ -47,7 +47,7 @@ export function markTabLoaded(tabName) {
 // VALID TAB NAMES (for URL hash validation)
 // =============================================================================
 
-const VALID_TABS = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'semantic'];
+const VALID_TABS = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
 
 /**
  * Get tab name from URL hash
@@ -162,11 +162,6 @@ function fireTabRefresh(tabName) {
                 window.initInvestigationHistory();
             }
             break;
-        case 'semantic':
-            if (typeof window.initSemanticWidgets === 'function') {
-                window.initSemanticWidgets();
-            }
-            break;
     }
 }
 
@@ -231,7 +226,7 @@ function setupKeyboardShortcuts() {
 
         // Tab shortcuts: 1-7 for tab switching
         if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            const tabs = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs', 'semantic'];
+            const tabs = ['atlasforge', 'investigations', 'analytics', 'lessons', 'glassbox', 'missionlogs'];
             const idx = parseInt(e.key) - 1;
             if (tabs[idx]) {
                 switchTab(tabs[idx]);
