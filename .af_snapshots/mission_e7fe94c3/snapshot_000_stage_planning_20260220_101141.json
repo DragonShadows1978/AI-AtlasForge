@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_e7fe94c3",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-20T10:11:41.964806",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "LAYER 1B detection pattern: Conductor explicitly checks process state \u2014 applied same pattern to hook",
+      "Conductor integration passing stage context \u2014 lock file already carries current_stage field, use it as primary source"
+    ],
+    "steps_planned": 3
+  }
+}
