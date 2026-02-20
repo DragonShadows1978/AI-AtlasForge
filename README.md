@@ -338,6 +338,14 @@ See `requirements.txt` or `pyproject.toml` for full list.
 
 ## Recent Changes
 
+### v1.9.0 (2026-02-20)
+- **Modular Engine Only** - Retired legacy monolithic `af_engine.py` (3,688 lines); modular `af_engine/` package is now the sole engine implementation
+- **Archival Module** - Migrated transcript archival functions to `af_engine/core/archival.py`; removed `importlib.util` dynamic loading hack
+- **Engine Init Simplified** - `af_engine/__init__.py` reduced from ~150 lines to ~50; `USE_MODULAR_ENGINE` feature flag removed entirely
+- **Dashboard WebSocket Push** - Live stage updates pushed to connected clients when af_engine stage changes; no polling required
+- **Analytics Integration** - Dashboard analytics endpoints enriched with engine-native metrics (success rate, execution time, task counts)
+- **Stage Gate Enforcement** - Two-layer stage enforcement: CLI `--disallowedTools` per stage + hook-level path restrictions
+
 ### v1.8.7 (2026-02-19)
 - **Widget Settings Popup** - Mobile panel reordering via widget settings buttons
 - **Collapsed Card Improvements** - Stage indicator and health summary remain visible when widgets are collapsed
