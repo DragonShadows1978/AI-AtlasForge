@@ -1,0 +1,21 @@
+{
+  "snapshot_type": "stage_testing",
+  "mission_id": "mission_a5b8e8b4",
+  "stage": "TESTING",
+  "timestamp": "2026-02-19T23:06:44.857950",
+  "snapshot_number": 4,
+  "event_data": {
+    "status": "tests_passed",
+    "tests_passed": true,
+    "adversarial_testing": {
+      "red_team_issues": [
+        "BUILDING stage did not rebuild dist/bundle.min.js after src changes \u2014 stale bundle still contained 'semantic' in VALID_TABS. Fixed by running npm run build during TESTING."
+      ],
+      "property_violations": [],
+      "mutation_score": null,
+      "spec_alignment": 1.0,
+      "epistemic_score": 0.9,
+      "rigor_level": "strong"
+    }
+  }
+}
