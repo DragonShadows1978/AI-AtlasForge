@@ -239,6 +239,37 @@ class MissionReportIntegration(BaseIntegrationHandler):
             logger.error(f"[MissionReport] SQLite save failed: {e}")
             return None
 
+        # Notify activity log that a suggestion was generated
+        try:
+            from atlasforge_config import STATE_DIR
+            import io_utils
+            chat_history_path = STATE_DIR / "chat_history.json"
+            source_labels = {
+                "successful_completion": "mission completion",
+                "drift_halt": "drift halt",
+                "manual": "manual"
+            }
+            source_label = source_labels.get(source_type, source_type)
+            notification = f'[SUGGESTION] Mission suggestion generated: "{rec_entry["mission_title"]}" (via {source_label})'
+
+            def _add_suggestion_to_chat(history):
+                if not isinstance(history, list):
+                    history = []
+                history.append({
+                    "role": "claude",
+                    "provider": "system",
+                    "content": notification,
+                    "timestamp": rec_entry["created_at"]
+                })
+                if len(history) > 500:
+                    history = history[-500:]
+                return history
+
+            io_utils.atomic_update_json(chat_history_path, _add_suggestion_to_chat, [])
+            logger.info(f'[MissionReport] Logged suggestion to activity log: {rec_entry["mission_title"]}')
+        except Exception as e:
+            logger.debug(f"[MissionReport] Could not write suggestion to activity log: {e}")
+
         # Emit WebSocket event for new recommendation
         try:
             from websocket_events import emit_recommendation_added
