@@ -47,11 +47,21 @@ function loadRecSortState() {
         if (!saved) return;
         const parsed = JSON.parse(saved);
         if (parsed.sortField) {
-            currentSortField = parsed.sortField;
             const sortSelect = document.getElementById('rec-sort-select');
-            if (sortSelect) sortSelect.value = currentSortField;
+            if (sortSelect) {
+                sortSelect.value = parsed.sortField;
+                // Only accept if the browser recognised the value (option exists)
+                if (sortSelect.value === parsed.sortField) {
+                    currentSortField = parsed.sortField;
+                } else {
+                    // Stored value doesn't match any option — restore the default
+                    sortSelect.value = currentSortField;
+                }
+            } else {
+                currentSortField = parsed.sortField;
+            }
         }
-        if (parsed.sortDirection) {
+        if (parsed.sortDirection && ['asc', 'desc'].includes(parsed.sortDirection)) {
             currentSortDirection = parsed.sortDirection;
             const btn = document.getElementById('rec-sort-dir-btn');
             if (btn) btn.textContent = currentSortDirection === 'desc' ? '\u2193 Desc' : '\u2191 Asc';
