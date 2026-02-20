@@ -72,6 +72,15 @@ def get_mission_status() -> dict:
     }
 
 
+def get_execution_trace() -> list:
+    """Get execution trace (stage transitions) from the active mission."""
+    import os
+    from pathlib import Path
+    mission_path = Path(os.environ.get("AF_MISSION_PATH", "/home/vader/AI-AtlasForge/state/mission.json"))
+    sm = StateManager(mission_path)
+    return sm.get_execution_trace()
+
+
 __all__ = [
     'RDMissionController',
     'StateManager',
@@ -81,6 +90,7 @@ __all__ = [
     'PromptFactory',
     'get_current_stage',
     'get_mission_status',
+    'get_execution_trace',
     'STAGES',
     'archive_mission_transcripts',
     'ingest_afterimage_from_archive',

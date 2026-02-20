@@ -569,7 +569,11 @@ def api_mission():
             })
         return jsonify({"success": False, "message": "No mission provided"})
     else:
-        mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        try:
+            from af_engine import StateManager
+            mission = StateManager(MISSION_PATH).mission
+        except Exception:
+            mission = io_utils.atomic_read_json(MISSION_PATH, {})
         return jsonify(mission)
 
 

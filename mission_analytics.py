@@ -1180,11 +1180,13 @@ def get_current_mission_analytics() -> Dict[str, Any]:
     Returns:
         Dict with mission analytics including tokens, cost breakdown
     """
-    import io_utils as io_utils_module
-
-    # Read current mission state
-    mission = io_utils_module.atomic_read_json(MISSION_PATH, {})
-    mission_id = mission.get("mission_id")
+    # Read current mission_id via af_engine, fallback to io_utils
+    try:
+        from af_engine import StateManager
+        mission_id = StateManager(MISSION_PATH).mission_id
+    except Exception:
+        import io_utils as io_utils_module
+        mission_id = io_utils_module.atomic_read_json(MISSION_PATH, {}).get("mission_id")
 
     if not mission_id:
         return {"error": "No active mission", "tokens": 0, "cost": 0}

@@ -233,6 +233,13 @@ def api_decision_graph_current():
             if graph.get('nodes'):
                 graph['mission_id'] = mission_id
                 graph['is_current'] = True
+                try:
+                    from af_engine import StateManager
+                    sm = StateManager(MISSION_PATH)
+                    graph['execution_trace'] = sm.get_execution_trace()
+                    graph.setdefault('mission_id', sm.mission_id)
+                except Exception:
+                    graph.setdefault('execution_trace', [])
                 return jsonify(graph)
 
         # Fall back to most recent mission with data
@@ -244,12 +251,24 @@ def api_decision_graph_current():
             graph['mission_id'] = fallback_id
             graph['is_current'] = False
             graph['note'] = f"Showing data from {fallback_id} (current mission has no decision data yet)"
+            try:
+                from af_engine import StateManager
+                graph['execution_trace'] = StateManager(MISSION_PATH).get_execution_trace()
+            except Exception:
+                graph.setdefault('execution_trace', [])
             return jsonify(graph)
 
+        execution_trace = []
+        try:
+            from af_engine import StateManager
+            execution_trace = StateManager(MISSION_PATH).get_execution_trace()
+        except Exception:
+            pass
         return jsonify({
             "nodes": [],
             "edges": [],
             "stats": {"total": 0, "errors": 0},
+            "execution_trace": execution_trace,
             "note": "No decision graph data available. Data is populated from archived transcripts."
         })
     except Exception as e:

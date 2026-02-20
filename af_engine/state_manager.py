@@ -338,3 +338,19 @@ class StateManager:
     def get_tests_dir(self) -> Path:
         """Get the tests directory."""
         return self.get_workspace_dir() / "tests"
+
+    def get_execution_trace(self) -> List[Dict]:
+        """
+        Derive execution trace from history (stage transitions).
+        Returns list of {stage, event, timestamp} dicts.
+        """
+        trace = []
+        for entry in self.history:
+            event = entry.get("event", "")
+            if "Stage transition:" in event:
+                trace.append({
+                    "stage": entry.get("stage", "UNKNOWN"),
+                    "event": event,
+                    "timestamp": entry.get("timestamp", ""),
+                })
+        return trace

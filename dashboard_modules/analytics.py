@@ -32,13 +32,28 @@ def api_analytics_summary():
     try:
         from mission_analytics import get_analytics
         analytics = get_analytics()
+        engine_metrics = {}
+        try:
+            from af_engine import StateManager
+            sm = StateManager(MISSION_PATH)
+            engine_metrics = {
+                "current_stage": sm.current_stage,
+                "current_cycle": sm.cycle_number,
+                "cycle_budget": sm.cycle_budget,
+                "cycles_remaining": max(0, sm.cycle_budget - sm.cycle_number),
+                "current_iteration": sm.iteration,
+                "mission_id": sm.mission_id,
+            }
+        except Exception:
+            pass
         return jsonify({
             "aggregate_30d": analytics.get_aggregate_stats(days=30),
             "all_time": analytics.get_aggregate_stats(days=0),
-            "recent_missions": analytics.get_recent_missions(limit=10)
+            "recent_missions": analytics.get_recent_missions(limit=10),
+            "engine_metrics": engine_metrics,
         })
     except Exception as e:
-        return jsonify({"error": str(e), "aggregate_30d": {}, "all_time": {}})
+        return jsonify({"error": str(e), "aggregate_30d": {}, "all_time": {}, "engine_metrics": {}})
 
 
 @analytics_bp.route('/mission/<mission_id>')
@@ -60,8 +75,22 @@ def api_analytics_current():
     """Get analytics for current mission."""
     try:
         from mission_analytics import get_current_mission_analytics
-        # Use the new function that queries token_events directly
         result = get_current_mission_analytics()
+        # Merge engine-native metrics into result
+        try:
+            from af_engine import StateManager
+            sm = StateManager(MISSION_PATH)
+            result.setdefault("engine_metrics", {})
+            result["engine_metrics"].update({
+                "current_stage": sm.current_stage,
+                "current_cycle": sm.cycle_number,
+                "cycle_budget": sm.cycle_budget,
+                "cycles_remaining": max(0, sm.cycle_budget - sm.cycle_number),
+                "current_iteration": sm.iteration,
+                "mission_id": sm.mission_id,
+            })
+        except Exception:
+            pass
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e), "tokens": 0, "cost": 0})
@@ -150,10 +179,17 @@ def api_watcher_start():
     try:
         from realtime_token_watcher import get_token_watcher
 
-        mission = io_utils.atomic_read_json(MISSION_PATH, {})
-        mission_id = mission.get('mission_id')
-        workspace = mission.get('mission_workspace')
-        stage = mission.get('current_stage', 'unknown')
+        try:
+            from af_engine import StateManager
+            _sm = StateManager(MISSION_PATH)
+            mission_id = _sm.mission_id
+            workspace = str(_sm.get_workspace_dir())
+            stage = _sm.current_stage
+        except Exception:
+            mission = io_utils.atomic_read_json(MISSION_PATH, {})
+            mission_id = mission.get('mission_id')
+            workspace = mission.get('mission_workspace')
+            stage = mission.get('current_stage', 'unknown')
 
         if not mission_id:
             return jsonify({"error": "No active mission", "started": False})
