@@ -1,0 +1,46 @@
+{
+  "snapshot_type": "cycle_1",
+  "mission_id": "mission_f49d3c1c",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-19T23:51:09.346604",
+  "snapshot_number": 8,
+  "event_data": {
+    "cycle_number": 1,
+    "final": true,
+    "final_report": {
+      "summary": "Investigated the AtlasForge stage lockout / tool gate system to determine whether PLANNING stage properly restricts code writing, testing, and state-modifying operations. Found a two-layer enforcement architecture: Layer 1 uses Claude's --disallowedTools CLI flag (via atlasforge_conductor.py + init_guard.py), and Layer 2 uses a PreToolUse hook (stage_gate_hook.py) registered in .claude/settings.json. The PLANNING gate IS enforced via Layer 2 \u2014 the hook blocks .py/.js/.ts writes and blocks destructive Bash commands. However, a critical design gap was found: Layer 1 (--disallowedTools) for PLANNING only blocks NotebookEdit (due to a logic branch bug in get_disallowed_tools_for_cli), meaning Write/Edit/Bash are NOT blocked at the CLI level for PLANNING and rely entirely on Layer 2. If the hook is absent, fails, or is bypassed, PLANNING-stage code writing is unblocked. Additional gaps identified: Gemini/Codex providers have zero Layer 1 gate enforcement, the hook defaults to BUILDING (least restrictive) on mission.json parse failure, and the hook file is not version-controlled in the repository.",
+      "all_files": [
+        "/home/vader/AI-AtlasForge/init_guard.py",
+        "/home/vader/AI-AtlasForge/atlasforge_conductor.py",
+        "/home/vader/AI-AtlasForge/.claude/settings.json",
+        "/home/vader/.claude/hooks/stage_gate_hook.py",
+        "/home/vader/AI-AtlasForge/af_engine/stages/planning.py",
+        "/home/vader/AI-AtlasForge/af_engine/stage_registry.py",
+        "/home/vader/AI-AtlasForge/workspace/Planning/artifacts/implementation_plan.md",
+        "/home/vader/AI-AtlasForge/workspace/Planning/artifacts/test_results.md",
+        "/home/vader/AI-AtlasForge/workspace/Planning/artifacts/analysis.md",
+        "/home/vader/AI-AtlasForge/workspace/Planning/research/research_findings.md"
+      ],
+      "key_achievements": [
+        "Fully mapped the two-layer stage gate architecture (CLI --disallowedTools + PreToolUse hook)",
+        "Identified the root cause of the observed bug: get_disallowed_tools_for_cli() uses blocked_tools branch for PLANNING (only NotebookEdit), never reaching the allowed_tools complementary-set branch that would block Write/Edit/Bash at CLI level",
+        "Confirmed Layer 2 (stage_gate_hook.py) IS working correctly: blocks .py/.js/.ts writes and destructive bash during PLANNING",
+        "Documented 7 specific gaps/vulnerabilities in the gate system with file paths and line numbers",
+        "Confirmed the hook is properly registered in .claude/settings.json PreToolUse matchers for Write, Edit, and Bash"
+      ],
+      "challenges_overcome": [
+        "Traced the full call chain from conductor invocation to hook execution across 5+ files",
+        "Identified why the allowed_tools branch in get_disallowed_tools_for_cli is dead code for PLANNING (blocked_tools branch preempts it)",
+        "Distinguished between cosmetic gaps (preview command bug) and security-relevant gaps (Gemini/Codex no Layer 1, fail-open default)"
+      ],
+      "lessons_learned": [
+        "The PLANNING stage gate relies critically on stage_gate_hook.py being present at the user-level hooks path \u2014 if that file is missing, Layer 2 silently fails and PLANNING has no write restrictions",
+        "The get_disallowed_tools_for_cli() logic has a design flaw: for stages with both allowed_tools and blocked_tools set, the blocked_tools branch always wins, skipping the more comprehensive allowed_tools computation",
+        "Bash restrictions in stage_gate_hook.py only apply to PLANNING \u2014 ANALYZING and CYCLE_END stages have no Bash restrictions in Layer 2, relying solely on Layer 1 (which also doesn't block Bash for ANALYZING/CYCLE_END for Claude)",
+        "Gemini and Codex providers have no programmatic gate enforcement \u2014 only advisory text in system prompts",
+        "The hook's fail-open default (return BUILDING on parse failure) prioritizes uptime over security \u2014 a deliberate trade-off but worth documenting",
+        "Stage gate hook should be version-controlled in the repository (.claude/hooks/) not just at user-level to ensure it deploys with the codebase"
+      ]
+    }
+  }
+}
