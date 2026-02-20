@@ -1,11 +1,11 @@
 {
-  "pid": 2230546,
+  "pid": 2387751,
   "hostname": "x-wing",
-  "acquired_at": "2026-02-20T12:18:57.512245",
-  "expires_at": "2026-02-20T13:09:58.116832",
-  "heartbeat_at": "2026-02-20T12:59:58.116832",
-  "mission_id": "mission_5ede3f70",
-  "current_stage": "CYCLE_END",
-  "boot_count": 485,
+  "acquired_at": "2026-02-20T14:59:41.299843",
+  "expires_at": "2026-02-20T15:10:53.645138",
+  "heartbeat_at": "2026-02-20T15:00:53.645138",
+  "mission_id": "mission_cf27f1d7",
+  "current_stage": "BUILDING",
+  "boot_count": 486,
   "lock_version": 1
 }
