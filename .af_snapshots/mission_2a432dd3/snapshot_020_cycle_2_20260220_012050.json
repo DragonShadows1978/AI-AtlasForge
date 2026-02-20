@@ -1,0 +1,42 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_2a432dd3",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-20T01:20:50.469543",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "final": true,
+    "final_report": {
+      "summary": "Across 2 cycles, this mission successfully applied and validated 5 targeted bug fixes to the AtlasForge dashboard's Activity log subsystem. Cycle 1 identified and applied all 5 fixes to dashboard_v2.py, af_engine.py, dashboard_static/js/chat.js, and dashboard_static/src/chat.js. Cycle 2 performed functional validation of every fix, confirmed end-to-end suggestion message flow from af_engine.py through the WebSocket to the Activity log UI, verified distinct styling for system/suggestion messages, confirmed no regressions for normal user/assistant messages, and produced a validated artifact document.",
+      "all_files": [
+        "dashboard_v2.py",
+        "af_engine.py",
+        "dashboard_static/js/chat.js",
+        "dashboard_static/src/chat.js",
+        "workspace/system/artifacts/activity_log_fixes_validated.md"
+      ],
+      "key_achievements": [
+        "Fixed watch_chat() pre-seeding order: messages now emitted to existing clients BEFORE adding to seen_messages set, eliminating race condition where new connections missed in-flight messages",
+        "Expanded watch_chat() poll window from history[-10:] to history[-30:] to match the REST API window, ensuring Activity log and REST endpoint show consistent history depth",
+        "_normalize_provider() now preserves 'system' and 'suggestion' as valid provider types instead of remapping them, enabling distinct styling in the Activity log",
+        "socket.on('message') in chat.js correctly passes provider/display_role as the 4th argument to addMessage(), fixing missing provider badges in the UI",
+        "af_engine.py suggestion events confirmed to use 'system' or 'suggestion' as the provider value, completing the end-to-end suggestion display pipeline",
+        "All 5 fixes validated end-to-end with functional testing; no regressions in normal message display"
+      ],
+      "challenges_overcome": [
+        "Race condition in pre-seeding logic required careful ordering of emit vs. set-insertion operations",
+        "Provider normalization had to balance canonicalizing known providers (anthropic, openai, google) while preserving passthrough for special types (system, suggestion)",
+        "JavaScript socket event handler required matching the exact argument signature of addMessage() to pass provider correctly",
+        "Validating end-to-end suggestion flow required confirming the chain: af_engine emit \u2192 WebSocket \u2192 chat.js handler \u2192 addMessage() \u2192 Activity log render"
+      ],
+      "lessons_learned": [
+        "When fixing message pipeline bugs, always trace the full data path from source (af_engine) through transport (WebSocket) to render (JS/CSS) \u2014 partial fixes cause subtle display failures",
+        "History window mismatches between REST and WebSocket endpoints create confusing inconsistencies; always keep them in sync",
+        "Provider normalization functions should explicitly whitelist passthrough values (system, suggestion) rather than silently remapping unknowns to 'unknown'",
+        "Pre-seeding logic for new connections must emit THEN record, never record THEN emit \u2014 the reverse order creates a window where messages are lost",
+        "Cycle 2 validation loops are valuable: forcing explicit re-confirmation of each fix catches cases where a fix was applied incorrectly or partially reverted"
+      ]
+    }
+  }
+}
