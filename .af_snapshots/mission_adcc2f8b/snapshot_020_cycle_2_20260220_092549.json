@@ -1,0 +1,39 @@
+{
+  "snapshot_type": "cycle_2",
+  "mission_id": "mission_adcc2f8b",
+  "stage": "CYCLE_END",
+  "timestamp": "2026-02-20T09:25:49.785575",
+  "snapshot_number": 20,
+  "event_data": {
+    "cycle_number": 2,
+    "cycles_remaining": 1,
+    "continuation_prompt": "Cycle 2 of 3 complete. The af_engine/dashboard WebSocket push is wired and 30 tests pass. For Cycle 3 (the final cycle), complete the remaining integration work:\n\n(1) ANALYTICS INTEGRATION: Wire af_engine MissionManager cost/token tracking directly into /api/analytics/summary and /api/analytics/current in dashboard_v2.py. The ExecutionEngine.aggregator.get_summary() already returns success_rate, avg_execution_time, and task counts. Enrich these endpoints to include engine-native metrics alongside the existing file-based analytics. Maintain backward-compatible response shape.\n\n(2) DECISION GRAPH INTEGRATION: Audit whether af_engine exposes an execution graph or tool invocation tracking API. Check /home/vader/AI-AtlasForge/af_engine/ for any graph tracking. If af_engine has this capability, make it the canonical source for /api/decision-graph/current and /api/decision-graph/missions. If not, add a minimal execution_trace list to ExecutionEngine that logs stage transitions with timestamps, and expose it via a get_execution_trace() method.\n\n(3) ELIMINATE io_utils.atomic_read_json() FOR ENGINE STATE: In /home/vader/AI-AtlasForge/dashboard_modules/core.py and /home/vader/AI-AtlasForge/dashboard_modules/recovery.py, find all calls to io_utils.atomic_read_json() that read engine-owned files (state/mission.json, state/stage.json, state/cycle.json). Replace them with direct af_engine API calls. The engine is now running live \u2014 reading its state from files is stale.\n\n(4) EXTEND TEST SUITE: Add a dedicated test_dashboard_engine_integration.py file (separate from test_integration.py) at /home/vader/AI-AtlasForge/workspace/ExecutionEngine/tests/test_dashboard_engine_integration.py covering: (a) analytics endpoint returns engine-native metrics, (b) decision-graph endpoint returns engine execution trace, (c) io_utils calls replaced with engine API calls, (d) end-to-end WebSocket stage push from engine through dashboard to client.\n\n(5) VALIDATE END-TO-END: After all changes, run the full test suite (pytest workspace/ExecutionEngine/tests/ -v) and confirm all tests pass. Target: 40+ passing tests with the new test_dashboard_engine_integration.py contributing at least 8 new tests.\n\nKey files to modify:\n- /home/vader/AI-AtlasForge/dashboard_v2.py\n- /home/vader/AI-AtlasForge/dashboard_modules/core.py\n- /home/vader/AI-AtlasForge/dashboard_modules/recovery.py\n- /home/vader/AI-AtlasForge/workspace/ExecutionEngine/engine.py (add get_execution_trace())\n- /home/vader/AI-AtlasForge/workspace/ExecutionEngine/tests/test_dashboard_engine_integration.py (new file)\n\nDo NOT break existing endpoint response shapes. Do NOT remove the WebSocket push added in Cycle 2. Do NOT regress the 30 existing passing tests.",
+    "cycle_report": {
+      "summary": "Cycle 2 deepened the af_engine/dashboard integration by building out the ExecutionEngine core in workspace/ExecutionEngine/engine.py and expanding the test suite to 30 passing tests across three test files (test_core_engine.py, test_integration.py, test_stress.py). The dashboard_v2.py and dashboard_modules/core.py were updated with WebSocket push via socketio.emit('engine_status', ...) on stage changes, af_engine.register_push_callback() wiring, and the /api/engine/status endpoint reading directly from ExecutionEngine.get_status(). The integration.py test file specifically validated the DashboardBridge including websocket_emit_on_stage_change and abort_propagates_to_dashboard. All 30 tests pass in 4.73s.",
+      "files_created": [],
+      "files_modified": [
+        "workspace/ExecutionEngine/engine.py",
+        "workspace/ExecutionEngine/tests/test_core_engine.py",
+        "workspace/ExecutionEngine/tests/test_integration.py",
+        "workspace/ExecutionEngine/tests/test_stress.py",
+        "dashboard_v2.py",
+        "dashboard_modules/core.py",
+        "atlasforge_conductor.lock",
+        "vision"
+      ],
+      "achievements": [
+        "ExecutionEngine.get_status() now powers /api/engine/status with live pipeline metrics (worker_count, queued_tasks, completed_tasks, success_rate)",
+        "WebSocket push implemented: socketio.emit('engine_status', data, namespace='/mission') fires on every stage change via register_push_callback()",
+        "DashboardBridge test class added to test_integration.py validating: status_payload_format, websocket_emit_on_stage_change, engine_heartbeat_signal, abort_propagates_to_dashboard",
+        "Stress tests added covering: rapid_snapshot_writes, high_frequency_stage_transitions, concurrent_lock_contention, memory_footprint_under_load, snapshot_queue_overflow_handling, large_payload_serialization",
+        "All 30 tests pass in 4.73s (15 core engine, 9 integration including 4 DashboardBridge, 6 stress)"
+      ],
+      "issues": [
+        "test_dashboard_engine_integration.py was not created as a separate file \u2014 integration tests were consolidated into test_integration.py under the TestDashboardBridge class instead",
+        "MissionManager cost/token tracking from af_engine not yet wired into /api/analytics/summary or /api/analytics/current \u2014 these still read from mission analytics files",
+        "Decision graph endpoints still read from decision_graph.db via SQLite \u2014 af_engine execution graph not yet the canonical source",
+        "io_utils.atomic_read_json() calls in dashboard_modules/ for state/mission.json and state/stage.json not yet fully replaced with direct af_engine API calls"
+      ]
+    }
+  }
+}
