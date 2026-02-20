@@ -88,6 +88,7 @@ window.formatDate = core.formatDate;
 window.copyToClipboard = core.copyToClipboard;
 window.downloadJSON = core.downloadJSON;
 window.downloadCSV = core.downloadCSV;
+window.clearAllPreferences = core.clearAllPreferences;
 
 // API
 window.api = api.api;
