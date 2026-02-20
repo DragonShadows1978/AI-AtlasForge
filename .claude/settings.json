@@ -6,7 +6,20 @@
         "hooks": [
           {
             "type": "command",
+            "command": "/home/vader/.claude/hooks/stage_gate_hook.py"
+          },
+          {
+            "type": "command",
             "command": ".claude/hooks/backup-core-files.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/vader/.claude/hooks/stage_gate_hook.py"
           }
         ]
       }

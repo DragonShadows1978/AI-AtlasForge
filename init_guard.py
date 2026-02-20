@@ -316,6 +316,52 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
         return ""
 
     @staticmethod
+    def get_disallowed_tools_for_cli(stage: str) -> str:
+        """Get comma-separated disallowed tools string for Claude CLI --disallowedTools flag.
+
+        This is the PRIMARY enforcement mechanism. The Claude CLI will refuse to invoke
+        any tool listed here, preventing the LLM from even attempting blocked operations.
+
+        For stages where Write/Edit are allowed but path-restricted (PLANNING, ANALYZING,
+        CYCLE_END), those tools are NOT blocked here - path enforcement is handled by
+        the stage_gate_hook.py PreToolUse hook as defense-in-depth.
+
+        Args:
+            stage: Current R&D stage name
+
+        Returns:
+            Comma-separated string of tool names to block (for --disallowedTools flag)
+        """
+        # Always block plan mode tools regardless of stage
+        base_blocked = {"EnterPlanMode", "ExitPlanMode"}
+
+        try:
+            rd_stage = RDStage(stage)
+            policy = STAGE_POLICIES.get(rd_stage)
+
+            if not policy:
+                return ",".join(sorted(base_blocked))
+
+            # If the policy has an explicit blocklist, use it
+            if policy.blocked_tools:
+                return ",".join(sorted(base_blocked | policy.blocked_tools))
+
+            # For stages with an allowlist, compute blocked = all_known - allowed
+            if policy.allowed_tools:
+                all_known_tools = {
+                    "Read", "Edit", "Write", "Bash", "Glob", "Grep",
+                    "WebFetch", "WebSearch", "Task", "NotebookEdit",
+                    "TodoWrite", "AskUserQuestion"
+                }
+                stage_blocked = all_known_tools - policy.allowed_tools
+                return ",".join(sorted(base_blocked | stage_blocked))
+
+        except ValueError:
+            pass
+
+        return ",".join(sorted(base_blocked))
+
+    @staticmethod
     def validate_tool_usage(stage: str, tool_name: str) -> tuple[bool, str]:
         """
         Validate if a tool usage is allowed in a stage.

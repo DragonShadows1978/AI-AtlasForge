@@ -202,9 +202,15 @@ def get_llm_provider() -> str:
     return provider
 
 
-def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
-    """Build subprocess CLI command for the selected provider."""
-    logger.info(f"Building command for provider: {provider}, model: {model}")
+def build_llm_command(provider: str, model: Optional[str] = None, stage: Optional[str] = None) -> List[str]:
+    """Build subprocess CLI command for the selected provider.
+
+    Args:
+        provider: LLM provider name (claude, codex, gemini)
+        model: Optional model override
+        stage: Current R&D stage - used to compute --disallowedTools for Claude CLI
+    """
+    logger.info(f"Building command for provider: {provider}, model: {model}, stage: {stage}")
     if provider == "codex":
         cmd = ["codex"]
         if _codex_web_search_enabled():
@@ -238,10 +244,13 @@ def build_llm_command(provider: str, model: Optional[str] = None) -> List[str]:
         return cmd
 
     # Default provider: Claude CLI
+    from init_guard import InitGuard
+    disallowed = InitGuard.get_disallowed_tools_for_cli(stage or "BUILDING")
+    logger.info(f"Stage '{stage or 'BUILDING'}' -> disallowedTools: {disallowed}")
     cmd = [
         "claude", "-p",
         "--dangerously-skip-permissions",
-        "--disallowedTools", "EnterPlanMode,ExitPlanMode"
+        "--disallowedTools", disallowed
     ]
     if model:
         cmd[2:2] = ["--model", model]
@@ -454,7 +463,7 @@ def terminate_active_claude():
         return True
 
 
-def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Optional[str], Optional[str]]:
+def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = None) -> tuple[Optional[str], Optional[str]]:
     """
     Invoke configured LLM and get response.
 
@@ -465,6 +474,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
         prompt: The prompt to send
         timeout: Timeout in seconds (default 20 min)
         cwd: Working directory (default BASE_DIR)
+        stage: Current R&D stage (passed to build_llm_command for tool restrictions)
 
     Returns:
         Tuple of (response_text, error_info):
@@ -479,7 +489,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None) -> tuple[Opti
 
     try:
         provider = get_llm_provider()
-        command = build_llm_command(provider)
+        command = build_llm_command(provider, stage=stage)
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)  # Prevent "nested session" error when spawning Claude CLI
         if provider == "gemini":
@@ -1578,7 +1588,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 llm_timeout = MAX_ABSOLUTE_TIMEOUT_MINUTES * 60 if HAS_CONTEXT_WATCHER else 3600
             elif current_stage == "BUILDING":
                 llm_timeout = 7200  # 2 hours for builds
-            response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace)
+            response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
 
             # Stop ContextWatcher
             if context_session_id and HAS_CONTEXT_WATCHER:
@@ -1786,7 +1796,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 logger.warning("JSON extraction failed, attempting format correction re-prompt")
                 correction_prompt = build_format_correction_prompt(current_stage, response_text)
                 try:
-                    corrected_text, _corr_err = invoke_llm(correction_prompt, timeout=120, cwd=WORKSPACE_DIR)
+                    corrected_text, _corr_err = invoke_llm(correction_prompt, timeout=120, cwd=WORKSPACE_DIR, stage=current_stage)
                     if corrected_text:
                         response = extract_json_from_response(corrected_text)
                         if response:
