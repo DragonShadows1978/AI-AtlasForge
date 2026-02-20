@@ -1641,13 +1641,50 @@ def watch_chat():
         time.sleep(2)
 
 
+def watch_engine_stage():
+    """Watch af_engine stage changes and push live updates to mission_status WS room."""
+    _last_stage = None
+    _last_mission_id = None
+
+    while True:
+        try:
+            time.sleep(2)
+            from af_engine import StateManager, STAGES
+            sm = StateManager(MISSION_PATH)
+            current_stage = sm.current_stage
+            current_mission = sm.mission_id
+
+            if current_stage != _last_stage or current_mission != _last_mission_id:
+                _last_stage = current_stage
+                _last_mission_id = current_mission
+                cycles_remaining = max(0, sm.cycle_budget - sm.cycle_number)
+                payload = {
+                    "mission_id": sm.mission_id,
+                    "stage": current_stage,
+                    "iteration": sm.iteration,
+                    "cycle": sm.cycle_number,
+                    "cycle_budget": sm.cycle_budget,
+                    "cycles_remaining": cycles_remaining,
+                    "is_last_cycle": sm.cycle_number >= sm.cycle_budget,
+                    "stages": STAGES,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                emit_widget_update('mission_status', {
+                    'event': 'engine_stage_change',
+                    'data': payload
+                })
+        except Exception:
+            pass
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
 if __name__ == '__main__':
-    # Start background watcher
+    # Start background watchers
     threading.Thread(target=watch_chat, daemon=True).start()
+    threading.Thread(target=watch_engine_stage, daemon=True).start()
 
     # Auto-start AfterImage Embedder Daemon
     # This indexes code for episodic memory retrieval

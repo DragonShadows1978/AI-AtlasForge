@@ -221,8 +221,12 @@ def api_decision_graph_current():
         logger = get_decision_logger()
 
         # Try current mission first
-        mission = io_utils.atomic_read_json(MISSION_PATH, {})
-        mission_id = mission.get("mission_id")
+        try:
+            from af_engine import StateManager
+            mission_id = StateManager(MISSION_PATH).mission_id or ''
+        except Exception:
+            mission = io_utils.atomic_read_json(MISSION_PATH, {})
+            mission_id = mission.get("mission_id")
 
         if mission_id:
             graph = logger.get_mission_graph(mission_id)
@@ -391,8 +395,15 @@ def api_recovery_backup_status():
         latest = manager.get_latest_snapshot()
         is_stale = monitor.check_staleness()
 
-        mission = io_utils.atomic_read_json(MISSION_PATH, {})
-        is_active = mission.get('current_stage') not in (None, '', 'COMPLETE')
+        try:
+            from af_engine import StateManager
+            _sm = StateManager(MISSION_PATH)
+            mission_id = _sm.mission_id or 'unknown'
+            is_active = _sm.current_stage not in (None, '', 'COMPLETE')
+        except Exception:
+            mission = io_utils.atomic_read_json(MISSION_PATH, {})
+            mission_id = mission.get('mission_id', 'unknown')
+            is_active = mission.get('current_stage') not in (None, '', 'COMPLETE')
 
         return jsonify({
             "latest_snapshot": latest.to_dict() if latest else None,

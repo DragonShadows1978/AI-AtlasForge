@@ -227,6 +227,7 @@ def api_engine_status():
 
         from af_engine import StateManager, STAGES
         sm = StateManager(MISSION_PATH)
+        cycles_remaining = max(0, sm.cycle_budget - sm.cycle_number)
         engine_data.update({
             "available": True,
             "mission_id": sm.mission_id,
@@ -234,6 +235,10 @@ def api_engine_status():
             "iteration": sm.iteration,
             "cycle": sm.cycle_number,
             "cycle_budget": sm.cycle_budget,
+            "cycles_remaining": cycles_remaining,
+            "is_last_cycle": sm.cycle_number >= sm.cycle_budget,
+            "cycle_history": sm.cycle_history,
+            "stage_history": sm.history[-10:] if sm.history else [],
             "stages": STAGES,
             "error": None,
         })
