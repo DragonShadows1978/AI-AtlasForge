@@ -1,0 +1,16 @@
+{
+  "snapshot_type": "stage_analyzing",
+  "mission_id": "mission_5ede3f70",
+  "stage": "ANALYZING",
+  "timestamp": "2026-02-20T12:59:06.274191",
+  "snapshot_number": 6,
+  "event_data": {
+    "status": "success",
+    "recommendation": "COMPLETE",
+    "issues_found": [
+      "atlasforgeTilesLocked stores plain boolean string without version wrapper (negligible \u2014 format can't become unparseable)",
+      "atlasforgeLayoutPresets has PRESETS_SCHEMA_VERSION constant defined but not validated in load path (cosmetic \u2014 reset clears it)",
+      "glassboxFilters legacy key written by deprecated main.js code path lacks version field (included in reset coverage)"
+    ]
+  }
+}
