@@ -2,11 +2,11 @@
   "snapshot_type": "stage_planning",
   "mission_id": "test_mission",
   "stage": "PLANNING",
-  "timestamp": "2026-02-20T03:37:29.460769",
+  "timestamp": "2026-02-20T03:37:29.920450",
   "snapshot_number": 0,
   "event_data": {
     "status": "plan_complete",
     "kb_learnings": [],
-    "steps_planned": 0
+    "steps_planned": 1
   }
 }
