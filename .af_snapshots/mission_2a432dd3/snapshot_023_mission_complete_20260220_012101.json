@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_2a432dd3",
+  "stage": "COMPLETE",
+  "timestamp": "2026-02-20T01:21:01.331700",
+  "snapshot_number": 23,
+  "event_data": {
+    "final_stage": "CYCLE_END",
+    "total_iterations": 0,
+    "cycle_count": 2,
+    "mission_workspace": "/home/vader/AI-AtlasForge/workspace/system",
+    "mission_dir": "/home/vader/AI-AtlasForge/missions/mission_2a432dd3",
+    "project_name": "system",
+    "created_at": "2026-02-20T00:33:04.848312",
+    "started_at": "2026-02-20T00:33:04.848312"
+  }
+}
