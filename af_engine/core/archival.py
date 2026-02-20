@@ -1,7 +1,7 @@
 """
 af_engine.core.archival - Transcript Archival and AfterImage Ingestion
 
-Migrated from the legacy af_engine.py monolith. Contains all transcript
+Migrated from the legacy monolithic engine. Contains all transcript
 archival logic that was previously loaded via importlib.util hack in
 af_engine/__init__.py.
 

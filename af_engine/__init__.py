@@ -2,7 +2,7 @@
 af_engine - Modular R&D Engine
 
 This package is the sole implementation of the AtlasForge R&D Engine.
-The legacy monolithic af_engine.py has been archived to .af_archived/.
+The legacy monolithic engine file has been archived to .af_archived/.
 
 Architecture:
     - StageOrchestrator: Core workflow orchestrator
@@ -45,7 +45,7 @@ from .integration_manager import IntegrationManager
 from .cycle_manager import CycleManager
 from .prompt_factory import PromptFactory
 
-# Archival functions (migrated from legacy af_engine.py)
+# Archival functions (migrated from legacy monolithic engine)
 from .core.archival import (
     archive_mission_transcripts,
     ingest_afterimage_from_archive,

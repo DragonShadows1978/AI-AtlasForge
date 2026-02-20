@@ -4,7 +4,7 @@ af_engine.integrations.mission_report - Final Report Generation and Recommendati
 This integration generates final mission reports and saves mission recommendations
 to SQLite storage when a mission completes.
 
-This replaces the functionality that was in legacy af_engine.py's
+This replaces the functionality that was in the legacy monolithic engine's
 _generate_final_report() and _save_recommendation() methods.
 """
 
@@ -36,7 +36,7 @@ class MissionReportIntegration(BaseIntegrationHandler):
     Generates final reports and saves mission recommendations.
 
     This integration handles the final report generation and recommendation
-    persistence that was previously handled in the legacy af_engine.py.
+    persistence that was previously handled in the legacy monolithic engine.
     It subscribes to MISSION_COMPLETED events and performs:
 
     1. Generate and save final mission report to missions/mission_logs/
