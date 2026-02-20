@@ -56,7 +56,20 @@ function addMessage(role, content, timestamp = null, metadata = null) {
     if (!container) return;
 
     const normalizedRole = (role || '').toString().trim().toLowerCase();
-    const cssRole = normalizedRole === 'codex' ? 'claude' : normalizedRole;
+
+    // Resolve metadata first so display_role can drive the CSS class
+    const meta = metadata || {};
+    const metaProvider = (meta.provider || '').toString().trim().toLowerCase();
+    const metaDisplayRole = (meta.display_role || meta.displayRole || '').toString().trim().toLowerCase();
+    const displayRole = (
+        metaDisplayRole ||
+        (normalizedRole === 'claude' && (metaProvider === 'codex' || metaProvider === 'gemini') ? metaProvider : normalizedRole)
+    ) || 'unknown';
+
+    // Use display_role for CSS class so suggestion/system get their own distinct styles.
+    const specialProviders = ['suggestion', 'system', 'codex', 'gemini'];
+    const cssRole = specialProviders.includes(displayRole) ? displayRole :
+                    (normalizedRole === 'codex' ? 'claude' : normalizedRole);
 
     const div = document.createElement('div');
     div.className = `message ${cssRole}`;
@@ -74,14 +87,6 @@ function addMessage(role, content, timestamp = null, metadata = null) {
 
     // Store raw content for copy functionality
     div.dataset.rawContent = content;
-
-    const meta = metadata || {};
-    const metaProvider = (meta.provider || '').toString().trim().toLowerCase();
-    const metaDisplayRole = (meta.display_role || meta.displayRole || '').toString().trim().toLowerCase();
-    const displayRole = (
-        metaDisplayRole ||
-        (normalizedRole === 'claude' && metaProvider === 'codex' ? 'codex' : normalizedRole)
-    ) || 'unknown';
 
     div.innerHTML = `<button class="message-copy-btn" onclick="copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;
 
