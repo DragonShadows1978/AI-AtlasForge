@@ -87,7 +87,7 @@ backups:
   # Protected files that are always backed up
   protected_patterns:
     - "dashboard_v2.py"
-    - "af_engine.py"
+    - "af_engine/"
     - "atlasforge_conductor.py"
     - "atlasforge_config.py"
     - "GROUND_RULES.md"
