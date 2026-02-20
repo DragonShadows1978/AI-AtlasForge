@@ -1,0 +1,15 @@
+{
+  "snapshot_type": "stage_planning",
+  "mission_id": "mission_9f3beeef",
+  "stage": "PLANNING",
+  "timestamp": "2026-02-20T00:21:30.995762",
+  "snapshot_number": 0,
+  "event_data": {
+    "status": "plan_complete",
+    "kb_learnings": [
+      "Prior mission_220bf0ee: 'Updated af_engine.py with SQLite-only _save_recommendation' \u2014 this was the mission that made the same mistake (editing legacy af_engine.py); helped identify the pattern",
+      "Prior mission_1bd372de: The exact mission whose work failed \u2014 confirmed it edited af_engine.py not the modular engine"
+    ],
+    "steps_planned": 4
+  }
+}
