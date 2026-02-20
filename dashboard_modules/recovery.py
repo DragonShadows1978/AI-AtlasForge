@@ -89,7 +89,8 @@ def api_recovery_check():
             # The incomplete_missions list is for informational purposes only
             return jsonify({
                 "recovery_available": False,
-                "incomplete_missions": checkpoints
+                "incomplete_missions": checkpoints,
+                "snapshot_data": _get_snapshot_summary(),
             })
 
         return jsonify({"recovery_available": False, "snapshot_data": _get_snapshot_summary()})
