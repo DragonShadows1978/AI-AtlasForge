@@ -2,7 +2,7 @@
   "snapshot_type": "stage_building",
   "mission_id": "test_mission",
   "stage": "BUILDING",
-  "timestamp": "2026-02-20T02:49:05.178097",
+  "timestamp": "2026-02-20T02:49:05.586364",
   "snapshot_number": 0,
   "event_data": {
     "old_stage": "BUILDING",
