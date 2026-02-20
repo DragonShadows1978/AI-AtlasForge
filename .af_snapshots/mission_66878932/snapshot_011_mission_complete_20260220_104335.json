@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_66878932",
+  "stage": "COMPLETE",
+  "timestamp": "2026-02-20T10:43:35.221934",
+  "snapshot_number": 11,
+  "event_data": {
+    "final_stage": "CYCLE_END",
+    "total_iterations": 0,
+    "cycle_count": 1,
+    "mission_workspace": "/home/vader/AI-AtlasForge/workspace/planning",
+    "mission_dir": "/home/vader/AI-AtlasForge/missions/mission_66878932",
+    "project_name": "planning",
+    "created_at": "2026-02-20T10:23:57.892709",
+    "started_at": "2026-02-20T10:23:57.892709"
+  }
+}
