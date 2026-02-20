@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_109fc66f",
+  "stage": "COMPLETE",
+  "timestamp": "2026-02-20T04:59:26.804490",
+  "snapshot_number": 23,
+  "event_data": {
+    "final_stage": "CYCLE_END",
+    "total_iterations": 0,
+    "cycle_count": 2,
+    "mission_workspace": "/home/vader/AI-AtlasForge/workspace/AtlasForge",
+    "mission_dir": "/home/vader/AI-AtlasForge/missions/mission_109fc66f",
+    "project_name": "AtlasForge",
+    "created_at": "2026-02-20T02:36:16.730058",
+    "started_at": "2026-02-20T02:36:16.730058"
+  }
+}
