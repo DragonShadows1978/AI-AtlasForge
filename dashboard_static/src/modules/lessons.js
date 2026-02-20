@@ -23,6 +23,36 @@ let analyticsVisible = false;
 let selectedMergeTarget = {};
 
 // =============================================================================
+// LESSONS SEARCH PERSISTENCE
+// =============================================================================
+
+const LESSONS_SEARCH_KEY = 'lessons_search_state';
+const LESSONS_SEARCH_VERSION = 1;
+
+function saveLessonsSearchState() {
+    try {
+        const el = document.getElementById('lessons-search-input');
+        localStorage.setItem(LESSONS_SEARCH_KEY, JSON.stringify({
+            version: LESSONS_SEARCH_VERSION,
+            search: el?.value || '',
+        }));
+    } catch (e) {}
+}
+
+function loadLessonsSearchState() {
+    try {
+        const saved = localStorage.getItem(LESSONS_SEARCH_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!parsed.version || parsed.version !== LESSONS_SEARCH_VERSION) {
+            localStorage.removeItem(LESSONS_SEARCH_KEY); return;
+        }
+        const el = document.getElementById('lessons-search-input');
+        if (el && parsed.search) el.value = parsed.search;
+    } catch (e) {}
+}
+
+// =============================================================================
 // MAIN LESSONS FUNCTIONS
 // =============================================================================
 
@@ -32,6 +62,14 @@ export async function loadAllLessons() {
         restoreFilterToElement('lessons-source-filter');
         restoreFilterToElement('lessons-domain-filter');
         restoreFilterToElement('lessons-type-filter');
+        loadLessonsSearchState();
+
+        // Wire search input persistence (idempotent — replaces if already set)
+        const _searchEl = document.getElementById('lessons-search-input');
+        if (_searchEl && !_searchEl._afPersistWired) {
+            _searchEl.addEventListener('input', saveLessonsSearchState);
+            _searchEl._afPersistWired = true;
+        }
 
         const domainEl = document.getElementById('lessons-domain-filter');
         const typeEl = document.getElementById('lessons-type-filter');

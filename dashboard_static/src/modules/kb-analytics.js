@@ -101,6 +101,38 @@ async function loadKBChainData() {
 // MAIN REFRESH
 // =============================================================================
 
+// =============================================================================
+// KB CUSTOM DATE RANGE PERSISTENCE
+// =============================================================================
+
+const KB_DATES_KEY = 'kb_custom_dates_state';
+const KB_DATES_VERSION = 1;
+
+function saveKbCustomDates() {
+    try {
+        localStorage.setItem(KB_DATES_KEY, JSON.stringify({
+            version: KB_DATES_VERSION,
+            startDate: document.getElementById('kb-start-date')?.value || '',
+            endDate: document.getElementById('kb-end-date')?.value || '',
+        }));
+    } catch (e) {}
+}
+
+function loadKbCustomDates() {
+    try {
+        const saved = localStorage.getItem(KB_DATES_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!parsed.version || parsed.version !== KB_DATES_VERSION) {
+            localStorage.removeItem(KB_DATES_KEY); return;
+        }
+        const start = document.getElementById('kb-start-date');
+        const end = document.getElementById('kb-end-date');
+        if (start && parsed.startDate) start.value = parsed.startDate;
+        if (end && parsed.endDate) end.value = parsed.endDate;
+    } catch (e) {}
+}
+
 export async function refreshKBAnalyticsWidget() {
     showKBSkeleton('kb-themes-list', 'list');
     const svg = document.getElementById('kb-accumulation-svg');
@@ -110,6 +142,7 @@ export async function refreshKBAnalyticsWidget() {
         // Restore saved filter states
         restoreFilterToElement('kb-source-filter');
         restoreFilterToElement('kb-time-filter');
+        loadKbCustomDates();
 
         const filterEl = document.getElementById('kb-time-filter');
         const filter = filterEl ? filterEl.value : 'all';
@@ -606,6 +639,12 @@ export function applyKBTimeFilter() {
         if (endInput) endInput.style.display = 'none';
     }
 
+    saveKbCustomDates();
+    refreshKBAnalyticsWidget();
+}
+
+export function applyKBCustomDateRange() {
+    saveKbCustomDates();
     refreshKBAnalyticsWidget();
 }
 

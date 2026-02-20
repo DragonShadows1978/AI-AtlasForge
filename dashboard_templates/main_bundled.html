@@ -371,6 +371,13 @@
 
                     <span class="toolbar-divider"></span>
 
+                    <!-- Reset All Preferences Button -->
+                    <button class="toolbar-btn" onclick="document.getElementById('reset-prefs-modal').style.display='flex'" title="Reset all saved preferences and filter states" aria-label="Reset all preferences">
+                        &#9851; Reset Prefs
+                    </button>
+
+                    <span class="toolbar-divider"></span>
+
                     <!-- Widget Visibility Selector -->
                     <div class="widget-vis-selector" id="widget-vis-selector" tabindex="0" role="button"
                          aria-haspopup="true" aria-expanded="false" title="Show/hide widgets">
@@ -2836,6 +2843,25 @@
         </div>
     </div>
 
+
+    <!-- Reset All Preferences Confirmation Modal -->
+    <div id="reset-prefs-modal" class="modal" role="alertdialog" aria-modal="true" aria-labelledby="reset-prefs-title"
+         style="display: none;" onclick="if(event.target===this) this.style.display='none'">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h3 id="reset-prefs-title">Reset All Preferences?</h3>
+                <button class="modal-close" onclick="document.getElementById('reset-prefs-modal').style.display='none'" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>This will clear all saved filter states, sort orders, layout presets, and view preferences, then reload the page.</p>
+                <p style="color: var(--text-dim); font-size: 0.9em;">This cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="document.getElementById('reset-prefs-modal').style.display='none'">Cancel</button>
+                <button class="btn btn-danger" onclick="clearAllPreferences()">Reset All Preferences</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Widget Settings Popup (shared, mobile panel reordering) -->
     <div id="widget-settings-popup" role="menu" aria-label="Widget panel settings">

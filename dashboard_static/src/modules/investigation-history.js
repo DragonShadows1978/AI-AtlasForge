@@ -97,6 +97,48 @@ function highlightMatch(text, searchTerm) {
 }
 
 // ============================================================================
+// Filter State Persistence
+// ============================================================================
+
+const INV_FILTER_KEY = 'inv_filter_state';
+const INV_SCHEMA_VERSION = 1;
+
+function saveInvFilterState() {
+    try {
+        localStorage.setItem(INV_FILTER_KEY, JSON.stringify({
+            version: INV_SCHEMA_VERSION,
+            search: document.getElementById('inv-search-input')?.value || '',
+            status: document.getElementById('inv-status-filter')?.value || '',
+            sortBy: document.getElementById('inv-sort-by')?.value || '',
+            sortOrder: document.getElementById('inv-sort-order')?.value || '',
+            dateFrom: document.getElementById('inv-date-from')?.value || '',
+            dateTo: document.getElementById('inv-date-to')?.value || '',
+            searchContent: document.getElementById('inv-search-content')?.checked || false,
+        }));
+    } catch (e) { console.log('Could not save inv filter state:', e); }
+}
+
+function loadInvFilterState() {
+    try {
+        const saved = localStorage.getItem(INV_FILTER_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!parsed.version || parsed.version !== INV_SCHEMA_VERSION) {
+            localStorage.removeItem(INV_FILTER_KEY); return;
+        }
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+        setVal('inv-search-input', parsed.search);
+        setVal('inv-status-filter', parsed.status);
+        setVal('inv-sort-by', parsed.sortBy);
+        setVal('inv-sort-order', parsed.sortOrder);
+        setVal('inv-date-from', parsed.dateFrom);
+        setVal('inv-date-to', parsed.dateTo);
+        const cb = document.getElementById('inv-search-content');
+        if (cb) cb.checked = !!parsed.searchContent;
+    } catch (e) { console.log('Could not load inv filter state:', e); }
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
@@ -105,6 +147,20 @@ function highlightMatch(text, searchTerm) {
  * Called when the tab is first shown.
  */
 export async function initInvestigationHistory() {
+    // Restore filter state before loading so first query uses saved values
+    loadInvFilterState();
+
+    // Wire save to all filter controls
+    const wireChange = (id) => { const el = document.getElementById(id); if (el) el.addEventListener('change', saveInvFilterState); };
+    const wireInput = (id) => { const el = document.getElementById(id); if (el) el.addEventListener('input', saveInvFilterState); };
+    wireInput('inv-search-input');
+    wireChange('inv-status-filter');
+    wireChange('inv-sort-by');
+    wireChange('inv-sort-order');
+    wireChange('inv-date-from');
+    wireChange('inv-date-to');
+    wireChange('inv-search-content');
+
     await Promise.all([
         loadInvestigationStats(),
         loadAllTags(),

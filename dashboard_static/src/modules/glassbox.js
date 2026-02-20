@@ -20,11 +20,68 @@ let dateFrom = '';
 let dateTo = '';
 
 // =============================================================================
+// GLASSBOX UI PERSISTENCE
+// =============================================================================
+
+const GLASSBOX_UI_KEY = 'glassbox_ui_state';
+const GLASSBOX_UI_VERSION = 1;
+
+function saveGlassboxUiState() {
+    try {
+        const searchEl = document.getElementById('glassbox-search-input');
+        const fromEl = document.getElementById('glassbox-date-from');
+        const toEl = document.getElementById('glassbox-date-to');
+        localStorage.setItem(GLASSBOX_UI_KEY, JSON.stringify({
+            version: GLASSBOX_UI_VERSION,
+            search: searchEl?.value || searchQuery,
+            dateFrom: fromEl?.value || dateFrom,
+            dateTo: toEl?.value || dateTo,
+            selectedMissionId: selectedMissionId || null,
+        }));
+    } catch (e) {}
+}
+
+function loadGlassboxUiState() {
+    try {
+        const saved = localStorage.getItem(GLASSBOX_UI_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!parsed.version || parsed.version !== GLASSBOX_UI_VERSION) {
+            localStorage.removeItem(GLASSBOX_UI_KEY); return;
+        }
+        if (parsed.search) {
+            searchQuery = parsed.search;
+            const searchEl = document.getElementById('glassbox-search-input');
+            if (searchEl) searchEl.value = parsed.search;
+        }
+        if (parsed.dateFrom) {
+            dateFrom = parsed.dateFrom;
+            const fromEl = document.getElementById('glassbox-date-from');
+            if (fromEl) fromEl.value = parsed.dateFrom;
+        }
+        if (parsed.dateTo) {
+            dateTo = parsed.dateTo;
+            const toEl = document.getElementById('glassbox-date-to');
+            if (toEl) toEl.value = parsed.dateTo;
+        }
+        if (parsed.selectedMissionId) {
+            selectedMissionId = parsed.selectedMissionId;
+        }
+    } catch (e) {}
+}
+
+// =============================================================================
 // MAIN LOAD FUNCTION (called when GlassBox tab is shown)
 // =============================================================================
 
 export async function loadGlassboxTabData() {
     try {
+        // Restore persisted UI state on first call
+        if (!loadGlassboxTabData._initialized) {
+            loadGlassboxTabData._initialized = true;
+            loadGlassboxUiState();
+        }
+
         // Load missions list and stats in parallel
         const [missionsData, statsData] = await Promise.all([
             api(`/api/glassbox/missions?page=${currentPage}&limit=${pageLimit}${searchQuery ? '&search=' + encodeURIComponent(searchQuery) : ''}${dateFrom ? '&from=' + dateFrom : ''}${dateTo ? '&to=' + dateTo : ''}`),
@@ -118,6 +175,7 @@ export async function selectGlassboxMission(missionId) {
     if (!missionId) return;
 
     selectedMissionId = missionId;
+    saveGlassboxUiState();
 
     // Update dropdown selection
     const select = document.getElementById('glassbox-tab-mission-select');
@@ -418,6 +476,7 @@ export function closeGlassboxModal() {
 export function glassboxSearch(query) {
     searchQuery = query;
     currentPage = 1;
+    saveGlassboxUiState();
     loadGlassboxTabData();
 }
 
@@ -428,6 +487,7 @@ export function glassboxDateFilter() {
     dateFrom = fromEl ? fromEl.value : '';
     dateTo = toEl ? toEl.value : '';
     currentPage = 1;
+    saveGlassboxUiState();
     loadGlassboxTabData();
 }
 

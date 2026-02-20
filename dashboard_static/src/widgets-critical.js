@@ -708,6 +708,8 @@ const recState = {
 // Debounce timer for search
 let recSearchTimer = null;
 
+const REC_FILTER_SCHEMA_VERSION = 1;
+
 /**
  * Load saved filter state from localStorage
  */
@@ -716,6 +718,10 @@ function loadRecFilterState() {
         const saved = localStorage.getItem('rec_filter_state');
         if (saved) {
             const parsed = JSON.parse(saved);
+            if (!parsed.version || parsed.version !== REC_FILTER_SCHEMA_VERSION) {
+                localStorage.removeItem('rec_filter_state');
+                return;
+            }
             Object.assign(recState, parsed);
             // Restore UI state
             const complexityEl = document.getElementById('rec-complexity-filter');
@@ -745,6 +751,7 @@ function loadRecFilterState() {
 function saveRecFilterState() {
     try {
         const stateToSave = {
+            version: REC_FILTER_SCHEMA_VERSION,
             page: recState.page,
             perPage: recState.perPage,
             filters: recState.filters

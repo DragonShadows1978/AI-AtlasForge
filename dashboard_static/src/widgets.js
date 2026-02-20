@@ -1224,9 +1224,36 @@ let analyticsCache = {
     models: null
 };
 
+const ANALYTICS_FILTER_KEY = 'analytics_filter_state';
+const ANALYTICS_SCHEMA_VERSION = 1;
+
+function saveAnalyticsFilterState() {
+    try {
+        const select = document.getElementById('analytics-period-filter');
+        localStorage.setItem(ANALYTICS_FILTER_KEY, JSON.stringify({
+            version: ANALYTICS_SCHEMA_VERSION,
+            period: select ? select.value : '30',
+        }));
+    } catch (e) {}
+}
+
+function loadAnalyticsFilterState() {
+    try {
+        const saved = localStorage.getItem(ANALYTICS_FILTER_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (!parsed.version || parsed.version !== ANALYTICS_SCHEMA_VERSION) {
+            localStorage.removeItem(ANALYTICS_FILTER_KEY); return;
+        }
+        const el = document.getElementById('analytics-period-filter');
+        if (el && parsed.period) el.value = parsed.period;
+    } catch (e) {}
+}
+
 export async function applyAnalyticsPeriodFilter() {
     const select = document.getElementById('analytics-period-filter');
     currentAnalyticsPeriod = parseInt(select.value) || 30;
+    saveAnalyticsFilterState();
     const periodLabel = document.getElementById('analytics-trend-period');
     if (periodLabel) {
         if (currentAnalyticsPeriod === 0) {
@@ -1239,6 +1266,11 @@ export async function applyAnalyticsPeriodFilter() {
 }
 
 export async function refreshFullAnalytics() {
+    // Restore saved period filter (no-op if already applied via applyAnalyticsPeriodFilter)
+    loadAnalyticsFilterState();
+    const _sel = document.getElementById('analytics-period-filter');
+    if (_sel && _sel.value) currentAnalyticsPeriod = parseInt(_sel.value) || 30;
+
     try {
         // Fetch all analytics data in parallel
         const [summary, daily, stages, models] = await Promise.all([

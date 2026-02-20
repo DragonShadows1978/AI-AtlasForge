@@ -28,13 +28,16 @@ let currentSortDirection = 'desc'; // 'asc' or 'desc'
 
 // localStorage key for sort/filter persistence
 const REC_SORT_STORAGE_KEY = 'rec_sort_filter_state';
+const REC_SORT_SCHEMA_VERSION = 2; // v2 adds healthFilter field
 
 function saveRecSortState() {
     try {
         localStorage.setItem(REC_SORT_STORAGE_KEY, JSON.stringify({
+            version: REC_SORT_SCHEMA_VERSION,
             sortField: currentSortField,
             sortDirection: currentSortDirection,
-            tagFilter: currentTagFilter
+            tagFilter: currentTagFilter,
+            healthFilter: currentHealthFilter
         }));
     } catch (e) {
         console.log('Could not save rec sort state:', e);
@@ -46,15 +49,18 @@ function loadRecSortState() {
         const saved = localStorage.getItem(REC_SORT_STORAGE_KEY);
         if (!saved) return;
         const parsed = JSON.parse(saved);
+        // Version check: discard stale schemas cleanly
+        if (!parsed.version || parsed.version !== REC_SORT_SCHEMA_VERSION) {
+            localStorage.removeItem(REC_SORT_STORAGE_KEY);
+            return;
+        }
         if (parsed.sortField) {
             const sortSelect = document.getElementById('rec-sort-select');
             if (sortSelect) {
                 sortSelect.value = parsed.sortField;
-                // Only accept if the browser recognised the value (option exists)
                 if (sortSelect.value === parsed.sortField) {
                     currentSortField = parsed.sortField;
                 } else {
-                    // Stored value doesn't match any option — restore the default
                     sortSelect.value = currentSortField;
                 }
             } else {
@@ -70,6 +76,13 @@ function loadRecSortState() {
             currentTagFilter = parsed.tagFilter;
             const tagSelect = document.getElementById('rec-tag-filter');
             if (tagSelect) tagSelect.value = currentTagFilter;
+        }
+        if (parsed.healthFilter !== undefined) {
+            currentHealthFilter = parsed.healthFilter;
+            if (currentHealthFilter) {
+                const activeEl = document.querySelector(`.rec-health-stat.${currentHealthFilter.replace('_', '-')}`);
+                if (activeEl) activeEl.classList.add('active');
+            }
         }
     } catch (e) {
         console.log('Could not load rec sort state:', e);
@@ -1009,6 +1022,7 @@ export function filterByHealth(status) {
         if (activeEl) activeEl.classList.add('active');
     }
 
+    saveRecSortState(); // persist health filter selection
     applyFilters();
 }
 

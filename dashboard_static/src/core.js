@@ -254,6 +254,7 @@ export function copyToClipboard(text) {
 // =============================================================================
 
 const FILTER_STATE_KEY = 'atlasforge_filter_state';
+const FILTER_STATE_SCHEMA_VERSION = 1;
 
 /**
  * Save a filter value to localStorage
@@ -262,9 +263,17 @@ const FILTER_STATE_KEY = 'atlasforge_filter_state';
  */
 export function saveFilterState(filterId, value) {
     try {
-        const state = JSON.parse(localStorage.getItem(FILTER_STATE_KEY) || '{}');
-        state[filterId] = value;
-        localStorage.setItem(FILTER_STATE_KEY, JSON.stringify(state));
+        const existing = localStorage.getItem(FILTER_STATE_KEY);
+        let filters = {};
+        if (existing) {
+            const parsed = JSON.parse(existing);
+            if (parsed && typeof parsed === 'object') {
+                // Support both legacy flat map and new versioned wrapper
+                filters = parsed.version === FILTER_STATE_SCHEMA_VERSION ? (parsed.data || {}) : parsed;
+            }
+        }
+        filters[filterId] = value;
+        localStorage.setItem(FILTER_STATE_KEY, JSON.stringify({ version: FILTER_STATE_SCHEMA_VERSION, data: filters }));
     } catch (e) {
         console.warn('Failed to save filter state:', e);
     }
@@ -278,8 +287,13 @@ export function saveFilterState(filterId, value) {
  */
 export function getFilterState(filterId, defaultValue = '') {
     try {
-        const state = JSON.parse(localStorage.getItem(FILTER_STATE_KEY) || '{}');
-        return state[filterId] !== undefined ? state[filterId] : defaultValue;
+        const existing = localStorage.getItem(FILTER_STATE_KEY);
+        if (!existing) return defaultValue;
+        const parsed = JSON.parse(existing);
+        if (!parsed || typeof parsed !== 'object') return defaultValue;
+        // Support both legacy flat map and new versioned wrapper
+        const filters = parsed.version === FILTER_STATE_SCHEMA_VERSION ? (parsed.data || {}) : parsed;
+        return filters[filterId] !== undefined ? filters[filterId] : defaultValue;
     } catch (e) {
         console.warn('Failed to get filter state:', e);
         return defaultValue;
@@ -295,6 +309,44 @@ export function clearFilterState() {
     } catch (e) {
         console.warn('Failed to clear filter state:', e);
     }
+}
+
+// =============================================================================
+// GLOBAL PREFERENCE MANAGEMENT
+// =============================================================================
+
+/**
+ * Master list of all localStorage preference keys used across the dashboard.
+ * Used by "Reset All Preferences" to clear every persisted state at once.
+ */
+export const ALL_PREFERENCE_KEYS = [
+    'activeTab',
+    'cardStates',
+    'journalExpandedEntries',
+    'rec_sort_filter_state',
+    'rec_filter_state',
+    'atlasforge_filter_state',
+    'glassboxFilters',
+    'atlasforgeWidgetLayout',
+    'atlasforgeLayoutPresets',
+    'atlasforgeTilesLocked',
+    'atlasforgeWidgetVisibility',
+    'queue_notifications',
+    'inv_filter_state',
+    'analytics_filter_state',
+    'kb_custom_dates_state',
+    'lessons_search_state',
+    'glassbox_ui_state',
+];
+
+/**
+ * Clear all persisted dashboard preferences and reload the page.
+ */
+export function clearAllPreferences() {
+    ALL_PREFERENCE_KEYS.forEach(key => {
+        try { localStorage.removeItem(key); } catch (e) {}
+    });
+    location.reload();
 }
 
 /**

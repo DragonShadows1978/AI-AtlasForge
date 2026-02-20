@@ -20,6 +20,9 @@ const STORAGE_KEY = 'atlasforgeWidgetLayout';
 const PRESETS_KEY = 'atlasforgeLayoutPresets';
 const LOCK_STORAGE_KEY = 'atlasforgeTilesLocked';
 const VISIBILITY_STORAGE_KEY = 'atlasforgeWidgetVisibility';
+const LAYOUT_SCHEMA_VERSION = 1;
+const PRESETS_SCHEMA_VERSION = 1;
+const VISIBILITY_SCHEMA_VERSION = 1;
 
 /**
  * Dynamically discovers all widget cards present in the DOM at call time.
@@ -1457,7 +1460,7 @@ export function saveLayout() {
 
 function saveLayoutToStorage(layout) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: LAYOUT_SCHEMA_VERSION, layout }));
         console.log('Widget layout saved:', layout.length, 'widgets');
     } catch (e) {
         console.warn('Failed to save widget layout:', e);
@@ -1472,7 +1475,18 @@ export function restoreLayout() {
     if (!saved) return false;
 
     try {
-        const layout = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        let layout;
+        if (Array.isArray(parsed)) {
+            // Legacy unversioned array — accept as-is
+            layout = parsed;
+        } else if (parsed.version === LAYOUT_SCHEMA_VERSION && Array.isArray(parsed.layout)) {
+            layout = parsed.layout;
+        } else {
+            console.warn('Widget layout schema mismatch, resetting');
+            localStorage.removeItem(STORAGE_KEY);
+            return false;
+        }
         applyLayout(layout);
         console.log('Widget layout restored:', layout.length, 'widgets');
         return true;
@@ -1977,14 +1991,23 @@ function trapFocusInModal(modal) {
 function getHiddenWidgets() {
     try {
         const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
-        return stored ? JSON.parse(stored) : [];
+        if (!stored) return [];
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed; // legacy format
+        if (parsed.version === VISIBILITY_SCHEMA_VERSION && Array.isArray(parsed.hidden)) return parsed.hidden;
+        localStorage.removeItem(VISIBILITY_STORAGE_KEY);
+        return [];
     } catch {
         return [];
     }
 }
 
 function setHiddenWidgets(hiddenIds) {
-    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(hiddenIds));
+    try {
+        localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify({ version: VISIBILITY_SCHEMA_VERSION, hidden: hiddenIds }));
+    } catch (e) {
+        console.warn('Failed to save widget visibility:', e);
+    }
 }
 
 function isWidgetVisible(cardId) {
