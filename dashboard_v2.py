@@ -1722,6 +1722,21 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"[Snapshot] Failed to start scheduler: {e}")
 
+    # Verify af_engine is healthy at startup
+    try:
+        import sys as _sys
+        _af_root = str(BASE_DIR)
+        if _af_root not in _sys.path:
+            _sys.path.insert(0, _af_root)
+        from af_engine import StateManager as _StartupSM, STAGES as _StartupSTAGES
+        _startup_sm = _StartupSM(MISSION_PATH)
+        _startup_stage = _startup_sm.current_stage
+        print(f"[af_engine] Health OK — stage={_startup_stage}, stages={len(_StartupSTAGES)}")
+    except ImportError as e:
+        print(f"[af_engine] WARNING: Import failed: {e}")
+    except Exception as e:
+        print(f"[af_engine] WARNING: Health check failed: {e}")
+
     print("=" * 50)
     print("AI-AtlasForge Dashboard")
     print("         [MODULAR ARCHITECTURE]")

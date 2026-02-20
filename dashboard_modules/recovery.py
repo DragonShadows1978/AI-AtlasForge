@@ -26,6 +26,25 @@ def init_recovery_blueprint(mission_path, io_utils_module):
     io_utils = io_utils_module
 
 
+def _get_snapshot_summary() -> dict:
+    """Get a summary of SnapshotManager state for inclusion in recovery responses."""
+    try:
+        from mission_snapshot_manager import get_snapshot_manager, get_stale_backup_monitor
+        manager = get_snapshot_manager()
+        monitor = get_stale_backup_monitor()
+        latest = manager.get_latest_snapshot()
+        is_stale = monitor.check_staleness()
+        snapshots = manager.list_snapshots()
+        return {
+            "available": True,
+            "latest_snapshot": latest.to_dict() if latest else None,
+            "snapshot_count": len(snapshots),
+            "is_stale": is_stale,
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
 # =============================================================================
 # CRASH RECOVERY ROUTES
 # =============================================================================
@@ -49,7 +68,8 @@ def api_recovery_check():
                     "files_created": checkpoint.files_created,
                     "recovery_hint": checkpoint.recovery_hint,
                     "iteration": checkpoint.iteration,
-                    "cycle": checkpoint.cycle
+                    "cycle": checkpoint.cycle,
+                    "snapshot_data": _get_snapshot_summary(),
                 })
 
         # Also check for any incomplete missions (but don't trigger recovery modal)
@@ -72,7 +92,7 @@ def api_recovery_check():
                 "incomplete_missions": checkpoints
             })
 
-        return jsonify({"recovery_available": False})
+        return jsonify({"recovery_available": False, "snapshot_data": _get_snapshot_summary()})
     except Exception as e:
         return jsonify({"error": str(e), "recovery_available": False})
 

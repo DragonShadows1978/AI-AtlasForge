@@ -171,6 +171,19 @@ def api_health():
     except Exception:
         services["signal_file_writable"] = False
 
+    # Check af_engine module health
+    try:
+        import sys as _sys
+        _af_root = str(Path(__file__).parent.parent)
+        if _af_root not in _sys.path:
+            _sys.path.insert(0, _af_root)
+        from af_engine import StateManager as _SM
+        _sm_check = _SM(MISSION_PATH)
+        _ = _sm_check.current_stage  # force state load
+        services["af_engine"] = True
+    except Exception:
+        services["af_engine"] = False
+
     elapsed_ms = (time.time() - start) * 1000
     overall_healthy = all(services.values())
 
@@ -186,6 +199,54 @@ def api_health():
         "services": services,
         "latency_ms": round(elapsed_ms, 2)
     })
+
+
+@core_bp.route('/api/engine/status')
+def api_engine_status():
+    """Live engine status endpoint reading directly from af_engine."""
+    import time as _time
+    import sys as _sys
+    _start = _time.time()
+
+    engine_data = {
+        "available": False,
+        "version": None,
+        "mission_id": None,
+        "stage": None,
+        "iteration": None,
+        "cycle": None,
+        "cycle_budget": None,
+        "stages": None,
+        "error": None,
+    }
+
+    try:
+        _af_root = str(Path(__file__).parent.parent)
+        if _af_root not in _sys.path:
+            _sys.path.insert(0, _af_root)
+
+        from af_engine import StateManager, STAGES
+        sm = StateManager(MISSION_PATH)
+        engine_data.update({
+            "available": True,
+            "mission_id": sm.mission_id,
+            "stage": sm.current_stage,
+            "iteration": sm.iteration,
+            "cycle": sm.cycle_number,
+            "cycle_budget": sm.cycle_budget,
+            "stages": STAGES,
+            "error": None,
+        })
+    except ImportError as e:
+        engine_data["error"] = f"af_engine not importable: {e}"
+    except Exception as e:
+        engine_data["error"] = str(e)
+
+    elapsed_ms = (_time.time() - _start) * 1000
+    engine_data["latency_ms"] = round(elapsed_ms, 2)
+    engine_data["timestamp"] = datetime.now().isoformat()
+
+    return jsonify(engine_data)
 
 
 @core_bp.route('/api/start/<mode>', methods=['POST'])
