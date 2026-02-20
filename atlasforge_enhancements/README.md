@@ -308,7 +308,7 @@ atlasforge_enhancements/
 
 ## Integration Points
 
-### af_engine.py
+### af_engine/ (Modular Engine Package)
 
 ```python
 enhancer = AtlasForgeEnhancer(mission_id)

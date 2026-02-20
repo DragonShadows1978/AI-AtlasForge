@@ -367,7 +367,7 @@ adversarial_testing/
 The adversarial testing framework is integrated into the R&D Engine's TESTING stage.
 
 ```python
-# In af_engine.py TESTING prompt:
+# In af_engine/ TESTING stage handler:
 from adversarial_testing import AdversarialRunner, AdversarialConfig
 from experiment_framework import ModelType
 

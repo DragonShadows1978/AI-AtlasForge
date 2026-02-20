@@ -2,7 +2,7 @@
 af_engine.integrations.transcript_archival - Transcript Archival Integration
 
 This integration archives Claude conversation transcripts when a mission completes.
-It calls the archive_mission_transcripts function from af_engine.py to:
+It calls the archive_mission_transcripts function from af_engine/core/archival.py to:
 1. Find all .jsonl transcripts in the mission time window
 2. Copy them to artifacts/transcripts/{mission_id}/
 3. Generate a manifest with token usage statistics
