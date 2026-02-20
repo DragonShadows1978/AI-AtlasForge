@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_e7fe94c3",
+  "stage": "COMPLETE",
+  "timestamp": "2026-02-20T10:23:04.109888",
+  "snapshot_number": 11,
+  "event_data": {
+    "final_stage": "CYCLE_END",
+    "total_iterations": 0,
+    "cycle_count": 1,
+    "mission_workspace": "/home/vader/AI-AtlasForge/workspace/atlasforge_conductor",
+    "mission_dir": "/home/vader/AI-AtlasForge/missions/mission_e7fe94c3",
+    "project_name": "atlasforge_conductor",
+    "created_at": "2026-02-20T10:08:57.067280",
+    "started_at": "2026-02-20T10:08:57.067280"
+  }
+}
