@@ -26,6 +26,46 @@ let savedScrollY = 0;
 let currentSortField = 'priority_score';
 let currentSortDirection = 'desc'; // 'asc' or 'desc'
 
+// localStorage key for sort/filter persistence
+const REC_SORT_STORAGE_KEY = 'rec_sort_filter_state';
+
+function saveRecSortState() {
+    try {
+        localStorage.setItem(REC_SORT_STORAGE_KEY, JSON.stringify({
+            sortField: currentSortField,
+            sortDirection: currentSortDirection,
+            tagFilter: currentTagFilter
+        }));
+    } catch (e) {
+        console.log('Could not save rec sort state:', e);
+    }
+}
+
+function loadRecSortState() {
+    try {
+        const saved = localStorage.getItem(REC_SORT_STORAGE_KEY);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        if (parsed.sortField) {
+            currentSortField = parsed.sortField;
+            const sortSelect = document.getElementById('rec-sort-select');
+            if (sortSelect) sortSelect.value = currentSortField;
+        }
+        if (parsed.sortDirection) {
+            currentSortDirection = parsed.sortDirection;
+            const btn = document.getElementById('rec-sort-dir-btn');
+            if (btn) btn.textContent = currentSortDirection === 'desc' ? '\u2193 Desc' : '\u2191 Asc';
+        }
+        if (parsed.tagFilter !== undefined) {
+            currentTagFilter = parsed.tagFilter;
+            const tagSelect = document.getElementById('rec-tag-filter');
+            if (tagSelect) tagSelect.value = currentTagFilter;
+        }
+    } catch (e) {
+        console.log('Could not load rec sort state:', e);
+    }
+}
+
 // Merge candidates state (for auto-prompt)
 let pendingMergeCandidates = [];
 let newSuggestionId = null;
@@ -106,6 +146,8 @@ export async function loadRecommendations() {
     allRecommendations = [...recommendations];
     // Reset pagination on reload
     currentPage = 1;
+    // Restore persisted sort/filter before rendering
+    loadRecSortState();
     // Apply current sort before rendering
     applySortToRecommendations();
     console.log('[DEBUG] About to call renderRecommendations');
@@ -731,6 +773,7 @@ export function sortRecommendations() {
     if (sortSelect) {
         currentSortField = sortSelect.value;
     }
+    saveRecSortState();
     applySortToRecommendations();
     renderRecommendations();
 }
@@ -744,6 +787,7 @@ export function toggleSortDirection() {
     if (btn) {
         btn.textContent = currentSortDirection === 'desc' ? '\u2193 Desc' : '\u2191 Asc';
     }
+    saveRecSortState();
     applySortToRecommendations();
     renderRecommendations();
 }
@@ -931,6 +975,7 @@ export async function addNewSuggestion(title, description = '') {
 export function filterByTag() {
     const select = document.getElementById('rec-tag-filter');
     currentTagFilter = select ? select.value : '';
+    saveRecSortState();
     applyFilters();
 }
 
