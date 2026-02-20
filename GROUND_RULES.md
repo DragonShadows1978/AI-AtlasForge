@@ -457,7 +457,7 @@ These run automatically - you don't need to invoke them, but be aware your explo
 **Core files are automatically backed up** before any Edit or Write operation.
 
 Protected files include:
-- `dashboard_v2.py`, `af_engine.py`, `claude_autonomous.py`
+- `dashboard_v2.py`, `af_engine/` (modular engine package), `claude_autonomous.py`
 - `exploration_hooks.py`, `io_utils.py`, `GROUND_RULES.md`
 - All files in `atlasforge_enhancements/`
 - GlassBox modules in `workspace/glassbox/`

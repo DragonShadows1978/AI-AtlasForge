@@ -17,7 +17,7 @@ This document describes the system architecture of AI-AtlasForge.
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Core Engine Layer                         │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                      af_engine.py                           ││
+│  │                    af_engine/ (Modular Engine Package)       ││
 │  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌──────────────┐ ││
 │  │  │ PLANNING  │→│ BUILDING  │→│ TESTING   │→│  ANALYZING   │ ││
 │  │  └───────────┘ └───────────┘ └───────────┘ └──────────────┘ ││
@@ -67,9 +67,9 @@ This document describes the system architecture of AI-AtlasForge.
 - `run_rd_loop()` - Main R&D execution loop
 - `send_to_claude()` - API communication
 
-### af_engine.py
+### af_engine/ (Modular Engine Package)
 
-**Purpose**: State machine for mission execution.
+**Purpose**: State machine for mission execution, implemented as a modular package.
 
 **Responsibilities**:
 - Manage stage transitions
@@ -89,9 +89,9 @@ PLANNING → BUILDING → TESTING → ANALYZING → CYCLE_END → COMPLETE
 ```
 
 **Key Classes**:
-- `RDEngine` - Main state machine
-- `StagePromptGenerator` - Creates prompts for each stage
-- `ToolRestrictionChecker` - Enforces stage constraints
+- `RDMissionController` - Main orchestrator (af_engine/orchestrator.py)
+- `StageRegistry` - Registers and resolves stage handlers (af_engine/stage_registry.py)
+- Stage handlers in `af_engine/stages/` - One handler per stage
 
 ### dashboard_v2.py
 
@@ -210,19 +210,19 @@ Automatically tracks:
          ↓
 2. claude_autonomous.py loads mission
          ↓
-3. af_engine.py generates PLANNING prompt
+3. af_engine/ orchestrator generates PLANNING prompt
          ↓
 4. Claude creates implementation plan
          ↓
-5. af_engine.py transitions to BUILDING
+5. af_engine/ orchestrator transitions to BUILDING
          ↓
 6. Claude implements solution
          ↓
-7. af_engine.py transitions to TESTING
+7. af_engine/ orchestrator transitions to TESTING
          ↓
 8. Claude + adversarial agents test
          ↓
-9. af_engine.py transitions to ANALYZING
+9. af_engine/ orchestrator transitions to ANALYZING
          ↓
 10. Claude evaluates results
          ↓
@@ -246,10 +246,10 @@ decision_graph.py ─────┘         │
 
 ### Adding a New Stage
 
-1. Add stage enum in `af_engine.py`
-2. Create prompt generator in `_get_stage_prompt()`
+1. Add stage handler in `af_engine/stages/`
+2. Register handler in `af_engine/stage_registry.py`
 3. Define tool restrictions in `init_guard.py`
-4. Update transition logic in `advance_stage()`
+4. Update transition logic in `af_engine/orchestrator.py`
 
 ### Adding Dashboard Widgets
 
@@ -309,7 +309,7 @@ decision_graph.py ─────┘         │
 ```
 AI-AtlasForge/
 ├── claude_autonomous.py    # Main entry point
-├── af_engine.py            # Stage state machine
+├── af_engine/              # Modular engine package (stage state machine)
 ├── dashboard_v2.py         # Web dashboard
 ├── atlasforge_config.py    # Centralized config
 ├── atlasforge_tray.py      # System tray (optional)
