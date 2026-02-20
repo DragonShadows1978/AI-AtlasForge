@@ -1054,7 +1054,7 @@ def _wait_for_new_mission_with_retry(
 
     1B. **Queue Signal File**: Check queue_auto_start_signal.json for queue missions
        - Detects missions started from the mission queue
-       - Written by af_engine._create_mission_from_queue_item()
+       - Written by af_engine/orchestrator.py's StageOrchestrator._create_mission_from_queue_item()
 
     2. **Mission File (Fallback)**: Poll mission.json for changes
        - Works even if signal file mechanism fails

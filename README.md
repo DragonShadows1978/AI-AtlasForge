@@ -263,7 +263,7 @@ AI-AtlasForge/
 |   +-- orchestrator.py     # StageOrchestrator
 |   +-- stages/             # Stage handlers
 |   +-- integrations/       # Event-driven integrations
-+-- af_engine_legacy.py     # Legacy engine (fallback)
++-- .af_archived/           # Archived legacy files (pre-modular engine backups)
 +-- context_watcher/        # Context monitoring module
 |   +-- context_watcher.py  # Token + time-based handoff
 |   +-- tests/              # Context watcher tests
