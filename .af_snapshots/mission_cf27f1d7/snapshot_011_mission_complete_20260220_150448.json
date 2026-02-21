@@ -1,0 +1,17 @@
+{
+  "snapshot_type": "mission_complete",
+  "mission_id": "mission_cf27f1d7",
+  "stage": "COMPLETE",
+  "timestamp": "2026-02-20T15:04:48.468052",
+  "snapshot_number": 11,
+  "event_data": {
+    "final_stage": "CYCLE_END",
+    "total_iterations": 0,
+    "cycle_count": 1,
+    "mission_workspace": "/home/vader/AI-AtlasForge/workspace/TestInvokeLlmTimeout",
+    "mission_dir": "/home/vader/AI-AtlasForge/missions/mission_cf27f1d7",
+    "project_name": "TestInvokeLlmTimeout",
+    "created_at": "2026-02-20T14:59:20.358366",
+    "started_at": "2026-02-20T14:59:20.358366"
+  }
+}
