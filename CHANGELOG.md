@@ -1,5 +1,95 @@
 # Changelog
 
+## [1.10.0] - 2026-02-22
+
+### Added
+
+- v1.8.0: Google Gemini provider support
+- v1.7.1: Update PyPI metadata with Codex support in README
+- Add Codex support to README and changelog
+- Update README for v1.5.0 features
+- Add HTTPS/SSL support for dashboard
+- v1.3.4: Add semantic search dashboard module
+- Add workspace deduplication with smart project naming
+- Fix mission suggestions loading + add WebSocket events
+- Add Related Projects section linking to AI-AfterImage, fix pyproject.toml license
+
+### Changed
+
+- Release v1.8.7 - Widget settings popup, collapsed card improvements
+- Release v1.8.6 - Widget controls, token sanity check, dashboard improvements
+- v1.6.3: Version bump for PyPI release
+- Release v1.5.1: Improved version checker
+- [Auto] Dashboard update from mission mission_938d2123
+- [Auto] Dashboard update from mission mission_e8ecb36e
+- [Auto] Dashboard update from mission mission_cd7eb987
+- [Auto] Dashboard update from mission mission_0e18dceb
+- [Auto] Dashboard update from mission mission_6ee0cf34
+- Revert "[Auto] Dashboard update from mission mission_c6140e2e"
+- [Auto] Dashboard update from mission mission_c6140e2e
+- Release v1.4.0: Major refactoring and engine migration
+- [Auto] Dashboard update from mission mission_0a7b9841
+- v1.3.6: Minor updates
+- [Auto] Dashboard update from mission mission_64d51f7f
+- [Auto] Dashboard update from mission mission_6f914c0b
+- [Auto] Dashboard update from mission mission_c1c4a4e8
+- [Auto] Dashboard update from mission mission_2b356be9
+- [Auto] Dashboard update from mission mission_35e142d2
+- [Auto] Dashboard update from mission mission_f13f7848
+
+### Fixed
+
+- Release v1.9.1 - Dashboard persistence and stage gate fixes
+- Release v1.8.5 - CLAUDECODE env fix and mission completions
+- v1.8.3: Test harness improvements and stability fixes
+- v1.8.2: Bug fixes for null handling and storage fallback
+- v1.8.1: Fix dashboard services configuration
+- v1.6.9 - GlassBox visualization fixes
+- v1.6.8 - Session/timer fixes and conductor singleton
+- v1.6.7 - Fix conductor JSON parsing bug
+- v1.6.5: Release with mission f14912e5 fixes
+- v1.6.4: Version bump for PyPI release (correct source)
+- v1.6.2: ContextWatcher fixes and plan mode disabled
+- Fix: Use CLI subscription for Haiku instead of API key
+- Fix mission queue auto-start: conductor now detects queue signal
+- Release v1.4.1: Fix mission queue race conditions
+- v1.3.5: Major bug fixes
+- Fix race condition in mission suggestions storage
+- Fix AfterImage dashboard to bind 0.0.0.0 for remote access
+- Fix BASE_DIR import bug in 3 files
+- Fix multi-part dashboard and mission system issues
+- Fix dashboard widget cascade failure
+
+### Removed
+
+- v1.8.4 - Handoff overhaul, widget visibility, drag-drop reordering
+- Remove auto-generated CI workflow (not needed for release)
+
+### Other
+
+- Release v1.9.0 - Modular engine only, legacy af_engine.py retired
+- v1.7.0: Ground rules, context watcher overhaul, experiment framework
+- Release v1.6.0 - ContextWatcher & StenoAI
+- Release v1.5.0: Modular Engine & Mission Queue System
+- Release v1.4.3: Version status indicators in dashboard header
+- Release v1.4.2: Dashboard header redesign
+- Enable AfterImage web dashboard by default
+- Auto-start AfterImage embedder daemon with dashboard
+- Streamline installation process for better accessibility
+
+### Stats
+
+```
+ timeout_budget.py                                  |   50 +-
+ verify.sh                                          |  353 ++
+ vision                                             |    1 +
+ websocket_events.py                                |  644 ++++
+ 296 files changed, 54256 insertions(+), 1771 deletions(-)
+```
+
+_Full diff: `git diff v1.0.0..v1.10.0`_
+
+
 All notable changes to AI-AtlasForge will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
