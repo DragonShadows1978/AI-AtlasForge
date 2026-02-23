@@ -91,12 +91,13 @@ def create_release_commit(repo_root: Path, version: str, description: str, tag: 
         cwd=repo_root, capture_output=True, text=True, timeout=30,
     )
     if result.returncode != 0:
-        if "nothing to commit" in (result.stdout + result.stderr):
+        combined = result.stdout + result.stderr
+        if "nothing to commit" in combined or "no changes added to commit" in combined:
             print("No uncommitted changes to include in release commit.")
             print("The real commits listed above are already committed.")
             # Still create a synthetic release tag/marker if requested
         else:
-            print(f"ERROR: Commit failed: {result.stderr}")
+            print(f"ERROR: Commit failed: {result.stderr or result.stdout}")
             return False
     else:
         print(f"✓ Release commit created: {commit_msg}")
