@@ -921,6 +921,56 @@
                 </div>
             </div>
 
+            <!-- Mission Params Widget -->
+            <div class="card" id="mission-params-widget-card">
+                <div class="card-header" onclick="toggleCard('mission-params-widget')">
+                    <h3>Mission Parameters <span id="param-health-badge" class="health-badge health-unknown" title="Parameter health">&#9679;</span></h3>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="mission-params-cycle-budget">-</div>
+                            <div class="analytics-stat-label">Cycle Budget</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="mission-params-max-iter">-</div>
+                            <div class="analytics-stat-label">Max Iterations</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="mission-params-cycle">-</div>
+                            <div class="analytics-stat-label">Current Cycle</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="mission-params-stage">-</div>
+                            <div class="analytics-stat-label">Stage</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box" style="grid-column: span 2;">
+                            <div class="analytics-stat-value" id="mission-params-provider">-</div>
+                            <div class="analytics-stat-label">LLM Provider</div>
+                        </div>
+                    </div>
+                    <div id="mission-params-audit" style="margin-top: 6px; font-size: 0.82em; text-align: center;"></div>
+                    <!-- Override details table (shown only when override_count > 0) -->
+                    <div id="param-override-table" style="display:none; margin-top:6px;"></div>
+                    <div style="margin-top: 4px; font-size: 0.75em; color: var(--text-dim); text-align: center;">
+                        ID: <span id="mission-params-id">-</span>
+                    </div>
+                    <!-- Trend chart (lazy-loaded on widget open) -->
+                    <div id="param-trend-container" style="margin-top:10px; display:none;">
+                        <div style="font-size:0.78em; color:var(--text-dim); margin-bottom:4px; text-align:center;">Parameter Trend (last 20 missions)</div>
+                        <canvas id="param-trend-chart" height="110"></canvas>
+                    </div>
+                    <div style="margin-top:6px; text-align:center;">
+                        <button onclick="toggleParamTrend()" style="font-size:0.75em; padding:2px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer;">Trend</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Validation Stats Widget -->
             <!-- Source Quality Widget -->
             <!-- KB Analytics Widget -->

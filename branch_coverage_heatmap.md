@@ -1,0 +1,129 @@
+# Branch Coverage Heatmap — atlasforge_conductor.py
+
+Generated: 2026-02-21 04:14:55
+
+---
+
+## Summary
+
+| Metric | Value |
+|---|---|
+| Total statements | 906 |
+| Covered statements | 877 (96.8%) |
+| Missing statements | 29 |
+| Total branches | 276 |
+| Covered branches | 270 (97.8%) |
+| Missing branches | 6 |
+| **Branch coverage** | **97.8%** |
+| Mission target | **85%+** ✅ |
+
+---
+
+## Heat Scale
+
+| Icon | Range | Meaning |
+|---|---|---|
+| ✅ | 100% | Perfect coverage |
+| 🟢 | 90–99% | Excellent coverage |
+| 🟡 | 75–89% | Good coverage |
+| 🟠 | 50–74% | Needs attention |
+| 🔴 | 0–49% | Critical gap |
+
+---
+
+## Per-Function Branch Heatmap
+
+| Heat | Function | Lines | Branches | Covered | % | Missing Arcs |
+|---|---|---|---|---|---|---|
+| 🟡 | `_is_valid_mission` | 958–1004 | 8 | 7 | 88% | 1001->1002 |
+| 🟢 | `run_rd_mode` | 1312–1891 | 94 | 92 | 98% | 1712->1714, 1769->1771 |
+| ✅ | `_env_flag_enabled` | 172–177 | 2 | 2 | 100% |  |
+| ✅ | `get_llm_provider` | 195–202 | 2 | 2 | 100% |  |
+| ✅ | `build_llm_command` | 205–257 | 18 | 18 | 100% |  |
+| ✅ | `acquire_conductor_lock` | 269–291 | 2 | 2 | 100% |  |
+| ✅ | `release_conductor_lock` | 294–306 | 2 | 2 | 100% |  |
+| ✅ | `add_to_memory` | 359–373 | 4 | 4 | 100% |  |
+| ✅ | `update_fn` | 361–371 | 4 | 4 | 100% |  |
+| ✅ | `send_to_chat` | 383–401 | 4 | 4 | 100% |  |
+| ✅ | `update_history` | 387–398 | 4 | 4 | 100% |  |
+| ✅ | `check_human_message` | 404–409 | 2 | 2 | 100% |  |
+| ✅ | `remove_pid` | 424–426 | 2 | 2 | 100% |  |
+| ✅ | `terminate_active_claude` | 444–463 | 2 | 2 | 100% |  |
+| ✅ | `invoke_llm` | 466–600 | 24 | 24 | 100% |  |
+| ✅ | `_find_balanced_json` | 603–643 | 18 | 18 | 100% |  |
+| ✅ | `extract_json_from_response` | 665–727 | 6 | 6 | 100% |  |
+| ✅ | `invoke_haiku_summary` | 756–830 | 8 | 8 | 100% |  |
+| ✅ | `get_recent_chat_context` | 833–859 | 4 | 4 | 100% |  |
+| ✅ | `_wait_for_new_mission_with_retry` | 1037–1243 | 34 | 34 | 100% |  |
+| ✅ | `_clear_signal_file` | 1246–1256 | 2 | 2 | 100% |  |
+| ✅ | `_clear_queue_signal_file` | 1259–1269 | 2 | 2 | 100% |  |
+| ✅ | `get_mission_workspace` | 1272–1282 | 4 | 4 | 100% |  |
+| ✅ | `on_context_handoff` | 1499–1565 | 12 | 12 | 100% |  |
+| ✅ | `run_free_mode` | 1935–2010 | 10 | 10 | 100% |  |
+| ✅ | `main` | 2017–2049 | 16 | 16 | 100% |  |
+
+---
+
+## Functions with 100% Branch Coverage
+
+| Function | Lines | Branches |
+|---|---|---|
+| `_wait_for_new_mission_with_retry` | 1037–1243 | 34 |
+| `invoke_llm` | 466–600 | 24 |
+| `build_llm_command` | 205–257 | 18 |
+| `_find_balanced_json` | 603–643 | 18 |
+| `main` | 2017–2049 | 16 |
+| `on_context_handoff` | 1499–1565 | 12 |
+| `run_free_mode` | 1935–2010 | 10 |
+| `invoke_haiku_summary` | 756–830 | 8 |
+| `extract_json_from_response` | 665–727 | 6 |
+| `add_to_memory` | 359–373 | 4 |
+| `update_fn` | 361–371 | 4 |
+| `send_to_chat` | 383–401 | 4 |
+| `update_history` | 387–398 | 4 |
+| `get_recent_chat_context` | 833–859 | 4 |
+| `get_mission_workspace` | 1272–1282 | 4 |
+| `_env_flag_enabled` | 172–177 | 2 |
+| `get_llm_provider` | 195–202 | 2 |
+| `acquire_conductor_lock` | 269–291 | 2 |
+| `release_conductor_lock` | 294–306 | 2 |
+| `check_human_message` | 404–409 | 2 |
+| `remove_pid` | 424–426 | 2 |
+| `terminate_active_claude` | 444–463 | 2 |
+| `_clear_signal_file` | 1246–1256 | 2 |
+| `_clear_queue_signal_file` | 1259–1269 | 2 |
+
+---
+
+## Remaining Uncovered Branch Arcs
+
+These arcs represent the 10 remaining uncovered branches (of 276 total).
+Most are module-level import guards or `__name__ == '__main__'` paths
+that cannot be exercised without actually running the script directly.
+
+| Arc | Source Line | Destination | Context |
+|---|---|---|---|
+| `52->54` | 52 | 54 | Module-level import guard — adapter_path already in sys.path |
+| `96->99` | 96 | 99 | Module-level import guard — conductor_path already in sys.path |
+| `288->291` | 288 | 291 | acquire_conductor_lock — BlockingIOError with fd open |
+| `1001->1002` | 1001 | 1002 | _is_valid_mission — empty dict {} |
+| `1579->1586` | 1579 | 1586 | run_rd_mode — context_session_id falsy (watcher returned None) |
+| `1712->1714` | 1712 | 1714 | run_rd_mode — blocking error with non-None error_info |
+| `1769->1771` | 1769 | 1771 | run_rd_mode — timeout error with non-None error_info |
+| `1800->1807` | 1800 | 1807 | run_rd_mode — format correction: corrected_text is falsy |
+| `2039->2038` | 2039 | 2038 | main() — fallback mode loop continuation (>1 argv) |
+| `2052->2053` | 2052 | 2053 | __name__ == '__main__' guard |
+
+---
+
+## Notes
+
+- **Module-level import guards** (lines 52->54, 96->99, 2052->2053) are
+  structurally unreachable in test context because the imports succeed
+  before tests run. These 3 arcs are acceptable noise.
+- **`__name__ == '__main__'`** (arc 2052->2053) only fires when the module
+  is executed directly — not importable in tests.
+- The remaining 7 arcs represent genuine logic paths that require
+  precise mock state combinations.
+
+_Report generated by `generate_heatmap.py` on 2026-02-21 04:14:55_

@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+from .mission_config import DEFAULT_CYCLE_BUDGET, DEFAULT_MAX_ITERATIONS
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,20 +111,20 @@ class StateManager:
             raise
 
     def _get_default_mission(self) -> Dict[str, Any]:
-        """Get default mission structure."""
+        """Get default mission structure. Uses MissionConfig canonical defaults."""
         return {
             "mission_id": "default",
             "problem_statement": "No mission defined. Please set a mission.",
             "current_stage": "PLANNING",
             "iteration": 0,
-            "max_iterations": 10,
+            "max_iterations": DEFAULT_MAX_ITERATIONS,
             "preferences": {},
             "success_criteria": [],
             "artifacts": {"plan": None, "code": [], "tests": []},
             "history": [],
             "created_at": datetime.now().isoformat(),
-            # Cycle iteration fields
-            "cycle_budget": 1,
+            # Cycle iteration fields — canonical defaults from mission_config
+            "cycle_budget": DEFAULT_CYCLE_BUDGET,
             "current_cycle": 1,
             "cycle_history": [],
             "original_problem_statement": None,

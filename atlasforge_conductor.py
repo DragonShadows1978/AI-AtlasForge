@@ -133,6 +133,24 @@ CONDUCTOR_LOCK_PATH = BASE_DIR / "atlasforge_conductor.lock"
 # Global file descriptor for conductor lock
 _conductor_lock_fd = None
 
+# =============================================================================
+# GIT COMMIT STRATEGY
+# =============================================================================
+# Real code changes: Use scripts/release_workflow.py to create clean
+#                    "Release vX.X.X - description" commits on main.
+#
+# Mission artifacts (.af_snapshots/, .af_archives/, atlasforge_conductor.lock,
+#                    .mutmut-cache, coverage*.json, mutants/):
+#                    Gitignored — never staged or committed to main.
+#
+# Checkpoint commits: Routed to 'af-missions/checkpoints' orphan branch by
+#                     GitIntegration (af_engine/integrations/git.py).
+#                     Set AF_GIT_STRATEGY=disabled to suppress all git commits.
+#
+# To clean current state (squash 244 [AF] commits ahead of origin/main):
+#     python3 scripts/clean_push.py --execute
+# =============================================================================
+
 # Ensure directories exist
 STATE_DIR.mkdir(exist_ok=True)
 WORKSPACE_DIR.mkdir(exist_ok=True)
@@ -1378,6 +1396,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
     cycle_count = 0
     timeout_retries = 0  # Track consecutive timeout failures
     parse_failure_count = 0  # Track consecutive JSON parse failures (separate from transport)
+    _announced_mission_id = None  # Track which mission we've announced to avoid duplicate announcements
 
     try:
         while running:
@@ -1385,6 +1404,14 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             state["total_cycles"] = state.get("total_cycles", 0) + 1
 
             current_stage = controller.mission.get("current_stage", "PLANNING")
+
+            # Announce mission start parameters once per mission (when mission_id changes)
+            _current_mission_id = controller.mission.get("mission_id")
+            if _current_mission_id and _current_mission_id != _announced_mission_id:
+                _cb = controller.mission.get("cycle_budget", 1)
+                _mi = controller.mission.get("max_iterations", 10)
+                send_to_chat(f"[MISSION] {_current_mission_id} | cycle_budget={_cb} cycles | max_iterations={_mi} per cycle")
+                _announced_mission_id = _current_mission_id
             logger.info(f"=== R&D Cycle {cycle_count} | Stage: {current_stage} ===")
 
             # Check for graceful shutdown request (takeover in progress)

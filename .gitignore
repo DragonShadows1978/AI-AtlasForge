@@ -166,3 +166,16 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.xml
+
+# ------ AtlasForge Runtime Artifacts (never commit these) ------
+# These are generated automatically during mission execution and must NOT be committed to main.
+# Mission recovery relies on filesystem state (state/, .af_snapshots/ on disk), NOT on git history.
+.af_snapshots/
+.af_archives/
+.af_checkpoints/
+atlasforge_conductor.lock
+.mutmut-cache
+coverage.json
+coverage_full.json
+coverage_baseline.json
+mutants/
