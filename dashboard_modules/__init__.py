@@ -70,6 +70,7 @@ from .semantic import semantic_bp, init_semantic_blueprint
 from .version_checker import version_bp, init_version_blueprint
 from .bundle_version import get_bundle_version, init_bundle_version
 from .artifact_health import artifact_health_bp, init_artifact_health_blueprint
+from .mission_params import mission_params_bp, init_mission_params_blueprint, get_mission_params
 
 __all__ = [
     # Blueprints
@@ -99,6 +100,10 @@ __all__ = [
     # Artifact health
     'artifact_health_bp',
     'init_artifact_health_blueprint',
+    # Mission params blueprint
+    'mission_params_bp',
+    'init_mission_params_blueprint',
+    'get_mission_params',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]

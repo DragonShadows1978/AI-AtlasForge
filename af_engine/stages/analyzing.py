@@ -54,6 +54,11 @@ Tasks:
 3. If tests failed: Diagnose issues and plan fixes
 4. Document analysis in {research_dir}/analysis.md
 
+TERMINOLOGY (use these terms accurately in your reports and messages):
+- **Iteration**: One ANALYZING→BUILDING loop within a single cycle. The engine tracks this as "iteration".
+- **Cycle**: One complete PLANNING→BUILDING→TESTING→ANALYZING pass. The engine tracks this as "cycle".
+- Do NOT call iterations "cycles" in your reports — they are different things.
+
 Respond with JSON:
 {{
     "status": "success" | "needs_revision" | "needs_replanning",

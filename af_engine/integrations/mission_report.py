@@ -54,11 +54,27 @@ class MissionReportIntegration(BaseIntegrationHandler):
         StageEvent.MISSION_COMPLETED,
     ]
 
+    # Placeholder/generic titles that indicate a low-quality LLM response
+    _PLACEHOLDER_TITLES = frozenset({
+        "follow-up mission",
+        "follow up mission",
+        "untitled mission",
+        "continue work",
+        "next mission",
+        "follow up",
+        "continuation",
+        "next steps",
+        "a concise title for the recommended next mission",
+        "recommended next mission",
+        "new mission",
+    })
+
     def __init__(self, mission_logs_dir: Optional[Path] = None):
         """Initialize the mission report integration."""
         super().__init__()
         self.mission_logs_dir = mission_logs_dir or MISSION_LOGS_DIR
         self.mission_logs_dir.mkdir(parents=True, exist_ok=True)
+        self._processed_missions: set = set()  # deduplication guard against double-fire
 
     def on_mission_completed(self, event: Event) -> None:
         """
@@ -73,6 +89,13 @@ class MissionReportIntegration(BaseIntegrationHandler):
         """
         mission_id = event.mission_id
         event_data = event.data or {}
+
+        # Deduplication guard: MISSION_COMPLETED can fire more than once due to
+        # orchestrator bugs. Skip if we have already processed this mission.
+        if mission_id in self._processed_missions:
+            logger.warning(f"[MissionReport] Duplicate MISSION_COMPLETED for {mission_id}, skipping")
+            return
+        self._processed_missions.add(mission_id)
 
         logger.info(f"[MissionReport] Processing mission completion: {mission_id}")
 
@@ -213,6 +236,12 @@ class MissionReportIntegration(BaseIntegrationHandler):
         Returns:
             The recommendation ID if saved successfully, None otherwise
         """
+        # Reject placeholder/generic titles produced by low-quality LLM responses
+        title = (recommendation.get("mission_title") or "").strip()
+        if not title or len(title) < 5 or title.lower() in self._PLACEHOLDER_TITLES:
+            logger.warning(f"[MissionReport] Skipping generic/placeholder recommendation title: '{title}'")
+            return None
+
         rec_entry = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
             "mission_title": recommendation.get("mission_title", "Untitled Mission"),

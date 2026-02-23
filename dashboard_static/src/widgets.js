@@ -1207,6 +1207,219 @@ export async function refreshArtifactHealthWidget() {
     }
 }
 
+// =============================================================================
+// MISSION PARAMS WIDGET
+// =============================================================================
+
+export async function refreshMissionParamsWidget() {
+    try {
+        const data = await api('/api/mission/parameters');
+        updateMissionParamsWidget(data);
+    } catch (e) {
+        console.error('[MissionParams] Widget error:', e);
+    }
+}
+
+export function updateMissionParamsWidget(data) {
+    const setEl = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = val ?? '-';
+    };
+
+    if (!data || !data.mission_id) {
+        setEl('mission-params-id', 'No active mission');
+        return;
+    }
+
+    const p = data.parameters || {};
+    setEl('mission-params-id', data.mission_id);
+    setEl('mission-params-cycle-budget', p.cycle_budget ?? '-');
+    setEl('mission-params-max-iter', p.max_iterations ?? '-');
+    setEl('mission-params-provider', p.llm_provider ?? '-');
+    setEl('mission-params-cycle', p.current_cycle ?? '-');
+    setEl('mission-params-stage', p.current_stage ?? '-');
+
+    const auditEl = document.getElementById('mission-params-audit');
+    if (auditEl && data.audit_summary) {
+        const a = data.audit_summary;
+        const count = a.override_count || 0;
+        if (count > 0) {
+            auditEl.textContent = `${count} override(s) applied`;
+            auditEl.className = 'mission-params-audit-warn';
+        } else {
+            auditEl.textContent = 'Parameters validated, no overrides';
+            auditEl.className = 'mission-params-audit-ok';
+        }
+
+        if (a.overrides && a.overrides.length > 0) {
+            _renderOverrideTable(a.overrides);
+        } else {
+            const tbl = document.getElementById('param-override-table');
+            if (tbl) { tbl.style.display = 'none'; tbl.innerHTML = ''; }
+        }
+    } else if (auditEl) {
+        auditEl.textContent = '';
+        const tbl = document.getElementById('param-override-table');
+        if (tbl) { tbl.style.display = 'none'; tbl.innerHTML = ''; }
+    }
+
+    // Update health badge from WebSocket push data
+    _applyHealthBadge(data.health);
+}
+
+function _renderOverrideTable(overrides) {
+    const container = document.getElementById('param-override-table');
+    if (!container) return;
+
+    const reasonLabels = {
+        min_clamp: 'below min',
+        max_clamp: 'above max',
+        type_coercion: 'type fix',
+        default_applied: 'default',
+        env_resolution: 'from env',
+        invalid_rejected: 'invalid\u2192default',
+    };
+
+    let html = '<table class="param-override-table"><thead><tr>'
+        + '<th>Param</th><th>Submitted</th><th>Applied</th><th>Reason</th>'
+        + '</tr></thead><tbody>';
+
+    for (const ov of overrides) {
+        const submitted = (ov.submitted_value === null || ov.submitted_value === undefined)
+            ? '<em>null</em>' : String(ov.submitted_value);
+        const applied = (ov.applied_value === null || ov.applied_value === undefined)
+            ? '<em>null</em>' : String(ov.applied_value);
+        const reason = reasonLabels[ov.reason] || ov.reason;
+        html += `<tr><td>${ov.param}</td><td>${submitted}</td><td>${applied}</td>`
+            + `<td class="override-reason">${reason}</td></tr>`;
+    }
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    container.style.display = 'block';
+}
+
+function _applyHealthBadge(health) {
+    const badge = document.getElementById('param-health-badge');
+    if (!badge || !health) return;
+    badge.className = `health-badge health-${health}`;
+    const labels = { green: 'Healthy — no overrides', yellow: 'Overrides detected', red: 'Issues detected', unknown: 'No audit data yet' };
+    badge.title = `Parameter health: ${labels[health] || health}`;
+}
+
+// Trend chart state
+let _paramTrendVisible = false;
+let _paramTrendRendered = false;
+
+export function toggleParamTrend() {
+    const container = document.getElementById('param-trend-container');
+    if (!container) return;
+    _paramTrendVisible = !_paramTrendVisible;
+    container.style.display = _paramTrendVisible ? 'block' : 'none';
+    if (_paramTrendVisible && !_paramTrendRendered) {
+        _loadParamTrendChart();
+    }
+}
+
+async function _loadParamTrendChart() {
+    try {
+        const resp = await fetch('/api/mission/parameter-audit/history?limit=20');
+        const json = await resp.json();
+        const history = json.history || [];
+
+        // Sync health badge
+        _applyHealthBadge(json.health);
+
+        if (!history.length) return;
+
+        const labels = history.map(h => (h.mission_id || '').slice(-8));
+        const cycleBudgets = history.map(h => h.cycle_budget ?? null);
+        const maxIters = history.map(h => h.max_iterations ?? null);
+        const overridePoints = history.map(h => h.override_count > 0 ? h.cycle_budget : null);
+
+        const canvas = document.getElementById('param-trend-chart');
+        if (!canvas) return;
+        _renderParamTrendCanvas(canvas, labels, cycleBudgets, maxIters, overridePoints);
+        _paramTrendRendered = true;
+    } catch (e) {
+        console.error('[ParamTrend] Failed to load trend:', e);
+    }
+}
+
+function _renderParamTrendCanvas(canvas, labels, cycleBudgets, maxIters, overridePoints) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.offsetWidth || 280;
+    const H = canvas.height || 110;
+    canvas.width = W;
+
+    const pad = { top: 14, right: 12, bottom: 28, left: 28 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const allVals = [...cycleBudgets, ...maxIters].filter(v => v !== null);
+    if (!allVals.length) return;
+    const maxV = Math.max(...allVals) + 1;
+
+    const xScale = (i) => pad.left + (i / Math.max(labels.length - 1, 1)) * plotW;
+    const yScale = (v) => pad.top + plotH - (v / maxV) * plotH;
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(128,128,128,0.2)';
+    ctx.lineWidth = 1;
+    [0, Math.ceil(maxV / 2), maxV].forEach(v => {
+        const y = yScale(v);
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + plotW, y); ctx.stroke();
+        ctx.fillStyle = 'rgba(160,160,160,0.8)';
+        ctx.font = '9px monospace';
+        ctx.fillText(v, 2, y + 3);
+    });
+
+    const drawLine = (data, color) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        data.forEach((v, i) => {
+            if (v === null) return;
+            const x = xScale(i), y = yScale(v);
+            if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    };
+
+    drawLine(cycleBudgets, '#4a9eff');
+    drawLine(maxIters, '#28a745');
+
+    // Override markers (red dots)
+    overridePoints.forEach((v, i) => {
+        if (v === null) return;
+        ctx.beginPath();
+        ctx.arc(xScale(i), yScale(v), 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#dc3545';
+        ctx.fill();
+    });
+
+    // X-axis labels (sparse)
+    ctx.fillStyle = 'rgba(160,160,160,0.8)';
+    ctx.font = '8px monospace';
+    labels.forEach((lbl, i) => {
+        if (i % 4 !== 0 && i !== labels.length - 1) return;
+        ctx.fillText(lbl, xScale(i) - 12, H - 4);
+    });
+
+    // Legend
+    const leg = pad.left;
+    ctx.fillStyle = '#4a9eff'; ctx.fillRect(leg, 2, 10, 3);
+    ctx.fillStyle = 'rgba(160,160,160,0.8)'; ctx.font = '8px monospace'; ctx.fillText('budget', leg + 13, 7);
+    ctx.fillStyle = '#28a745'; ctx.fillRect(leg + 58, 2, 10, 3);
+    ctx.fillStyle = 'rgba(160,160,160,0.8)'; ctx.fillText('max_iter', leg + 71, 7);
+    ctx.beginPath(); ctx.arc(leg + 130, 4, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#dc3545'; ctx.fill();
+    ctx.fillStyle = 'rgba(160,160,160,0.8)'; ctx.fillText('override', leg + 137, 7);
+}
+
 // Export fullMissionText getter
 export function getFullMissionText() {
     return fullMissionText;

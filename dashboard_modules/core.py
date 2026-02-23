@@ -472,90 +472,97 @@ def api_journal():
 @core_bp.route('/api/mission', methods=['GET', 'POST'])
 def api_mission():
     if request.method == 'POST':
-        data = request.get_json()
-        problem_statement = data.get('mission', '')
-        cycle_budget = int(data.get('cycle_budget', 1))
-        metadata = data.get('metadata', {})
-        user_project_name = data.get('project_name')  # Optional user-specified project name
-        active_provider = get_llm_provider() if get_llm_provider else "claude"
+        data = request.get_json() or {}
+        import logging as _logging
+        import uuid
+
+        # Pre-flight validation via canonical MissionConfig
+        try:
+            from af_engine.mission_config import MissionConfig, validate_mission_params, save_audit_log
+            _mc_available = True
+        except ImportError:
+            _mc_available = False
+
+        if _mc_available:
+            is_valid, param_errors = validate_mission_params(data)
+            if not is_valid:
+                return jsonify({"success": False, "errors": param_errors,
+                                "message": "; ".join(param_errors)}), 400
+
+        raw_cb = data.get('cycle_budget')
+        _logging.getLogger(__name__).info(f"[MISSION] cycle_budget submitted={raw_cb!r}")
+
+        problem_statement = data.get('problem_statement') or data.get('mission', '')
+        user_project_name = data.get('project_name')
 
         if problem_statement:
-            import uuid
-
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
             missions_dir = BASE_DIR / "missions"
             mission_dir = missions_dir / mission_id
 
-            # Resolve project name for shared workspace
             resolved_project_name = None
             try:
                 from project_name_resolver import resolve_project_name
                 resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-                # Use shared workspace under workspace/<project_name>/
-                workspace_dir = BASE_DIR / "workspace"
-                mission_workspace = workspace_dir / resolved_project_name
+                mission_workspace = (BASE_DIR / "workspace") / resolved_project_name
             except ImportError:
-                # Fallback to legacy per-mission workspace
                 mission_workspace = mission_dir / "workspace"
 
-            # Create mission directory (for config, analytics, drift validation)
             mission_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create workspace directories (may already exist if shared project)
             (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
-            new_mission = {
-                "mission_id": mission_id,
-                "problem_statement": problem_statement,
-                "original_problem_statement": problem_statement,
-                "preferences": {},
-                "success_criteria": [],
-                "current_stage": "PLANNING",
-                "iteration": 0,
-                "max_iterations": 10,
-                "artifacts": {"plan": None, "code": [], "tests": []},
-                "history": [],
-                "created_at": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat(),
-                "cycle_started_at": datetime.now().isoformat(),
-                "cycle_budget": max(1, cycle_budget),
-                "current_cycle": 1,
-                "cycle_history": [],
-                "mission_workspace": str(mission_workspace),
-                "mission_dir": str(mission_dir),
-                "project_name": resolved_project_name,
-                "llm_provider": active_provider,
-                "metadata": metadata
-            }
-            io_utils.atomic_write_json(MISSION_PATH, new_mission)
+            if _mc_available:
+                active_provider = get_llm_provider() if get_llm_provider else None
+                req = dict(data)
+                req["problem_statement"] = problem_statement
+                if active_provider and "llm_provider" not in req:
+                    req["llm_provider"] = active_provider
+                config, audit = MissionConfig.from_request(req, mission_id=mission_id)
+                new_mission = config.to_mission_dict(
+                    mission_id=mission_id, mission_workspace=mission_workspace,
+                    mission_dir=mission_dir, resolved_project_name=resolved_project_name,
+                    audit=audit,
+                )
+                io_utils.atomic_write_json(MISSION_PATH, new_mission)
+                mission_config_path = mission_dir / "mission_config.json"
+                with open(mission_config_path, 'w') as f:
+                    json.dump(config.to_config_dict(
+                        mission_id=mission_id, mission_workspace=mission_workspace,
+                        resolved_project_name=resolved_project_name,
+                        created_at=new_mission["created_at"],
+                    ), f, indent=2)
+                save_audit_log(audit, mission_dir)
+                applied_cycle_budget = config.cycle_budget
+            else:
+                cycle_budget = max(1, int(data.get('cycle_budget', 3)))
+                active_provider = get_llm_provider() if get_llm_provider else "claude"
+                new_mission = {
+                    "mission_id": mission_id, "problem_statement": problem_statement,
+                    "original_problem_statement": problem_statement,
+                    "preferences": {}, "success_criteria": [],
+                    "current_stage": "PLANNING", "iteration": 0, "max_iterations": 10,
+                    "artifacts": {"plan": None, "code": [], "tests": []}, "history": [],
+                    "created_at": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat(),
+                    "cycle_started_at": datetime.now().isoformat(),
+                    "cycle_budget": cycle_budget, "current_cycle": 1, "cycle_history": [],
+                    "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
+                    "project_name": resolved_project_name, "llm_provider": active_provider,
+                    "metadata": data.get('metadata', {})
+                }
+                io_utils.atomic_write_json(MISSION_PATH, new_mission)
+                applied_cycle_budget = cycle_budget
 
-            config_data = {
-                "mission_id": mission_id,
-                "problem_statement": problem_statement,
-                "cycle_budget": max(1, cycle_budget),
-                "created_at": new_mission["created_at"],
-                "llm_provider": active_provider,
-            }
-            if resolved_project_name:
-                config_data["project_name"] = resolved_project_name
-                config_data["project_workspace"] = str(mission_workspace)
-
-            mission_config_path = mission_dir / "mission_config.json"
-            with open(mission_config_path, 'w') as f:
-                json.dump(config_data, f, indent=2)
-
-            # Register mission with analytics system
             try:
                 from mission_analytics import get_analytics
                 analytics = get_analytics()
                 analytics.start_mission(mission_id, problem_statement)
             except Exception as e:
-                import logging
-                logging.warning(f"Analytics: Failed to register mission: {e}")
+                _logging.warning(f"Analytics: Failed to register mission: {e}")
 
-            response_msg = f"Mission saved with {cycle_budget} cycle(s)."
+            response_msg = f"Mission saved with {applied_cycle_budget} cycle(s)."
             if resolved_project_name:
                 response_msg += f" Project: {resolved_project_name}."
             response_msg += " Click 'Start R&D' to begin."
@@ -1052,111 +1059,103 @@ def api_set_mission_from_recommendation(rec_id):
     if not target_rec:
         return jsonify({"success": False, "error": "Recommendation not found"}), 404
 
-    import uuid
-    mission_id = f"mission_{uuid.uuid4().hex[:8]}"
+    import uuid as _uuid_r
+    import logging as _rlog
+    mission_id = f"mission_{_uuid_r.uuid4().hex[:8]}"
 
-    # Build problem statement first (needed for project name resolution)
-    # Special handling for merged recommendations
+    # Build problem statement (special handling for merged recommendations)
     if target_rec.get("source_type") == "merged" and target_rec.get("merged_source_descriptions"):
-        # For merged recommendations, combine user summary with original source descriptions
         parts = []
         user_desc = (target_rec.get("mission_description") or "").strip()
         if user_desc:
             parts.append(f"## Summary\n{user_desc}")
-
-        for src in target_rec.get("merged_source_descriptions", []):
-            src_title = src.get("title", "Source")
-            src_desc = src.get("description", "")
-            if src_desc:
-                parts.append(f"## {src_title}\n{src_desc}")
-
+        for _src in target_rec.get("merged_source_descriptions", []):
+            if _src.get("description"):
+                parts.append(f"## {_src.get('title', 'Source')}\n{_src['description']}")
         problem_statement = "\n\n".join(parts) if parts else target_rec.get("mission_title", "")
     else:
-        # Standard: use mission_description if non-empty, otherwise fall back to mission_title
         problem_statement = target_rec.get("mission_description") or target_rec.get("mission_title") or ""
+
+    # Pre-flight validation via canonical MissionConfig
+    try:
+        from af_engine.mission_config import MissionConfig as _MCR, validate_mission_params as _vmpr, save_audit_log as _salr
+        _mcr_ok = True
+    except ImportError:
+        _mcr_ok = False
+
+    if _mcr_ok:
+        _ok, _errs = _vmpr({"problem_statement": problem_statement, "cycle_budget": data.get("cycle_budget")})
+        if not _ok:
+            return jsonify({"success": False, "errors": _errs, "message": "; ".join(_errs)}), 400
 
     missions_dir = BASE_DIR / "missions"
     mission_dir = missions_dir / mission_id
 
-    # Resolve project name for shared workspace (same logic as api_mission)
     resolved_project_name = None
     try:
         from project_name_resolver import resolve_project_name
         resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-        # Use shared workspace under workspace/<project_name>/
         mission_workspace = WORKSPACE_DIR / resolved_project_name
     except ImportError:
-        # Fallback to legacy per-mission workspace
         mission_workspace = mission_dir / "workspace"
 
-    # Create mission directory (for config, analytics, drift validation)
     mission_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create workspace directories (may already exist if shared project)
     (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
     (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
     (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
-    new_mission = {
-        "mission_id": mission_id,
-        "problem_statement": problem_statement,
-        "original_problem_statement": problem_statement,
-        "preferences": {},
-        "success_criteria": [],
-        "current_stage": "PLANNING",
-        "iteration": 0,
-        "max_iterations": 10,
-        "artifacts": {"plan": None, "code": [], "tests": []},
-        "history": [],
-        "created_at": datetime.now().isoformat(),
-        "last_updated": datetime.now().isoformat(),
-        "cycle_started_at": datetime.now().isoformat(),
-        "cycle_budget": max(1, cycle_budget),
-        "current_cycle": 1,
-        "cycle_history": [],
-        "mission_workspace": str(mission_workspace),
-        "mission_dir": str(mission_dir),
-        "project_name": resolved_project_name,
-        "llm_provider": get_llm_provider() if get_llm_provider else "claude",
-        "source_recommendation_id": rec_id
-    }
-    io_utils.atomic_write_json(MISSION_PATH, new_mission)
+    if _mcr_ok:
+        active_provider = get_llm_provider() if get_llm_provider else None
+        _req_r = dict(data)
+        _req_r["problem_statement"] = problem_statement
+        if active_provider and "llm_provider" not in _req_r:
+            _req_r["llm_provider"] = active_provider
+        _cfg_r, _aud_r = _MCR.from_request(_req_r, mission_id=mission_id)
+        new_mission = _cfg_r.to_mission_dict(
+            mission_id=mission_id, mission_workspace=mission_workspace,
+            mission_dir=mission_dir, resolved_project_name=resolved_project_name,
+            source_recommendation_id=rec_id, audit=_aud_r,
+        )
+        io_utils.atomic_write_json(MISSION_PATH, new_mission)
+        with open(mission_dir / "mission_config.json", 'w') as _f:
+            json.dump(_cfg_r.to_config_dict(
+                mission_id=mission_id, mission_workspace=mission_workspace,
+                resolved_project_name=resolved_project_name,
+                source_recommendation_id=rec_id,
+                created_at=new_mission["created_at"],
+            ), _f, indent=2)
+        _salr(_aud_r, mission_dir)
+        applied_cycle_budget = _cfg_r.cycle_budget
+    else:
+        new_mission = {
+            "mission_id": mission_id, "problem_statement": problem_statement,
+            "original_problem_statement": problem_statement,
+            "preferences": {}, "success_criteria": [],
+            "current_stage": "PLANNING", "iteration": 0, "max_iterations": 10,
+            "artifacts": {"plan": None, "code": [], "tests": []}, "history": [],
+            "created_at": datetime.now().isoformat(), "last_updated": datetime.now().isoformat(),
+            "cycle_started_at": datetime.now().isoformat(),
+            "cycle_budget": max(1, cycle_budget), "current_cycle": 1, "cycle_history": [],
+            "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
+            "project_name": resolved_project_name,
+            "llm_provider": get_llm_provider() if get_llm_provider else "claude",
+            "source_recommendation_id": rec_id
+        }
+        io_utils.atomic_write_json(MISSION_PATH, new_mission)
+        applied_cycle_budget = cycle_budget
 
-    # Build mission config with shared workspace info
-    config_data = {
-        "mission_id": mission_id,
-        "problem_statement": problem_statement,
-        "cycle_budget": max(1, cycle_budget),
-        "created_at": new_mission["created_at"],
-        "llm_provider": new_mission.get("llm_provider", "claude"),
-        "source_recommendation_id": rec_id
-    }
-    if resolved_project_name:
-        config_data["project_name"] = resolved_project_name
-        config_data["project_workspace"] = str(mission_workspace)
-
-    mission_config_path = mission_dir / "mission_config.json"
-    with open(mission_config_path, 'w') as f:
-        json.dump(config_data, f, indent=2)
-
-    # Register mission with analytics system
     try:
         from mission_analytics import get_analytics
-        analytics = get_analytics()
-        analytics.start_mission(mission_id, problem_statement)
-    except Exception as e:
-        import logging
-        logging.warning(f"Analytics: Failed to register mission: {e}")
+        get_analytics().start_mission(mission_id, problem_statement)
+    except Exception as _e:
+        _rlog.warning(f"Analytics: Failed to register mission: {_e}")
 
-    # Remove recommendation from SQLite storage
     try:
         storage.delete(rec_id)
-    except Exception as e:
-        import logging
-        logging.warning(f"SQLite delete failed: {e}")
-        # Continue anyway - mission was created successfully
+    except Exception as _e:
+        _rlog.warning(f"SQLite delete failed: {_e}")
 
-    response_msg = f"Mission set with {cycle_budget} cycle(s)."
+    response_msg = f"Mission set with {applied_cycle_budget} cycle(s)."
     if resolved_project_name:
         response_msg += f" Project: {resolved_project_name}."
     response_msg += " Click 'Start Mission' to begin."

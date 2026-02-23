@@ -200,6 +200,7 @@ window.applyAnalyticsPeriodFilter = widgets.applyAnalyticsPeriodFilter;
 window.exportAnalyticsCSV = widgets.exportAnalyticsCSV;
 window.openMissionAnalyticsModal = widgets.openMissionAnalyticsModal;
 window.closeMissionAnalyticsModal = widgets.closeMissionAnalyticsModal;
+window.toggleParamTrend = widgets.toggleParamTrend;
 
 // Exploration
 window.GraphRenderer = exploration.GraphRenderer;
@@ -832,6 +833,10 @@ function setupWebSocketHandlers() {
         updateAnalyticsFromPush(data);
     });
 
+    registerHandler('mission_params', (data) => {
+        widgets.updateMissionParamsWidget(data);
+    });
+
     // Investigation mode real-time updates
     registerHandler('investigation_progress', (data) => {
         investigation.handleInvestigationProgress(data);
@@ -887,6 +892,9 @@ function setupMinimalPolling() {
     // Initial call for artifact health widget
     widgets.refreshArtifactHealthWidget();
 
+    // Initial call for mission params widget
+    widgets.refreshMissionParamsWidget();
+
     // Very infrequent polling as backup when WebSocket is connected
     // These only trigger if WebSocket hasn't sent updates recently
 
@@ -932,6 +940,10 @@ function setupFullPolling() {
     // Artifact health widget - every 60 seconds
     widgets.refreshArtifactHealthWidget();
     pollingIntervals.push(setInterval(widgets.refreshArtifactHealthWidget, 60000));
+
+    // Mission params widget - every 30 seconds
+    widgets.refreshMissionParamsWidget();
+    pollingIntervals.push(setInterval(widgets.refreshMissionParamsWidget, 30000));
 
     // Token integrity widget - every 60 seconds
     widgets.refreshTokenIntegrityWidget();

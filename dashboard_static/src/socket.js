@@ -83,7 +83,8 @@ const eventHandlers = {
     recommendations: [],
     queue_updated: [],
     queue_paused: [],
-    queue_resumed: []
+    queue_resumed: [],
+    mission_params: []
 };
 
 // =============================================================================
@@ -579,6 +580,7 @@ function resubscribeToRooms() {
         subscribeToRoom('glassbox_archive');
         subscribeToRoom('glassbox');
         subscribeToRoom('recommendations');
+        subscribeToRoom('mission_params');
         // Subscribe to queue events
         subscribeToRoom('queue_updated');
     } else {

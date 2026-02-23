@@ -28,6 +28,7 @@ from .integration_manager import IntegrationManager
 from .cycle_manager import CycleManager
 from .prompt_factory import PromptFactory
 from .stages.base import StageContext, StageResult
+from .mission_config import MissionConfig, MissionValidationError, save_audit_log, prune_old_audit_logs
 from .integrations.base import Event, StageEvent
 
 logger = logging.getLogger(__name__)
@@ -179,21 +180,10 @@ class StageOrchestrator:
 
         # Handle special stage transitions
         if new_stage == "COMPLETE":
-            mission_completed_data = {
-                "final_stage": old_stage,
-                "total_iterations": self.state.iteration,
-                "cycle_count": self.cycles.current_cycle,
-                "mission_workspace": self.state.mission.get("mission_workspace"),
-                "mission_dir": self.state.mission.get("mission_dir"),
-                "project_name": self.state.mission.get("project_name"),
-                "created_at": self.state.mission.get("created_at"),
-                "started_at": self.state.mission.get("created_at"),
-            }
-            self._validate_mission_completed_data(mission_completed_data)
-            self.integrations.emit_mission_completed(
-                mission_id=self.mission_id,
-                data=mission_completed_data,
-            )
+            # NOTE: MISSION_COMPLETED is emitted by the CYCLE_END stage handler
+            # (which has the full recommendation data). Do NOT emit it again here
+            # or it will fire twice — once with data (correct) and once without (bug).
+            # See: af_engine/stages/cycle_end.py and mission_report.py
 
             # Process mission queue - start next queued mission
             self._process_mission_queue()
@@ -562,10 +552,13 @@ Continue the mission from where the previous cycle left off.
         preferences: dict = None,
         success_criteria: list = None,
         mission_id: str = None,
-        cycle_budget: int = 1,
+        cycle_budget: int = MissionConfig.DEFAULT_CYCLE_BUDGET,
         project_name: str = None
     ) -> None:
         """Set a new mission with optional cycle budget for multi-cycle execution.
+
+        Validates all parameters via MissionConfig before creating any state.
+        Raises MissionValidationError for invalid params (cycle_budget=0, etc.).
 
         If PROJECT_NAME_RESOLVER_AVAILABLE, workspace is created under workspace/<project_name>/
         to enable workspace sharing across missions working on the same project.
@@ -590,19 +583,25 @@ Continue the mission from where the previous cycle left off.
 
         # Generate mission ID
         mid = mission_id or f"mission_{uuid.uuid4().hex[:8]}"
-        llm_provider = str(os.environ.get("ATLASFORGE_LLM_PROVIDER", "claude")).strip().lower() or "claude"
-        if llm_provider not in {"claude", "codex", "gemini"}:
-            llm_provider = "claude"
+
+        # Build and validate config via canonical MissionConfig
+        raw_params = {
+            "problem_statement": problem_statement,
+            "cycle_budget": cycle_budget,
+            "preferences": preferences or {},
+            "success_criteria": success_criteria or [],
+            "project_name": project_name,
+        }
+        config, audit = MissionConfig.from_request(raw_params, mission_id=mid)
+        # from_request resolves llm_provider from env automatically
 
         # Resolve project name for shared workspace
         resolved_project_name = None
         if resolve_project_name is not None:
-            resolved_project_name = resolve_project_name(problem_statement, mid, project_name)
-            # Use shared workspace under workspace/<project_name>/
+            resolved_project_name = resolve_project_name(problem_statement, mid, config.project_name)
             mission_workspace = WORKSPACE_DIR / resolved_project_name
             logger.info(f"Resolved project name: {resolved_project_name}")
         else:
-            # Legacy: per-mission workspace
             mission_workspace = MISSIONS_DIR / mid / "workspace"
 
         # Create mission directory (for config, analytics, drift validation)
@@ -616,49 +615,46 @@ Continue the mission from where the previous cycle left off.
 
         logger.info(f"Mission workspace at {mission_workspace}")
 
-        self.state.mission = {
-            "mission_id": mid,
-            "problem_statement": problem_statement,
-            "original_problem_statement": problem_statement,  # Keep root mission
-            "preferences": preferences or {},
-            "success_criteria": success_criteria or [],
-            "current_stage": "PLANNING",
-            "iteration": 0,
-            "max_iterations": 10,
-            "artifacts": {"plan": None, "code": [], "tests": []},
-            "history": [],
-            "created_at": datetime.now().isoformat(),
-            "cycle_started_at": datetime.now().isoformat(),
-            # Cycle iteration fields
-            "cycle_budget": max(1, cycle_budget),  # Minimum 1 cycle
-            "current_cycle": 1,
-            "cycle_history": [],
-            # Mission workspace path
-            "mission_workspace": str(mission_workspace),
-            "mission_dir": str(mission_dir),
-            # Project name for workspace deduplication
-            "project_name": resolved_project_name,
-            "llm_provider": llm_provider,
-            "metadata": {}
-        }
+        # Build mission dict from canonical config
+        new_mission = config.to_mission_dict(
+            mission_id=mid,
+            mission_workspace=mission_workspace,
+            mission_dir=mission_dir,
+            resolved_project_name=resolved_project_name,
+            audit=audit,
+        )
+        self.state.mission = new_mission
         self.save_mission()
 
-        # Also save a copy of the mission config in the mission directory
+        # Save compact mission_config.json in mission directory
         mission_config_path = mission_dir / "mission_config.json"
-        config_data = {
-            "mission_id": mid,
-            "problem_statement": problem_statement,
-            "cycle_budget": max(1, cycle_budget),
-            "created_at": self.mission["created_at"],
-            "llm_provider": llm_provider,
-        }
-        if resolved_project_name:
-            config_data["project_name"] = resolved_project_name
-            config_data["project_workspace"] = str(mission_workspace)
+        config_dict = config.to_config_dict(
+            mission_id=mid,
+            mission_workspace=mission_workspace,
+            resolved_project_name=resolved_project_name,
+            created_at=new_mission["created_at"],
+        )
         with open(mission_config_path, 'w') as f:
-            json.dump(config_data, f, indent=2)
+            json.dump(config_dict, f, indent=2)
 
-        logger.info(f"New mission set with {cycle_budget} cycles: {problem_statement[:100]}...")
+        # Write parameter audit log
+        save_audit_log(audit, mission_dir)
+
+        # Auto-prune: keep at most 200 missions' audit logs (non-fatal)
+        try:
+            prune_old_audit_logs(
+                mission_dir.parent,
+                max_missions=200,
+                max_total_mb=500.0,
+                dry_run=False,
+            )
+        except Exception as _prune_exc:
+            logger.warning("prune_old_audit_logs failed (non-fatal): %s", _prune_exc)
+
+        logger.info(
+            f"New mission set with {config.cycle_budget} cycles "
+            f"(submitted={cycle_budget}): {problem_statement[:100]}..."
+        )
 
         # AtlasForge Enhancement: Set baseline fingerprint for mission continuity tracking
         try:
@@ -666,7 +662,7 @@ Continue the mission from where the previous cycle left off.
             enhancer = AtlasForgeEnhancer(
                 mission_id=mid,
                 storage_base=mission_workspace / "af_data",
-                llm_provider=llm_provider,
+                llm_provider=config.llm_provider,
             )
             enhancer.set_mission_baseline(problem_statement, source="initial_mission")
             logger.info("AtlasForge baseline fingerprint set for mission continuity tracking")
@@ -701,8 +697,8 @@ Continue the mission from where the previous cycle left off.
             mission_id=mid,
             data={
                 "problem_statement": problem_statement[:200],
-                "cycle_budget": cycle_budget,
-                "llm_provider": llm_provider,
+                "cycle_budget": config.cycle_budget,
+                "llm_provider": config.llm_provider,
                 "mission_workspace": str(mission_workspace),
             }
         )
@@ -959,25 +955,18 @@ Continue the mission from where the previous cycle left off.
             # Generate mission ID
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
-            # Get mission details from queue item
-            # Handle both dashboard format (problem_statement) and core format (mission_description)
-            problem_statement = (
-                queue_item.get("mission_description") or
-                queue_item.get("problem_statement") or
-                queue_item.get("mission_title", "")
-            )
-            cycle_budget = queue_item.get("cycle_budget") or 3  # Handle None values
-            user_project_name = queue_item.get("project_name")
+            # Build and validate config via canonical MissionConfig
+            config, audit = MissionConfig.from_queue_item(queue_item, mission_id=mission_id)
+            problem_statement = config.problem_statement
+            user_project_name = config.project_name
 
             # Resolve project name for shared workspace
             resolved_project_name = None
             if PROJECT_NAME_RESOLVER_AVAILABLE and resolve_project_name:
                 resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-                # Use shared workspace under workspace/<project_name>/
                 mission_workspace = WORKSPACE_DIR / resolved_project_name
                 logger.info(f"Queue mission resolved project name: {resolved_project_name}")
             else:
-                # Legacy: per-mission workspace
                 mission_workspace = MISSIONS_DIR / mission_id / "workspace"
 
             # Create mission directory (for config, analytics, drift validation)
@@ -989,31 +978,16 @@ Continue the mission from where the previous cycle left off.
             (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
-            # Create the mission
-            new_mission = {
-                "mission_id": mission_id,
-                "problem_statement": problem_statement,
-                "original_problem_statement": problem_statement,
-                "preferences": {},
-                "success_criteria": [],
-                "current_stage": "PLANNING",
-                "iteration": 0,
-                "max_iterations": 10,
-                "artifacts": {"plan": None, "code": [], "tests": []},
-                "history": [],
-                "created_at": datetime.now().isoformat(),
-                "last_updated": datetime.now().isoformat(),
-                "cycle_started_at": datetime.now().isoformat(),
-                "cycle_budget": max(1, cycle_budget),
-                "current_cycle": 1,
-                "cycle_history": [],
-                "mission_workspace": str(mission_workspace),
-                "mission_dir": str(mission_dir),
-                "project_name": resolved_project_name,
-                "source_queue_item_id": queue_item.get("id"),
-                "source_recommendation_id": queue_item.get("recommendation_id"),
-                "metadata": {"queued": True, "queued_at": queue_item.get("queued_at")}
-            }
+            # Build mission dict from canonical config
+            new_mission = config.to_mission_dict(
+                mission_id=mission_id,
+                mission_workspace=mission_workspace,
+                mission_dir=mission_dir,
+                resolved_project_name=resolved_project_name,
+                source_queue_item_id=queue_item.get("id"),
+                source_recommendation_id=queue_item.get("recommendation_id"),
+                audit=audit,
+            )
 
             # Save mission state with return value check
             success = io_utils.atomic_write_json(MISSION_PATH, new_mission)
@@ -1021,20 +995,31 @@ Continue the mission from where the previous cycle left off.
                 logger.error(f"Failed to write new mission {mission_id} to disk")
                 return False
 
-            # Save mission config
+            # Save compact mission_config.json in mission directory
             mission_config_path = mission_dir / "mission_config.json"
-            config_data = {
-                "mission_id": mission_id,
-                "problem_statement": problem_statement,
-                "cycle_budget": max(1, cycle_budget),
-                "created_at": new_mission["created_at"],
-                "source_queue_item_id": queue_item.get("id")
-            }
-            if resolved_project_name:
-                config_data["project_name"] = resolved_project_name
-                config_data["project_workspace"] = str(mission_workspace)
+            config_dict = config.to_config_dict(
+                mission_id=mission_id,
+                mission_workspace=mission_workspace,
+                resolved_project_name=resolved_project_name,
+                source_queue_item_id=queue_item.get("id"),
+                created_at=new_mission["created_at"],
+            )
             with open(mission_config_path, 'w') as f:
-                json.dump(config_data, f, indent=2)
+                json.dump(config_dict, f, indent=2)
+
+            # Write parameter audit log
+            save_audit_log(audit, mission_dir)
+
+            # Auto-prune: keep at most 200 missions' audit logs (non-fatal)
+            try:
+                prune_old_audit_logs(
+                    mission_dir.parent,
+                    max_missions=200,
+                    max_total_mb=500.0,
+                    dry_run=False,
+                )
+            except Exception as _prune_exc:
+                logger.warning("prune_old_audit_logs failed (non-fatal): %s", _prune_exc)
 
             # Register with analytics if available
             if ANALYTICS_AVAILABLE and get_analytics:

@@ -2361,6 +2361,39 @@ h1 { color: var(--accent); font-size: 1.3em; }
 .analytics-stat-value.warning { color: var(--orange); }
 .analytics-stat-value.stale { color: var(--text-dim); }
 
+/* Mission Params Widget */
+.mission-params-audit-ok { color: var(--green); }
+.mission-params-audit-warn { color: var(--yellow); font-weight: bold; }
+
+/* Param health badge (green/yellow/red/unknown) */
+.health-badge.health-green  { color: #28a745; }
+.health-badge.health-yellow { color: #ffc107; }
+.health-badge.health-red    { color: #dc3545; }
+.health-badge.health-unknown { color: var(--text-dim); }
+
+/* Override details table */
+.param-override-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.75em;
+    margin-top: 4px;
+}
+.param-override-table th {
+    text-align: left;
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 600;
+}
+.param-override-table td {
+    padding: 2px 4px;
+    border-bottom: 1px solid var(--surface2, #21262d);
+}
+.param-override-table .override-reason {
+    color: var(--yellow);
+    font-style: italic;
+}
+
 /* Git Status Widget Styles */
 .git-status-grid {
     display: grid;

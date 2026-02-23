@@ -37,6 +37,7 @@ class CycleEndStageHandler(BaseStageHandler):
         current_cycle = context.cycle_number
         cycle_budget = context.cycle_budget
         cycles_remaining = cycle_budget - current_cycle
+        context_iteration = context.iteration
         original_mission = context.original_mission[:500] if context.original_mission else context.problem_statement[:500]
 
         if cycles_remaining > 0:
@@ -49,6 +50,8 @@ ORIGINAL MISSION: {original_mission}
 
 Your task:
 1. Generate a comprehensive report of what was accomplished this cycle
+   - This was cycle {current_cycle} of {cycle_budget}, with {context_iteration} iterations within this cycle
+   - TERMINOLOGY: Each ANALYZING→BUILDING loop is one **iteration**. The full cycle (PLANNING→BUILDING→TESTING→ANALYZING) is a **cycle**. Use these terms correctly.
 2. List ALL files created or modified this cycle
 3. Summarize key achievements and any issues encountered
 4. Write a CONTINUATION PROMPT for the next cycle
@@ -83,6 +86,8 @@ ORIGINAL MISSION: {original_mission}
 
 Your task:
 1. Generate a comprehensive FINAL report of everything accomplished across ALL cycles
+   - IMPORTANT: This mission completed {current_cycle} cycle(s) with {context_iteration} total iteration(s) across all cycles
+   - TERMINOLOGY: Each ANALYZING→BUILDING loop is one **iteration**. Each full PLANNING→BUILDING→TESTING→ANALYZING pass is one **cycle**. Use these terms correctly in your report.
 2. List ALL files created or modified across the entire mission
 3. Summarize the complete journey from start to finish
 4. Provide lessons learned and recommendations

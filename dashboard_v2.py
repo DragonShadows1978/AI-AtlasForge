@@ -135,6 +135,7 @@ VALID_WS_ROOMS = [
     'file_events',       # File creation/modification events during missions
     'glassbox_archive',  # GlassBox transcript archival events
     'subprocess_gate',   # Intelligent Subprocess Gate status
+    'mission_params',    # Active mission validated parameters + audit summary
 ]
 
 # Register websocket_events module with socketio reference
@@ -452,6 +453,7 @@ from dashboard_modules import (
     version_bp, init_version_blueprint,
     get_bundle_version, init_bundle_version,
     artifact_health_bp, init_artifact_health_blueprint,
+    mission_params_bp, init_mission_params_blueprint, get_mission_params,
 )
 
 # Initialize blueprints with dependencies
@@ -505,6 +507,7 @@ init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=so
 init_version_blueprint(BASE_DIR)
 init_bundle_version(STATIC_DIR, BASE_DIR)
 init_artifact_health_blueprint(WORKSPACE_DIR / "artifacts")
+init_mission_params_blueprint(MISSION_PATH, BASE_DIR / "missions", io_utils)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -520,6 +523,7 @@ app.register_blueprint(queue_scheduler_bp)
 app.register_blueprint(semantic_bp)
 app.register_blueprint(version_bp)
 app.register_blueprint(artifact_health_bp)
+app.register_blueprint(mission_params_bp)
 
 # Conductor status and control API (enhanced singleton with takeover support)
 try:
@@ -1070,6 +1074,8 @@ def get_initial_room_data(room: str) -> dict:
             return get_recommendations_summary()
         elif room == 'subprocess_gate':
             return get_subprocess_gate_status()
+        elif room == 'mission_params':
+            return get_mission_params()
     except Exception as e:
         return {'error': str(e)}
     return {}
@@ -1406,6 +1412,18 @@ def check_and_emit_widget_updates():
             if _widget_state.get('gate_key') != gate_key:
                 _widget_state['gate_key'] = gate_key
                 emit_widget_update('subprocess_gate', gate_data)
+    except Exception:
+        pass
+
+    # Mission params check (every 30 seconds — parameters rarely change mid-mission)
+    try:
+        if now - _widget_state.get('mission_params_last_check', 0) > 30:
+            _widget_state['mission_params_last_check'] = now
+            params_data = get_mission_params()
+            params_key = f"{params_data.get('mission_id')}:{params_data.get('parameters', {}).get('current_cycle')}:{params_data.get('parameters', {}).get('current_stage')}"
+            if _widget_state.get('mission_params_key') != params_key:
+                _widget_state['mission_params_key'] = params_key
+                emit_widget_update('mission_params', params_data)
     except Exception:
         pass
 
