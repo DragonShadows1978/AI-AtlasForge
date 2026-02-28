@@ -2,21 +2,27 @@
 
 ## [1.11.0] - 2026-02-28
 
-### Other
+### Added
 
-- feat: make investigation_validator permanent (was symlink)
+- **Agent Activity Widget** - Real-time agent activity panel in the dashboard showing live spawned agents, streaming output, and completion status for both mission and investigation contexts; tabbed interface (AtlasForge / Mission / Investigation panels)
+- **Agent Stream Manager** - New `agent_stream_manager.py` backend module; tracks agent lifecycle events (spawn, stream lines, complete, error), maintains live state, and broadcasts to dashboard via WebSocket
+- **WebSocket Events Module** - New `websocket_events.py` dedicated module for all widget push events; decoupled from dashboard_v2.py for cleaner architecture
+- **Subagent Pool Manager** - New `subagent_pool_manager.py` and `pool_manager.py` for managing concurrent subagent execution pools
+- **Mission Status Schema** - New `dashboard_modules/mission_status_schema.py` for canonical mission state validation
+- **TTL Cache** - `dashboard_modules/cache.py` now includes a thread-safe in-memory TTL cache for hot API endpoints (`/api/status`, `/api/journal`)
+- **Investigation Validator** - Full investigation claim validation system (`claim_extractor.py`, `source_fetcher.py`, `validator_agent.py`, `orchestrator.py`, `filter.py`) made permanent from workspace
 
-### Stats
+### Fixed
 
-```
- workspace/investigation_validator/orchestrator.py  | 233 +++++++++
- .../investigation_validator/source_fetcher.py      | 582 +++++++++++++++++++++
- .../investigation_validator/tests/__init__.py      |   1 +
- .../investigation_validator/validator_agent.py     | 506 ++++++++++++++++++
- 15 files changed, 2882 insertions(+), 28 deletions(-)
-```
+- **Agent Activity Widget Wiring** - Fixed broken WebSocket room subscriptions; `mission_agents` and `investigation_agents` rooms were missing from `socket.js` event handler registry and default subscriptions
+- **Dead Function Reference** - Fixed `agent-activity.js` calling non-existent `window.subscribeToAgentRoom()` — corrected to `window.subscribeToSocketRoom()`
+- **Handler Registration Gap** - Registered `handleMissionAgentEvent` and `handleInvestigationAgentEvent` in `widgets.js` `initWebSocketHandlers()` which previously left them unwired
+- **pool_status room** - Added missing `pool_status` WebSocket room to socket registry
 
-_Full diff: `git diff v1.10.0..v1.11.0`_
+### Changed
+
+- **Dashboard Architecture** - Significant backend refactor; modularized WebSocket event emission, agent tracking, and cache management out of `dashboard_v2.py` into dedicated modules
+- **Restored `.gitignore`** - Rebuilt after Codex destructive rollback; added `certs/`, `recovery_*/`, `*.pre_recovery_backup` entries
 
 
 ## [1.10.0] - 2026-02-23
