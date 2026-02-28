@@ -12,6 +12,75 @@ from flask import Blueprint, jsonify, request
 from pathlib import Path
 import logging
 
+import threading
+import time
+
+# =============================================================================
+# TTL CACHE - In-memory cache with per-key expiry for hot API endpoints
+# =============================================================================
+
+class TTLCache:
+    """Simple thread-safe in-memory cache with per-key TTL expiry.
+
+    Designed for hot API endpoints like /api/status and /api/journal
+    where re-computing the result on every request is expensive.
+
+    Usage:
+        _cache = TTLCache()
+        data = _cache.get('status')
+        if data is None:
+            data = expensive_compute()
+            _cache.set('status', data, ttl_seconds=0.75)
+    """
+
+    def __init__(self):
+        self._store = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str):
+        """Return cached value if still valid, else None."""
+        with self._lock:
+            entry = self._store.get(key)
+            if entry and time.time() < entry['expires']:
+                return entry['data']
+            return None
+
+    def set(self, key: str, data, ttl_seconds: float):
+        """Store value with TTL expiry."""
+        with self._lock:
+            self._store[key] = {
+                'data': data,
+                'expires': time.time() + ttl_seconds
+            }
+
+    def invalidate(self, key: str):
+        """Remove a specific key from cache."""
+        with self._lock:
+            self._store.pop(key, None)
+
+    def clear(self):
+        """Clear all cached entries."""
+        with self._lock:
+            self._store.clear()
+
+    def stats(self) -> dict:
+        """Return cache statistics."""
+        with self._lock:
+            now = time.time()
+            total = len(self._store)
+            live = sum(1 for e in self._store.values() if now < e['expires'])
+            return {'total_keys': total, 'live_keys': live, 'expired_keys': total - live}
+
+
+# Singleton instance used by dashboard modules
+_dashboard_ttl_cache = TTLCache()
+
+
+def get_dashboard_cache() -> TTLCache:
+    """Get the global dashboard TTL cache instance."""
+    return _dashboard_ttl_cache
+
+
 logger = logging.getLogger(__name__)
 
 # Create Blueprint
@@ -23,6 +92,12 @@ def cache_status():
     """Get status of all caches."""
     try:
         caches = {}
+
+        # TTL cache stats
+        try:
+            caches['ttl_cache'] = get_dashboard_cache().stats()
+        except Exception as e:
+            caches['ttl_cache'] = {"error": str(e)}
 
         # KB analytics cache
         try:
@@ -75,6 +150,13 @@ def invalidate_kb_cache():
 def invalidate_all_caches():
     """Invalidate all caches."""
     results = {}
+
+    # TTL cache
+    try:
+        get_dashboard_cache().clear()
+        results['ttl_cache'] = 'cleared'
+    except Exception as e:
+        results['ttl_cache'] = f'error: {e}'
 
     # KB cache
     try:

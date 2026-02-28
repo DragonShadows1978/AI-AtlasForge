@@ -20,6 +20,14 @@ from datetime import datetime
 import json
 import mimetypes
 
+# TTL cache for hot endpoints
+def _get_ttl_cache():
+    try:
+        from dashboard_modules.cache import get_dashboard_cache
+        return get_dashboard_cache()
+    except Exception:
+        return None
+
 # Create Blueprint
 core_bp = Blueprint('core', __name__)
 
@@ -121,7 +129,15 @@ def init_core_blueprint(
 
 @core_bp.route('/api/status')
 def api_status():
-    return jsonify(get_claude_status())
+    cache = _get_ttl_cache()
+    if cache:
+        cached = cache.get('api_status')
+        if cached is not None:
+            return jsonify(cached)
+    result = get_claude_status()
+    if cache:
+        cache.set('api_status', result, ttl_seconds=0.75)
+    return jsonify(result)
 
 
 @core_bp.route('/api/health')
@@ -462,7 +478,15 @@ def api_narrative_reset():
 
 @core_bp.route('/api/journal')
 def api_journal():
-    return jsonify(get_recent_journal(15))
+    cache = _get_ttl_cache()
+    if cache:
+        cached = cache.get('api_journal')
+        if cached is not None:
+            return jsonify(cached)
+    result = get_recent_journal(15)
+    if cache:
+        cache.set('api_journal', result, ttl_seconds=1.0)
+    return jsonify(result)
 
 
 # =============================================================================

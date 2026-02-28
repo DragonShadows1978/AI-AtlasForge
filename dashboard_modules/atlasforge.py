@@ -17,6 +17,14 @@ from flask import Blueprint, jsonify, request
 atlasforge_bp = Blueprint('atlasforge', __name__, url_prefix='/api/atlasforge')
 
 
+def _get_ttl_cache():
+    try:
+        from dashboard_modules.cache import get_dashboard_cache
+        return get_dashboard_cache()
+    except Exception:
+        return None
+
+
 # =============================================================================
 # EXPLORATION STATS AND HISTORY
 # =============================================================================
@@ -24,9 +32,16 @@ atlasforge_bp = Blueprint('atlasforge', __name__, url_prefix='/api/atlasforge')
 @atlasforge_bp.route('/exploration-stats')
 def api_af_exploration_stats():
     """Get exploration graph statistics for dashboard widget."""
+    cache = _get_ttl_cache()
+    if cache:
+        cached = cache.get('exploration_stats')
+        if cached is not None:
+            return jsonify(cached)
     try:
         import exploration_hooks
         data = exploration_hooks.get_af_dashboard_data()
+        if cache:
+            cache.set('exploration_stats', data, ttl_seconds=5.0)
         return jsonify(data)
     except Exception as e:
         return jsonify({

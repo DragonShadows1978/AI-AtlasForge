@@ -78,6 +78,7 @@ def load_template(name):
     return f"<html><body><h1>Template '{name}' not found</h1></body></html>"
 
 HTML_TEMPLATE = load_template("main")
+HTML_BUNDLED_TEMPLATE = load_template("main_bundled")
 TIMELINE_PAGE_HTML = load_template("timeline")
 
 # =============================================================================
@@ -135,13 +136,22 @@ VALID_WS_ROOMS = [
     'file_events',       # File creation/modification events during missions
     'glassbox_archive',  # GlassBox transcript archival events
     'subprocess_gate',   # Intelligent Subprocess Gate status
-    'mission_params',    # Active mission validated parameters + audit summary
+    'mission_params',        # Active mission validated parameters + audit summary
+    'mission_agents',        # Real-time Mission agent activity streams
+    'investigation_agents',  # Real-time Investigation agent activity streams
 ]
 
 # Register websocket_events module with socketio reference
 try:
     from websocket_events import set_socketio
     set_socketio(socketio)
+except ImportError:
+    pass
+
+# Tell agent_stream_manager we are in the dashboard process (enables direct SocketIO emission)
+try:
+    from agent_stream_manager import set_dashboard_mode
+    set_dashboard_mode(True)
 except ImportError:
     pass
 
@@ -179,6 +189,30 @@ def find_process(script_name: str) -> dict | None:
     except:
         pass
     return None
+
+
+# Process detection cache: avoids repeated pgrep subprocess calls (50-500ms each)
+_process_cache: dict = {'pid': None, 'valid': False, 'checked_at': 0.0}
+_PROCESS_CACHE_TTL = 1.0  # seconds
+
+
+def find_process_cached(script_name: str) -> dict | None:
+    """Cached wrapper for find_process() — avoids repeated pgrep subprocess calls.
+
+    Returns cached result if checked within the last _PROCESS_CACHE_TTL seconds.
+    Falls through to find_process() on cache miss or expiry.
+    """
+    now = time.time()
+    if now - _process_cache['checked_at'] < _PROCESS_CACHE_TTL:
+        if _process_cache['valid']:
+            return {'pid': _process_cache['pid'], 'cmd': ''}
+        return None
+
+    result = find_process(script_name)
+    _process_cache['pid'] = result['pid'] if result else None
+    _process_cache['valid'] = result is not None
+    _process_cache['checked_at'] = now
+    return result
 
 
 def _normalize_provider(provider: str | None) -> str:
@@ -280,7 +314,7 @@ def _serialize_chat_message(msg: dict, fallback_provider: str) -> dict:
 
 def get_claude_status() -> dict:
     """Get Claude autonomous status."""
-    proc = find_process("atlasforge_conductor.py")
+    proc = find_process_cached("atlasforge_conductor.py")
     state = io_utils.atomic_read_json(CLAUDE_STATE_PATH, {})
     mission = io_utils.atomic_read_json(MISSION_PATH, {})
     provider = get_llm_provider()
@@ -336,7 +370,7 @@ def get_recent_journal(n: int = 10) -> list:
 
 def start_claude(mode: str = "rd") -> tuple[bool, str]:
     """Start Claude autonomous."""
-    if find_process("atlasforge_conductor.py"):
+    if find_process_cached("atlasforge_conductor.py"):
         return False, "Already running"
 
     script_path = BASE_DIR / "atlasforge_conductor.py"
@@ -362,7 +396,7 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
         )
         time.sleep(2)
 
-        if find_process("atlasforge_conductor.py"):
+        if find_process_cached("atlasforge_conductor.py"):
             return True, f"Started in {mode} mode ({provider})"
         return False, "Failed to start"
     except Exception as e:
@@ -371,7 +405,7 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
 
 def stop_claude() -> tuple[bool, str]:
     """Stop Claude autonomous."""
-    proc = find_process("atlasforge_conductor.py")
+    proc = find_process_cached("atlasforge_conductor.py")
     if not proc:
         return False, "Not running"
 
@@ -379,7 +413,7 @@ def stop_claude() -> tuple[bool, str]:
         os.kill(proc["pid"], signal.SIGTERM)
         time.sleep(2)
 
-        if find_process("atlasforge_conductor.py"):
+        if find_process_cached("atlasforge_conductor.py"):
             os.kill(proc["pid"], signal.SIGKILL)
             time.sleep(1)
 
@@ -660,13 +694,13 @@ def queue_auto_start_watcher():
                         continue
 
                     # Check if Claude is already running - with grace period
-                    if find_process("atlasforge_conductor.py"):
+                    if find_process_cached("atlasforge_conductor.py"):
                         # Wait for grace period to allow old process to terminate
                         print(f"[QueueWatcher] Claude detected running, waiting {PROCESS_GRACE_PERIOD}s grace period...")
                         time.sleep(PROCESS_GRACE_PERIOD)
 
                         # Check again after grace period
-                        if find_process("atlasforge_conductor.py"):
+                        if find_process_cached("atlasforge_conductor.py"):
                             print(f"[QueueWatcher] Claude still running after grace period, incrementing retry count")
                             # Increment retry count and save back (don't delete signal)
                             signal_data["retry_count"] = retry_count + 1
@@ -725,7 +759,7 @@ def queue_auto_start_watcher():
                     pass  # Lock module not available, proceed
 
                 # Check if Claude is already running
-                if find_process("atlasforge_conductor.py"):
+                if find_process_cached("atlasforge_conductor.py"):
                     continue  # Already running
 
                 # Check mission state
@@ -802,8 +836,9 @@ def index():
     template_name = "main_bundled" if app.config['USE_BUNDLED'] else "main"
     # Get bundle version for cache-busting
     bundle_version = get_bundle_version()
+    template = HTML_BUNDLED_TEMPLATE if app.config['USE_BUNDLED'] else HTML_TEMPLATE
     return render_template_string(
-        load_template(template_name),
+        template,
         bundle_js_version=bundle_version['js'],
         bundle_css_version=bundle_version['css']
     )
@@ -1076,6 +1111,20 @@ def get_initial_room_data(room: str) -> dict:
             return get_subprocess_gate_status()
         elif room == 'mission_params':
             return get_mission_params()
+        elif room == 'mission_agents':
+            try:
+                from agent_stream_manager import get_active_agents as _get_agents
+                agents = _get_agents()
+                return {'event': 'initial_state', 'agents': agents.get('mission', [])}
+            except Exception:
+                return {'event': 'initial_state', 'agents': []}
+        elif room == 'investigation_agents':
+            try:
+                from agent_stream_manager import get_active_agents as _get_agents
+                agents = _get_agents()
+                return {'event': 'initial_state', 'agents': agents.get('investigation', [])}
+            except Exception:
+                return {'event': 'initial_state', 'agents': []}
     except Exception as e:
         return {'error': str(e)}
     return {}
@@ -1328,7 +1377,7 @@ def check_and_emit_widget_updates():
 
     # Track timing for rate limiting
     now = time.time()
-    if now - _ws_state_cache.get('last_check', 0) < 0.5:  # Rate limit to 2Hz
+    if now - _ws_state_cache.get('last_check', 0) < 1.5:  # Rate limit to ~0.67Hz (reduced from 2Hz for lower I/O load)
         return
     _ws_state_cache['last_check'] = now
 
@@ -1698,6 +1747,117 @@ def watch_engine_stage():
 # =============================================================================
 # MAIN
 # =============================================================================
+
+
+@app.route('/api/agent-stream/history')
+def get_agent_stream_history():
+    """Return list of past agent stream manifests from persistent store."""
+    try:
+        from agent_stream_manager import get_stream_history
+        mission_id = request.args.get('mission_id')
+        limit = int(request.args.get('limit', 20))
+        limit = min(max(limit, 1), 100)
+        manifests = get_stream_history(mission_id=mission_id, limit=limit)
+        return jsonify({'success': True, 'agents': manifests, 'count': len(manifests)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/agent-stream/<agent_id>')
+def get_agent_stream(agent_id):
+    """Return accumulated stream lines for an agent (for reconnect replay)."""
+    try:
+        from agent_stream_manager import get_agent_stream_lines
+        lines = get_agent_stream_lines(agent_id, limit=200)
+        return jsonify({'success': True, 'lines': lines})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/internal/reload-agent-stream', methods=['POST'])
+def reload_agent_stream_module():
+    """Force-reload agent_stream_manager and set dashboard mode. Called after code updates."""
+    try:
+        import importlib
+        import sys
+        if 'agent_stream_manager' in sys.modules:
+            importlib.reload(sys.modules['agent_stream_manager'])
+        from agent_stream_manager import set_dashboard_mode
+        set_dashboard_mode(True)
+        return jsonify({'success': True, 'message': 'agent_stream_manager reloaded and set to dashboard mode'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/internal/agent-event', methods=['POST'])
+def internal_agent_event():
+    """
+    IPC endpoint: receive agent lifecycle/stream events from subprocess contexts
+    (atlasforge_conductor.py, investigation_engine.py) and emit via SocketIO
+    to connected browser clients.
+
+    Subprocesses cannot share the dashboard's SocketIO instance, so they POST
+    events here and this endpoint re-emits them from within the dashboard process.
+
+    POST body: {"room": "mission_agents"|"investigation_agents", "payload": {...}}
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        room = data.get('room', '')
+        payload = data.get('payload', {})
+
+        if room not in ('mission_agents', 'investigation_agents'):
+            return jsonify({'success': False, 'error': f'Invalid room: {room}'})
+
+        socketio.emit('update', {
+            'room': room,
+            'data': payload,
+            'timestamp': datetime.now().isoformat()
+        }, room=room, namespace='/widgets')
+
+        return jsonify({'success': True, 'room': room})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/agent-stream/test-emit', methods=['POST'])
+def test_agent_emit():
+    """
+    Cycle 3 verification endpoint: fire a mock agent lifecycle sequence
+    from within the dashboard process so SocketIO events reach real browsers.
+    POST body: {"context": "mission"|"investigation", "label": "..."}
+    """
+    try:
+        import uuid, time, threading
+        from agent_stream_manager import register_agent, complete_agent, STREAM_DIR
+        data = request.get_json(silent=True) or {}
+        context = data.get('context', 'mission')
+        label = data.get('label', 'Test-Agent')
+        agent_id = f"test_{uuid.uuid4().hex[:8]}"
+
+        stream_file = register_agent(context, agent_id, label=label)
+
+        def _write_and_complete():
+            events = [
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"Running test analysis..."}]}}',
+                '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/tmp/test.py"}}]}}',
+                '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"Test result OK."}]}]}}',
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"Test complete."}]}}',
+            ]
+            with open(str(stream_file), 'a') as f:
+                for evt in events:
+                    f.write(evt + '\n')
+                    f.flush()
+                    time.sleep(0.4)
+            time.sleep(0.5)
+            complete_agent(agent_id)
+
+        t = threading.Thread(target=_write_and_complete, daemon=True)
+        t.start()
+        return jsonify({'success': True, 'agent_id': agent_id, 'context': context, 'label': label})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 
 if __name__ == '__main__':
     # Start background watchers

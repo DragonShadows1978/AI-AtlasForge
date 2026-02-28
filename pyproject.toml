@@ -94,6 +94,6 @@ warn_unused_configs = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["workspace/tests"]
+testpaths = ["workspace/tests", "workspace/AI-AtlasForge_red_team/tests"]
 python_files = "test_*.py"
 python_functions = "test_*"

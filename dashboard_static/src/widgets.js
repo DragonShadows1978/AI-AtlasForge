@@ -5,6 +5,7 @@
  */
 
 import { showToast, escapeHtml, formatBytes, formatNumber, formatTimeAgo, stages, downloadFileViaFetch } from './core.js';
+import { handleMissionAgentEvent, handleInvestigationAgentEvent } from './modules/agent-activity.js';
 import { api } from './api.js';
 import { setFullMissionText } from './modals.js';
 
@@ -136,8 +137,27 @@ export { parseActivityMessageType, renderStyledJournalEntry };
 export function toggleCard(cardId) {
     const card = document.getElementById(cardId + '-card');
     if (card) {
+        const content = card.querySelector('.card-content');
         card.classList.toggle('collapsed');
         saveCardState(cardId, card.classList.contains('collapsed'));
+        if (card.classList.contains('collapsed')) {
+            // Explicitly set 0 so the CSS transition animates from current height to 0.
+            // After animation, remove the inline style so CSS class rule fully owns it.
+            if (content) {
+                content.style.maxHeight = '0px';
+                content.style.opacity = '0';
+                setTimeout(() => {
+                    content.style.removeProperty('max-height');
+                    content.style.removeProperty('opacity');
+                }, 300); // matches --dur-slow CSS token
+            }
+        } else {
+            // Expanding: recalculate and apply height
+            if (content) {
+                setTimeout(() => _setCardHeight(content,
+                    window.visualViewport?.height || window.innerHeight), 50);
+            }
+        }
     }
 }
 
@@ -159,6 +179,62 @@ export function loadCardStates() {
             }
         }
     } catch (e) {}
+}
+// =============================================================================
+// DYNAMIC CARD HEIGHT SYSTEM
+// =============================================================================
+
+const WIDGET_HEIGHT_OVERRIDES = {
+    'queue': 0.70,
+    'mission-suggestions': 0.70,
+    'recommendations-widget': 0.65,
+    'files': 0.50,
+};
+const DEFAULT_HEIGHT_FRACTION = 0.60;
+
+export function initDynamicCardHeights() {
+    applyDynamicHeights();
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(applyDynamicHeights, 150);
+    });
+}
+
+export function applyDynamicHeights() {
+    const viewportH = window.visualViewport?.height || window.innerHeight;
+    document.querySelectorAll('.card:not(.collapsed) .card-content').forEach(el => {
+        _setCardHeight(el, viewportH);
+    });
+}
+
+function _setCardHeight(el, viewportH) {
+    const card = el.closest('.card');
+    const cardId = card?.id?.replace('-card', '') || '';
+    const fraction = WIDGET_HEIGHT_OVERRIDES[cardId] ?? DEFAULT_HEIGHT_FRACTION;
+    // Mobile: cap fraction at 0.45 on narrow viewports (< 768px)
+    const effectiveFraction = window.innerWidth < 768 ? Math.min(fraction, 0.45) : fraction;
+    const cap = viewportH * effectiveFraction;
+
+    // Lift constraint to measure natural height
+    el.style.transition = 'none';
+    el.style.maxHeight = 'none';
+    const naturalH = el.scrollHeight;
+
+    // Apply min(content, cap)
+    el.style.maxHeight = Math.min(naturalH, cap) + 'px';
+    // Double-rAF: ensures maxHeight is committed to render pipeline before
+    // re-enabling transition, preventing any edge-case same-frame measurement+transition.
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => { el.style.transition = ''; });
+    });
+}
+
+export function recalcCardHeight(cardId) {
+    const card = document.getElementById(cardId + '-card');
+    if (!card || card.classList.contains('collapsed')) return;
+    const content = card.querySelector('.card-content');
+    if (content) _setCardHeight(content, window.visualViewport?.height || window.innerHeight);
 }
 
 // =============================================================================
@@ -369,7 +445,8 @@ export async function startClaude(mode) {
         }
 
         // Create the new mission
-        const payload = { mission: missionText, cycle_budget: cycleBudget };
+        const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
+        const payload = { mission: missionText, cycle_budget: cycleBudget, max_iterations: maxIterations };
         if (projectName) payload.project_name = projectName;
 
         const setResult = await api('/api/mission', 'POST', payload);
@@ -433,7 +510,8 @@ export async function setMission() {
         if (!confirm2) return;
     }
 
-    const payload = {mission, cycle_budget: cycleBudget};
+    const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
+    const payload = {mission, cycle_budget: cycleBudget, max_iterations: maxIterations};
     if (projectName) {
         payload.project_name = projectName;
     }
@@ -462,6 +540,7 @@ export async function queueMission() {
     }
 
     const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+    const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
     const projectNameInput = document.getElementById('project-name-input');
     const projectName = projectNameInput ? projectNameInput.value.trim() : '';
 
@@ -470,6 +549,7 @@ export async function queueMission() {
         const payload = {
             problem_statement: missionText,
             cycle_budget: cycleBudget,
+            max_iterations: maxIterations,
             priority: 0,
             source: 'dashboard'
         };
@@ -550,6 +630,82 @@ export function initProjectNameSuggestion() {
 // =============================================================================
 // FILE HANDLING
 // =============================================================================
+
+// =============================================================================
+// DATA APPLICATION HELPERS (used by parallel refresh())
+// =============================================================================
+
+/**
+ * Apply pre-fetched files data to the files widget.
+ * Called by refresh() after parallel Promise.all fetch.
+ */
+function _applyFilesData(files) {
+    try {
+        if (!Array.isArray(files)) return;
+        const container = document.getElementById('files-list');
+        const countEl = document.getElementById('files-count');
+        if (countEl) countEl.textContent = files.length;
+        if (!container) return;
+        if (files.length === 0) {
+            container.innerHTML = '<div class="no-files">No files yet</div>';
+            return;
+        }
+        container.innerHTML = files.slice(0, 20).map(f => `
+            <div class="file-item">
+                <div class="file-info">
+                    <a href="#" class="download-link file-name"
+                       data-content-url="${f.content_url || ''}"
+                       data-download-url="${f.download_url}"
+                       data-filename="${f.name}"
+                       data-file-type="${f.file_type || 'binary'}"
+                       title="${f.path}">${f.name}</a>
+                    <span class="file-meta">${formatBytes(f.size)} - ${formatTimeAgo(f.modified)}</span>
+                </div>
+            </div>
+        `).join('');
+        container.querySelectorAll('.download-link[data-content-url]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                openFilePreviewModal(
+                    link.dataset.contentUrl,
+                    link.dataset.filename,
+                    link.dataset.fileType
+                );
+            });
+        });
+    } catch (e) {
+        console.warn('[Widgets] _applyFilesData error:', e);
+    }
+}
+
+/**
+ * Apply pre-fetched AtlasForge exploration data to widgets.
+ * Called by refresh() after parallel Promise.all fetch.
+ */
+function _applyAtlasForgeData(data) {
+    try {
+        if (!data || data.error) return;
+        if (data.exploration) {
+            const fileCount = (data.exploration.nodes_by_type || {}).file || 0;
+            const filesEl = document.getElementById('atlasforge-files-count');
+            const insightsEl = document.getElementById('atlasforge-insights-count');
+            const edgesEl = document.getElementById('atlasforge-edges-count');
+            if (filesEl) filesEl.textContent = fileCount;
+            if (insightsEl) insightsEl.textContent = data.exploration.total_insights || 0;
+            if (edgesEl) edgesEl.textContent = data.exploration.total_edges || 0;
+        }
+        const coverage = data.coverage_pct || 0;
+        const coveragePctEl = document.getElementById('atlasforge-coverage-pct');
+        const coverageBarEl = document.getElementById('atlasforge-coverage-bar');
+        if (coveragePctEl) coveragePctEl.textContent = coverage + '%';
+        if (coverageBarEl) coverageBarEl.style.width = coverage + '%';
+        if (typeof updateDriftChart === 'function') updateDriftChart(data.drift_history || []);
+        if (typeof updateRecentExplorations === 'function') updateRecentExplorations(data.recent_explorations || []);
+    } catch (e) {
+        console.warn('[Widgets] _applyAtlasForgeData error:', e);
+    }
+}
+
 
 export async function loadFiles() {
     try {
@@ -907,23 +1063,28 @@ export async function confirmRestart() {
 
 export async function refresh() {
     try {
-        const data = await api('/api/status');
+        // Fire all independent API calls in parallel — eliminates serial waterfall
+        const [data, invStatus, journal, files, atlasData] = await Promise.all([
+            api('/api/status'),
+            api('/api/investigation/status').catch(() => null),
+            api('/api/journal').catch(() => []),
+            api('/api/files').catch(() => []),
+            api('/api/atlasforge/exploration-stats').catch(() => ({}))
+        ]);
 
         // Update AtlasForge service status in header
         updateAtlasForgeServiceStatus(data.running, data.mode);
 
-        // Also check Investigation status
+        // Update Investigation status from parallel result
         try {
-            const invStatus = await api('/api/investigation/status');
             const isInvRunning = invStatus && invStatus.investigation_id &&
                 invStatus.status !== 'completed' && invStatus.status !== 'failed' && invStatus.status !== 'idle';
             updateInvestigationServiceStatus(isInvRunning, invStatus?.status);
         } catch (e) {
-            // Investigation API not available or error
             updateInvestigationServiceStatus(false, null);
         }
 
-        // Update external service statuses (terminal server, etc.)
+        // Update external service statuses (terminal server, etc.) — fire and forget
         refreshServiceStatuses();
 
         // Helper function for safe DOM updates
@@ -960,9 +1121,9 @@ export async function refresh() {
 
     updateStageIndicator(data.rd_stage);
 
-    const journal = await api('/api/journal');
+    // Use journal data fetched in parallel
     const journalEl = document.getElementById('journal');
-    if (journalEl) journalEl.innerHTML = journal.map(j => renderStyledJournalEntry(j)).join('') || '<div style="color: var(--text-dim)">No activity yet</div>';
+    if (journalEl) journalEl.innerHTML = (Array.isArray(journal) ? journal : []).map(j => renderStyledJournalEntry(j)).join('') || '<div style="color: var(--text-dim)">No activity yet</div>';
 
     restoreJournalExpandedStates();
 
@@ -970,8 +1131,11 @@ export async function refresh() {
         await window.loadRecommendations();
     }
 
-    await loadFiles();
-    await refreshAtlasForgeWidgets();
+    // Use files data fetched in parallel (populate files list directly)
+    _applyFilesData(files);
+
+    // Use atlasData fetched in parallel
+    _applyAtlasForgeData(atlasData);
 
     if (!window.lastKBRefresh || Date.now() - window.lastKBRefresh > 15000) {
         if (typeof window.refreshKBAnalyticsWidget === 'function') {
@@ -2233,6 +2397,9 @@ export function initWebSocketHandlers() {
         window.registerSocketHandler('journal', handleJournalEvent);
         console.log('[Widgets] WebSocket event handlers registered');
     }
+    // Agent activity widget is initialized separately in main.js (agentActivity.initAgentActivity()).
+    // Do NOT call initAgentActivity() here — it would subscribe to mission_agents and
+    // investigation_agents rooms twice, causing every activity event to fire twice.
 }
 
 // Make handlers available globally for socket.js integration
@@ -2243,6 +2410,8 @@ window.handleRecommendationEvent = handleRecommendationEvent;
 window.handleMissionStatusEvent = handleMissionStatusEvent;
 window.handleJournalEvent = handleJournalEvent;
 window.initWebSocketHandlers = initWebSocketHandlers;
+window.handleMissionAgentEvent = handleMissionAgentEvent;
+window.handleInvestigationAgentEvent = handleInvestigationAgentEvent;
 
 // =============================================================================
 // TOKEN INTEGRITY WIDGET

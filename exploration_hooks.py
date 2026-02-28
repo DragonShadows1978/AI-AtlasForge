@@ -694,7 +694,7 @@ def semantic_search(query: str, top_k: int = 10) -> List[Dict]:
     return []
 
 
-def get_drift_history(force_reload: bool = True) -> List[Dict]:
+def get_drift_history(force_reload: bool = False) -> List[Dict]:
     """
     Get history of mission drift measurements.
 
@@ -745,7 +745,7 @@ def get_drift_history(force_reload: bool = True) -> List[Dict]:
     return []
 
 
-def get_recent_explorations(limit: int = 10, force_reload: bool = True) -> List[Dict]:
+def get_recent_explorations(limit: int = 10, force_reload: bool = False) -> List[Dict]:
     """
     Get recently explored items.
 
@@ -798,7 +798,7 @@ def get_recent_explorations(limit: int = 10, force_reload: bool = True) -> List[
     return []
 
 
-def get_af_dashboard_data(force_reload: bool = True) -> Dict:
+def get_af_dashboard_data(force_reload: bool = False) -> Dict:
     """
     Get all data needed for AtlasForge dashboard widgets.
 
