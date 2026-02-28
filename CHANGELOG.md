@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.11.0] - 2026-02-28
+
+### Other
+
+- feat: make investigation_validator permanent (was symlink)
+
+### Stats
+
+```
+ workspace/investigation_validator/orchestrator.py  | 233 +++++++++
+ .../investigation_validator/source_fetcher.py      | 582 +++++++++++++++++++++
+ .../investigation_validator/tests/__init__.py      |   1 +
+ .../investigation_validator/validator_agent.py     | 506 ++++++++++++++++++
+ 15 files changed, 2882 insertions(+), 28 deletions(-)
+```
+
+_Full diff: `git diff v1.10.0..v1.11.0`_
+
+
 ## [1.10.0] - 2026-02-23
 
 ### Added
