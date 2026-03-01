@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.12.0] - 2026-03-01
+
+### Added
+
+- feat: add vision module and claude_hooks as integrated repo components
+- docs: update v1.11.0 changelog with full feature list
+
+### Code Changes
+
+- **Added** `claude_hooks/backup-core-files.py` — `get_backups_for_file`, `cleanup_old_backups`, `create_backup`, `is_core_file`, `main`
+- **Added** `claude_hooks/bash_delete_guard.py` — `_is_whitelisted`, `_is_protected`, `_extract_targets`, `_command_hash`, `_was_already_shown`
+- **Added** `claude_hooks/bash_write_guard.py` — `_detect_file_write`, `main`
+- **Added** `claude_hooks/pre_tool_use.py` — `_structured_log`, `is_conductor_running`, `get_stage_from_lock`, `is_path_allowed`, `check_write_edit`
+- **Added** `claude_hooks/stage_gate_hook.py` — `_debug_log`, `is_conductor_running`, `get_current_stage`, `is_path_allowed`, `check_write_edit`
+- **Added** `vision/__init__.py`
+- **Added** `vision/burst_capture.py` — `FrameInfo`, `BurstResult`, `to_dict`, `capture_burst`, `see_burst`
+- **Added** `vision/burst_review.py` — `FrameAnnotation`, `to_dict`, `from_dict`, `FrameDiff`, `BurstMetadata`
+- **Added** `vision/claude_vision.py` — `see`, `see_compact`, `describe_screen`, `save_screenshot`, `main`
+- **Added** `vision/desktop_vision.py` — `capture_display`, `capture_to_base64`, `capture_and_save`, `main`
+- **Added** `vision/screen_capture.py` — `ScreenCortex`, `__init__`, `capture`, `capture_to_png_bytes`, `capture_to_base64`
+- **Added** `vision/x11_bindings.py` — `_load_library`, `XWindowAttributes`, `XImage`, `XShmSegmentInfo`, `X11Display`
+
+### Stats
+
+```
+ vision/claude_vision.py           |  277 ++++++++
+ vision/desktop_vision.py          |  253 +++++++
+ vision/screen_capture.py          |  279 ++++++++
+ vision/x11_bindings.py            |  401 ++++++++++++
+ 21 files changed, 4627 insertions(+), 78 deletions(-)
+```
+
+_Full diff: `git diff v1.11.0..v1.12.0`_
+
+
 ## [1.11.0] - 2026-02-28
 
 ### Added
