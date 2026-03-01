@@ -19,28 +19,32 @@ from pathlib import Path
 # =============================================================================
 
 CORE_FILES = [
-    # Mini-Mind v2 Core
-    "/home/vader/mini-mind-v2/dashboard_v2.py",
-    "/home/vader/mini-mind-v2/rd_engine.py",
-    "/home/vader/mini-mind-v2/claude_autonomous.py",
-    "/home/vader/mini-mind-v2/exploration_hooks.py",
-    "/home/vader/mini-mind-v2/io_utils.py",
-    "/home/vader/mini-mind-v2/GROUND_RULES.md",
+    # AtlasForge Core
+    "/home/vader/AI-AtlasForge/atlasforge_conductor.py",
+    "/home/vader/AI-AtlasForge/dashboard_v2.py",
+    "/home/vader/AI-AtlasForge/exploration_hooks.py",
+    "/home/vader/AI-AtlasForge/io_utils.py",
+    "/home/vader/AI-AtlasForge/GROUND_RULES.md",
 
-    # RDE Enhancements
-    "/home/vader/mini-mind-v2/rde_enhancements/rde_enhancer.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/exploration_graph.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/fingerprint_extractor.py",
-    "/home/vader/mini-mind-v2/rde_enhancements/mission_continuity_tracker.py",
+    # AF Engine
+    "/home/vader/AI-AtlasForge/af_engine/orchestrator.py",
+    "/home/vader/AI-AtlasForge/af_engine/prompt_factory.py",
+    "/home/vader/AI-AtlasForge/af_engine/state_manager.py",
+
+    # AtlasForge Enhancements
+    "/home/vader/AI-AtlasForge/atlasforge_enhancements/atlasforge_enhancer.py",
+    "/home/vader/AI-AtlasForge/atlasforge_enhancements/exploration_graph.py",
+    "/home/vader/AI-AtlasForge/atlasforge_enhancements/fingerprint_extractor.py",
+    "/home/vader/AI-AtlasForge/atlasforge_enhancements/mission_continuity_tracker.py",
 
     # GlassBox
-    "/home/vader/mini-mind-v2/workspace/glassbox/dashboard_routes.py",
-    "/home/vader/mini-mind-v2/workspace/glassbox/mission_archiver.py",
-    "/home/vader/mini-mind-v2/workspace/glassbox/transcript_parser.py",
+    "/home/vader/AI-AtlasForge/glassbox/dashboard_routes.py",
+    "/home/vader/AI-AtlasForge/glassbox/mission_archiver.py",
+    "/home/vader/AI-AtlasForge/glassbox/transcript_parser.py",
 ]
 
 # Backup directory
-BACKUP_DIR = "/home/vader/mini-mind-v2/backups/auto_backups"
+BACKUP_DIR = "/home/vader/AI-AtlasForge/backups/auto_backups"
 
 # Maximum backups to keep per file (oldest get deleted)
 MAX_BACKUPS_PER_FILE = 10
