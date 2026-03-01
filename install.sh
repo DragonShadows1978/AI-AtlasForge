@@ -213,6 +213,34 @@ if [ -f "$ATLASFORGE_ROOT/scripts/generate_environment.py" ]; then
     log_success "ENVIRONMENT.md generated"
 fi
 
+# Install Claude Code hooks
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}Claude Code Hooks${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "AtlasForge uses Claude Code hooks to enforce mission discipline:"
+echo "  • Stage-gate: prevents writes outside the current mission stage"
+echo "  • Bash write guard: blocks heredoc/redirect file writes"
+echo "  • Delete guard: backs up files before destructive deletes"
+echo "  • Core file backup: snapshots key files before edits"
+echo ""
+echo "These hooks are installed to ~/.claude/hooks/ and registered in"
+echo "~/.claude/settings.json. They only activate when a mission is running."
+echo ""
+if check_command claude; then
+    read -p "Install Claude Code hooks? [Y/n] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        bash "$ATLASFORGE_ROOT/scripts/install_hooks.sh"
+    else
+        log_warning "Skipped hook installation. Run scripts/install_hooks.sh later."
+    fi
+else
+    log_warning "Claude Code CLI not found — skipping hook installation."
+    log_warning "Install Claude Code, then run: ./scripts/install_hooks.sh"
+fi
+
 # API key prompt
 echo ""
 echo -e "${YELLOW}═══════════════════════════════════════════════════════════${NC}"

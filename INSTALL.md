@@ -152,6 +152,64 @@ If you want to use a local LLM:
      model: "llama3.1:8b"
    ```
 
+## Claude Code Hooks
+
+AtlasForge ships a set of Claude Code hooks that enforce mission discipline
+and protect your files. They live in `claude_hooks/` in the repo and are
+installed to `~/.claude/hooks/` by `install.sh`.
+
+### What the hooks do
+
+| Hook | Fires on | Purpose |
+|---|---|---|
+| `pre_tool_use.py` | `Write`, `Edit`, `Bash` | Stage-gate: blocks writes outside the current mission stage |
+| `stage_gate_hook.py` | `Write`, `Edit`, `Bash` | Path-level stage validation (defense in depth) |
+| `backup-core-files.py` | `Write`, `Edit` | Auto-backup of critical files before edits |
+| `bash_write_guard.py` | `Bash` | Blocks heredoc/redirect file writes that bypass AfterImage |
+| `bash_delete_guard.py` | `Bash` | Deny-then-allow with auto-backup for `rm`/`unlink` |
+
+All hooks **bypass enforcement when no mission is running** — they check for
+the conductor lock file and exit silently if it's absent. Normal Claude Code
+sessions outside AtlasForge are unaffected.
+
+### Installing hooks manually
+
+If you skipped hook installation during `install.sh`:
+
+```bash
+./scripts/install_hooks.sh
+
+# Preview without making changes:
+./scripts/install_hooks.sh --dry-run
+```
+
+### AfterImage hooks (optional but recommended)
+
+[AI-AfterImage](https://github.com/DragonShadows1978/AI-AfterImage) provides
+episodic code memory — before Claude writes a file it surfaces similar past
+code from a knowledge base, and after the write it stores the new code for
+future recall. It also tracks file churn and warns when stable files are being
+over-edited.
+
+AfterImage's `afterimage_hook.py` is **not** included in this repo — it must
+be installed from the AfterImage project:
+
+```bash
+git clone https://github.com/DragonShadows1978/AI-AfterImage.git
+cd AI-AfterImage
+./install.sh
+```
+
+AfterImage's installer registers its own hook in `~/.claude/settings.json`
+alongside the AtlasForge hooks automatically.
+
+### Full hook reference
+
+See `claude_hooks/README.md` for:
+- What each hook does in detail
+- The `settings.json` structure after full installation
+- Hook execution order and the protocol hooks use to deny/allow tool calls
+
 ## systemd Services (Optional)
 
 For auto-start on boot:

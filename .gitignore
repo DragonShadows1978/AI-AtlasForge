@@ -63,6 +63,7 @@ ENV/
 *.pre_restore
 *.orig
 *.backup
+*.pre_recovery_backup
 
 # ------ Deployment Artifacts ------
 deploy.log
@@ -78,54 +79,6 @@ workspace/
 .env
 .env.local
 .env.*.local
-.env.production
-.env.development
-config.yaml
-*.pem
-*.key
-
-# SSL Certificates (do not commit private keys)
-certs/
-credentials.json
-secrets.json
-config.local.json
-email_config.json
-*_config.json
-
-# ------ IDE/Editor ------
-.vscode/
-.idea/
-*.sublime-*
-.project
-.pydevproject
-*.iml
-.spyderproject
-.spyproject
-
-# ------ OS ------
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-*.lnk
-desktop.ini
-
-# ------ Databases (local only) ------
-*.db
-*.sqlite
-*.sqlite3
-
-# ------ Testing Artifacts ------
-test_output/
-*.coverage
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
 
 # ------ Node.js ------
 node_modules/
@@ -141,10 +94,6 @@ yarn.lock
 
 # ------ Investigations (personal data) ------
 investigations/
-!investigations/
-investigations/*
-!investigations/INV_GROUND_RULES.md
-!investigations/INV_GROUND_RULES_CODEX.md
 
 # ------ Predictive Drift (personal infrastructure) ------
 predictive_drift/
@@ -154,8 +103,9 @@ predictive_drift/
 docs/internal/
 *.personal.md
 
-# ------ Claude Hooks (may contain local paths) ------
-.claude/hooks/
+# ------ Claude local settings (may contain local paths/secrets) ------
+# Hooks are tracked in claude_hooks/ instead
+.claude/
 
 # ------ Jupyter Notebooks ------
 .ipynb_checkpoints/
@@ -167,15 +117,13 @@ htmlcov/
 .coverage.*
 coverage.xml
 
-# ------ AtlasForge Runtime Artifacts (never commit these) ------
-# These are generated automatically during mission execution and must NOT be committed to main.
-# Mission recovery relies on filesystem state (state/, .af_snapshots/ on disk), NOT on git history.
-.af_snapshots/
-.af_archives/
-.af_checkpoints/
-atlasforge_conductor.lock
-.mutmut-cache
-coverage.json
-coverage_full.json
-coverage_baseline.json
-mutants/
+# ------ SSL Certificates ------
+certs/
+
+# ------ Recovery Artifacts ------
+recovery_*/
+recovery_restore_backup_*/
+recovery_ai_storyforge_*/
+
+# ------ Mypy Cache ------
+.mypy_cache/
