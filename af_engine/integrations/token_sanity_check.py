@@ -68,7 +68,7 @@ class TokenSanityCheckIntegration(BaseIntegrationHandler):
             root_dir = Path(__file__).resolve().parent.parent.parent
             if str(root_dir) not in sys.path:
                 sys.path.insert(0, str(root_dir))
-            from workspace.glassbox.mission_archiver import TRANSCRIPTS_ARCHIVE_DIR
+            from glassbox.mission_archiver import TRANSCRIPTS_ARCHIVE_DIR
             return TRANSCRIPTS_ARCHIVE_DIR
         except ImportError:
             root_dir = Path(__file__).resolve().parent.parent.parent
