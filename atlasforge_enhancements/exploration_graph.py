@@ -2062,6 +2062,119 @@ class ExplorationGraph:
         """Generate a stable ID from a key."""
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
+    # -------------------------------------------------------------------------
+    # Dashboard Convenience Methods
+    # (Added to fix silent failures in dashboard_v2.py and exploration_hooks.py)
+    # -------------------------------------------------------------------------
+
+    def get_node_counts_by_type(self) -> Dict[str, int]:
+        """Return {node_type: count} for all nodes in the graph."""
+        with self._graph_lock():
+            return {
+                ntype: len(nids)
+                for ntype, nids in self._node_by_type.items()
+            }
+
+    def get_insight_count(self) -> int:
+        """Return total number of insights in the graph."""
+        with self._graph_lock():
+            return len(self.insights)
+
+    def get_edge_count(self) -> int:
+        """Return total number of edges in the graph."""
+        with self._graph_lock():
+            return len(self.edges)
+
+    def get_coverage_percentage(self) -> float:
+        """Return percentage of nodes that have embeddings."""
+        with self._graph_lock():
+            total = len(self.nodes)
+            if total == 0:
+                return 0.0
+            with_embedding = sum(
+                1 for n in self.nodes.values() if n.embedding is not None
+            )
+            return round(with_embedding / total * 100, 1)
+
+    def get_drift_history(self) -> List[Dict]:
+        """Return empty list — drift history lives in MissionContinuityTracker.
+
+        Stub so dashboard code calling graph.get_drift_history() does not raise
+        AttributeError. Use exploration_hooks.get_drift_history() for real data.
+        """
+        logger.debug(
+            "get_drift_history() called on ExplorationGraph — "
+            "use exploration_hooks.get_drift_history() for real data"
+        )
+        return []
+
+    def get_recent_explorations(self, limit: int = 10) -> List[Dict]:
+        """Return most recently explored nodes as dicts, sorted by last_explored desc."""
+        with self._graph_lock():
+            sorted_nodes = sorted(
+                self.nodes.values(),
+                key=lambda n: n.last_explored,
+                reverse=True
+            )[:max(1, limit)]
+            return [n.to_dict() for n in sorted_nodes]
+
+    def get_recent_nodes(self, limit: int = 20) -> List[Dict]:
+        """Return most recently explored nodes as dicts, sorted by last_explored desc."""
+        return self.get_recent_explorations(limit)
+
+    def get_recent_edges(self, limit: int = 30) -> List[Dict]:
+        """Return most recently created edges as dicts, sorted by discovered_at desc."""
+        with self._graph_lock():
+            sorted_edges = sorted(
+                self.edges,
+                key=lambda e: e.discovered_at,
+                reverse=True
+            )[:max(1, limit)]
+            return [e.to_dict() for e in sorted_edges]
+
+    def get_recent_insights(self, limit: int = 10) -> List[Dict]:
+        """Return most recently created insights as dicts, sorted by discovered_at desc."""
+        with self._graph_lock():
+            sorted_insights = sorted(
+                self.insights.values(),
+                key=lambda i: i.discovered_at,
+                reverse=True
+            )[:max(1, limit)]
+            return [i.to_dict() for i in sorted_insights]
+
+
+# =============================================================================
+# Module-level singleton factory
+# =============================================================================
+
+_global_graph: Optional['ExplorationGraph'] = None
+
+
+def get_exploration_graph(storage_path: Optional[str] = None) -> Optional['ExplorationGraph']:
+    """Get or create the module-level singleton ExplorationGraph.
+
+    This is the function imported by dashboard_v2.py. It returns a persistent
+    singleton backed by the default atlasforge_data/exploration/ directory,
+    or a custom path if provided.
+
+    Args:
+        storage_path: Optional path override. Uses the default path if None.
+
+    Returns:
+        ExplorationGraph singleton instance.
+    """
+    global _global_graph
+    if _global_graph is None:
+        path = storage_path or str(
+            Path(__file__).resolve().parent.parent / 'atlasforge_data' / 'exploration'
+        )
+        try:
+            _global_graph = ExplorationGraph(storage_path=Path(path))
+        except Exception as e:
+            logger.error(f"get_exploration_graph: failed to create graph at {path}: {e}")
+            return None
+    return _global_graph
+
 
 # =============================================================================
 # DEMO

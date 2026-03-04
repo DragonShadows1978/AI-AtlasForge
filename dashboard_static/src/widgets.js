@@ -6,8 +6,10 @@
 
 import { showToast, escapeHtml, formatBytes, formatNumber, formatTimeAgo, stages, downloadFileViaFetch } from './core.js';
 import { handleMissionAgentEvent, handleInvestigationAgentEvent } from './modules/agent-activity.js';
+import { initSubagentPoolWidget, handlePoolStatusEvent } from './modules/subagent-pool.js';
 import { api } from './api.js';
 import { setFullMissionText } from './modals.js';
+import { getConnectionState, forceReconnect } from './socket.js';
 
 // =============================================================================
 // STATE
@@ -15,6 +17,9 @@ import { setFullMissionText } from './modals.js';
 
 let fullMissionText = '';
 let analyticsData = null;
+
+// Track which data has been received via WebSocket initial_data to skip duplicate REST calls
+const _wsInitialReceived = new Set();
 
 // =============================================================================
 // ACTIVITY LOG MESSAGE STYLING (Cycle 3)
@@ -464,6 +469,13 @@ export async function startClaude(mode) {
         showToast(`Mission set and started: ${startResult.message}`, 'success');
         refresh();
 
+        // Auto-reconnect WebSocket if disconnected so live updates flow immediately
+        const connState = getConnectionState();
+        if (connState.main !== 'connected' || connState.widgets !== 'connected') {
+            console.log('[Mission] Socket disconnected after submit, forcing reconnect...');
+            forceReconnect();
+        }
+
     } else if (!isComplete) {
         // Case 2: Empty text box, mission in progress - restart/resume
         const data = await api(`/api/start/${mode}`, 'POST');
@@ -521,6 +533,13 @@ export async function setMission() {
     document.getElementById('mission-input').value = '';
     if (projectNameInput) projectNameInput.value = '';
     refresh();
+
+    // Auto-reconnect WebSocket if disconnected so live updates flow immediately
+    const smConnState = getConnectionState();
+    if (smConnState.main !== 'connected' || smConnState.widgets !== 'connected') {
+        console.log('[Mission] Socket disconnected after setMission, forcing reconnect...');
+        forceReconnect();
+    }
 }
 
 export async function resetMission() {
@@ -667,8 +686,9 @@ function _applyFilesData(files) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 openFilePreviewModal(
-                    link.dataset.contentUrl,
                     link.dataset.filename,
+                    link.dataset.contentUrl,
+                    link.dataset.downloadUrl,
                     link.dataset.fileType
                 );
             });
@@ -774,9 +794,17 @@ export function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
     modal.style.display = 'flex';
     document.body.classList.add('modal-open');
 
-    fetch(contentUrl)
-        .then(r => r.json())
+    const _fpController = new AbortController();
+    const _fpTimeout = setTimeout(() => _fpController.abort(), 30000);
+
+    fetch(contentUrl, { signal: _fpController.signal })
+        .then(r => {
+            clearTimeout(_fpTimeout);
+            if (!r.ok) throw new Error(`Server returned ${r.status}: ${r.statusText}`);
+            return r.json();
+        })
         .then(data => {
+            if (data.error) throw new Error(data.error);
             if (data.file_type === 'image') {
                 body.innerHTML = `<img src="data:${data.mime_type};base64,${data.content}" alt="${_escFp(name)}">`;
                 copyBtn.style.display = 'none';
@@ -796,7 +824,9 @@ export function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
             }
         })
         .catch(err => {
-            body.innerHTML = `<div class="file-preview-binary">Error loading file: ${_escFp(err.message)}</div>`;
+            clearTimeout(_fpTimeout);
+            const msg = err.name === 'AbortError' ? 'Request timed out' : (err.message || 'Unknown error');
+            body.innerHTML = `<div class="file-preview-binary">Error loading file: ${_escFp(msg)}</div>`;
         });
 }
 
@@ -805,7 +835,7 @@ export function closeFilePreviewModal() {
     if (modal) modal.style.display = 'none';
     _fpCurrentTextContent = null;
     _fpCurrentDownloadUrl = null;
-    const anyOpen = document.querySelectorAll('.modal[style*="display: flex"], .modal[style*="display:flex"]').length > 0;
+    const anyOpen = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"], .restart-modal-overlay.visible').length > 0;
     if (!anyOpen) document.body.classList.remove('modal-open');
 }
 
@@ -1063,14 +1093,34 @@ export async function confirmRestart() {
 
 export async function refresh() {
     try {
-        // Fire all independent API calls in parallel — eliminates serial waterfall
+        // Skip REST calls for data already received via WebSocket initial_data
+        const wsHasStatus = _wsInitialReceived.has('mission_status');
+
+        // Only fetch what WebSocket hasn't already provided
         const [data, invStatus, journal, files, atlasData] = await Promise.all([
-            api('/api/status'),
+            wsHasStatus ? Promise.resolve(null) : api('/api/status'),
             api('/api/investigation/status').catch(() => null),
-            api('/api/journal').catch(() => []),
+            wsHasStatus ? Promise.resolve(null) : api('/api/journal').catch(() => []),
             api('/api/files').catch(() => []),
             api('/api/atlasforge/exploration-stats').catch(() => ({}))
         ]);
+
+        // If WebSocket already handled status, skip the REST-driven DOM updates
+        if (!data) {
+            // Still update files and atlas data from REST
+            _applyFilesData(files);
+            _applyAtlasForgeData(atlasData);
+
+            // Investigation status still needs REST (no WS room for it)
+            try {
+                const isInvRunning = invStatus && invStatus.investigation_id &&
+                    invStatus.status !== 'completed' && invStatus.status !== 'failed' && invStatus.status !== 'idle';
+                updateInvestigationServiceStatus(isInvRunning, invStatus?.status);
+            } catch (e) {
+                updateInvestigationServiceStatus(false, null);
+            }
+            return;
+        }
 
         // Update AtlasForge service status in header
         updateAtlasForgeServiceStatus(data.running, data.mode);
@@ -1205,6 +1255,8 @@ function updateDriftChart(driftHistory) {
     const sevEl = document.getElementById('atlasforge-drift-severity');
     // Guard against missing DOM elements to prevent TypeError
     if (!chart || !simEl || !sevEl) return;
+    // Bug C analog: skip render when card is collapsed (offsetParent===null)
+    if (chart.offsetParent === null) return;
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -1300,6 +1352,8 @@ export async function refreshAnalyticsWidget() {
 function updateAnalyticsTrendWidget(missions) {
     const chart = document.getElementById('analytics-trend-chart');
     if (!chart) return;
+    // Bug C analog: skip render when widget is collapsed (offsetParent===null)
+    if (chart.offsetParent === null) return;
 
     if (!missions || missions.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.75em; width: 100%; text-align: center;">No trend data</div>';
@@ -1334,7 +1388,7 @@ export async function refreshArtifactHealthWidget() {
         }
 
         // Update health score and bar
-        const healthPercent = Math.round((summary.overall_health || 0) * 100);
+        const healthPercent = Math.round(summary.overall_health || 0);
         const healthBar = document.getElementById('artifact-health-bar');
         const healthPercentEl = document.getElementById('artifact-health-percent');
         if (healthBar) {
@@ -1429,6 +1483,100 @@ export function updateMissionParamsWidget(data) {
 
     // Update health badge from WebSocket push data
     _applyHealthBadge(data.health);
+
+    // Show "was: X" original values if they differ from current
+    const origCB = p.original_cycle_budget;
+    const origMI = p.original_max_iterations;
+    const origCBEl = document.getElementById('mission-params-cycle-budget-original');
+    if (origCBEl) {
+        origCBEl.textContent = (origCB !== undefined && origCB !== null && origCB !== p.cycle_budget) ? `was: ${origCB}` : '';
+    }
+    const origMIEl = document.getElementById('mission-params-max-iter-original');
+    if (origMIEl) {
+        origMIEl.textContent = (origMI !== undefined && origMI !== null && origMI !== p.max_iterations) ? `was: ${origMI}` : '';
+    }
+
+    // Show edit button only for in-progress missions (not COMPLETE, not empty)
+    const editBtn = document.getElementById('mission-params-edit-btn');
+    if (editBtn) {
+        const stage = p.current_stage || '';
+        editBtn.style.display = (stage && stage !== 'COMPLETE') ? 'inline-block' : 'none';
+    }
+}
+
+// =============================================================================
+// MISSION PARAMS LIVE-EDIT
+// =============================================================================
+
+export function toggleMissionParamEdit() {
+    const panel = document.getElementById('mission-params-edit-panel');
+    if (!panel) return;
+    if (panel.style.display !== 'none') {
+        closeMissionParamEdit();
+    } else {
+        openMissionParamEdit();
+    }
+}
+
+function openMissionParamEdit() {
+    const panel = document.getElementById('mission-params-edit-panel');
+    if (!panel) return;
+
+    // Pre-fill inputs with current displayed values
+    const cbEl = document.getElementById('mission-params-cycle-budget');
+    const miEl = document.getElementById('mission-params-max-iter');
+    const editCB = document.getElementById('edit-cycle-budget');
+    const editMI = document.getElementById('edit-max-iterations');
+    if (editCB && cbEl && cbEl.textContent !== '-') editCB.value = cbEl.textContent.trim();
+    if (editMI && miEl && miEl.textContent !== '-') editMI.value = miEl.textContent.trim();
+
+    // Show range hints
+    const hintCB = document.getElementById('edit-cycle-budget-hint');
+    if (hintCB) hintCB.textContent = '(1–10)';
+    const hintMI = document.getElementById('edit-max-iterations-hint');
+    if (hintMI) hintMI.textContent = '(1–50)';
+
+    const statusEl = document.getElementById('mission-params-edit-status');
+    if (statusEl) statusEl.textContent = '';
+
+    panel.style.display = 'block';
+}
+
+export function closeMissionParamEdit() {
+    const panel = document.getElementById('mission-params-edit-panel');
+    if (panel) panel.style.display = 'none';
+}
+
+export async function applyMissionParamEdit() {
+    const editCB = document.getElementById('edit-cycle-budget');
+    const editMI = document.getElementById('edit-max-iterations');
+    const statusEl = document.getElementById('mission-params-edit-status');
+
+    const payload = {};
+    if (editCB && editCB.value !== '') payload.cycle_budget = parseInt(editCB.value, 10);
+    if (editMI && editMI.value !== '') payload.max_iterations = parseInt(editMI.value, 10);
+
+    if (Object.keys(payload).length === 0) {
+        if (statusEl) { statusEl.textContent = 'No changes to apply'; statusEl.style.color = 'var(--text-dim)'; }
+        return;
+    }
+
+    if (statusEl) { statusEl.textContent = 'Applying…'; statusEl.style.color = 'var(--text-dim)'; }
+
+    try {
+        const result = await api('/api/mission/parameters', 'PATCH', payload);
+        if (result.success) {
+            if (statusEl) { statusEl.textContent = `✓ ${result.message}`; statusEl.style.color = 'var(--success, #4caf50)'; }
+            setTimeout(() => closeMissionParamEdit(), 1500);
+            // Refresh widget immediately to show new values + "was:" labels
+            await refreshMissionParamsWidget();
+        } else {
+            const errMsg = result.errors ? result.errors.join(', ') : (result.error || 'Failed');
+            if (statusEl) { statusEl.textContent = `✗ ${errMsg}`; statusEl.style.color = 'var(--danger, #f44336)'; }
+        }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = `✗ ${e.message}`; statusEl.style.color = 'var(--danger, #f44336)'; }
+    }
 }
 
 function _renderOverrideTable(overrides) {
@@ -1474,6 +1622,9 @@ function _applyHealthBadge(health) {
 // Trend chart state
 let _paramTrendVisible = false;
 let _paramTrendRendered = false;
+let _paramTrendResizeObserver = null;
+// Last data payload for ResizeObserver re-render
+let _lastParamTrendArgs = null;
 
 export function toggleParamTrend() {
     const container = document.getElementById('param-trend-container');
@@ -1483,6 +1634,31 @@ export function toggleParamTrend() {
     if (_paramTrendVisible && !_paramTrendRendered) {
         _loadParamTrendChart();
     }
+    if (_paramTrendVisible) {
+        // ResizeObserver: observe canvas for resize events so chart repaints correctly
+        const canvas = document.getElementById('param-trend-chart');
+        if (canvas && !_paramTrendResizeObserver) {
+            _paramTrendResizeObserver = new ResizeObserver(() => {
+                if (_lastParamTrendArgs && _paramTrendVisible) {
+                    const [labels, cb, mi, op] = _lastParamTrendArgs;
+                    _renderParamTrendCanvas(canvas, labels, cb, mi, op);
+                }
+            });
+            _paramTrendResizeObserver.observe(canvas);
+        }
+    } else {
+        // When closing, reset rendered flag so next open refreshes data
+        _paramTrendRendered = false;
+        // ResizeObserver: disconnect to prevent zombie observers
+        if (_paramTrendResizeObserver) {
+            _paramTrendResizeObserver.disconnect();
+            _paramTrendResizeObserver = null;
+        }
+    }
+    // Recalc card height so maxHeight expands/contracts to fit the trend chart.
+    // The chart container is display:none when the card height is first measured,
+    // so without this call the canvas gets clipped by the card's maxHeight constraint.
+    recalcCardHeight('mission-params-widget');
 }
 
 async function _loadParamTrendChart() {
@@ -1503,6 +1679,8 @@ async function _loadParamTrendChart() {
 
         const canvas = document.getElementById('param-trend-chart');
         if (!canvas) return;
+        // Store last args so ResizeObserver can re-render on container resize
+        _lastParamTrendArgs = [labels, cycleBudgets, maxIters, overridePoints];
         _renderParamTrendCanvas(canvas, labels, cycleBudgets, maxIters, overridePoints);
         _paramTrendRendered = true;
     } catch (e) {
@@ -1512,9 +1690,11 @@ async function _loadParamTrendChart() {
 
 function _renderParamTrendCanvas(canvas, labels, cycleBudgets, maxIters, overridePoints) {
     const ctx = canvas.getContext('2d');
-    const W = canvas.offsetWidth || 280;
+    // canvas.offsetWidth can be 0 when transitioning from display:none; fall back to parent width
+    const W = canvas.offsetWidth || canvas.parentElement?.clientWidth || 280;
     const H = canvas.height || 110;
     canvas.width = W;
+    canvas.height = H;
 
     const pad = { top: 14, right: 12, bottom: 28, left: 28 };
     const plotW = W - pad.left - pad.right;
@@ -1592,6 +1772,45 @@ export function getFullMissionText() {
 // =============================================================================
 // ENHANCED ANALYTICS TAB FUNCTIONS
 // =============================================================================
+
+// Bug C: visibility / render state flags for analytics-trend-canvas
+// setAnalyticsTabVisible() is called when the analytics tab opens/closes
+let _analyticsTabVisible = false;
+let _analyticsTrendRendered = false;
+let _analyticsTrendResizeObserver = null;
+// Last analytics data payload for ResizeObserver re-render
+let _lastAnalyticsData = { daily: null, summary: null };
+
+/** Call this when the analytics tab becomes visible or hidden.
+ *  Exported so the tab-switch handler can notify us. */
+export function setAnalyticsTabVisible(visible) {
+    _analyticsTabVisible = visible;
+    if (visible) {
+        // ResizeObserver: observe the analytics trend canvas when tab becomes visible
+        const canvas = document.getElementById('analytics-trend-canvas');
+        if (canvas && !_analyticsTrendResizeObserver) {
+            _analyticsTrendResizeObserver = new ResizeObserver(() => {
+                if (_lastAnalyticsData.daily && _analyticsTabVisible) {
+                    renderEnhancedTrendChart(_lastAnalyticsData.daily, _lastAnalyticsData.summary);
+                }
+            });
+            _analyticsTrendResizeObserver.observe(canvas);
+        }
+    } else {
+        // Bug C: reset rendered flag on close so next open refreshes data
+        _analyticsTrendRendered = false;
+        // ResizeObserver: disconnect to prevent zombie observers
+        if (_analyticsTrendResizeObserver) {
+            _analyticsTrendResizeObserver.disconnect();
+            _analyticsTrendResizeObserver = null;
+        }
+    }
+}
+
+/** Get analytics trend render state - exported for test use */
+export function getAnalyticsTrendState() {
+    return { tabVisible: _analyticsTabVisible, rendered: _analyticsTrendRendered };
+}
 
 let currentAnalyticsPeriod = 30;
 let analyticsCache = {
@@ -1712,6 +1931,8 @@ export async function refreshFullAnalytics() {
 
         // Render daily trend chart
         if (daily && !daily.error) {
+            // Store last data so ResizeObserver can re-render on container resize
+            _lastAnalyticsData = { daily: daily.daily || [], summary: daily.summary || {} };
             renderEnhancedTrendChart(daily.daily || [], daily.summary || {});
         }
 
@@ -1831,15 +2052,20 @@ function renderEnhancedTrendChart(daily, summary) {
     const canvas = document.getElementById('analytics-trend-canvas');
     if (!canvas) return;
 
+    // Bug C: skip render when analytics tab is not visible OR canvas is hidden
+    // Fix: use || (OR) not && (AND) — skip if EITHER condition is true
+    if (!_analyticsTabVisible || canvas.offsetParent === null) return;
+
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
 
-    // Ensure canvas has size (may be 0 if tab not visible)
-    let w = rect.width || 400;
-    let h = rect.height || 200;
+    // Bug B: Ensure canvas has size (may be 0 if tab not visible)
+    // Bug B: getBoundingClientRect fallback -> parentElement -> CSS computed -> hardcoded
+    let w = rect.width || canvas.offsetWidth || canvas.parentElement?.clientWidth || 400;
+    let h = rect.height || canvas.offsetHeight || canvas.parentElement?.clientHeight || 200;
 
-    // If rect has no size, use canvas CSS dimensions
-    if (w < 50) {
+    // Bug B: tightened threshold from w<50 to w<10 to reduce false fallbacks
+    if (w < 10) {
         const computedStyle = window.getComputedStyle(canvas);
         w = parseFloat(computedStyle.width) || 400;
         h = parseFloat(computedStyle.height) || 200;
@@ -1937,6 +2163,9 @@ function renderEnhancedTrendChart(daily, summary) {
         if (peakDayEl) peakDayEl.textContent = summary.peak_day || '-';
         if (peakCostEl) peakCostEl.textContent = '$' + (summary.peak_cost || 0).toFixed(2);
     }
+
+    // Bug C: mark render complete
+    _analyticsTrendRendered = true;
 
     // Store data for hover (attach to canvas)
     canvas._chartData = daily;
@@ -2315,32 +2544,81 @@ export function handleRecommendationEvent(data) {
 }
 
 /**
- * Handle mission status events from WebSocket
- * @param {object} data - Event data with mission status
+ * Validate a mission_status payload against the canonical schema.
+ * Logs warnings in development if required fields are missing or have wrong types.
+ * Does NOT throw — this is a development aid, not a hard gate.
+ *
+ * @param {object} data - Incoming mission status payload
+ * @returns {object} The same data object (passthrough)
+ */
+function normalizeMissionStatus(data) {
+    if (!data || typeof data !== 'object') {
+        console.warn('[MissionStatus] Invalid payload: expected object, got', typeof data);
+        return data;
+    }
+    const required = {
+        rd_stage: 'string',
+        rd_iteration: 'number',
+        current_cycle: 'number',
+        cycle_budget: 'number',
+        running: 'boolean',
+    };
+    for (const [field, expectedType] of Object.entries(required)) {
+        if (!(field in data)) {
+            console.warn(`[MissionStatus] Missing required field: '${field}'`);
+        } else if (typeof data[field] !== expectedType) {
+            console.warn(`[MissionStatus] Wrong type for '${field}': expected ${expectedType}, got ${typeof data[field]}`);
+        }
+    }
+    return data;
+}
+
+/**
+ * Handle mission status events from WebSocket.
+ *
+ * All server-side emission paths now use the canonical schema
+ * (mission_status_schema.py), so payloads always arrive with canonical
+ * field names: rd_stage, rd_iteration, current_cycle, cycle_budget.
+ * No fallback chains needed.
+ *
+ * @param {object} data - Canonical mission status payload
  */
 export function handleMissionStatusEvent(data) {
-    const eventData = data.data || data;
+    if (!data) return;
+    _wsInitialReceived.add('mission_status');
+    normalizeMissionStatus(data);
 
-    // Update stage indicator and status bar
-    if (eventData.current_stage) {
-        updateStageIndicator(eventData.current_stage);
+    // Canonical fields — no legacy fallbacks needed
+    const stage = data.rd_stage;
+    if (stage) {
+        updateStageIndicator(stage);
+        const stageEl = document.getElementById('stat-stage');
+        if (stageEl) stageEl.textContent = stage;
     }
 
-    // Update status bar elements
-    if (eventData.iteration !== undefined) {
+    if (data.rd_iteration !== undefined) {
         const iterEl = document.getElementById('stat-iteration');
-        if (iterEl) iterEl.textContent = eventData.iteration;
+        if (iterEl) iterEl.textContent = data.rd_iteration;
     }
 
-    if (eventData.current_cycle && eventData.cycle_budget) {
+    if (data.current_cycle && data.cycle_budget) {
         const cycleEl = document.getElementById('stat-mission-cycle');
-        if (cycleEl) cycleEl.textContent = `${eventData.current_cycle}/${eventData.cycle_budget}`;
+        if (cycleEl) cycleEl.textContent = `${data.current_cycle}/${data.cycle_budget}`;
     }
 
-    // Show toast for stage changes with visual feedback
-    if (eventData.event === 'stage_change' && eventData.new_stage) {
-        showToast(`Stage: ${eventData.old_stage || '?'} → ${eventData.new_stage}`, 'info');
-        // Add visual feedback to status card
+    if (data.project_name !== undefined) {
+        const projEl = document.getElementById('stat-project-name');
+        if (projEl) projEl.textContent = data.project_name || '-';
+    }
+
+    // Toast for stage transitions
+    const eventName = data.event;
+    if ((eventName === 'stage_change' || eventName === 'engine_stage_change'
+            || eventName === 'mission_stage_change') && stage) {
+        const prevStage = data.old_stage || '';
+        if (prevStage && prevStage !== stage) {
+            showToast(`Stage: ${prevStage} → ${stage}`, 'info');
+        }
         const statusCard = document.getElementById('status-card');
         if (statusCard) {
             statusCard.classList.add('ws-updated');
@@ -2388,18 +2666,23 @@ export function handleJournalEvent(data) {
  */
 export function initWebSocketHandlers() {
     // Import registerHandler from socket module if available
+    // Note: mission_status, journal, mission_agents, investigation_agents, pool_status
+    // are registered in main.js::setupWebSocketHandlers() — do NOT register them here
+    // to avoid duplicate handler execution.
     if (typeof window.registerSocketHandler === 'function') {
         window.registerSocketHandler('file_events', handleFileEvent);
         window.registerSocketHandler('glassbox_archive', handleGlassboxArchiveEvent);
         window.registerSocketHandler('glassbox', handleGlassboxEvent);
         window.registerSocketHandler('recommendations', handleRecommendationEvent);
-        window.registerSocketHandler('mission_status', handleMissionStatusEvent);
-        window.registerSocketHandler('journal', handleJournalEvent);
         console.log('[Widgets] WebSocket event handlers registered');
     }
-    // Agent activity widget is initialized separately in main.js (agentActivity.initAgentActivity()).
-    // Do NOT call initAgentActivity() here — it would subscribe to mission_agents and
-    // investigation_agents rooms twice, causing every activity event to fire twice.
+}
+
+// Initialize subagent pool widget on load
+try {
+    initSubagentPoolWidget();
+} catch (e) {
+    console.debug('[Widgets] Pool widget init deferred:', e.message);
 }
 
 // Make handlers available globally for socket.js integration
@@ -2412,6 +2695,9 @@ window.handleJournalEvent = handleJournalEvent;
 window.initWebSocketHandlers = initWebSocketHandlers;
 window.handleMissionAgentEvent = handleMissionAgentEvent;
 window.handleInvestigationAgentEvent = handleInvestigationAgentEvent;
+window.toggleMissionParamEdit = toggleMissionParamEdit;
+window.closeMissionParamEdit = closeMissionParamEdit;
+window.applyMissionParamEdit = applyMissionParamEdit;
 
 // =============================================================================
 // TOKEN INTEGRITY WIDGET

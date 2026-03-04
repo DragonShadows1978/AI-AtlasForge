@@ -46,6 +46,8 @@ class WorkUnit:
         files: Expected files to be created/modified
         strategy: Which splitting strategy produced this unit
         metadata: Additional context
+        wave: Which execution wave this unit belongs to (1-indexed)
+        contracts: Upstream task_id → contract string from dependency agents
     """
     id: str
     description: str
@@ -55,6 +57,8 @@ class WorkUnit:
     files: List[str] = field(default_factory=list)
     strategy: SplitStrategy = SplitStrategy.AUTO
     metadata: Dict[str, Any] = field(default_factory=dict)
+    wave: int = 1
+    contracts: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = {
@@ -65,13 +69,19 @@ class WorkUnit:
             "estimated_complexity": self.estimated_complexity,
             "files": self.files,
             "strategy": self.strategy.value,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "wave": self.wave,
+            "contracts": self.contracts,
         }
         return d
 
     @classmethod
     def from_dict(cls, data: dict) -> 'WorkUnit':
+        data = dict(data)  # don't mutate caller's dict
         data['strategy'] = SplitStrategy(data.get('strategy', 'auto'))
+        # Tolerate older serialized dicts that don't have these fields
+        data.setdefault('wave', 1)
+        data.setdefault('contracts', {})
         return cls(**data)
 
 
@@ -456,6 +466,110 @@ class MissionSplitter:
         else:
             return 10
 
+    def recommend_agent_count(self, mission: str, max_agents: int) -> int:
+        """
+        Analyze mission and return the appropriate number of parallel agents.
+
+        Never exceeds max_agents. Returns 1 for simple/single-file missions.
+        Uses word count, file count, task count, and keyword heuristics.
+        """
+        mission_lower = mission.lower()
+        words = mission.split()
+        word_count = len(words)
+
+        # Always 1 for bug-fix / single-change keywords
+        single_change_keywords = [
+            'fix the crash', 'fix the bug', 'fix the error', 'fix the typo',
+            'rename', 'update one', 'change one', 'single file', 'one file',
+            'quick fix', 'missing import', 'broken import',
+        ]
+        if any(kw in mission_lower for kw in single_change_keywords):
+            return 1
+
+        # Count explicit tasks in numbered/bulleted list
+        explicit_tasks = self._extract_tasks(mission)
+        if len(explicit_tasks) >= 2:
+            return min(len(explicit_tasks), max_agents)
+
+        # Count distinct files mentioned
+        files = self._extract_files(mission)
+
+        # Word count heuristics
+        if word_count < 100:
+            return 1
+        elif word_count < 300:
+            if len(files) <= 1:
+                return 1
+            else:
+                return min(max(2, len(files)), 3, max_agents)
+        elif word_count < 600:
+            n_sections = len(self._detect_sections(mission))
+            base = max(3, len(files), n_sections)
+            return min(base, 5, max_agents)
+        else:
+            # Large mission — scale up to max_agents
+            return max_agents
+
+    def _create_worker_prompt(
+        self,
+        project_context: str,
+        task_description: str,
+        task_id: str,
+        wave: int,
+        total_waves: int,
+        upstream_contracts: Dict[str, str],
+        files: List[str],
+    ) -> str:
+        """
+        Build an isolated worker prompt containing ONLY:
+        - One-line project context
+        - This specific task description
+        - Upstream contracts (interface definitions from deps)
+        - NO full mission text
+
+        This is the core fix for Bug #2: agents no longer receive the full
+        mission text and therefore cannot "implement everything themselves".
+        """
+        contracts_section = ""
+        if upstream_contracts:
+            contracts_section = "\n# Upstream Contracts (Interfaces from Completed Tasks)\n"
+            for dep_id, contract in upstream_contracts.items():
+                contracts_section += f"\n## From task `{dep_id}`:\n{contract}\n"
+            contracts_section += (
+                "\nConnect to these interfaces. "
+                "Do NOT rebuild what upstream tasks have already done.\n"
+            )
+
+        files_section = ""
+        if files:
+            files_section = "\n# Files You Should Create or Modify\n"
+            files_section += "\n".join(f"- {f}" for f in files)
+            files_section += "\n"
+
+        return f"""# Project Context
+{project_context}
+
+# Your Task (Wave {wave} of {total_waves})
+{task_description}
+{files_section}{contracts_section}
+# Instructions
+1. Implement ONLY the task described above
+2. Do NOT implement tasks assigned to other agents
+3. Produce a clean interface contract for any downstream tasks
+
+# Response Format
+Return JSON with:
+{{
+    "status": "build_complete" | "build_blocked" | "build_in_progress",
+    "task_id": "{task_id}",
+    "summary": "What was accomplished",
+    "files_created": [],
+    "files_modified": [],
+    "contract": "Interface/API description for downstream agents (function signatures, file paths, data shapes)",
+    "blockers": []
+}}
+"""
+
     # Prompt creation methods
     def _create_task_prompt(
         self,
@@ -640,6 +754,72 @@ Return JSON with:
 """
 
 
+    def parse_plan_to_tasks(self, plan_text: str) -> List[Dict[str, Any]]:
+        """Extract structured tasks from a markdown implementation plan.
+
+        Strategy 1: '### Step N:' headers — splits by boundary, captures full
+        multi-line body between consecutive headers.
+        Strategy 2: Numbered list items (fallback).
+        Dependency detection: scans each body for 'depends on step N' language.
+
+        Returns list of dicts: {id, description, deps, files, _step_num}
+        """
+        tasks: List[Dict[str, Any]] = []
+        task_index: Dict[str, int] = {}
+
+        # Strategy 1: split on "### Step N:" header lines
+        header_pat = re.compile(r'^###\s+Step\s+(\d+)[:\s]*(.*)', re.MULTILINE)
+        headers = list(header_pat.finditer(plan_text))
+
+        if headers:
+            for i, m in enumerate(headers):
+                step_num = m.group(1)
+                title = m.group(2).strip()
+                body_start = m.end()
+                body_end = headers[i + 1].start() if i + 1 < len(headers) else len(plan_text)
+                body_text = plan_text[body_start:body_end].strip()
+                full_desc = f"{title}\n{body_text}".strip() if body_text else title
+
+                task_id = f"step_{step_num}"
+                tasks.append({
+                    "id": task_id,
+                    "description": full_desc[:1500],
+                    "deps": [],
+                    "files": self._extract_files(full_desc),
+                    "_step_num": int(step_num),
+                })
+                task_index[step_num] = len(tasks) - 1
+
+            # Two-step dep detection: find trigger clause, then extract all Step N refs
+            dep_trigger_pats = [
+                r'(?:depends?\s+on|after\s+completing?|requires?|following)\s+((?:[Ss]teps?\s+)?[\w\s,and]+?)(?:[.\n]|$)',
+                r'([\w\s]+)\s+(?:must|should)\s+(?:complete|finish|run)\s+first',
+            ]
+            for task in tasks:
+                for pat in dep_trigger_pats:
+                    for clause in re.findall(pat, task["description"], re.IGNORECASE):
+                        for dep_num in re.findall(r'[Ss]tep\s*(\d+)', clause):
+                            dep_id = f"step_{dep_num}"
+                            if dep_id != task["id"] and dep_id not in task["deps"]:
+                                task["deps"].append(dep_id)
+        else:
+            # Strategy 2: numbered list items
+            numbered = re.compile(r'^\s*(\d+)\.\s+(.+)$', re.MULTILINE)
+            for m in numbered.finditer(plan_text):
+                num, desc = m.group(1), m.group(2).strip()
+                task_id = f"task_{num}"
+                tasks.append({
+                    "id": task_id,
+                    "description": desc,
+                    "deps": [],
+                    "files": self._extract_files(desc),
+                    "_step_num": int(num),
+                })
+                task_index[num] = len(tasks) - 1
+
+        return tasks
+
+
 # Utility function for quick splitting
 def split_mission(
     mission: str,
@@ -709,5 +889,49 @@ if __name__ == "__main__":
     print(f"\nApproach-based mission split into {len(units)} units:")
     for wu in units:
         print(f"  - {wu.id}: {wu.description}")
+
+    # Test recommend_agent_count()
+    print("\n--- recommend_agent_count() tests ---")
+    simple_bug = "Fix the crash in pre_tool_use.py"
+    n = splitter.recommend_agent_count(simple_bug, max_agents=5)
+    assert n == 1, f"Expected 1 for bug-fix mission, got {n}"
+    print(f"  Bug fix mission → {n} agents  ✓")
+
+    single_short = "Update the README file"
+    n = splitter.recommend_agent_count(single_short, max_agents=5)
+    assert n == 1, f"Expected 1 for short single-file mission, got {n}"
+    print(f"  Short single-file mission → {n} agents  ✓")
+
+    task_list_mission = """Build auth system:
+    1. Create login form component
+    2. Add API endpoint for authentication
+    3. Implement session management
+    4. Write unit tests
+    """
+    n = splitter.recommend_agent_count(task_list_mission, max_agents=5)
+    assert n <= 5, f"Expected ≤5 agents, got {n}"
+    assert n >= 2, f"Expected ≥2 agents for 4-task mission, got {n}"
+    print(f"  4-task mission → {n} agents  ✓")
+
+    # Verify max_agents cap is respected
+    n = splitter.recommend_agent_count(task_list_mission, max_agents=2)
+    assert n <= 2, f"Expected ≤2 (max_agents cap), got {n}"
+    print(f"  max_agents=2 cap respected → {n} agents  ✓")
+
+    # WorkUnit serialization with new fields
+    wu = WorkUnit(
+        id="test_wave",
+        description="Test wave field",
+        prompt="test",
+        wave=2,
+        contracts={"task_1": "def foo() -> str: ..."},
+    )
+    d = wu.to_dict()
+    assert d["wave"] == 2, "wave not serialized"
+    assert "task_1" in d["contracts"], "contracts not serialized"
+    wu2 = WorkUnit.from_dict(d)
+    assert wu2.wave == 2, "wave not deserialized"
+    assert wu2.contracts["task_1"] == "def foo() -> str: ...", "contracts not deserialized"
+    print(f"  WorkUnit wave/contracts round-trip  ✓")
 
     print("\nMission Splitter self-test complete!")

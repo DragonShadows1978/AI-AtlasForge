@@ -4,8 +4,10 @@ af_engine.stages.cycle_end - Cycle End Stage Handler
 This stage handles cycle completion, report generation, and continuation.
 """
 
+import json
 import logging
-from typing import Dict, Any, List
+from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 from .base import (
     BaseStageHandler,
@@ -36,6 +38,10 @@ class CycleEndStageHandler(BaseStageHandler):
         """Generate the CYCLE_END stage prompt."""
         current_cycle = context.cycle_number
         cycle_budget = context.cycle_budget
+        logger.debug(
+            f"CYCLE_END: live cycle_budget={cycle_budget} (fresh disk read via StateManager); "
+            f"current_cycle={current_cycle}"
+        )
         cycles_remaining = cycle_budget - current_cycle
         context_iteration = context.iteration
         original_mission = context.original_mission[:500] if context.original_mission else context.problem_statement[:500]
@@ -140,6 +146,9 @@ Respond with JSON:
         cycle_success_signals = ["cycle_complete", "success", "continue"]
         mission_success_signals = ["mission_complete", "complete", "done", "finished", "success"]
 
+        # Read continuation manifest written by ANALYZING stage (if available)
+        continuation_missions = self._read_continuation_manifest(context)
+
         if status in cycle_success_signals and cycles_remaining > 0:
             # More cycles remaining - continue
             continuation_prompt = response.get("continuation_prompt", "")
@@ -159,6 +168,10 @@ Respond with JSON:
                         "cycles_remaining": cycles_remaining,
                         "continuation_prompt": continuation_prompt,
                         "cycle_report": cycle_report,
+                        "workspace_dir": context.workspace_dir,
+                        "files_created": cycle_report.get("files_created", []) if isinstance(cycle_report, dict) else [],
+                        "files_modified": cycle_report.get("files_modified", []) if isinstance(cycle_report, dict) else [],
+                        "continuation_missions": continuation_missions,
                     }
                 )
             ]
@@ -178,6 +191,16 @@ Respond with JSON:
             deliverables = response.get("deliverables", [])
             next_mission = response.get("next_mission_recommendation", {})
 
+            # Derive backward-compat next_mission_recommendation from manifest if not in response
+            if not next_mission and continuation_missions:
+                first = continuation_missions[0]
+                next_mission = {
+                    "mission_title": first.get("title", ""),
+                    "mission_description": first.get("description", ""),
+                    "suggested_cycles": 3,
+                    "rationale": first.get("rationale", ""),
+                }
+
             events = [
                 Event(
                     type=StageEvent.CYCLE_COMPLETED,
@@ -187,6 +210,8 @@ Respond with JSON:
                         "cycle_number": current_cycle,
                         "final": True,
                         "final_report": final_report,
+                        "workspace_dir": context.workspace_dir,
+                        "continuation_missions": continuation_missions,
                     }
                 ),
                 Event(
@@ -197,6 +222,7 @@ Respond with JSON:
                         "total_cycles": cycle_budget,
                         "deliverables": deliverables,
                         "next_mission_recommendation": next_mission,
+                        "continuation_missions": continuation_missions,
                         "final_report": final_report,
                     }
                 )
@@ -221,6 +247,30 @@ Respond with JSON:
                 output_data=response,
                 message=f"Unexpected status: {status}"
             )
+
+    def _read_continuation_manifest(self, context: StageContext) -> List[Dict[str, Any]]:
+        """
+        Read continuation_missions.json written by ANALYZING stage.
+
+        Returns the missions list, or [] if the file is missing or malformed.
+        Logs a warning if the manifest is absent so operators know it wasn't produced.
+        """
+        try:
+            manifest_path = Path(context.artifacts_dir) / "continuation_missions.json"
+            if not manifest_path.exists():
+                logger.debug("CYCLE_END: No continuation_missions.json found — will use single-mission fallback")
+                return []
+            with open(manifest_path, "r") as f:
+                data = json.load(f)
+            missions = data.get("missions", [])
+            if not isinstance(missions, list):
+                logger.warning("CYCLE_END: continuation_missions.json 'missions' field is not a list")
+                return []
+            logger.info(f"CYCLE_END: Loaded {len(missions)} continuation missions from manifest")
+            return missions
+        except Exception as e:
+            logger.warning(f"CYCLE_END: Failed to read continuation_missions.json: {e}")
+            return []
 
     def get_restrictions(self) -> StageRestrictions:
         """

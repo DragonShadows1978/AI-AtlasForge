@@ -404,8 +404,14 @@ export async function startNextFromQueue() {
     try {
         const statusData = await api('/api/queue/status');
         if (statusData.atlasforge_running) {
-            showToast('AtlasForge is currently running a mission', 'warning');
+            // Conductor is alive and a mission is actively running — genuinely busy
+            showToast('AtlasForge is currently running a mission. Wait for it to complete or stop it first.', 'warning');
             return;
+        }
+        if (statusData.mission_stuck) {
+            // Stage says non-complete but conductor is not running — stale/stuck state
+            showToast('Previous mission appears stuck (conductor not running). Starting next mission from queue.', 'info');
+            // Fall through — don't return, let the queue proceed
         }
         // Update our local cache with fresh data
         queueData = statusData;

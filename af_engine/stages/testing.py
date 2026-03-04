@@ -42,9 +42,10 @@ class TestingStageHandler(BaseStageHandler):
 === TESTING STAGE ===
 Your goal: Verify the solution works correctly with EPISTEMIC RIGOR.
 
-IMPORTANT: You design your tests based on your code - of course they'll pass.
+IMPORTANT: You design your tests based on your code — of course they'll pass.
 This is the "painter who loves their own work" problem. To build TRUE confidence,
-you must include ADVERSARIAL TESTING - attempts to BREAK your own code.
+you must include ADVERSARIAL TESTING — launching real blind agents that try to BREAK
+your code without any knowledge of how you built it.
 
 === PHASE 1: SELF-TESTS (Baseline) ===
 Your own tests that verify basic functionality.
@@ -54,13 +55,63 @@ Tasks:
 2. Run the code and capture output
 3. Verify against success criteria from your plan
 
-=== PHASE 2: ADVERSARIAL TESTING (Epistemic Rigor) ===
-The adversarial_testing module is available in the project's adversarial_testing/ directory.
+=== PHASE 2: ADVERSARIAL TESTING — BLIND AGENT RED TEAM ===
 
-Adversarial Testing Tasks:
-1. **Red Team Analysis**: Use the AdversarialRunner to spawn a fresh agent that tries to BREAK your code
-   - Fresh agent has no memory of how you built it
-   - Looks for vulnerabilities, edge cases, logic flaws
+**Launch the red team BEFORE or DURING self-tests for maximum parallelism.**
+
+The adversarial_testing module provides `BlindAgentRedTeam` — a parallel team of
+REAL Claude CLI subprocess agents that explore your workspace, run your tests,
+and try to break your code. These are NOT single LLM calls with code pasted in;
+they are full agents with Read/Grep/Bash/Write tool loops that navigate the
+codebase themselves. Each agent appears as its own tab in the Mission Activity
+dashboard.
+
+**How to launch:**
+
+```python
+import sys
+sys.path.insert(0, '/home/vader/AI-AtlasForge')
+from adversarial_testing.blind_agent_runner import BlindAgentRedTeam
+
+team = BlindAgentRedTeam(n_agents=3, timeout=300)
+result = team.launch_parallel_team(
+    workspace_dir='{workspace_dir}',
+    mission_desc='<one-sentence description of what your code does>',
+)
+print(f"Red team findings: {{result.total_issues}}")
+print(f"Critical: {{len(result.critical_findings)}}")
+for f in result.findings:
+    print(f"  [{{f.severity.upper()}}] {{f.title}} — {{f.affected_code}}")
+```
+
+**Or via RedTeamAgent.analyze_workspace():**
+
+```python
+from adversarial_testing.red_team_agent import RedTeamAgent
+agent = RedTeamAgent()
+result = agent.analyze_workspace(
+    workspace_dir='{workspace_dir}',
+    mission_desc='<description>',
+    n_agents=3,
+    timeout=300,
+)
+```
+
+**What the blind agents do (one agent per attack focus):**
+- Agent 0 — Boundary/Type: empty inputs, None, 0, -1, wrong types
+- Agent 1 — Injection/Errors: command injection, path traversal, swallowed exceptions
+- Agent 2 — Logic/State: off-by-one, state machine bypass, invariant violations
+- Agent 3 — Concurrency/Resources: race conditions, leaks, missing timeouts
+
+Each agent independently reads your code, runs your tests, and tries adversarial
+inputs. Results are written to {workspace_dir}/tests/red_team_agent_N.json and
+aggregated into a single RedTeamResult.
+
+**Timing:** Blind agents run for 60–300 seconds (they are real Claude sessions).
+If result.total_issues == 0 AND result.duration_ms < 10000, the agents likely
+timed out — check result.error for details.
+
+=== PHASE 3: ADDITIONAL ADVERSARIAL CHECKS ===
 
 2. **Property Testing**: Generate edge cases automatically
    - Empty inputs, null values, boundary conditions
@@ -78,7 +129,7 @@ Adversarial Testing Tasks:
 
 Document ALL test results in {artifacts_dir}/test_results.md including:
 1. Self-test results (your own tests)
-2. Adversarial findings (what the red team found)
+2. Blind agent red team findings (by agent: boundary/injection/logic/concurrency)
 3. Edge cases discovered (from property testing)
 4. Mutation score (if applicable)
 5. Spec alignment (from blind validation)
@@ -91,7 +142,9 @@ Respond with JSON:
         {{"name": "test2", "passed": false, "error": "..."}}
     ],
     "adversarial_testing": {{
-        "red_team_issues": ["list of issues found by adversarial agent"],
+        "red_team_issues": ["list of issues found by blind agent team"],
+        "red_team_agent_count": 3,
+        "red_team_duration_seconds": 120,
         "property_violations": ["edge cases that broke the code"],
         "mutation_score": 0.0-1.0 or null,
         "spec_alignment": 0.0-1.0 or null,

@@ -126,6 +126,19 @@ def _save_queue(queue: Dict[str, Any]) -> bool:
         return False
 
 
+def _is_conductor_running() -> bool:
+    """Check if the atlasforge conductor process is actually running."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['pgrep', '-f', 'atlasforge_conductor.py'],
+            capture_output=True, text=True, timeout=2
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 @queue_scheduler_bp.route('/status')
 def queue_status():
     """Get queue status and statistics."""
@@ -137,7 +150,11 @@ def queue_status():
         from io_utils import atomic_read_json
         mission = atomic_read_json(STATE_DIR / "mission.json") or {}
         current_stage = mission.get("current_stage", "COMPLETE")
-        is_running = current_stage not in ["COMPLETE", None, ""]
+        stage_running = current_stage not in ["COMPLETE", None, ""]
+        conductor_alive = _is_conductor_running()
+        # Only truly "running" if both the stage is non-complete AND conductor is alive
+        is_running = stage_running and conductor_alive
+        mission_stuck = stage_running and not conductor_alive
 
         # Build next_up info for the first queued mission
         next_up = None
@@ -159,6 +176,8 @@ def queue_status():
             "settings": queue.get("settings", {}),
             "last_updated": queue.get("last_updated"),
             "atlasforge_running": is_running,
+            "conductor_running": conductor_alive,
+            "mission_stuck": mission_stuck,
             "current_stage": current_stage,
             "next_up": next_up
         })
@@ -265,6 +284,7 @@ def add_to_queue():
             "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(_load_queue().get('missions', []))}",
             "problem_statement": problem_statement,
             "cycle_budget": data.get("cycle_budget", 3),
+            "max_iterations": data.get("max_iterations", 10),
             "priority": data.get("priority", 0),  # 0 = normal, higher = more urgent
             "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
             "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
@@ -409,8 +429,11 @@ def start_next_mission():
         from io_utils import atomic_read_json
         mission = atomic_read_json(STATE_DIR / "mission.json") or {}
         current_stage = mission.get("current_stage", "COMPLETE")
+        stage_running = current_stage not in ["COMPLETE", None, ""]
 
-        if current_stage not in ["COMPLETE", None, ""]:
+        # Only block if BOTH the stage is non-complete AND the conductor is actually alive.
+        # A stuck stage (conductor dead) should NOT prevent launching the next queued mission.
+        if stage_running and _is_conductor_running():
             return jsonify({
                 "error": "AtlasForge is currently busy",
                 "current_stage": current_stage
@@ -452,7 +475,7 @@ def start_next_mission():
             "success_criteria": [],
             "current_stage": "PLANNING",
             "iteration": 0,
-            "max_iterations": 10,
+            "max_iterations": next_mission.get("max_iterations", 10),
             "artifacts": {"plan": None, "code": [], "tests": []},
             "history": [],
             "created_at": datetime.now().isoformat(),

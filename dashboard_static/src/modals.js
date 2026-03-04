@@ -198,7 +198,12 @@ function renderRecommendations() {
     container.innerHTML = paginatedRecs.map(rec => {
         const isDriftHalt = rec.source_type === 'drift_halt';
         const isMerged = rec.source_type === 'merged';
-        const itemClass = isDriftHalt ? 'rec-item drift-halt' : (isMerged ? 'rec-item merged' : 'rec-item');
+        const missionType = rec.mission_type || 'EXPANSION';
+        const itemClass = isDriftHalt ? 'rec-item drift-halt'
+            : (isMerged ? 'rec-item merged'
+            : (missionType === 'BUGFIX' ? 'rec-item bugfix-mission'
+            : (missionType === 'TECH_DEBT' ? 'rec-item tech-debt-mission'
+            : 'rec-item')));
         const sourceBadge = isDriftHalt
             ? '<span class="rec-source-badge drift">From Drift</span>'
             : (rec.source_type === 'successful_completion'
@@ -206,6 +211,16 @@ function renderRecommendations() {
                 : (isMerged
                     ? `<span class="rec-source-badge merged">Merged (${(rec.merged_from || []).length})</span>`
                     : ''));
+
+        // Mission type badge (BUGFIX / TECH_DEBT / COMPLETION — no badge for EXPANSION/MANUAL)
+        const missionTypeBadge = (() => {
+            switch (missionType) {
+                case 'BUGFIX':     return '<span class="mission-type-badge bugfix">[BUGFIX]</span>';
+                case 'TECH_DEBT':  return '<span class="mission-type-badge tech-debt">[DEBT]</span>';
+                case 'COMPLETION': return '<span class="mission-type-badge completion">[COMPLETE]</span>';
+                default:           return '';
+            }
+        })();
 
         // Auto-tags badges
         const tagBadges = (rec.auto_tags || []).slice(0, 3).map(tag =>
@@ -229,7 +244,7 @@ function renderRecommendations() {
             <div class="${itemClass}" onclick="window.openRecModal('${rec.id}')">
                 <div class="rec-item-content">
                     <div class="rec-item-title">
-                        ${escapeHtml(rec.mission_title)}
+                        ${missionTypeBadge}${escapeHtml(rec.mission_title)}
                         ${sourceBadge}
                         ${healthBadge}
                     </div>
@@ -246,7 +261,7 @@ function renderRecommendations() {
     }).join('');
 }
 
-export function openRecModal(recId) {
+export async function openRecModal(recId) {
     selectedRecId = recId;
     const rec = recommendations.find(r => r.id === recId);
     if (!rec) return;
@@ -298,6 +313,29 @@ export function openRecModal(recId) {
     const cyclesSelect = document.getElementById('rec-modal-cycles');
     const suggestedCycles = rec.suggested_cycles || 3;
     cyclesSelect.value = suggestedCycles;
+
+    // Reset project name field and trigger async auto-suggestion
+    const projectInput = document.getElementById('rec-project-name-input');
+    if (projectInput) {
+        projectInput.value = '';
+        projectInput.placeholder = 'Auto-detecting...';
+        projectInput.dataset.suggested = '';
+        const missionText = rec.mission_description || rec.mission_title || '';
+        if (missionText.length > 10) {
+            api('/api/suggest-project-name', 'POST', { problem_statement: missionText })
+                .then(result => {
+                    if (result && result.suggested_name) {
+                        projectInput.placeholder = result.suggested_name;
+                        projectInput.dataset.suggested = result.suggested_name;
+                    } else {
+                        projectInput.placeholder = 'Enter project name (optional)';
+                    }
+                })
+                .catch(() => { projectInput.placeholder = 'Enter project name (optional)'; });
+        } else {
+            projectInput.placeholder = 'Enter project name (optional)';
+        }
+    }
 
     // Save scroll position first before opening modal
     savedScrollX = window.scrollX || window.pageXOffset;
@@ -367,9 +405,15 @@ export async function setMissionFromRec() {
 
     const cycleBudget = parseInt(document.getElementById('rec-modal-cycles').value) || 3;
 
-    const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', {
-        cycle_budget: cycleBudget
-    });
+    const projectInputS = document.getElementById('rec-project-name-input');
+    const projectNameS = projectInputS
+        ? (projectInputS.value.trim() || projectInputS.dataset.suggested || '')
+        : '';
+
+    const setPayload = { cycle_budget: cycleBudget };
+    if (projectNameS) setPayload.project_name = projectNameS;
+
+    const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', setPayload);
 
     if (data.success) {
         showToast(data.message);
@@ -738,13 +782,20 @@ export async function queueMissionSuggestion() {
 
     const cycleBudget = parseInt(document.getElementById('rec-modal-cycles').value) || 3;
 
+    const projectInputQ = document.getElementById('rec-project-name-input');
+    const projectNameQ = projectInputQ
+        ? (projectInputQ.value.trim() || projectInputQ.dataset.suggested || '')
+        : '';
+
     try {
-        const data = await api('/api/queue/add', 'POST', {
+        const queuePayload = {
             problem_statement: rec.mission_description || rec.mission_title,
             cycle_budget: cycleBudget,
             priority: 0,
             source: 'recommendation'
-        });
+        };
+        if (projectNameQ) queuePayload.project_name = projectNameQ;
+        const data = await api('/api/queue/add', 'POST', queuePayload);
 
         if (data.status === 'added') {
             showToast(`Added to queue (position ${data.queue_length})`);

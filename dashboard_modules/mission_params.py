@@ -6,10 +6,11 @@ audit history. Integrates with the WebSocket widget system for real-time
 parameter display on the dashboard.
 
 Routes:
-  GET /api/mission/parameters                  - Active mission params + audit summary
-  GET /api/mission/parameter-audit             - Full audit log for current mission
-  GET /api/mission/parameter-audit/<mission_id> - Audit log for specific mission
-  GET /api/mission/parameter-audit/history     - Cross-mission trend (last N missions)
+  GET  /api/mission/parameters                  - Active mission params + audit summary
+  PATCH /api/mission/parameters                 - Live-edit cycle_budget / max_iterations
+  GET  /api/mission/parameter-audit             - Full audit log for current mission
+  GET  /api/mission/parameter-audit/<mission_id> - Audit log for specific mission
+  GET  /api/mission/parameter-audit/history     - Cross-mission trend (last N missions)
 """
 
 import json
@@ -23,6 +24,7 @@ mission_params_bp = Blueprint('mission_params', __name__)
 _MISSION_PATH = None
 _MISSIONS_DIR = None
 _io_utils = None
+_emit_callback = None  # Optional: emit_widget_update injected from dashboard_v2
 
 # ---------------------------------------------------------------------------
 # History cache (30s TTL — avoids scanning 363+ dirs on every request)
@@ -31,12 +33,13 @@ _HISTORY_CACHE: dict = {"data": None, "ts": 0.0}
 HISTORY_CACHE_TTL: float = 30.0
 
 
-def init_mission_params_blueprint(mission_path, missions_dir, io_utils_module):
+def init_mission_params_blueprint(mission_path, missions_dir, io_utils_module, emit_callback=None):
     """Initialize the blueprint with required dependencies."""
-    global _MISSION_PATH, _MISSIONS_DIR, _io_utils
+    global _MISSION_PATH, _MISSIONS_DIR, _io_utils, _emit_callback
     _MISSION_PATH = Path(mission_path)
     _MISSIONS_DIR = Path(missions_dir)
     _io_utils = io_utils_module
+    _emit_callback = emit_callback
 
 
 def get_mission_params() -> dict:
@@ -72,6 +75,9 @@ def get_mission_params() -> dict:
             "current_cycle": mission.get("current_cycle", 1),
             "current_stage": mission.get("current_stage"),
             "project_name": mission.get("project_name"),
+            "original_cycle_budget": mission.get("original_cycle_budget"),
+            "original_max_iterations": mission.get("original_max_iterations"),
+            "parameter_changes": mission.get("parameter_changes", []),
         }
 
         # Use embedded audit summary if present, else load from file
@@ -232,6 +238,136 @@ def _compute_param_health(history: list) -> str:
 # =============================================================================
 # Routes
 # =============================================================================
+
+
+@mission_params_bp.route('/api/mission/parameters', methods=['PATCH'])
+def api_patch_mission_parameters():
+    """Live-edit cycle_budget and/or max_iterations for the active mission.
+
+    Only accepted while mission is not COMPLETE.
+    Writes atomically to mission.json and records changes in parameter_changes audit trail.
+    Emits WebSocket push via injected emit_callback if available.
+    """
+    from af_engine.mission_config import (
+        MIN_CYCLE_BUDGET, MAX_CYCLE_BUDGET,
+        MIN_MAX_ITERATIONS, MAX_MAX_ITERATIONS,
+    )
+    from datetime import datetime
+
+    data = request.get_json() or {}
+    errors = []
+
+    # Load current mission
+    if _io_utils:
+        mission = _io_utils.atomic_read_json(_MISSION_PATH, {})
+    else:
+        if _MISSION_PATH and _MISSION_PATH.exists():
+            with open(_MISSION_PATH) as f:
+                import json as _json
+                mission = _json.load(f)
+        else:
+            mission = {}
+
+    if not mission.get("mission_id"):
+        return jsonify({"success": False, "error": "No active mission"}), 404
+
+    current_stage = mission.get("current_stage", "")
+    if current_stage == "COMPLETE":
+        return jsonify({"success": False, "error": "Cannot edit parameters of a completed mission"}), 400
+
+    changes = []
+
+    if "cycle_budget" in data:
+        try:
+            new_cb = int(data["cycle_budget"])
+        except (TypeError, ValueError):
+            errors.append("cycle_budget must be an integer")
+            new_cb = None
+
+        if new_cb is not None:
+            if new_cb < MIN_CYCLE_BUDGET or new_cb > MAX_CYCLE_BUDGET:
+                errors.append(f"cycle_budget must be between {MIN_CYCLE_BUDGET} and {MAX_CYCLE_BUDGET}")
+            else:
+                old_val = mission.get("cycle_budget")
+                if new_cb != old_val:
+                    if "original_cycle_budget" not in mission:
+                        mission["original_cycle_budget"] = old_val
+                    changes.append({
+                        "field": "cycle_budget",
+                        "old_value": old_val,
+                        "new_value": new_cb,
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "live_edit",
+                    })
+                    mission["cycle_budget"] = new_cb
+
+    if "max_iterations" in data:
+        try:
+            new_mi = int(data["max_iterations"])
+        except (TypeError, ValueError):
+            errors.append("max_iterations must be an integer")
+            new_mi = None
+
+        if new_mi is not None:
+            if new_mi < MIN_MAX_ITERATIONS or new_mi > MAX_MAX_ITERATIONS:
+                errors.append(f"max_iterations must be between {MIN_MAX_ITERATIONS} and {MAX_MAX_ITERATIONS}")
+            else:
+                old_val = mission.get("max_iterations")
+                if new_mi != old_val:
+                    if "original_max_iterations" not in mission:
+                        mission["original_max_iterations"] = old_val
+                    changes.append({
+                        "field": "max_iterations",
+                        "old_value": old_val,
+                        "new_value": new_mi,
+                        "timestamp": datetime.now().isoformat(),
+                        "source": "live_edit",
+                    })
+                    mission["max_iterations"] = new_mi
+
+    if errors:
+        return jsonify({"success": False, "errors": errors}), 400
+
+    if not changes:
+        return jsonify({"success": True, "message": "No changes", "changes": []}), 200
+
+    # Append to parameter_changes audit trail
+    if "parameter_changes" not in mission:
+        mission["parameter_changes"] = []
+    mission["parameter_changes"].extend(changes)
+    mission["last_updated"] = datetime.now().isoformat()
+
+    # Atomic write
+    if _io_utils:
+        _io_utils.atomic_write_json(_MISSION_PATH, mission)
+    else:
+        import json as _json
+        tmp = str(_MISSION_PATH) + ".tmp"
+        with open(tmp, "w") as f:
+            _json.dump(mission, f, indent=2)
+        import os
+        os.replace(tmp, str(_MISSION_PATH))
+
+    # Force WebSocket push so UI reflects change immediately
+    if _emit_callback:
+        try:
+            _emit_callback('mission_params', get_mission_params())
+        except Exception:
+            pass
+
+    return jsonify({
+        "success": True,
+        "message": f"Updated {len(changes)} parameter(s)",
+        "changes": changes,
+        "parameters": {
+            "cycle_budget": mission.get("cycle_budget"),
+            "max_iterations": mission.get("max_iterations"),
+            "original_cycle_budget": mission.get("original_cycle_budget"),
+            "original_max_iterations": mission.get("original_max_iterations"),
+            "current_stage": mission.get("current_stage"),
+        },
+    })
+
 
 @mission_params_bp.route('/api/mission/parameters')
 def api_mission_parameters():

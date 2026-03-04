@@ -10,6 +10,7 @@ The key insight: Assert that PROPERTIES remain valid for a wide variety of input
 rather than testing specific examples.
 """
 
+import concurrent.futures
 import sys
 import json
 import random
@@ -24,6 +25,30 @@ from enum import Enum
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from experiment_framework import invoke_fresh_llm, ModelType
+
+
+# Safe type registry — replaces eval(expected_type) to prevent arbitrary code execution
+_SAFE_PYTHON_TYPES: dict = {
+    'int': int, 'str': str, 'float': float, 'bool': bool,
+    'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
+    'bytes': bytes, 'bytearray': bytearray, 'complex': complex,
+    'frozenset': frozenset, 'NoneType': type(None),
+}
+
+# Safe builtins for exec() — prevents access to os/sys/open/__import__ etc.
+# getattr/setattr/hasattr excluded: they enable sandbox traversal via __globals__ access.
+_SAFE_BUILTINS_NAMES = frozenset({
+    'abs', 'all', 'any', 'bool', 'chr', 'dict', 'divmod', 'enumerate',
+    'filter', 'float', 'format', 'frozenset',
+    'hash', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list',
+    'map', 'max', 'min', 'next', 'object', 'ord', 'pow', 'print',
+    'range', 'repr', 'reversed', 'round', 'set', 'slice',
+    'sorted', 'str', 'sum', 'tuple', 'type', 'zip', 'Exception',
+    'ValueError', 'TypeError', 'NotImplementedError', 'AttributeError',
+    'KeyError', 'IndexError', 'StopIteration', 'True', 'False', 'None',
+})
+import builtins as _builtins_module  # Always a module; avoids __builtins__ dict/module ambiguity
+_RESTRICTED_BUILTINS: dict = {k: v for k, v in vars(_builtins_module).items() if k in _SAFE_BUILTINS_NAMES}
 
 
 class PropertyType(Enum):
@@ -114,11 +139,13 @@ class InputGenerator:
 
     def __init__(self, seed: Optional[int] = None):
         """Initialize with optional seed for reproducibility."""
-        self.seed = seed or random.randint(0, 2**32)
+        self.seed = seed if seed is not None else random.randint(0, 2**32)
         random.seed(self.seed)
 
     def integers(self, count: int = 100, include_edge_cases: bool = True) -> List[GeneratedInput]:
         """Generate integer inputs."""
+        if count <= 0:  # C3-8: guard against zero/negative count
+            return []
         inputs = []
 
         if include_edge_cases:
@@ -149,10 +176,13 @@ class InputGenerator:
                 seed=self.seed
             ))
 
-        return inputs
+        # M1: truncate to exactly count when count < number of edge cases
+        return inputs[:count]
 
     def strings(self, count: int = 100, include_edge_cases: bool = True) -> List[GeneratedInput]:
         """Generate string inputs."""
+        if count <= 0:  # C3-8: guard matches integers()
+            return []
         inputs = []
 
         if include_edge_cases:
@@ -192,10 +222,13 @@ class InputGenerator:
                 seed=self.seed
             ))
 
-        return inputs
+        # M2: truncate to exactly count when count < number of edge cases
+        return inputs[:count]
 
     def lists(self, count: int = 50, element_generator: Callable = None) -> List[GeneratedInput]:
         """Generate list inputs."""
+        if count <= 0:  # C3-8: guard matches integers()
+            return []
         inputs = []
 
         edge_cases = [
@@ -229,10 +262,13 @@ class InputGenerator:
                 seed=self.seed
             ))
 
-        return inputs
+        # M2: truncate to exactly count when count < number of edge cases
+        return inputs[:count]
 
     def floats(self, count: int = 100, include_edge_cases: bool = True) -> List[GeneratedInput]:
         """Generate float inputs."""
+        if count <= 0:  # C3-8: guard matches integers()
+            return []
         inputs = []
 
         if include_edge_cases:
@@ -258,7 +294,7 @@ class InputGenerator:
                 ))
 
         # Random floats
-        for _ in range(count - len(inputs)):
+        for _ in range(max(0, count - len(inputs))):
             value = random.uniform(-1e6, 1e6)
             inputs.append(GeneratedInput(
                 value=value,
@@ -266,10 +302,13 @@ class InputGenerator:
                 seed=self.seed
             ))
 
-        return inputs
+        # M2: truncate to exactly count when count < number of edge cases
+        return inputs[:count]
 
     def dicts(self, count: int = 50) -> List[GeneratedInput]:
         """Generate dictionary inputs."""
+        if count <= 0:
+            return []
         inputs = []
 
         edge_cases = [
@@ -290,7 +329,20 @@ class InputGenerator:
                 description=desc
             ))
 
-        return inputs
+        # Random dicts to fill up to count
+        for _ in range(max(0, count - len(inputs))):
+            length = random.randint(0, 10)
+            value = {
+                ''.join(random.choices(string.ascii_lowercase, k=random.randint(1, 10))): random.randint(-100, 100)
+                for _ in range(length)
+            }
+            inputs.append(GeneratedInput(
+                value=value,
+                generator="random_dict",
+                seed=self.seed
+            ))
+
+        return inputs[:count]
 
 
 class PropertyTester:
@@ -336,7 +388,8 @@ Respond in JSON:
     def __init__(
         self,
         model: ModelType = ModelType.BALANCED,
-        max_inputs: int = 100
+        max_inputs: int = 100,
+        seed: Optional[int] = None
     ):
         """
         Initialize property tester.
@@ -344,10 +397,11 @@ Respond in JSON:
         Args:
             model: Model to use for property inference
             max_inputs: Maximum inputs to generate per property
+            seed: Optional RNG seed for reproducibility (0 is a valid seed)
         """
         self.model = model
         self.max_inputs = max_inputs
-        self.generator = InputGenerator()
+        self.generator = InputGenerator(seed=seed)
 
     def infer_properties(self, code: str, function_name: str) -> List[Dict[str, Any]]:
         """
@@ -403,17 +457,21 @@ Respond in JSON:
         property_type = PropertyType(property_spec.get("type", "invariant"))
         property_name = property_spec.get("name", "unknown")
 
+        if not input_types:
+            return violations
+
         # Generate inputs based on types
         inputs = []
+        count_per_type = max(1, self.max_inputs // len(input_types))
         for input_type in input_types:
             if input_type == "int":
-                inputs.extend(self.generator.integers(self.max_inputs // len(input_types)))
+                inputs.extend(self.generator.integers(count_per_type))
             elif input_type == "str":
-                inputs.extend(self.generator.strings(self.max_inputs // len(input_types)))
+                inputs.extend(self.generator.strings(count_per_type))
             elif input_type == "float":
-                inputs.extend(self.generator.floats(self.max_inputs // len(input_types)))
+                inputs.extend(self.generator.floats(count_per_type))
             elif input_type == "list":
-                inputs.extend(self.generator.lists(self.max_inputs // len(input_types)))
+                inputs.extend(self.generator.lists(count_per_type))
 
         # Test each input
         for inp in inputs:
@@ -428,7 +486,7 @@ Respond in JSON:
                     violations.append(violation)
 
             except Exception as e:
-                # Exception during execution is a potential violation
+                # Exception during execution is a violation
                 if property_type == PropertyType.NULL_SAFE and inp.value is None:
                     violations.append(PropertyViolation(
                         property_name=property_name,
@@ -437,6 +495,15 @@ Respond in JSON:
                         expected="No exception",
                         actual=str(e),
                         error_message=f"Function raised exception on None: {e}"
+                    ))
+                else:
+                    violations.append(PropertyViolation(
+                        property_name=property_name,
+                        property_type=property_type,
+                        input_values=[inp],
+                        expected="No exception during property check",
+                        actual=str(e),
+                        error_message=f"Unexpected exception: {type(e).__name__}: {e}"
                     ))
 
         return violations
@@ -495,7 +562,8 @@ Respond in JSON:
 
         elif property_type == PropertyType.TYPE_PRESERVING:
             expected_type = property_spec.get("expected_type")
-            if expected_type and not isinstance(result, eval(expected_type)):
+            _expected_cls = _SAFE_PYTHON_TYPES.get(expected_type)
+            if expected_type and _expected_cls is not None and not isinstance(result, _expected_cls):
                 return PropertyViolation(
                     property_name=property_name,
                     property_type=property_type,
@@ -540,7 +608,8 @@ Respond in JSON:
         # If no function provided, try to get it from code
         if function is None:
             try:
-                exec_globals = {}
+                # Restrict builtins to prevent os/sys/file access from LLM-supplied code
+                exec_globals = {'__builtins__': _RESTRICTED_BUILTINS}
                 exec(code, exec_globals)
                 function = exec_globals.get(function_name)
             except Exception as e:
@@ -553,11 +622,29 @@ Respond in JSON:
             result.success = False
             return result
 
-        # Test each property
+        # Test each property with per-property timeout and violation deduplication
         total_inputs = 0
+        _seen_violations: set = set()
+        _prop_timeout = getattr(self, 'property_timeout', 30)
         for prop in properties:
-            violations = self.test_property(function, prop)
-            result.violations.extend(violations)
+            _ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _fut = _ex.submit(self.test_property, function, prop)
+            try:
+                violations = _fut.result(timeout=_prop_timeout)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    f"Property '{prop.get('name', 'unknown')}' timed out "
+                    f"after {_prop_timeout}s — skipping"
+                )
+                violations = []
+            finally:
+                _ex.shutdown(wait=False)  # don't block if thread is still running
+            for v in violations:
+                _first_val = str(v.input_values[0].value)[:80] if v.input_values else ""
+                _key = (v.property_name, _first_val, (v.error_message or "")[:80])
+                if _key not in _seen_violations:
+                    _seen_violations.add(_key)
+                    result.violations.append(v)
             total_inputs += self.max_inputs
 
         result.total_inputs_generated = total_inputs

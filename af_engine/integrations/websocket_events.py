@@ -109,9 +109,17 @@ class WebSocketIntegration(BaseIntegrationHandler):
         })
 
     def _emit(self, event_type: str, data: dict) -> None:
-        """Emit event to WebSocket clients."""
+        """Emit event to WebSocket clients.
+
+        Routes through emit_widget_update('mission_status', ...) rather than a
+        dedicated emit_stage_change() call to avoid double-toasting: the
+        watch_engine_stage() 2-second poller in dashboard_v2.py already calls
+        emit_stage_change() with old_stage for stage transitions.  Using
+        emit_widget_update here ensures engine events reach the UI room without
+        triggering a second toast from the same transition event.
+        """
         try:
             import websocket_events as ws
-            ws.emit_event(event_type, data)
+            ws.emit_widget_update('mission_status', {**data, 'event': event_type})
         except Exception as e:
             logger.debug(f"WebSocket emit failed: {e}")

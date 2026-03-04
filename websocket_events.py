@@ -213,6 +213,21 @@ def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/w
         pass
 
 
+
+def emit_widget_update(room: str, data: Dict[str, Any]):
+    """
+    Emit an 'update' event to a specific widget room on the /widgets namespace.
+
+    This is the generic widget update function. Used by agent_stream_manager and
+    other components that need to push real-time data to the dashboard.
+
+    Args:
+        room: The room name (must be in VALID_WS_ROOMS on the server)
+        data: The event payload to deliver to all subscribers
+    """
+    _safe_emit(room, 'update', data, namespace='/widgets', queue_if_unavailable=False)
+
+
 # =============================================================================
 # FILE EVENTS
 # =============================================================================
@@ -227,7 +242,7 @@ def emit_file_created(file_path: str, file_type: str, mission_id: str, metadata:
         mission_id: The mission that created this file
         metadata: Optional additional metadata
     """
-    event_key = f'file_created:{mission_id}'
+    event_key = f'file_created:{mission_id}:{file_path}'
     if not _should_emit(event_key):
         return
 
@@ -353,6 +368,9 @@ def emit_mission_updated(mission_data: Dict, change_type: str):
     """
     Emit event when mission state changes.
 
+    Routes through the canonical mission_status_schema to ensure consistent
+    field names (rd_stage, rd_iteration, current_cycle) across all emitters.
+
     Args:
         mission_data: The current mission dict
         change_type: Type of change ('stage_change', 'iteration_change', 'started', 'stopped', 'completed')
@@ -362,25 +380,25 @@ def emit_mission_updated(mission_data: Dict, change_type: str):
     if not _should_emit(event_key):
         return
 
-    data = {
-        'event': change_type,
-        'mission_id': mission_id,
-        'current_stage': mission_data.get('current_stage'),
-        'iteration': mission_data.get('iteration', 0),
+    from dashboard_modules.mission_status_schema import emit_mission_status
+    # Map legacy field names to canonical via the schema builder
+    status = {
+        'rd_stage': mission_data.get('current_stage', mission_data.get('rd_stage', '')),
+        'rd_iteration': mission_data.get('iteration', mission_data.get('rd_iteration', 0)),
         'current_cycle': mission_data.get('current_cycle', 1),
         'cycle_budget': mission_data.get('cycle_budget', 1),
-        'running': True  # Assumed running if we're emitting updates
+        'mission_id': mission_id,
+        'running': True,
     }
-
-    _safe_emit('mission_status', 'state_change', {
-        'event': f'mission_{change_type}',
-        'data': data
-    })
+    emit_mission_status(status, event_type=f'mission_{change_type}')
 
 
 def emit_stage_change(mission_id: str, old_stage: str, new_stage: str, iteration: int = 0):
     """
     Emit event when mission stage changes.
+
+    Routes through the canonical mission_status_schema to ensure consistent
+    field names across all emitters.
 
     Args:
         mission_id: The mission ID
@@ -392,19 +410,14 @@ def emit_stage_change(mission_id: str, old_stage: str, new_stage: str, iteration
     if not _should_emit(event_key):
         return
 
-    data = {
-        'event': 'stage_change',
+    from dashboard_modules.mission_status_schema import emit_mission_status
+    status = {
+        'rd_stage': new_stage,
+        'rd_iteration': iteration,
         'mission_id': mission_id,
-        'old_stage': old_stage,
-        'new_stage': new_stage,
-        'iteration': iteration,
-        'timestamp': datetime.now().isoformat()
+        'running': True,
     }
-
-    _safe_emit('mission_status', 'state_change', {
-        'event': 'mission_stage_change',
-        'data': data
-    })
+    emit_mission_status(status, event_type='mission_stage_change', old_stage=old_stage)
 
 
 # =============================================================================

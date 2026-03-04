@@ -51,7 +51,8 @@ from .exploration_graph import (
     ExplorationGraph,
     ExplorationNode,
     ExplorationEdge,
-    ExplorationInsight
+    ExplorationInsight,
+    get_exploration_graph,
 )
 
 from .insight_extractor import (
@@ -118,6 +119,7 @@ __all__ = [
     'ExplorationNode',
     'ExplorationEdge',
     'ExplorationInsight',
+    'get_exploration_graph',
     'extract_from_text',
     'ExtractionResult',
     'ExplorationAdvisor',

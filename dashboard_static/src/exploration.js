@@ -2,6 +2,12 @@
  * Dashboard Exploration Graph Module (ES6)
  * Canvas-based exploration graph visualization
  * Dependencies: core.js, api.js
+ *
+ * Hardening applied (2026-02-26):
+ *   Bug A: Explicit canvas.width/canvas.height assignment in constructor and render
+ *   Bug B: getBoundingClientRect -> offsetWidth -> parentElement.clientWidth -> fallback chain
+ *   Bug C: _explorationVisible/_explorationRendered state flags with reset on close
+ *   Bug D: <canvas> element in HTML has style="width:100%;display:block;"
  */
 
 import { api } from './api.js';
@@ -24,6 +30,20 @@ export class GraphRenderer {
         this.offsetY = 0;
         this.tooltip = document.getElementById('graph-tooltip');
 
+        // Bug A+B: read layout dimensions from CSS rather than trusting HTML attributes
+        const rect = this.canvas.getBoundingClientRect();
+        this.width = rect.width || this.canvas.offsetWidth || this.canvas.parentElement?.clientWidth || 800;
+        this.height = rect.height || this.canvas.offsetHeight || this.canvas.parentElement?.clientHeight || 600;
+        // If still zero (hidden on init), use CSS computed style
+        if (this.width < 10) {
+            const cs = window.getComputedStyle(this.canvas);
+            this.width = parseFloat(cs.width) || 800;
+            this.height = parseFloat(cs.height) || 600;
+        }
+        // Bug A: explicit canvas pixel dimension assignment
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+
         this.colors = {
             file: '#58a6ff',
             concept: '#3fb950',
@@ -36,11 +56,31 @@ export class GraphRenderer {
         this.canvas.addEventListener('mouseleave', () => this.hideTooltip());
     }
 
+    /** Re-read canvas dimensions from layout (call after container becomes visible) */
+    refreshDimensions() {
+        if (!this.canvas) return;
+        const rect = this.canvas.getBoundingClientRect();
+        let w = rect.width || this.canvas.offsetWidth || this.canvas.parentElement?.clientWidth || 800;
+        let h = rect.height || this.canvas.offsetHeight || this.canvas.parentElement?.clientHeight || 600;
+        if (w < 10) {
+            const cs = window.getComputedStyle(this.canvas);
+            w = parseFloat(cs.width) || 800;
+            h = parseFloat(cs.height) || 600;
+        }
+        if (w !== this.width || h !== this.height) {
+            this.width = w;
+            this.height = h;
+            this.canvas.width = w;
+            this.canvas.height = h;
+        }
+    }
+
     applyForceLayout(iterations = 50) {
         if (this.nodes.length === 0) return;
 
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+        // Bug B: use this.width/this.height (set from CSS layout) not canvas.width/canvas.height
+        const width = this.width;
+        const height = this.height;
         const padding = 40;
         const minNodeDistance = 60;
 
@@ -122,6 +162,8 @@ export class GraphRenderer {
         this.edges = graphData.edges || [];
 
         if (this.nodes.length > 0) {
+            // Bug B: refresh dimensions before layout computation
+            this.refreshDimensions();
             this.applyForceLayout(80);
             this.scale = 1.0;
             this.offsetX = 0;
@@ -303,12 +345,73 @@ export class GraphRenderer {
 }
 
 // =============================================================================
-// GLOBAL INSTANCE AND REFRESH
+// GLOBAL INSTANCE, STATE FLAGS, AND REFRESH
 // =============================================================================
 
 let graphRenderer = null;
 
+// Bug C: visibility / render state flags - reset on close so reopen gets fresh render
+let _explorationVisible = false;
+let _explorationRendered = false;
+let _explorationResizeObserver = null;
+
+/** Toggle the exploration graph widget open/closed. Wire to the card header button. */
+export function toggleExplorationGraph() {
+    const container = document.getElementById('exploration-graph-container');
+    if (!container) return;
+    _explorationVisible = !_explorationVisible;
+    container.style.display = _explorationVisible ? 'block' : 'none';
+    if (_explorationVisible && !_explorationRendered) {
+        refreshGraphVisualization();
+    }
+    if (_explorationVisible) {
+        // ResizeObserver: observe canvas so graph repaints on container resize
+        const canvas = document.getElementById('exploration-graph-canvas');
+        if (canvas && !_explorationResizeObserver) {
+            _explorationResizeObserver = new ResizeObserver(() => {
+                if (_explorationVisible && graphRenderer) {
+                    graphRenderer.refreshDimensions();
+                    graphRenderer.render();
+                }
+            });
+            _explorationResizeObserver.observe(canvas);
+        }
+    } else {
+        // Bug C: reset rendered flag on close so next open fetches fresh data
+        _explorationRendered = false;
+        // Allow renderer to re-read dimensions on next open
+        if (graphRenderer) {
+            graphRenderer = null;
+        }
+        // ResizeObserver: disconnect to prevent zombie observers
+        if (_explorationResizeObserver) {
+            _explorationResizeObserver.disconnect();
+            _explorationResizeObserver = null;
+        }
+    }
+    // Recalc card height so maxHeight expands/contracts to fit the canvas
+    if (typeof window.recalcCardHeight === 'function') {
+        window.recalcCardHeight('atlasforge-exploration');
+    }
+}
+
+/** Reset state flags - exported for test use */
+export function resetExplorationState() {
+    _explorationVisible = false;
+    _explorationRendered = false;
+    graphRenderer = null;
+}
+
+/** Get current visibility/render state - exported for test use */
+export function getExplorationState() {
+    return { visible: _explorationVisible, rendered: _explorationRendered };
+}
+
 export async function refreshGraphVisualization() {
+    // Bug C: skip data load when graph widget is collapsed
+    const container = document.getElementById('exploration-graph-container');
+    if (container && container.style.display === 'none' && !_explorationVisible) return;
+
     try {
         const data = await api('/api/atlasforge/exploration-graph?width=800&height=600');
         if (data.error && data.nodes && data.nodes.length === 0) {
@@ -322,6 +425,7 @@ export async function refreshGraphVisualization() {
 
         if (graphRenderer) {
             graphRenderer.loadData(data);
+            _explorationRendered = true;
         }
     } catch (e) {
         console.log('Error loading graph:', e);

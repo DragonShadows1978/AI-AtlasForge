@@ -1306,12 +1306,20 @@ window.rerunInvestigation = async function(investigationId) {
         // Set the subagent count
         const subagentSelect = document.getElementById('investigation-subagents');
         if (subagentSelect) {
-            // Find the closest option value
-            const options = Array.from(subagentSelect.options);
-            const closest = options.reduce((prev, curr) => {
-                return Math.abs(parseInt(curr.value) - subagentCount) < Math.abs(parseInt(prev.value) - subagentCount) ? curr : prev;
-            });
-            subagentSelect.value = closest.value;
+            const standardOptions = Array.from(subagentSelect.options).filter(o => o.value !== 'custom');
+            const exactMatch = standardOptions.find(o => parseInt(o.value) === subagentCount);
+            if (exactMatch) {
+                subagentSelect.value = exactMatch.value;
+                const customInput = document.getElementById('investigation-subagents-custom');
+                if (customInput) customInput.style.display = 'none';
+            } else {
+                subagentSelect.value = 'custom';
+                const customInput = document.getElementById('investigation-subagents-custom');
+                if (customInput) {
+                    customInput.style.display = 'inline-block';
+                    customInput.value = subagentCount;
+                }
+            }
         }
 
         showToast('Investigation query loaded. Click "Start Investigation" to run.');

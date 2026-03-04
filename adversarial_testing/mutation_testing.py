@@ -21,6 +21,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from enum import Enum
 
+# Security: restrict mutation targets to files within the project root.
+# Resolved at import time to prevent symlink bypass at call time.
+_ALLOWED_ROOT: Path = Path(__file__).resolve().parent.parent
+
 
 class MutantOperator(Enum):
     """Types of mutation operators."""
@@ -351,17 +355,20 @@ class MutationTester:
         # Collect all possible mutations
         mutations = self.mutator.collect_mutations(tree)
 
-        # Sample if needed
-        if len(mutations) > self.max_mutants:
-            mutations = random.sample(mutations, self.max_mutants)
+        # Sample if needed — preserve original indices so apply_mutation
+        # receives the correct position in the full (pre-sample) list.
+        indexed_mutations = list(enumerate(mutations))
+        if len(indexed_mutations) > self.max_mutants:
+            k = min(self.max_mutants, len(indexed_mutations))  # C3-4: clamp to avoid ValueError
+            indexed_mutations = random.sample(indexed_mutations, k)
 
         # Generate actual mutants
         mutants = []
-        for i, (op_type, line, desc) in enumerate(mutations):
+        for orig_idx, (op_type, line, desc) in indexed_mutations:
             try:
                 # Re-parse for each mutation (to get fresh tree)
                 tree = ast.parse(code)
-                mutated_tree = self.mutator.apply_mutation(tree, i)
+                mutated_tree = self.mutator.apply_mutation(tree, orig_idx)
                 ast.fix_missing_locations(mutated_tree)
                 mutated_code = ast.unparse(mutated_tree)
 
@@ -409,17 +416,26 @@ class MutationTester:
             tmp.write(mutant.mutated_code)
             tmp_path = Path(tmp.name)
 
+        # C1: initialize before try so finally can guard against NameError
+        original_code = None
+        # C2: use a .bak file for atomic backup — survives SIGKILL between write and finally
+        bak_path = original_file.with_suffix('.bak')
+
         try:
-            # Backup original file
+            # Backup original file (C1 fix: assigned before overwrite)
             original_code = original_file.read_text()
+            # C2: write atomic backup so finally can restore even if process is killed mid-mutant
+            bak_path.write_text(original_code)
 
             # Replace with mutant
             original_file.write_text(mutant.mutated_code)
 
-            # Run tests
+            # Run tests — shell=False prevents OS command injection via LLM-supplied test_command
+            import shlex as _shlex
+            _cmd_list = _shlex.split(test_command) if isinstance(test_command, str) else list(test_command)
             result = subprocess.run(
-                test_command,
-                shell=True,
+                _cmd_list,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_per_mutant,
@@ -435,13 +451,17 @@ class MutationTester:
                 mutant.killed = False  # Mutant survived - tests didn't catch it!
 
         except subprocess.TimeoutExpired:
-            mutant.killed = True  # Timeout counts as killed (infinite loop mutation)
-            mutant.error = "Timeout"
+            mutant.killed = True  # Timeout counts as killed (infinite loop = detected) C3-5: no error flag
         except Exception as e:
             mutant.error = str(e)
+            mutant.killed = False  # Explicit: error state != survived, but also != killed
         finally:
-            # Restore original file
-            original_file.write_text(original_code)
+            # C2: prefer .bak restore (survives SIGKILL); fall back to in-memory copy (C1)
+            if bak_path.exists():
+                original_file.write_text(bak_path.read_text())
+                bak_path.unlink(missing_ok=True)
+            elif original_code is not None:
+                original_file.write_text(original_code)
             # Clean up temp file
             tmp_path.unlink(missing_ok=True)
 
@@ -450,7 +470,7 @@ class MutationTester:
     def run_mutation_testing(
         self,
         code_path: Path,
-        test_command: str
+        test_command: str = ""
     ) -> MutationResult:
         """
         Run full mutation testing on a file.
@@ -463,7 +483,7 @@ class MutationTester:
             MutationResult with score and details
         """
         start_time = datetime.now()
-        code_path = Path(code_path)
+        code_path = Path(code_path).resolve()
 
         result = MutationResult(
             code_path=str(code_path),
@@ -472,9 +492,19 @@ class MutationTester:
             duration_ms=0
         )
 
+        if not code_path.is_relative_to(_ALLOWED_ROOT):
+            result.success = False
+            result.error = f"Security: path traversal rejected — {code_path} is outside {_ALLOWED_ROOT}"
+            return result
+
         if not code_path.exists():
             result.success = False
             result.error = f"File not found: {code_path}"
+            return result
+
+        if not code_path.is_file():
+            result.success = False
+            result.error = f"Security: path is not a regular file: {code_path}"
             return result
 
         code = code_path.read_text()
@@ -496,6 +526,7 @@ class MutationTester:
         # Sample mutants if needed
         if self.sample_ratio < 1.0:
             sample_size = max(1, int(len(mutants) * self.sample_ratio))
+            sample_size = min(sample_size, len(mutants))  # C3-4: defensive clamp
             mutants = random.sample(mutants, sample_size)
 
         # Test each mutant

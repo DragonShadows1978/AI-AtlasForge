@@ -384,6 +384,10 @@ class DriftTimeline {
         this.container = document.getElementById(containerId);
         this.history = [];
         this.chartLoaded = false;
+        // Bug C: visibility state flag - reset on hide to ensure re-init on show
+        this._visible = false;
+        this.chart = null;
+        this._resizeObserver = null;
     }
 
     async ensureChart() {
@@ -417,6 +421,25 @@ class DriftTimeline {
         }
     }
 
+    /** Show the timeline widget. Call before render() when container becomes visible. */
+    show() {
+        this._visible = true;
+    }
+
+    /** Hide the timeline widget. Destroys chart and disconnects ResizeObserver. */
+    hide() {
+        // Bug C: reset state so next show() triggers a fresh render
+        this._visible = false;
+        if (this.chart) {
+            this.chart.destroy();
+            this.chart = null;
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
+    }
+
     async render() {
         if (!await this.ensureChart()) {
             this.renderFallback();
@@ -434,24 +457,39 @@ class DriftTimeline {
             return;
         }
 
-        // Destroy existing chart
-        const existingChart = Chart.getChart(this.containerId);
-        if (existingChart) {
-            existingChart.destroy();
+        // Bug C: destroy existing chart instance before re-creating
+        if (this.chart) {
+            this.chart.destroy();
+            this.chart = null;
+        } else {
+            const existingChart = Chart.getChart(this.containerId);
+            if (existingChart) {
+                existingChart.destroy();
+            }
         }
 
         // Create canvas if needed
         let canvas = this.container.querySelector('canvas');
         if (!canvas) {
-            this.container.innerHTML = '<canvas></canvas>';
+            // Bug D: set explicit style on dynamically created canvas
+            this.container.innerHTML = '<canvas style="width:100%;display:block;"></canvas>';
             canvas = this.container.querySelector('canvas');
         }
+
+        // Bug B: read container dimensions with fallback chain
+        const rect = this.container.getBoundingClientRect();
+        const w = rect.width || this.container.clientWidth || this.container.offsetWidth || 400;
+        const h = rect.height || this.container.clientHeight || this.container.offsetHeight || 200;
+
+        // Bug A: explicitly set canvas pixel dimensions before drawing
+        canvas.width = w;
+        canvas.height = h;
 
         const labels = this.history.map(h => new Date(h.timestamp).toLocaleDateString());
         const driftData = this.history.map(h => h.overall_drift || 0);
         const alertThreshold = 0.5;
 
-        new Chart(canvas, {
+        this.chart = new Chart(canvas, {
             type: 'line',
             data: {
                 labels,
@@ -494,6 +532,16 @@ class DriftTimeline {
                 }
             }
         });
+
+        // ResizeObserver: resize Chart.js chart when container dimensions change
+        if (!this._resizeObserver && this.container) {
+            this._resizeObserver = new ResizeObserver(() => {
+                if (this.chart) {
+                    this.chart.resize();
+                }
+            });
+            this._resizeObserver.observe(this.container);
+        }
     }
 
     renderFallback() {

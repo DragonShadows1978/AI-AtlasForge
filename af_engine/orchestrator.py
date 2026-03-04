@@ -34,6 +34,51 @@ from .integrations.base import Event, StageEvent
 logger = logging.getLogger(__name__)
 
 
+def _format_research_context(findings, prior_found: bool = False) -> str:
+    """Format ResearchFindings into a prompt-injectable context block."""
+    cycle_note = "\n*Built on prior cycle research findings.*" if prior_found else ""
+
+    # Guard: topics_researched may be non-list; str()-cast prevents join() crash on non-str items
+    topics_list = findings.topics_researched if isinstance(findings.topics_researched, list) else []
+    topics = ", ".join(str(t) for t in topics_list[:5]) if topics_list else "None identified"
+    total = findings.total_sources or 0
+    primary = findings.primary_sources or 0
+    sources_line = f"{total} total ({primary} primary)"
+
+    # Synthesized recommendations and gaps
+    if findings.synthesis:
+        # Guard: to_markdown() may return None or raise; fall back to empty string
+        try:
+            raw = findings.synthesis.to_markdown()
+            md_content = raw if isinstance(raw, str) else ""
+        except Exception:
+            md_content = ""
+        if not md_content:
+            md_content = "No synthesis available."
+        # Trim to avoid flooding prompt (cap at ~3000 chars)
+        elif len(md_content) > 3000:
+            md_content = md_content[:3000] + "\n...[truncated — full report in research/research_findings.md]"
+    else:
+        md_content = "No synthesis available."
+
+    return f"""=== RESEARCH FINDINGS (Pre-computed) ==={cycle_note}
+The following research was conducted automatically before planning began:
+
+Topics Researched: {topics}
+Sources Consulted: {sources_line}
+
+{md_content}
+
+Full research report: research/research_findings.md
+
+Use these findings as the foundation for your implementation plan.
+Do NOT re-research topics already covered above — focus your research
+on filling the identified knowledge gaps only. Every major architectural
+decision MUST cite either the pre-computed research above or a specific
+source you consulted during planning.
+=== END RESEARCH FINDINGS ==="""
+
+
 class StageOrchestrator:
     """
     Core orchestrator for the modular R&D Engine.
@@ -245,6 +290,15 @@ class StageOrchestrator:
                 full_prompt,
                 stage_context.problem_statement
             )
+            # Run ResearchOrchestrator BEFORE the planning agent starts.
+            # This ensures findings are pre-loaded context, not something the
+            # agent documents as an afterthought.
+            research_context = self._run_pre_planning_research(stage_context)
+            if research_context:
+                full_prompt = self.prompts.inject_research_context(
+                    full_prompt,
+                    research_context
+                )
 
         # Inject AfterImage context for BUILDING stage
         if stage == "BUILDING":
@@ -348,6 +402,141 @@ class StageOrchestrator:
             return recovery_handler.get_recovery_info()
         return None
 
+    def _run_pre_planning_research(self, stage_context) -> Optional[str]:
+        """
+        Run ResearchOrchestrator before the planning prompt is built.
+
+        Returns a formatted research context string to inject into the prompt,
+        or None if research fails/times out (graceful fallback).
+
+        Multi-cycle continuity: if research_findings.md already exists from a
+        prior cycle, it is passed as context so the orchestrator builds on
+        existing findings rather than starting fresh.
+        """
+        try:
+            import sys as _sys
+            root_str = str(self.root)
+            # Check position 0: path elsewhere still allows module shadowing
+            if not _sys.path or _sys.path[0] != root_str:
+                _sys.path.insert(0, root_str)
+            from research_agent import ResearchOrchestrator, ResearchConfig
+        except ImportError as e:
+            logger.warning(f"[Planning] ResearchOrchestrator not available: {e}")
+            return None
+
+        import threading
+        from pathlib import Path as _Path
+
+        research_dir = _Path(stage_context.research_dir)
+        prior_findings_path = research_dir / "research_findings.md"
+
+        # Check for prior cycle findings (multi-cycle continuity)
+        prior_findings_text = None
+        prior_found = False
+        if prior_findings_path.exists() and stage_context.cycle_number > 1:
+            try:
+                prior_findings_text = prior_findings_path.read_text(encoding="utf-8")
+                prior_found = True
+                logger.info(
+                    "[Planning] Found prior research findings from cycle %d, will build on them",
+                    stage_context.cycle_number - 1,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Planning] Could not read prior cycle findings (%s): %s",
+                    prior_findings_path, exc,
+                )
+
+        config = ResearchConfig(
+            max_topics=5,
+            max_queries_per_topic=3,
+            timeout_seconds=120,
+        )
+        orchestrator = ResearchOrchestrator(config=config)
+
+        # Use original mission statement — cycle 2+ overwrites problem_statement with continuation prompt
+        mission_description = (
+            self.state.mission.get("original_problem_statement")
+            or self.state.mission.get("problem_statement")
+            or stage_context.problem_statement
+        )
+
+        # Build research context string (include prior findings for multi-cycle)
+        research_context_str = "[Mission workspace context]"
+        if prior_findings_text:
+            prior_text = prior_findings_text[:2000]
+            if len(prior_findings_text) > 2000:
+                prior_text += "\n...[truncated — full report in research/research_findings.md]"
+            research_context_str += f"\n\n### Prior Cycle Research:\n{prior_text}"
+
+        result_holder: list = [None]
+        error_holder: list = [None]
+        # cancel_event: signals the daemon thread to skip disk writes if caller timed out
+        cancel_event = threading.Event()
+
+        logger.info(
+            "[Planning] Research phase started: up to %d topics, mission='%.60s...'",
+            config.max_topics,
+            mission_description,
+        )
+        _research_start = time.time()
+
+        def _run() -> None:
+            try:
+                findings = orchestrator.research_for_planning(
+                    mission=mission_description,
+                    topics=None,  # auto-extract from mission
+                    context=research_context_str,
+                )
+                # Skip save and result assignment if caller already timed out
+                if not cancel_event.is_set():
+                    try:
+                        research_dir.mkdir(parents=True, exist_ok=True)
+                        findings.save_report(prior_findings_path)
+                    except Exception as save_err:
+                        logger.warning("[Planning] Failed to save research report: %s", save_err)
+                    result_holder[0] = findings
+            except Exception as exc:
+                error_holder[0] = exc
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout=120)
+
+        # Signal cancellation on timeout — daemon thread checks cancel_event before writing
+        if thread.is_alive():
+            cancel_event.set()
+            logger.warning(
+                "[Planning] Research phase timed out after 120s — "
+                "planning will proceed without pre-computed research findings."
+            )
+            return None
+
+        if error_holder[0]:
+            logger.warning(
+                "[Planning] Research phase failed (%s) — continuing without research context",
+                type(error_holder[0]).__name__,
+            )
+            return None
+
+        findings = result_holder[0]
+        if not findings:
+            return None
+
+        _elapsed = time.time() - _research_start
+        logger.info(
+            "[Planning] Research phase completed in %.1fs: %d sources found",
+            _elapsed,
+            findings.total_sources or 0,
+        )
+
+        # Wrap: _format_research_context may raise if synthesis fields are unexpected types
+        try:
+            return _format_research_context(findings, prior_found=prior_found)
+        except Exception as fmt_exc:
+            logger.warning("[Planning] Failed to format research context: %s", fmt_exc)
+            return None
+
     # =========================================================================
     # Cycle management methods
     # =========================================================================
@@ -388,6 +577,10 @@ class StageOrchestrator:
     def get_cycle_status(self) -> Dict[str, Any]:
         """Get current cycle status."""
         return self.cycles.get_cycle_context()
+
+    def sync_live_params(self) -> None:
+        """Sync live-editable params from disk into in-memory state."""
+        self.state.sync_live_params()
 
     def _generate_default_continuation(self) -> str:
         """Generate a default continuation prompt when Claude doesn't provide one.
@@ -599,7 +792,7 @@ Continue the mission from where the previous cycle left off.
         resolved_project_name = None
         if resolve_project_name is not None:
             resolved_project_name = resolve_project_name(problem_statement, mid, config.project_name)
-            mission_workspace = WORKSPACE_DIR / resolved_project_name
+            mission_workspace = WORKSPACE_DIR / resolved_project_name / mid
             logger.info(f"Resolved project name: {resolved_project_name}")
         else:
             mission_workspace = MISSIONS_DIR / mid / "workspace"
@@ -964,7 +1157,7 @@ Continue the mission from where the previous cycle left off.
             resolved_project_name = None
             if PROJECT_NAME_RESOLVER_AVAILABLE and resolve_project_name:
                 resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-                mission_workspace = WORKSPACE_DIR / resolved_project_name
+                mission_workspace = WORKSPACE_DIR / resolved_project_name / mission_id
                 logger.info(f"Queue mission resolved project name: {resolved_project_name}")
             else:
                 mission_workspace = MISSIONS_DIR / mission_id / "workspace"

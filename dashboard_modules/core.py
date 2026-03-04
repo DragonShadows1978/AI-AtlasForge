@@ -134,7 +134,9 @@ def api_status():
         cached = cache.get('api_status')
         if cached is not None:
             return jsonify(cached)
-    result = get_claude_status()
+    # Route through canonical schema so REST and WebSocket payloads match
+    from dashboard_modules.mission_status_schema import build_mission_status
+    result = build_mission_status(get_claude_status())
     if cache:
         cache.set('api_status', result, ttl_seconds=0.75)
     return jsonify(result)
@@ -528,7 +530,7 @@ def api_mission():
             try:
                 from project_name_resolver import resolve_project_name
                 resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-                mission_workspace = (BASE_DIR / "workspace") / resolved_project_name
+                mission_workspace = (BASE_DIR / "workspace") / resolved_project_name / mission_id
             except ImportError:
                 mission_workspace = mission_dir / "workspace"
 
@@ -1119,7 +1121,7 @@ def api_set_mission_from_recommendation(rec_id):
     try:
         from project_name_resolver import resolve_project_name
         resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
-        mission_workspace = WORKSPACE_DIR / resolved_project_name
+        mission_workspace = WORKSPACE_DIR / resolved_project_name / mission_id
     except ImportError:
         mission_workspace = mission_dir / "workspace"
 
@@ -1387,6 +1389,12 @@ def get_file_content(filepath):
 @core_bp.route('/api/files')
 def list_files():
     """List files in current mission workspace (or global workspace if no mission)."""
+    cache = _get_ttl_cache()
+    if cache:
+        cached = cache.get('api_files')
+        if cached is not None:
+            return jsonify(cached)
+
     files = []
 
     # Get mission workspace if an active mission exists
@@ -1397,55 +1405,55 @@ def list_files():
     # Use mission-specific workspace when available
     workspace_base = Path(mission_workspace) if mission_workspace else WORKSPACE_DIR
 
-    scan_dirs = [
-        workspace_base / "artifacts",
-        workspace_base / "research",
-        workspace_base / "tests",
-        workspace_base
-    ]
+    # Exclusion set for directories that shouldn't appear in the files widget
+    exclude_dirs = {"__pycache__", ".git", "node_modules", "atlasforge_data", ".mypy_cache", ".pytest_cache"}
 
     seen_paths = set()
 
-    for dir_path in scan_dirs:
-        if dir_path.exists():
-            pattern = "*" if dir_path == workspace_base else "**/*"
-            for f in dir_path.glob(pattern):
-                if f.is_file():
-                    try:
-                        rel_path = f.relative_to(workspace_base)
-                        path_str = str(rel_path)
+    if workspace_base.exists():
+        for f in workspace_base.rglob("*"):
+            if f.is_file():
+                # Skip files inside excluded directories
+                if any(part in exclude_dirs for part in f.relative_to(workspace_base).parts):
+                    continue
+                try:
+                    rel_path = f.relative_to(workspace_base)
+                    path_str = str(rel_path)
 
-                        if path_str in seen_paths:
-                            continue
-                        seen_paths.add(path_str)
-
-                        stat = f.stat()
-                        # Build download/content URLs with mission context if needed
-                        if mission_workspace:
-                            download_path = f"mission/{mission_id}/{path_str}"
-                        else:
-                            download_path = path_str
-
-                        mime_type, _ = mimetypes.guess_type(str(f))
-                        mime_type = mime_type or 'application/octet-stream'
-                        file_type = _classify_file_type(mime_type)
-
-                        files.append({
-                            "name": f.name,
-                            "path": path_str,
-                            "size": stat.st_size,
-                            "modified": stat.st_mtime,
-                            "download_url": f"/api/download/{download_path}",
-                            "content_url": f"/api/file-content/{download_path}",
-                            "mime_type": mime_type,
-                            "file_type": file_type,
-                            "mission_id": mission_id if mission_workspace else None
-                        })
-                    except (OSError, IOError, ValueError):
+                    if path_str in seen_paths:
                         continue
+                    seen_paths.add(path_str)
+
+                    stat = f.stat()
+                    # Build download/content URLs with mission context if needed
+                    if mission_workspace:
+                        download_path = f"mission/{mission_id}/{path_str}"
+                    else:
+                        download_path = path_str
+
+                    mime_type, _ = mimetypes.guess_type(str(f))
+                    mime_type = mime_type or 'application/octet-stream'
+                    file_type = _classify_file_type(mime_type)
+
+                    files.append({
+                        "name": f.name,
+                        "path": path_str,
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                        "download_url": f"/api/download/{download_path}",
+                        "content_url": f"/api/file-content/{download_path}",
+                        "mime_type": mime_type,
+                        "file_type": file_type,
+                        "mission_id": mission_id if mission_workspace else None
+                    })
+                except (OSError, IOError, ValueError):
+                    continue
 
     files.sort(key=lambda x: x["modified"], reverse=True)
-    return jsonify(files[:50])
+    result = files[:50]
+    if cache:
+        cache.set('api_files', result, ttl_seconds=5.0)
+    return jsonify(result)
 
 
 # =============================================================================

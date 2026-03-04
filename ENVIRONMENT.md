@@ -1,6 +1,6 @@
 # Environment Profile
 
-Auto-generated on 2026-01-17 13:51:10
+Auto-generated on 2026-03-02
 
 This file documents the hardware profile of this installation.
 The autonomous agent uses this information for resource-aware planning.
@@ -9,7 +9,7 @@ The autonomous agent uses this information for resource-aware planning.
 
 | Component | Details |
 |-----------|---------|
-| OS | Linux 6.14.0-37-generic |
+| OS | Linux 6.17.0-14-generic |
 | Architecture | x86_64 |
 | Python | 3.12.3 |
 
@@ -17,16 +17,16 @@ The autonomous agent uses this information for resource-aware planning.
 
 | Property | Value |
 |----------|-------|
-| Model | Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz |
-| Cores | 4 |
-| Threads | 8 |
+| Model | AMD Ryzen 5 3600 6-Core Processor |
+| Cores | 6 |
+| Threads | 12 |
 
 ## Memory
 
 | Property | Value |
 |----------|-------|
 | Total RAM | 62Gi |
-| Available | 51Gi |
+| Available | 54Gi |
 | Swap | 2.0Gi |
 
 ## GPU
@@ -36,21 +36,22 @@ The autonomous agent uses this information for resource-aware planning.
 | Available | Yes |
 | Model | NVIDIA GeForce RTX 3070 |
 | VRAM Total | 8192 MiB |
-| VRAM Free | 4773 MiB |
+| VRAM Free | 7603 MiB |
 | CUDA Available | Yes |
-| CUDA Version | 12.8 |
+| CUDA Version | 13.1 |
+| Driver Version | 590.48.01 |
 
 ## Storage
 
 | Path | Total | Available |
 |------|-------|-----------|
-| / | 457G | 196G |
+| / | 916G | 850G |
 
 ## Services
 
 | Service | Status |
 |---------|--------|
-| Ollama | Running |
+| Ollama | Running (llama3.1:8b loaded) |
 | Docker | Not available |
 
 ## Resource Recommendations
@@ -58,9 +59,9 @@ The autonomous agent uses this information for resource-aware planning.
 Based on detected hardware:
 
 - **GPU Available**: Use CUDA for ML workloads. NVIDIA GeForce RTX 3070 detected with 8192 MiB VRAM.
-- **Multi-core CPU**: Use multiprocessing for parallel tasks (8 threads available).
+- **Multi-core CPU**: Use multiprocessing for parallel tasks (12 threads available).
 - **High RAM**: Can cache large datasets in memory (62Gi total).
-- **Ollama Running**: Local LLM available for testing and data generation.
+- **Ollama Online**: Local LLM available at http://localhost:11434 with llama3.1:8b loaded. Use for local inference tasks.
 
 ## Notes
 

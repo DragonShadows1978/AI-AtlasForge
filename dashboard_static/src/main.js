@@ -25,6 +25,8 @@ import * as queue from './modules/queue.js';
 import * as backupStatus from './modules/backup-status.js';
 import * as activityFeed from './modules/activity-feed.js';
 import * as conductorStatus from './modules/conductor-status.js';
+import * as agentActivity from './modules/agent-activity.js';
+import * as subagentPool from './modules/subagent-pool.js';
 
 // Import new socket functions for WebSocket push
 import {
@@ -99,6 +101,7 @@ window.getWidgetSocket = socket.getWidgetSocket;
 window.subscribeToRoom = subscribeToRoom;
 window.unsubscribeFromRoom = unsubscribeFromRoom;
 window.registerHandler = registerHandler;
+window.handlePoolStatusEvent = subagentPool.handlePoolStatusEvent;
 window.getConnectionState = getConnectionState;
 window.forceReconnect = forceReconnect;
 
@@ -201,15 +204,24 @@ window.exportAnalyticsCSV = widgets.exportAnalyticsCSV;
 window.openMissionAnalyticsModal = widgets.openMissionAnalyticsModal;
 window.closeMissionAnalyticsModal = widgets.closeMissionAnalyticsModal;
 window.toggleParamTrend = widgets.toggleParamTrend;
+window.setAnalyticsTabVisible = widgets.setAnalyticsTabVisible;
+window.getAnalyticsTrendState = widgets.getAnalyticsTrendState;
 
 // Exploration
 window.GraphRenderer = exploration.GraphRenderer;
 window.refreshGraphVisualization = exploration.refreshGraphVisualization;
 window.searchInsights = exploration.searchInsights;
+window.toggleExplorationGraph = exploration.toggleExplorationGraph;
+window.resetExplorationState = exploration.resetExplorationState;
+window.getExplorationState = exploration.getExplorationState;
+window.setupInsightSearch = exploration.setupInsightSearch;
 
 // Decision Graph
 window.refreshDecisionGraph = decisionGraph.refreshDecisionGraph;
 window.showDecisionNodeDetails = decisionGraph.showDecisionNodeDetails;
+window.toggleDecisionGraph = decisionGraph.toggleDecisionGraph;
+window.resetDecisionGraphState = decisionGraph.resetDecisionGraphState;
+window.getDecisionGraphState = decisionGraph.getDecisionGraphState;
 
 // Recovery
 window.checkForRecovery = recovery.checkForRecovery;
@@ -236,6 +248,10 @@ window.showInvestigationBanner = investigation.showInvestigationBanner;
 window.hideInvestigationBanner = investigation.hideInvestigationBanner;
 window.scrollToInvestigationCard = investigation.scrollToInvestigationCard;
 window.isInvestigationActive = investigation.isInvestigationActive;
+// Auto-archive functions
+window.pinInvestigation = investigation.pinInvestigation;
+window.unpinInvestigation = investigation.unpinInvestigation;
+window.handleAutoArchiveSettingChange = investigation.handleAutoArchiveSettingChange;
 
 // Drift Monitoring Widget
 
@@ -541,6 +557,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Check for running investigation
     investigation.checkForRunningInvestigation();
 
+    // Load investigation settings (auto-archive config)
+    investigation.loadInvestigationSettings();
+
     // Initialize drift monitoring widget
 
     // Initialize drift intervention system
@@ -564,6 +583,12 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Initialize conductor status widget
     conductorStatus.initConductorStatus();
+
+    // Initialize agent activity widget (real-time subagent streaming)
+    agentActivity.initAgentActivity();
+
+    // Initialize subagent pool widget
+    subagentPool.initSubagentPoolWidget();
 
     // Initialize GitHub status widget
 
@@ -598,13 +623,13 @@ document.addEventListener('DOMContentLoaded', async function() {
  * This ensures modals stay on top of scrolled columns on mobile
  */
 function initMobileModalFix() {
-    // Only needed on mobile devices
-    if (window.innerWidth > 600) return;
+    // Run on all viewport sizes as a safety net against stuck modal-open class
 
     // Function to check if any modal is visible
     function updateModalOpenClass() {
         const visibleModals = document.querySelectorAll(
-            '.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]'
+            '.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"],' +
+            '.restart-modal-overlay.visible'
         );
         if (visibleModals.length > 0) {
             document.body.classList.add('modal-open');
@@ -624,9 +649,9 @@ function initMobileModalFix() {
         }
     });
 
-    // Observe all existing modals
-    document.querySelectorAll('.modal').forEach(modal => {
-        observer.observe(modal, {
+    // Observe all existing modals AND restart-modal-overlay (uses .visible class, not .modal)
+    document.querySelectorAll('.modal, .restart-modal-overlay').forEach(el => {
+        observer.observe(el, {
             attributes: true,
             attributeFilter: ['style', 'class']
         });
@@ -637,7 +662,8 @@ function initMobileModalFix() {
         for (const mutation of mutations) {
             if (mutation.addedNodes.length > 0) {
                 mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === Node.ELEMENT_NODE && node.classList?.contains('modal')) {
+                    if (node.nodeType === Node.ELEMENT_NODE &&
+                        (node.classList?.contains('modal') || node.classList?.contains('restart-modal-overlay'))) {
                         observer.observe(node, {
                             attributes: true,
                             attributeFilter: ['style', 'class']
@@ -651,6 +677,12 @@ function initMobileModalFix() {
 
     // Run initial check
     updateModalOpenClass();
+
+    // Safety net: periodically verify modal-open class isn't stuck.
+    // If body has modal-open but no modal is actually visible, remove it.
+    // Catches race conditions or error paths that leave modal-open stuck,
+    // which would block pointer-events on the activity panel buttons on mobile.
+    setInterval(updateModalOpenClass, 5000);
 
     console.log('Mobile modal z-index fix initialized');
 }
@@ -782,13 +814,19 @@ let pollingIntervals = [];
 let wsPollingMode = false;
 
 function setupPeriodicRefreshes() {
+    // Guard flag: prevent double-registration if WS reconnects
+    let _wsHandlersRegistered = false;
+
     // Check if WebSocket is connected - if so, reduce polling
     const connectionState = getConnectionState();
 
     if (connectionState.isConnected) {
         // WebSocket connected - minimal polling for backup
         console.log('WebSocket connected - using push updates with minimal polling backup');
-        setupWebSocketHandlers();
+        if (!_wsHandlersRegistered) {
+            setupWebSocketHandlers();
+            _wsHandlersRegistered = true;
+        }
         setupMinimalPolling();
     } else {
         // No WebSocket - use full polling
@@ -801,6 +839,10 @@ function setupPeriodicRefreshes() {
         if (status.status === 'connected' && wsPollingMode === true) {
             console.log('WebSocket connected - switching to push mode');
             clearPollingIntervals();
+            if (!_wsHandlersRegistered) {
+                setupWebSocketHandlers();
+                _wsHandlersRegistered = true;
+            }
             setupMinimalPolling();
             wsPollingMode = false;
         } else if (status.status !== 'connected' && wsPollingMode === false) {
@@ -815,8 +857,13 @@ function setupPeriodicRefreshes() {
 function setupWebSocketHandlers() {
     // Register handlers for WebSocket push updates
     registerHandler('mission_status', (data) => {
-        widgets.updateStatusBar(data);
-        widgets.updateStageIndicator(data.rd_stage);
+        // Route through handleMissionStatusEvent which handles:
+        // - updateStatusBar + updateStageIndicator
+        // - _wsInitialReceived tracking (skips REST polls when WS is alive)
+        // - Stage transition toast notifications
+        if (data) {
+            widgets.handleMissionStatusEvent(data);
+        }
     });
 
     registerHandler('journal', (data) => {
@@ -835,6 +882,20 @@ function setupWebSocketHandlers() {
 
     registerHandler('mission_params', (data) => {
         widgets.updateMissionParamsWidget(data);
+    });
+
+    // Agent activity widget real-time updates
+    registerHandler('mission_agents', (data) => {
+        agentActivity.handleMissionAgentEvent(data);
+    });
+
+    registerHandler('investigation_agents', (data) => {
+        agentActivity.handleInvestigationAgentEvent(data);
+    });
+
+    // Subagent pool widget real-time updates
+    registerHandler('pool_status', (data) => {
+        subagentPool.handlePoolStatusEvent(data);
     });
 
     // Investigation mode real-time updates
@@ -898,8 +959,14 @@ function setupMinimalPolling() {
     // Very infrequent polling as backup when WebSocket is connected
     // These only trigger if WebSocket hasn't sent updates recently
 
+    // Files widget gets its own dedicated polling interval (15s)
+    // This ensures files appear even if WebSocket events are lost
     pollingIntervals.push(setInterval(() => {
-        // Only refresh if no WebSocket update in last 30 seconds
+        widgets.loadFiles();
+    }, 15000));
+
+    // General backup polling still gated on WS staleness
+    pollingIntervals.push(setInterval(() => {
         const state = getConnectionState();
         const timeSinceUpdate = Date.now() - state.lastUpdate;
         if (timeSinceUpdate > 30000) {

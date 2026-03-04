@@ -12,6 +12,7 @@
 const esbuild = require('esbuild');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -141,6 +142,9 @@ async function build() {
             JSON.stringify(manifest, null, 2)
         );
 
+        // Generate pre-compressed .gz files for all dist assets
+        await compressDistFiles(distDir);
+
         const elapsed = Date.now() - startTime;
         console.log(`\nBuild completed in ${elapsed}ms\n`);
 
@@ -148,6 +152,35 @@ async function build() {
     } catch (err) {
         console.error('Build failed:', err);
         process.exit(1);
+    }
+}
+
+// =============================================================================
+// GZIP COMPRESSION
+// =============================================================================
+
+async function compressDistFiles(dir) {
+    const extensions = ['.js', '.css', '.json'];
+    let count = 0;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            await compressDistFiles(fullPath);
+            continue;
+        }
+        const ext = path.extname(entry.name);
+        if (!extensions.includes(ext) || entry.name.endsWith('.gz')) continue;
+        const gzPath = fullPath + '.gz';
+        const data = fs.readFileSync(fullPath);
+        const compressed = zlib.gzipSync(data, { level: 9 });
+        fs.writeFileSync(gzPath, compressed);
+        const ratio = ((1 - compressed.length / data.length) * 100).toFixed(0);
+        console.log(`  gzip: ${entry.name} ${(data.length/1024).toFixed(1)}KB -> ${(compressed.length/1024).toFixed(1)}KB (-${ratio}%)`);
+        count++;
+    }
+    if (count > 0 && dir.endsWith('dist')) {
+        console.log(`Compressed ${count} files`);
     }
 }
 

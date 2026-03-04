@@ -101,14 +101,17 @@ class MissionReportIntegration(BaseIntegrationHandler):
 
         # Generate and save final report
         final_report = self._generate_final_report(event)
+        source_summary = final_report.get("final_summary", "") if final_report else ""
 
-        # Save recommendation to SQLite
-        next_rec = event_data.get("next_mission_recommendation")
-        if next_rec:
-            summary = ""
-            if final_report:
-                summary = final_report.get("final_summary", "")
-            self._save_recommendation(next_rec, mission_id, summary)
+        # Save all continuation missions from the manifest (primary path)
+        continuation_missions = event_data.get("continuation_missions")
+        if continuation_missions and isinstance(continuation_missions, list):
+            self._save_continuation_manifest(continuation_missions, mission_id, source_summary)
+        else:
+            # Backward-compat: fall back to single next_mission_recommendation
+            next_rec = event_data.get("next_mission_recommendation")
+            if next_rec:
+                self._save_recommendation(next_rec, mission_id, source_summary)
 
         # Ingest to knowledge base
         self._ingest_to_knowledge_base(mission_id)
@@ -194,6 +197,30 @@ class MissionReportIntegration(BaseIntegrationHandler):
             final_report["statistics"]["file_types"][ftype] = \
                 final_report["statistics"]["file_types"].get(ftype, 0) + 1
 
+        # Collect agent errors for this mission from claude_journal.jsonl
+        try:
+            af_root = Path(__file__).resolve().parent.parent.parent
+            journal_path = af_root / 'state' / 'claude_journal.jsonl'
+            agent_errors = []
+            if journal_path.exists():
+                with open(journal_path, 'r') as _jf:
+                    for _line in _jf:
+                        _line = _line.strip()
+                        if not _line:
+                            continue
+                        try:
+                            _entry = json.loads(_line)
+                            if (_entry.get('type') == 'agent_error' and
+                                    _entry.get('mission_id') == mission_id):
+                                agent_errors.append(_entry)
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+            final_report['agent_errors'] = agent_errors
+            final_report['agent_error_count'] = len(agent_errors)
+        except Exception:
+            final_report['agent_errors'] = []
+            final_report['agent_error_count'] = 0
+
         # Save to mission_logs
         report_path = self.mission_logs_dir / f"{mission_id}_report.json"
         try:
@@ -251,7 +278,12 @@ class MissionReportIntegration(BaseIntegrationHandler):
             "source_mission_summary": source_summary[:500] if source_summary else "",
             "rationale": recommendation.get("rationale", ""),
             "created_at": datetime.now().isoformat(),
-            "source_type": source_type
+            "source_type": source_type,
+            "priority_score": recommendation.get("priority_score", 50.0),
+            # v2 fields — passed through from continuation manifest or defaulted
+            "mission_type": recommendation.get("mission_type", "EXPANSION"),
+            "bug_references": recommendation.get("bug_references", []),
+            "scope_context": recommendation.get("scope_context"),
         }
 
         # Add drift context if provided
@@ -310,6 +342,71 @@ class MissionReportIntegration(BaseIntegrationHandler):
             logger.debug(f"[MissionReport] WebSocket emit failed: {e}")
 
         return rec_entry["id"]
+
+    def _save_continuation_manifest(
+        self,
+        missions: list,
+        source_mission_id: str,
+        source_summary: str,
+    ) -> None:
+        """
+        Save all missions from the continuation manifest to SQLite.
+
+        Each manifest mission is saved as a separate suggestion row with the
+        appropriate mission_type, bug_references, and scope_context set.
+        Priority 1 (BUGFIX) missions get a boosted priority_score so they
+        sort to the top of the queue panel.
+        """
+        # Map category → (mission_type, scope_context, base_priority_score)
+        category_map = {
+            "BUGFIX":      ("BUGFIX",      "out_of_scope", 90.0),
+            "TECH_DEBT":   ("TECH_DEBT",   "out_of_scope", 70.0),
+            "COMPLETION":  ("COMPLETION",  None,           65.0),
+            "EXPANSION":   ("EXPANSION",   None,           50.0),
+        }
+
+        saved = 0
+        for mission in missions:
+            try:
+                category = (mission.get("category") or "EXPANSION").upper()
+                mission_type, scope_context, base_score = category_map.get(
+                    category, ("EXPANSION", None, 50.0)
+                )
+                # Higher priority number → lower in queue priority (invert manifest priority).
+                # Default to 1 (highest priority) when field is missing; clamp to [1, 10].
+                raw_priority = mission.get("priority", 1)
+                try:
+                    manifest_priority = max(1, min(10, int(raw_priority)))
+                except (TypeError, ValueError):
+                    manifest_priority = 1
+                priority_score = max(10.0, base_score - (manifest_priority - 1) * 5)
+
+                title = mission.get("title", "").strip()
+                if not title or len(title) < 5:
+                    logger.warning(f"[MissionReport] Skipping continuation mission with short/empty title: '{title}'")
+                    continue
+
+                rec_entry = {
+                    "mission_title": title,
+                    "mission_description": mission.get("description", ""),
+                    "suggested_cycles": 3,
+                    "source_mission_id": source_mission_id,
+                    "source_mission_summary": source_summary[:500] if source_summary else "",
+                    "rationale": mission.get("rationale", ""),
+                    "source_type": "successful_completion",
+                    "priority_score": priority_score,
+                    "mission_type": mission_type,
+                    "bug_references": mission.get("source_bugs", []),
+                    "scope_context": scope_context,
+                }
+                self._save_recommendation(rec_entry, source_mission_id, source_summary,
+                                          source_type="successful_completion")
+                saved += 1
+            except Exception as e:
+                title_safe = mission.get('title', '?') if isinstance(mission, dict) else repr(mission)
+                logger.warning(f"[MissionReport] Failed to save continuation mission '{title_safe}': {e}")
+
+        logger.info(f"[MissionReport] Saved {saved}/{len(missions)} continuation missions from manifest")
 
     def _ingest_to_knowledge_base(self, mission_id: str) -> None:
         """

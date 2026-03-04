@@ -17,6 +17,15 @@ let isInvestigationRunning = false;
 let savedScrollX = 0;
 let savedScrollY = 0;
 
+// Auto-archive state
+let autoArchiveTimer = null;
+let countdownInterval = null;
+let isPinned = false;
+let investigationSettings = {
+    auto_archive_enabled: true,
+    auto_archive_delay_seconds: 5
+};
+
 /**
  * Toggle between R&D mode and Investigation mode
  */
@@ -59,7 +68,14 @@ export async function startInvestigation() {
         return;
     }
 
-    const subagents = parseInt(document.getElementById('investigation-subagents').value) || 5;
+    const subagentsSelect = document.getElementById('investigation-subagents');
+    let subagents;
+    if (subagentsSelect && subagentsSelect.value === 'custom') {
+        const customInput = document.getElementById('investigation-subagents-custom');
+        subagents = parseInt(customInput ? customInput.value : 5) || 5;
+    } else {
+        subagents = parseInt(subagentsSelect ? subagentsSelect.value : '5') || 5;
+    }
     const timeout = parseInt(document.getElementById('investigation-timeout').value) || 10;
 
     try {
@@ -454,6 +470,10 @@ export async function checkForRunningInvestigation() {
 
                 // Controls should be ENABLED since investigation is not running
                 updateInvestigationControlsState(false);
+
+                // Start auto-archive countdown (investigation already done)
+                isPinned = false;
+                startAutoArchiveCountdown();
             } else {
                 // Idle or unknown status - ensure header shows offline
                 if (typeof window.updateInvestigationServiceStatus === 'function') {
@@ -514,7 +534,171 @@ export function handleInvestigationComplete(data) {
                 error: data.error
             });
         }
+
+        // Start auto-archive countdown
+        isPinned = false;
+        startAutoArchiveCountdown();
     }
+}
+
+// =============================================================================
+// AUTO-ARCHIVE FUNCTIONS
+// =============================================================================
+
+/**
+ * Load investigation settings from server
+ */
+export async function loadInvestigationSettings() {
+    try {
+        const settings = await api('/api/investigation/settings');
+        if (settings) {
+            investigationSettings = settings;
+            syncSettingsToUI(settings);
+        }
+    } catch (err) {
+        console.warn('Could not load investigation settings:', err);
+    }
+}
+
+/**
+ * Save investigation settings to server and update local cache
+ */
+export async function saveInvestigationSettings(updates) {
+    try {
+        const result = await api('/api/investigation/settings', 'POST', updates);
+        if (result && result.settings) {
+            investigationSettings = result.settings;
+        }
+        return result;
+    } catch (err) {
+        console.error('Failed to save investigation settings:', err);
+        return null;
+    }
+}
+
+/**
+ * Sync settings object to the settings UI controls
+ */
+function syncSettingsToUI(settings) {
+    const enabledCheckbox = document.getElementById('auto-archive-enabled');
+    const delaySelect = document.getElementById('auto-archive-delay');
+    if (enabledCheckbox) enabledCheckbox.checked = settings.auto_archive_enabled;
+    if (delaySelect) delaySelect.value = String(settings.auto_archive_delay_seconds);
+}
+
+/**
+ * Start auto-archive countdown after investigation completes
+ */
+export function startAutoArchiveCountdown() {
+    if (!investigationSettings.auto_archive_enabled) return;
+    if (isPinned) return;
+
+    const delay = investigationSettings.auto_archive_delay_seconds;
+    let remaining = delay;
+
+    updateCountdownDisplay(remaining);
+
+    const countdownEl = document.getElementById('auto-archive-countdown');
+    if (countdownEl) countdownEl.style.display = 'flex';
+
+    // Show pin button when countdown starts
+    const pinBtn = document.getElementById('pin-investigation-btn');
+    if (pinBtn) pinBtn.style.display = 'inline-block';
+
+    countdownInterval = setInterval(() => {
+        remaining--;
+        updateCountdownDisplay(remaining);
+        if (remaining <= 0) {
+            clearCountdown();
+        }
+    }, 1000);
+
+    autoArchiveTimer = setTimeout(() => {
+        if (!isPinned) {
+            dismissInvestigation();
+        }
+        clearCountdown();
+    }, delay * 1000);
+}
+
+/**
+ * Update the countdown display text and progress bar
+ */
+function updateCountdownDisplay(remaining) {
+    const textEl = document.getElementById('auto-archive-seconds');
+    const barEl = document.getElementById('auto-archive-progress-bar');
+
+    if (textEl) textEl.textContent = remaining;
+
+    if (barEl) {
+        const total = investigationSettings.auto_archive_delay_seconds;
+        const pct = (remaining / total) * 100;
+        barEl.style.width = pct + '%';
+    }
+}
+
+/**
+ * Clear countdown timers and hide countdown UI
+ */
+function clearCountdown() {
+    if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+    }
+    if (autoArchiveTimer) {
+        clearTimeout(autoArchiveTimer);
+        autoArchiveTimer = null;
+    }
+    const countdownEl = document.getElementById('auto-archive-countdown');
+    if (countdownEl) countdownEl.style.display = 'none';
+}
+
+/**
+ * Pin the current investigation (prevent auto-archive)
+ */
+export function pinInvestigation() {
+    isPinned = true;
+    clearCountdown();
+
+    const pinBtn = document.getElementById('pin-investigation-btn');
+    const unpinBtn = document.getElementById('unpin-investigation-btn');
+    if (pinBtn) pinBtn.style.display = 'none';
+    if (unpinBtn) unpinBtn.style.display = 'inline-block';
+
+    showToast('Investigation pinned — will not auto-archive');
+}
+
+/**
+ * Unpin the current investigation (re-enable auto-archive)
+ */
+export function unpinInvestigation() {
+    isPinned = false;
+
+    const pinBtn = document.getElementById('pin-investigation-btn');
+    const unpinBtn = document.getElementById('unpin-investigation-btn');
+    if (pinBtn) pinBtn.style.display = 'inline-block';
+    if (unpinBtn) unpinBtn.style.display = 'none';
+
+    // Restart countdown if investigation still completed
+    if (currentInvestigationId && !isInvestigationRunning) {
+        startAutoArchiveCountdown();
+    }
+}
+
+/**
+ * Handle change of auto-archive settings controls in the UI
+ */
+export async function handleAutoArchiveSettingChange() {
+    const enabledCheckbox = document.getElementById('auto-archive-enabled');
+    const delaySelect = document.getElementById('auto-archive-delay');
+
+    const updates = {
+        auto_archive_enabled: enabledCheckbox ? enabledCheckbox.checked : true,
+        auto_archive_delay_seconds: delaySelect ? parseInt(delaySelect.value) : 5
+    };
+
+    await saveInvestigationSettings(updates);
+    showToast(`Auto-archive ${updates.auto_archive_enabled ? 'enabled (' + updates.auto_archive_delay_seconds + 's)' : 'disabled'}`);
 }
 
 // =============================================================================
@@ -623,6 +807,16 @@ export function isInvestigationActive() {
  * Clears the current investigation and allows starting a new one
  */
 export async function dismissInvestigation() {
+    // Clear any pending auto-archive timers first
+    clearCountdown();
+    isPinned = false;
+
+    // Hide pin/unpin buttons
+    const pinBtn = document.getElementById('pin-investigation-btn');
+    const unpinBtn = document.getElementById('unpin-investigation-btn');
+    if (pinBtn) pinBtn.style.display = 'none';
+    if (unpinBtn) unpinBtn.style.display = 'none';
+
     try {
         const result = await api('/api/investigation/dismiss', 'POST');
 

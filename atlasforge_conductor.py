@@ -452,6 +452,22 @@ def remove_pid():
 _active_claude_process = None
 _active_claude_lock = threading.Lock()
 
+# Agent streaming counter for mission agents
+import uuid as _uuid
+_mission_agent_counter = 0
+_mission_agent_counter_lock = threading.Lock()
+
+def _next_mission_agent_id(stage: str) -> tuple:
+    """Return (agent_id, label) for a new mission agent."""
+    global _mission_agent_counter
+    with _mission_agent_counter_lock:
+        _mission_agent_counter += 1
+        n = _mission_agent_counter
+    agent_id = f"mission_{_uuid.uuid4().hex[:8]}"
+    stage_short = (stage or 'AGENT').upper()[:8]
+    label = f"{stage_short} Agent {n}"
+    return agent_id, label
+
 
 def get_active_claude_process():
     """Get the currently active Claude subprocess, if any."""
@@ -479,6 +495,133 @@ def terminate_active_claude():
         except (ProcessLookupError, OSError):
             pass
         return True
+
+
+
+# =============================================================================
+# HIERARCHICAL PARALLEL EXECUTION — dashboard-integrated multi-agent BUILDING
+# =============================================================================
+
+def _should_use_parallel(stage: str, mission: dict) -> bool:
+    """
+    Determine if parallel execution should be used for this stage.
+
+    Conditions (any one triggers parallel mode):
+    - stage == BUILDING AND cycle_budget >= 2
+    - stage == BUILDING AND problem_statement is very long (> 500 chars)
+    """
+    if stage != "BUILDING":
+        return False
+    cycle_budget = mission.get("cycle_budget", 1)
+    if cycle_budget >= 2:
+        return True
+    problem_statement = mission.get("problem_statement", "")
+    if len(problem_statement) > 500:
+        return True
+    return False
+
+
+def _run_hierarchical_building(
+    prompt: str,
+    mission: dict,
+    workspace: Path,
+    stage: str = "BUILDING",
+    timeout: int = 7200
+) -> tuple:
+    """
+    Run BUILDING stage using HierarchicalExperiment (parallel Claude agents).
+
+    Each agent is registered with agent_stream_manager and appears as a tab
+    in the Mission Activity Panel on the dashboard.
+
+    Falls back to single-agent path if:
+    - hierarchical_framework cannot be imported
+    - MissionSplitter produces < 2 work units
+
+    Returns: (aggregated_response_text | None, error_info | None)
+    """
+    try:
+        from hierarchical_framework import HierarchicalExperiment, HierarchicalConfig
+        from mission_splitter import MissionSplitter, SplitStrategy
+
+        mission_id = mission.get("mission_id", f"hf_{__import__('uuid').uuid4().hex[:8]}")
+
+        splitter = MissionSplitter()
+        # Use recommend_agent_count() to derive correct agent count from mission complexity
+        n_agents = splitter.recommend_agent_count(prompt, max_agents=3)
+        work_units = splitter.split(prompt, strategy=SplitStrategy.AUTO, max_units=n_agents)
+
+        if len(work_units) < 2:
+            logger.info("[Parallel] MissionSplitter returned < 2 units — falling back to single agent")
+            return None, "insufficient_work_units"
+
+        # If an implementation plan exists, use MasterBuilder for wave-based orchestration
+        plan_path = workspace / "artifacts" / "implementation_plan.md"
+        if plan_path.exists():
+            from hierarchical_framework import MasterBuilder
+            config = HierarchicalConfig(
+                mission_id=mission_id,
+                description=(mission.get("problem_statement", "") or prompt)[:100],
+                total_timeout=timeout,
+                max_agents=n_agents,
+                stage=stage,
+                enable_streaming=True,
+            )
+            send_to_chat(f"[PARALLEL] MasterBuilder: wave-based execution from {plan_path.name}")
+            builder = MasterBuilder(config, plan_path, project_context=prompt[:300])
+            results = builder.run(progress_callback=send_to_chat)
+        else:
+            config = HierarchicalConfig(
+                mission_id=mission_id,
+                description=(mission.get("problem_statement", "") or prompt)[:100],
+                total_timeout=timeout,
+                max_agents=len(work_units),
+                stage=stage,
+                enable_streaming=True,
+            )
+            send_to_chat(f"[PARALLEL] Splitting {stage} stage into {len(work_units)} parallel agents")
+            exp = HierarchicalExperiment(config)
+            results = exp.run(work_units, progress_callback=send_to_chat)
+
+        summary = results.get_summary()
+        logger.info(f"[Parallel] Completed: {summary['completed']}/{summary['total_agents']} agents succeeded")
+
+        # Build aggregated response that the conductor's response handler can process
+        response_parts = []
+        all_files_created = []
+        all_files_modified = []
+
+        for ar in results.agent_results:
+            if ar.status == "completed":
+                if ar.parsed_result and "summary" in ar.parsed_result:
+                    response_parts.append(ar.parsed_result["summary"])
+                all_files_created.extend(ar.files_created)
+                all_files_modified.extend(ar.files_modified)
+
+        if not response_parts and summary["completed"] == 0:
+            return None, "all_agents_failed"
+
+        aggregated = {
+            "status": "build_complete",
+            "parallel_execution": True,
+            "agents_run": summary["total_agents"],
+            "agents_completed": summary["completed"],
+            "files_created": list(set(all_files_created)),
+            "files_modified": list(set(all_files_modified)),
+            "summary": f"Parallel BUILDING complete: {summary['completed']}/{summary['total_agents']} agents succeeded. " + " | ".join(response_parts[:3]),
+            "ready_for_testing": summary["completed"] > 0,
+            "blockers": [],
+            "message_to_human": f"Parallel execution: {summary['completed']}/{summary['total_agents']} agents completed in {summary['total_elapsed_seconds']:.0f}s",
+        }
+
+        return json.dumps(aggregated, indent=2), None
+
+    except ImportError as e:
+        logger.warning(f"[Parallel] Hierarchical framework unavailable: {e}")
+        return None, f"import_error:{e}"
+    except Exception as e:
+        logger.error(f"[Parallel] Hierarchical building failed: {e}")
+        return None, f"exception:{e}"
 
 
 def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = None) -> tuple[Optional[str], Optional[str]]:
@@ -520,6 +663,24 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     env["GEMINI_API_KEY"] = google_api_key
         logger.info(f"Invoking {provider}: {prompt[:100]}...")
 
+        # For Claude provider: register agent for streaming before spawn
+        _agent_id = None
+        _stream_file = None
+        if provider == "claude":
+            _agent_id, _agent_label = _next_mission_agent_id(stage)
+            try:
+                from agent_stream_manager import register_agent as _reg, update_agent_pid as _upd_pid, complete_agent as _comp, stream_stdout_to_file as _stream_fn
+                _stream_file = _reg('mission', _agent_id, _agent_label, pid=0)
+            except Exception:
+                _agent_id = None
+                _stream_file = None
+
+        # Add stream-json format flag for Claude so agent-activity widget can parse output
+        if provider == "claude":
+            command = list(command)  # copy
+            if '--output-format' not in command:
+                command.extend(['--output-format', 'stream-json', '--verbose'])
+
         proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -534,6 +695,21 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         with _active_claude_lock:
             _active_claude_process = proc
 
+        # Update PID and start streaming thread (Claude only)
+        if _stream_file and _agent_id:
+            try:
+                _upd_pid(_agent_id, proc.pid)
+                _stdout_thread = threading.Thread(
+                    target=_stream_fn,
+                    args=(proc, _stream_file, _agent_id),
+                    daemon=True,
+                    name=f"stream-{_agent_id}"
+                )
+                _stdout_thread.start()
+            except Exception:
+                _stream_file = None
+                _agent_id = None
+
         # Propagate LLM subprocess PID to activity monitor for subprocess detection
         try:
             from context_watcher import get_context_watcher as _get_cw
@@ -543,8 +719,22 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         except Exception:
             pass  # Non-critical enhancement
 
+        # Write prompt to stdin; stdout is consumed by stream thread (Claude) or below (others)
         try:
-            stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+        except Exception:
+            pass
+
+        try:
+            if provider == "claude" and _stream_file:
+                # Streaming thread handles stdout; just wait for process
+                proc.wait(timeout=timeout)
+                stderr = proc.stderr.read() if proc.stderr else ""
+                stdout = None  # consumed by stream thread
+            else:
+                stdout_data, stderr = proc.communicate(timeout=timeout)
+                stdout = stdout_data
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -558,21 +748,35 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                 except (ProcessLookupError, OSError):
                     pass
             logger.error(f"{provider} timed out after {timeout}s")
+            if _agent_id:
+                try: _comp(_agent_id, error=f"timeout:{timeout}s")
+                except Exception: pass
             return None, f"timeout:{timeout}s"
         finally:
             with _active_claude_lock:
                 _active_claude_process = None
 
         if proc.returncode == 0:
-            response = stdout.strip()
-            # Handle Gemini CLI JSON wrapper
-            if provider == "gemini":
+            if provider == "claude" and _stream_file:
+                # Reconstruct response from JSONL stream file
                 try:
-                    data = json.loads(response)
-                    if isinstance(data, dict) and "response" in data:
-                        response = data["response"]
-                except json.JSONDecodeError:
-                    pass
+                    from agent_stream_manager import reconstruct_text_from_stream_file as _recon
+                    response = _recon(_stream_file, provider='claude')
+                except Exception:
+                    response = ""
+                if _agent_id:
+                    try: _comp(_agent_id)
+                    except Exception: pass
+            else:
+                response = (stdout or "").strip()
+                # Handle Gemini CLI JSON wrapper
+                if provider == "gemini":
+                    try:
+                        data = json.loads(response)
+                        if isinstance(data, dict) and "response" in data:
+                            response = data["response"]
+                    except json.JSONDecodeError:
+                        pass
             logger.info(f"{provider} responded: {response[:200]}...")
             return response, None
         else:
@@ -609,6 +813,9 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     stderr_snippet = best_line[:500]
 
             logger.error(f"{provider} error: {stderr_text}")
+            if _agent_id:
+                try: _comp(_agent_id, error=f"cli_error:{stderr_snippet[:80]}")
+                except Exception: pass
             return None, f"cli_error:{stderr_snippet}"
 
     except Exception as e:
@@ -1405,6 +1612,12 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
             current_stage = controller.mission.get("current_stage", "PLANNING")
 
+            # Sync live-editable params from disk (picks up dashboard PATCH changes)
+            try:
+                controller.sync_live_params()
+            except Exception:
+                pass
+
             # Announce mission start parameters once per mission (when mission_id changes)
             _current_mission_id = controller.mission.get("mission_id")
             if _current_mission_id and _current_mission_id != _announced_mission_id:
@@ -1615,7 +1828,20 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 llm_timeout = MAX_ABSOLUTE_TIMEOUT_MINUTES * 60 if HAS_CONTEXT_WATCHER else 3600
             elif current_stage == "BUILDING":
                 llm_timeout = 7200  # 2 hours for builds
-            response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
+            # Use hierarchical parallel execution for complex BUILDING stages
+            if _should_use_parallel(current_stage, controller.mission):
+                parallel_response, parallel_error = _run_hierarchical_building(
+                    prompt, controller.mission, workspace, stage=current_stage, timeout=llm_timeout
+                )
+                if parallel_response:
+                    response_text = parallel_response
+                    error_info = None
+                    logger.info("[Parallel] Hierarchical building succeeded — using aggregated response")
+                else:
+                    logger.info(f"[Parallel] Falling back to single agent ({parallel_error})")
+                    response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
+            else:
+                response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
 
             # Stop ContextWatcher
             if context_session_id and HAS_CONTEXT_WATCHER:
@@ -2041,8 +2267,51 @@ def run_free_mode():
 # MAIN
 # =============================================================================
 
+def _run_release_pipeline() -> None:
+    """
+    Execute the release pipeline and exit.
+
+    Reads --push-tags, --dry-run, --bump, --publish-pypi from sys.argv.
+    Wraps scripts/release_pipeline.ReleasePipeline and exits with 0/1.
+    """
+    try:
+        _scripts_path = str(Path(__file__).resolve().parent / "scripts")
+        if _scripts_path not in sys.path:
+            sys.path.insert(0, _scripts_path)
+        from release_pipeline import ReleasePipeline, get_repo_root
+    except ImportError as e:
+        print(f"ERROR: Could not import release_pipeline: {e}")
+        sys.exit(1)
+
+    push_tags = "--push-tags" in sys.argv
+    dry_run = "--dry-run" in sys.argv
+    publish_pypi = "--publish-pypi" in sys.argv
+    bump_override: Optional[str] = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--bump="):
+            bump_override = arg.split("=", 1)[1].strip()
+            break
+
+    repo_root = get_repo_root()
+    pipeline = ReleasePipeline(
+        repo_root=repo_root,
+        push_tags=push_tags,
+        dry_run=dry_run,
+        bump_override=bump_override,
+        publish_pypi=publish_pypi,
+    )
+    success = pipeline.run()
+    sys.exit(0 if success else 1)
+
+
 def main():
     """Main entry point."""
+    # --release is an early-exit convenience wrapper around scripts/release_pipeline.py.
+    # It must be checked before mode dispatch so it does not start the mission engine.
+    if "--release" in sys.argv:
+        _run_release_pipeline()
+        return  # _run_release_pipeline always calls sys.exit; this is unreachable
+
     if HAS_ENHANCED_CONDUCTOR:
         # Use enhanced argument parsing with takeover support
         args = parse_conductor_args()
@@ -2072,7 +2341,7 @@ def main():
             run_free_mode()
         else:
             print(f"Unknown mode: {mode}")
-            print("Usage: python3 atlasforge_conductor.py --mode=rd|free")
+            print("Usage: python3 atlasforge_conductor.py --mode=rd|free [--release [--push-tags] [--dry-run] [--bump=minor|patch]]")
             sys.exit(1)
 
 

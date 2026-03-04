@@ -26,6 +26,7 @@ Usage:
 
 import json
 import logging
+import math
 import sqlite3
 import uuid
 from abc import ABC, abstractmethod
@@ -42,7 +43,20 @@ STATE_DIR = BASE_DIR / "state"
 DB_PATH = STATE_DIR / "mission_suggestions.db"
 
 # Current schema version
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# SQLite INTEGER max (2^63 - 1); values beyond this overflow
+SQLITE_MAX_INT = (2 ** 63) - 1
+
+ALLOWED_COLUMNS = frozenset({
+    'id', 'mission_title', 'mission_description', 'suggested_cycles',
+    'source_mission_id', 'source_mission_summary', 'rationale',
+    'created_at', 'source_type', 'priority_score', 'health_status',
+    'last_analyzed_at', 'last_edited_at', 'auto_tags', 'merged_from',
+    'merged_source_descriptions', 'drift_context', 'original_mission_title',
+    'original_mission_description', 'original_rationale', 'original_suggested_cycles',
+    'mission_type', 'bug_references', 'scope_context',
+})
 
 
 class SuggestionStorageBackend(ABC):
@@ -113,10 +127,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             # Check current version
             version = conn.execute("PRAGMA user_version").fetchone()[0]
 
-            if version < SCHEMA_VERSION:
+            if version < 1:
                 self._create_schema(conn)
-                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-                logger.info(f"Database schema updated to version {SCHEMA_VERSION}")
+                conn.execute("PRAGMA user_version = 1")
+                version = 1
+                logger.info("Database schema created at version 1")
+
+            if version < 2:
+                self._migrate_v1_to_v2(conn)
+                conn.execute("PRAGMA user_version = 2")
+                logger.info("Database schema migrated to version 2 (mission_type, bug_references, scope_context)")
 
     def _create_schema(self, conn: sqlite3.Connection) -> None:
         """Create the database schema."""
@@ -160,6 +180,35 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 ON mission_suggestions(source_mission_id);
         """)
 
+    def _migrate_v1_to_v2(self, conn: sqlite3.Connection) -> None:
+        """
+        Add mission_type, bug_references, scope_context columns (v1 → v2).
+
+        All three are nullable/defaulted so existing rows are fully backward-compatible.
+        Migration sets mission_type='MANUAL' for user-created rows and 'EXPANSION' for
+        auto-generated ones, leaving the two new columns as NULL for legacy data.
+        """
+        for stmt in [
+            "ALTER TABLE mission_suggestions ADD COLUMN mission_type TEXT DEFAULT 'EXPANSION'",
+            "ALTER TABLE mission_suggestions ADD COLUMN bug_references TEXT DEFAULT '[]'",
+            "ALTER TABLE mission_suggestions ADD COLUMN scope_context TEXT DEFAULT NULL",
+        ]:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                if 'duplicate column name' not in str(e):
+                    logger.warning("_migrate_v1_to_v2: unexpected error for stmt %r: %s", stmt, e)
+                    raise
+                # Column already exists — idempotent, safe to continue
+
+        # Fix-up: user-created rows get MANUAL; auto-generated keep EXPANSION
+        conn.execute(
+            "UPDATE mission_suggestions SET mission_type = 'MANUAL' WHERE source_type = 'manual'"
+        )
+        conn.execute(
+            "UPDATE mission_suggestions SET mission_type = 'EXPANSION' WHERE source_type = 'successful_completion' AND mission_type IS NULL"
+        )
+
     def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
         """Convert a database row to a suggestion dict."""
         if row is None:
@@ -168,13 +217,13 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         result = dict(row)
 
         # Parse JSON columns
-        for json_col in ['auto_tags', 'merged_from', 'merged_source_descriptions', 'drift_context']:
+        for json_col in ['auto_tags', 'merged_from', 'merged_source_descriptions', 'drift_context', 'bug_references']:
             if result.get(json_col):
                 try:
                     result[json_col] = json.loads(result[json_col])
                 except json.JSONDecodeError:
-                    result[json_col] = [] if json_col in ['auto_tags', 'merged_from'] else None
-            elif json_col == 'auto_tags':
+                    result[json_col] = [] if json_col in ['auto_tags', 'merged_from', 'bug_references'] else None
+            elif json_col in ('auto_tags', 'bug_references'):
                 result[json_col] = []
 
         # Remove None values for cleaner output
@@ -185,12 +234,94 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         row = dict(suggestion)
 
         # Serialize JSON columns
-        for json_col in ['auto_tags', 'merged_from', 'merged_source_descriptions', 'drift_context']:
+        for json_col in ['auto_tags', 'merged_from', 'merged_source_descriptions', 'drift_context', 'bug_references']:
             if json_col in row and row[json_col] is not None:
                 if isinstance(row[json_col], (list, dict)):
                     row[json_col] = json.dumps(row[json_col])
 
-        return row
+        # Allowlist: reject any column not in the schema to prevent SQL injection
+        unknown = set(row.keys()) - ALLOWED_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown column(s) not allowed: {unknown}")
+        return {k: v for k, v in row.items() if k in ALLOWED_COLUMNS}
+
+    # =========================================================================
+    # Validation Helpers
+    # =========================================================================
+
+    def _validate_row(self, suggestion: Dict[str, Any], partial: bool = False) -> None:
+        """Validate suggestion fields. Raises ValueError on bad input.
+
+        Called by add()/upsert() for full rows (partial=False, default) and by
+        update()/update_batch() for partial patches (partial=True).
+        When partial=True, required-field checks are skipped for keys absent
+        from the dict -- absence means 'do not change this field'.
+        """
+        # mission_title: required for full rows; only validated when present in partials
+        if 'mission_title' in suggestion or not partial:
+            mission_title = suggestion.get('mission_title')
+            if mission_title is None:
+                raise ValueError(
+                    "mission_title is required and cannot be None. "
+                    "Provide a non-empty string for mission_title."
+                )
+            if not isinstance(mission_title, str):
+                raise ValueError(
+                    f"mission_title must be a string, got: {type(mission_title).__name__}"
+                )
+            if not mission_title.strip():
+                raise ValueError(
+                    "mission_title cannot be an empty string. "
+                    "Provide a meaningful title for the mission suggestion."
+                )
+
+        # source_type enum
+        if 'source_type' in suggestion or not partial:
+            valid_source_types = ('drift_halt', 'successful_completion', 'merged', 'manual')
+            source_type = suggestion.get('source_type', 'manual')
+            if source_type not in valid_source_types:
+                raise ValueError(
+                    f"Invalid source_type '{source_type}'. "
+                    f"Must be one of: {', '.join(valid_source_types)}"
+                )
+
+        # health_status enum
+        if 'health_status' in suggestion or not partial:
+            valid_health_statuses = ('healthy', 'stale', 'orphaned', 'needs_review', 'hot')
+            health_status = suggestion.get('health_status', 'healthy')
+            if health_status not in valid_health_statuses:
+                raise ValueError(
+                    f"Invalid health_status '{health_status}'. "
+                    f"Must be one of: {', '.join(valid_health_statuses)}"
+                )
+
+        # suggested_cycles: int in [1, 10], not bool
+        if 'suggested_cycles' in suggestion or not partial:
+            suggested_cycles = suggestion.get('suggested_cycles', 3)
+            if isinstance(suggested_cycles, bool) or not isinstance(suggested_cycles, int) or not (1 <= suggested_cycles <= 10):
+                raise ValueError(
+                    f"suggested_cycles must be an integer between 1 and 10, got: {suggested_cycles!r}"
+                )
+
+        # mission_type enum
+        if 'mission_type' in suggestion or not partial:
+            valid_mission_types = ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')
+            mission_type = suggestion.get('mission_type', 'EXPANSION')
+            if mission_type not in valid_mission_types:
+                raise ValueError(
+                    f"Invalid mission_type '{mission_type}'. "
+                    f"Must be one of: {', '.join(valid_mission_types)}"
+                )
+
+        # priority_score: numeric, no NaN/inf
+        priority_score = suggestion.get('priority_score', 50.0)
+        if priority_score is not None:
+            try:
+                ps = float(priority_score)
+            except (TypeError, ValueError):
+                raise ValueError(f"priority_score must be numeric, got: {priority_score!r}")
+            if math.isnan(ps) or math.isinf(ps):
+                raise ValueError(f"priority_score must be a finite number, got: {priority_score!r}")
 
     # =========================================================================
     # CRUD Operations
@@ -228,46 +359,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             ValueError: If mission_title is explicitly None or empty string
             sqlite3.IntegrityError: If duplicate ID is provided
         """
-        # Defensive validation for required fields
-        mission_title = suggestion.get('mission_title')
-        if mission_title is None:
-            raise ValueError(
-                "mission_title is required and cannot be None. "
-                "Provide a non-empty string for mission_title."
-            )
-        if isinstance(mission_title, str) and not mission_title.strip():
-            raise ValueError(
-                "mission_title cannot be an empty string. "
-                "Provide a meaningful title for the mission suggestion."
-            )
-
-        # Validate source_type if provided
-        valid_source_types = ('drift_halt', 'successful_completion', 'merged', 'manual')
-        source_type = suggestion.get('source_type', 'manual')
-        if source_type not in valid_source_types:
-            raise ValueError(
-                f"Invalid source_type '{source_type}'. "
-                f"Must be one of: {', '.join(valid_source_types)}"
-            )
-
-        # Validate health_status if provided
-        valid_health_statuses = ('healthy', 'stale', 'orphaned', 'needs_review', 'hot')
-        health_status = suggestion.get('health_status', 'healthy')
-        if health_status not in valid_health_statuses:
-            raise ValueError(
-                f"Invalid health_status '{health_status}'. "
-                f"Must be one of: {', '.join(valid_health_statuses)}"
-            )
-
-        # Validate suggested_cycles range
-        suggested_cycles = suggestion.get('suggested_cycles', 3)
-        if not isinstance(suggested_cycles, int) or not (1 <= suggested_cycles <= 10):
-            raise ValueError(
-                f"suggested_cycles must be an integer between 1 and 10, got: {suggested_cycles}"
-            )
+        # Validate all fields via shared helper (also used by upsert)
+        self._validate_row(suggestion)
 
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
+        mission_type = suggestion.get('mission_type', 'EXPANSION')
 
         # Build normalized suggestion dict
         now = datetime.now().isoformat()
@@ -292,7 +389,11 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'original_mission_title': suggestion.get('original_mission_title'),
             'original_mission_description': suggestion.get('original_mission_description'),
             'original_rationale': suggestion.get('original_rationale'),
-            'original_suggested_cycles': suggestion.get('original_suggested_cycles')
+            'original_suggested_cycles': suggestion.get('original_suggested_cycles'),
+            # v2 columns
+            'mission_type': mission_type,
+            'bug_references': suggestion.get('bug_references', []),
+            'scope_context': suggestion.get('scope_context'),
         }
 
         row = self._dict_to_row(suggestion)
@@ -310,12 +411,14 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
     def update(self, suggestion_id: str, updates: Dict[str, Any]) -> bool:
         """Update a suggestion. Returns True if found and updated."""
-        # Don't allow updating the ID
+        # Work on a copy so we don't mutate the caller's dict
+        updates = dict(updates)
         updates.pop('id', None)
 
         if not updates:
             return False
 
+        self._validate_row(updates, partial=True)
         row_updates = self._dict_to_row(updates)
 
         with self._get_connection() as conn:
@@ -389,13 +492,28 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             conditions.append("priority_score <= ?")
             params.append(max_priority)
 
+        # HIGH-1: reject negative limit/offset
+        if limit is not None and limit < 0:
+            raise ValueError(f"limit must be non-negative, got: {limit}")
+        if offset < 0:
+            raise ValueError(f"offset must be non-negative, got: {offset}")
+        # HIGH-2: reject values that overflow SQLite INTEGER
+        if limit is not None and limit > SQLITE_MAX_INT:
+            raise ValueError(f"limit exceeds SQLite max integer ({SQLITE_MAX_INT}): {limit}")
+        if offset > SQLITE_MAX_INT:
+            raise ValueError(f"offset exceeds SQLite max integer ({SQLITE_MAX_INT}): {offset}")
+
         query = "SELECT * FROM mission_suggestions"
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY priority_score DESC"
 
-        if limit:
-            query += f" LIMIT {limit} OFFSET {offset}"
+        if limit is not None and limit != 0:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), int(offset)])
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(int(offset))
 
         with self._get_connection() as conn:
             cursor = conn.execute(query, params)
@@ -471,7 +589,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 'total': total,
                 'stale_items': stale_items,
                 'orphaned_items': orphaned_items,
-                'needs_analysis': any(v == 0 for v in counts.values()) and total > 0
+                'needs_analysis': len({'healthy', 'stale', 'orphaned', 'needs_review', 'hot'} - set(counts.keys())) > 0 and total > 0
             }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -529,6 +647,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         Uses INSERT OR REPLACE to avoid race conditions.
         Returns the suggestion ID.
         """
+        suggestion = dict(suggestion)  # don't mutate caller's dict
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
         suggestion['id'] = suggestion_id
@@ -539,6 +658,9 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             suggestion['created_at'] = now
         if 'mission_title' not in suggestion:
             suggestion['mission_title'] = 'Untitled'
+
+        # HIGH-3: validate via shared helper (same rules as add())
+        self._validate_row(suggestion)
 
         row = self._dict_to_row(suggestion)
 
@@ -563,13 +685,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         now = datetime.now().isoformat()
 
         with self._get_connection() as conn:
-            for suggestion in suggestions:
+            for orig in suggestions:
+                suggestion = dict(orig)  # don't mutate caller's list items
                 if 'id' not in suggestion:
                     suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
                 if 'created_at' not in suggestion:
                     suggestion['created_at'] = now
                 if 'mission_title' not in suggestion:
                     suggestion['mission_title'] = 'Untitled'
+
+                self._validate_row(suggestion)  # enforce validation (Bug 2 fix)
 
                 row = self._dict_to_row(suggestion)
                 columns = ', '.join(row.keys())
@@ -602,7 +727,8 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             conn.execute("DELETE FROM mission_suggestions")
 
             # Insert all
-            for suggestion in suggestions:
+            for orig in suggestions:
+                suggestion = dict(orig)  # don't mutate caller's list items
                 # Ensure required fields have defaults
                 if 'created_at' not in suggestion:
                     suggestion['created_at'] = now
@@ -610,6 +736,8 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
                 if 'mission_title' not in suggestion:
                     suggestion['mission_title'] = 'Untitled'
+
+                self._validate_row(suggestion)  # enforce validation (Bug 3 fix)
 
                 row = self._dict_to_row(suggestion)
                 columns = ', '.join(row.keys())
@@ -627,10 +755,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         updated = 0
         with self._get_connection() as conn:
             for update in updates:
+                update = dict(update)
                 suggestion_id = update.pop('id', None)
                 if not suggestion_id or not update:
                     continue
 
+                self._validate_row(update, partial=True)
                 row_updates = self._dict_to_row(update)
                 set_clause = ', '.join([f"{k} = ?" for k in row_updates.keys()])
                 cursor = conn.execute(
@@ -672,6 +802,13 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 'imported': 0
             }
 
+        if not isinstance(data, dict):
+            return {
+                'success': False,
+                'error': f"Expected JSON object at root, got {type(data).__name__}",
+                'imported': 0
+            }
+
         items = data.get('items', [])
         if not items:
             return {
@@ -687,6 +824,13 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         with self._get_connection() as conn:
             for item in items:
                 try:
+                    if not isinstance(item, dict):
+                        errors.append({
+                            'id': repr(item)[:50],
+                            'error': f"Expected dict, got {type(item).__name__}"
+                        })
+                        continue
+
                     # Check if already exists
                     existing = conn.execute(
                         "SELECT id FROM mission_suggestions WHERE id = ?",

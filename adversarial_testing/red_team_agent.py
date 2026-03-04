@@ -7,12 +7,52 @@ details, giving them a truly adversarial perspective.
 """
 
 import json
+import logging
+import os
+import ssl
 import sys
+import threading
+import time
+import urllib.request
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Dashboard IPC: emit red team lifecycle events to the Mission Activity window
+# ---------------------------------------------------------------------------
+try:
+    _DASHBOARD_PORT = int(os.environ.get('ATLASFORGE_PORT', '5010'))
+except (ValueError, TypeError):
+    _DASHBOARD_PORT = 5010
+_IPC_SCHEME = os.environ.get('ATLASFORGE_IPC_SCHEME', 'http')
+_IPC_URL = f'{_IPC_SCHEME}://localhost:{_DASHBOARD_PORT}/api/internal/agent-event'
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+
+
+def _emit_red_team_event(payload: dict) -> None:
+    """Fire-and-forget IPC emission to dashboard Mission Activity window.
+
+    Runs in a daemon thread — never blocks the red team, never raises.
+    """
+    def _post():
+        try:
+            body = json.dumps({'room': 'mission_agents', 'payload': payload}).encode()
+            req = urllib.request.Request(
+                _IPC_URL, data=body,
+                headers={'Content-Type': 'application/json'}, method='POST'
+            )
+            ctx = _SSL_CTX if _IPC_SCHEME == 'https' else None
+            urllib.request.urlopen(req, timeout=3, context=ctx).close()
+        except Exception:
+            pass
+    threading.Thread(target=_post, daemon=True).start()
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -204,19 +244,53 @@ Respond in JSON format:
         if session_id is None:
             session_id = f"rt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+        agent_id = f"red_team_{session_id}"
+        start_time = time.time()
+        line_count = 0
+
+        # Emit: agent spawned — creates the Red Team tab in Mission Activity
+        _emit_red_team_event({
+            'event': 'agent_spawned',
+            'agent_id': agent_id,
+            'label': 'Red Team',
+            'timestamp': datetime.now().isoformat()
+        })
+
+        # Emit: starting analysis
+        _emit_red_team_event({
+            'event': 'agent_stream_line',
+            'agent_id': agent_id,
+            'label': 'Red Team',
+            'event_type': 'thinking',
+            'text': f'Invoking fresh LLM adversarial analysis ({len(code)} chars of code)...',
+            'timestamp': datetime.now().isoformat()
+        })
+        line_count += 1
+
         # Build the analysis prompt
         prompt = self.ANALYSIS_PROMPT_TEMPLATE.format(
             code=code,
             description=description
         )
 
-        # Invoke fresh LLM instance
+        # Invoke fresh LLM instance (blocking — 20-120s)
         response, duration_ms = invoke_fresh_llm(
             prompt=prompt,
             model=self.model,
             system_prompt=self.RED_TEAM_SYSTEM_PROMPT,
             timeout=self.timeout_seconds
         )
+
+        # Emit: response received
+        _emit_red_team_event({
+            'event': 'agent_stream_line',
+            'agent_id': agent_id,
+            'label': 'Red Team',
+            'event_type': 'thinking',
+            'text': f'Response received in {duration_ms:.0f}ms, parsing findings...',
+            'timestamp': datetime.now().isoformat()
+        })
+        line_count += 1
 
         # Parse the response
         result = RedTeamResult(
@@ -228,9 +302,30 @@ Respond in JSON format:
             raw_response=response
         )
 
+        if response is None:
+            response = ""
         if response.startswith("ERROR:"):
+            logger.warning(
+                f"Red team analysis failed (duration={duration_ms:.0f}ms): {response[:200]}"
+            )
             result.success = False
             result.error = response
+            # Emit: error state
+            _emit_red_team_event({
+                'event': 'agent_error',
+                'agent_id': agent_id,
+                'label': 'Red Team',
+                'error': response[:200],
+                'timestamp': datetime.now().isoformat()
+            })
+            _emit_red_team_event({
+                'event': 'agent_complete',
+                'agent_id': agent_id,
+                'label': 'Red Team',
+                'duration_seconds': round(time.time() - start_time, 1),
+                'line_count': line_count,
+                'timestamp': datetime.now().isoformat()
+            })
             return result
 
         # Parse findings from JSON response
@@ -239,23 +334,86 @@ Respond in JSON format:
             parsed = self._extract_json(response)
             if parsed:
                 for finding_data in parsed.get("findings", []):
-                    finding = RedTeamFinding(
-                        category=AttackCategory(finding_data.get("category", "logic")),
-                        severity=finding_data.get("severity", "medium"),
-                        title=finding_data.get("title", "Unknown issue"),
-                        description=finding_data.get("description", ""),
-                        reproduction_steps=finding_data.get("reproduction_steps", []),
-                        affected_code=finding_data.get("affected_code", "unknown"),
-                        suggested_fix=finding_data.get("suggested_fix", ""),
-                        confidence=float(finding_data.get("confidence", 0.5))
-                    )
+                    try:
+                        finding = RedTeamFinding(
+                            category=AttackCategory(finding_data.get("category", "logic")),
+                            severity=finding_data.get("severity") or "medium",
+                            title=finding_data.get("title", "Unknown issue"),
+                            description=finding_data.get("description", ""),
+                            reproduction_steps=finding_data.get("reproduction_steps", []),
+                            affected_code=finding_data.get("affected_code", "unknown"),
+                            suggested_fix=finding_data.get("suggested_fix", ""),
+                            confidence=max(0.0, min(1.0, float(finding_data.get("confidence", 0.5))))
+                        )
+                    except (ValueError, KeyError, TypeError):
+                        # Invalid AttackCategory or other field error - fall back to LOGIC_FLAW
+                        # Safe confidence read: malformed confidence must not re-raise
+                        try:
+                            safe_confidence = max(0.0, min(1.0, float(finding_data.get("confidence", 0.5))))
+                        except (ValueError, TypeError):
+                            safe_confidence = 0.5
+                        finding = RedTeamFinding(
+                            category=AttackCategory.LOGIC_FLAW,
+                            severity=finding_data.get("severity") or "medium",
+                            title=finding_data.get("title", "Unknown issue"),
+                            description=finding_data.get("description", ""),
+                            reproduction_steps=finding_data.get("reproduction_steps", []),
+                            affected_code=finding_data.get("affected_code", "unknown"),
+                            suggested_fix=finding_data.get("suggested_fix", ""),
+                            confidence=safe_confidence
+                        )
                     result.findings.append(finding)
 
                 result.attack_vectors_tried = parsed.get("attack_vectors_tried", [])
         except Exception as e:
             result.error = f"Failed to parse response: {e}"
-            # Still mark as success if we got a response, just with parsing issues
-            result.success = True
+            # Preserve any findings already appended inside the loop.
+            # Only mark failure if no findings were recovered at all.
+            if not result.findings:
+                result.success = False
+
+        # Emit: findings summary
+        critical_count = len([f for f in result.findings if f.severity == "critical"])
+        high_count = len([f for f in result.findings if f.severity == "high"])
+        summary_text = (
+            f'Analysis complete: {result.total_issues} issue(s) found '
+            f'({critical_count} critical, {high_count} high)'
+        )
+        _emit_red_team_event({
+            'event': 'agent_stream_line',
+            'agent_id': agent_id,
+            'label': 'Red Team',
+            'event_type': 'tool_result',
+            'text': summary_text,
+            'timestamp': datetime.now().isoformat()
+        })
+        line_count += 1
+
+        # Emit: individual findings sorted by severity (critical first)
+        _SEVERITY_ORDER = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
+        for finding in sorted(result.findings, key=lambda f: _SEVERITY_ORDER.get(f.severity or "medium", 5)):
+            sev = (finding.severity or "medium").upper()
+            cat = finding.category.value if hasattr(finding.category, 'value') else str(finding.category)
+            evt_type = 'error' if finding.severity in ('critical', 'high') else 'tool_result'
+            _emit_red_team_event({
+                'event': 'agent_stream_line',
+                'agent_id': agent_id,
+                'label': 'Red Team',
+                'event_type': evt_type,
+                'text': f'[{sev}] {cat}: {finding.title} — {finding.affected_code}',
+                'timestamp': datetime.now().isoformat()
+            })
+            line_count += 1
+
+        # Emit: complete
+        _emit_red_team_event({
+            'event': 'agent_complete',
+            'agent_id': agent_id,
+            'label': 'Red Team',
+            'duration_seconds': round(time.time() - start_time, 1),
+            'line_count': line_count,
+            'timestamp': datetime.now().isoformat()
+        })
 
         return result
 
@@ -322,6 +480,39 @@ Respond in JSON format:
             description=focused_description
         )
 
+    def analyze_workspace(
+        self,
+        workspace_dir: Path,
+        mission_desc: str = "",
+        n_agents: int = 3,
+        timeout: int = 300,
+    ) -> RedTeamResult:
+        """
+        Launch parallel blind agents against a workspace directory.
+
+        This is the preferred method for workspace-based red teaming.
+        Agents are real Claude CLI subprocesses — they explore the codebase
+        themselves using file tools instead of receiving pasted code.
+
+        Args:
+            workspace_dir: Directory containing the codebase to attack
+            mission_desc: Brief description of what the code does
+            n_agents: Number of parallel blind agents (1-4)
+            timeout: Per-agent timeout in seconds
+
+        Returns:
+            RedTeamResult with aggregated findings from all agents
+        """
+        from .blind_agent_runner import RedTeamOrchestrator
+
+        orchestrator = RedTeamOrchestrator(timeout=timeout, n_agents=n_agents)
+        return orchestrator.launch(
+            workspace_dir=Path(workspace_dir),
+            mission_desc=mission_desc or "Codebase at {}".format(workspace_dir),
+            n_agents=n_agents,
+            timeout=timeout,
+        )
+
     def _extract_json(self, text: str) -> Optional[dict]:
         """Extract JSON from response text."""
         # Try direct parse
@@ -339,15 +530,52 @@ Respond in JSON format:
             except json.JSONDecodeError:
                 pass
 
-        # Try to find raw JSON object
-        json_match = re.search(r'\{[^{}]*"findings"[^{}]*\[.*?\][^{}]*\}', text, re.DOTALL)
-        if json_match:
+        # Try to find raw JSON object using raw_decode to handle nested braces
+        decoder = json.JSONDecoder()
+        idx = text.find('{')
+        while idx != -1:
             try:
-                return json.loads(json_match.group(0))
+                obj, _ = decoder.raw_decode(text, idx)
+                if isinstance(obj, dict) and "findings" in obj:
+                    return obj
             except json.JSONDecodeError:
                 pass
+            idx = text.find('{', idx + 1)
 
         return None
+
+
+def analyze_workspace(
+    workspace_dir: Path,
+    mission_desc: str = "",
+    n_agents: int = 3,
+    timeout: int = 300,
+) -> RedTeamResult:
+    """
+    Launch a blind agent red team against a workspace directory.
+
+    This is the preferred red team method for workspace-based testing.
+    Spawns real Claude CLI subprocesses (not single LLM calls), each with
+    full tool access to explore the codebase, run tests, and break things.
+    Each agent appears as a tab in the Mission Activity dashboard.
+
+    Args:
+        workspace_dir: Path to the workspace/codebase to attack
+        mission_desc: Brief description of what the code does
+        n_agents: Number of parallel agents (1-4)
+        timeout: Per-agent timeout in seconds
+
+    Returns:
+        RedTeamResult with aggregated findings from all agents
+    """
+    from .blind_agent_runner import RedTeamOrchestrator
+    orchestrator = RedTeamOrchestrator(timeout=timeout, n_agents=n_agents)
+    return orchestrator.launch(
+        workspace_dir=Path(workspace_dir),
+        mission_desc=mission_desc or "Explore and determine from code",
+        n_agents=n_agents,
+        timeout=timeout,
+    )
 
 
 def run_red_team_analysis(
@@ -403,7 +631,7 @@ def process_user_input(user_input):
     print(f"Duration: {result.duration_ms:.0f}ms")
 
     for finding in result.findings:
-        print(f"\n[{finding.severity.upper()}] {finding.title}")
+        print(f"\n[{(finding.severity or 'medium').upper()}] {finding.title}")
         print(f"  Category: {finding.category.value}")
         print(f"  Confidence: {finding.confidence:.0%}")
 

@@ -106,6 +106,10 @@ export function switchTab(tabName, updateUrl = true) {
         window.updateMobileNavDots();
     }
 
+    // Show layout toolbar only on atlasforge tab
+    const toolbar = document.getElementById('layout-toolbar');
+    if (toolbar) toolbar.style.display = tabName === 'atlasforge' ? '' : 'none';
+
     // Update URL hash for deep linking
     if (updateUrl) {
         updateHash(tabName);

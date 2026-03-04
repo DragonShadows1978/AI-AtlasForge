@@ -99,13 +99,23 @@ app.config['COMPRESS_MIMETYPES'] = [
 ]
 app.config['COMPRESS_MIN_SIZE'] = 500
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode='threading',
+    ping_interval=25,        # Server sends ping every 25s
+    ping_timeout=120,        # 120s timeout tolerates VPN/DERP relay latency + browser-throttled tabs
+    max_http_buffer_size=1_000_000,  # 1MB for large widget payloads
+    logger=False,
+    engineio_logger=False
+)
 
 # Track app start time for health checks
 app._start_time = time.time()
 
-# Track seen messages for deduplication
-seen_messages = set()
+# Track seen messages for deduplication (bounded deque prevents unbounded growth)
+from collections import deque as _deque
+seen_messages = _deque(maxlen=200)
 
 # =============================================================================
 # WEBSOCKET STATE TRACKING (for real-time push)
@@ -139,6 +149,7 @@ VALID_WS_ROOMS = [
     'mission_params',        # Active mission validated parameters + audit summary
     'mission_agents',        # Real-time Mission agent activity streams
     'investigation_agents',  # Real-time Investigation agent activity streams
+    'pool_status',           # Subagent pool utilization updates
 ]
 
 # Register websocket_events module with socketio reference
@@ -148,12 +159,53 @@ try:
 except ImportError:
     pass
 
+# Register mission_status_schema module with socketio reference
+try:
+    from dashboard_modules.mission_status_schema import set_socketio as set_schema_socketio
+    set_schema_socketio(socketio)
+except ImportError:
+    pass
+
 # Tell agent_stream_manager we are in the dashboard process (enables direct SocketIO emission)
 try:
     from agent_stream_manager import set_dashboard_mode
     set_dashboard_mode(True)
 except ImportError:
     pass
+
+# Startup cleanup: immediately reap any stale agents from previous crashes
+try:
+    from agent_stream_manager import reap_dead_agents as _startup_reap
+    _startup_reaped = _startup_reap()
+    if _startup_reaped:
+        print(f"[PID Reaper] Startup cleanup: reaped {len(_startup_reaped)} stale agents: {_startup_reaped}")
+except Exception:
+    pass
+
+
+def _start_agent_pid_reaper():
+    """Start background thread that periodically reaps dead agent processes."""
+    import logging as _reaper_logging
+    _reaper_logger = _reaper_logging.getLogger('pid_reaper')
+
+    def _reaper_loop():
+        import time as _time
+        while True:
+            _time.sleep(3)
+            try:
+                from agent_stream_manager import reap_dead_agents
+                reaped = reap_dead_agents()
+                if reaped:
+                    _reaper_logger.info(f"PID reaper: cleaned up {len(reaped)} dead agents: {reaped}")
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_reaper_loop, daemon=True, name="agent-pid-reaper")
+    t.start()
+
+
+# Start the PID reaper immediately (runs in dashboard process)
+_start_agent_pid_reaper()
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -193,7 +245,7 @@ def find_process(script_name: str) -> dict | None:
 
 # Process detection cache: avoids repeated pgrep subprocess calls (50-500ms each)
 _process_cache: dict = {'pid': None, 'valid': False, 'checked_at': 0.0}
-_PROCESS_CACHE_TTL = 1.0  # seconds
+_PROCESS_CACHE_TTL = 3.0  # seconds (was 1.0 — pgrep fallback costs 50-500ms)
 
 
 def find_process_cached(script_name: str) -> dict | None:
@@ -385,9 +437,12 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
         # when dashboard itself is started via systemd with stale env values.
         env.update(_load_env_file_values(BASE_DIR / ".env"))
         env["ATLASFORGE_LLM_PROVIDER"] = provider
+        env["ATLASFORGE_PORT"] = str(PORT)  # Ensure conductor subprocess uses same port for IPC
 
+        venv_python = BASE_DIR / ".venv" / "bin" / "python3"
+        python_bin = str(venv_python) if venv_python.exists() else "python3"
         subprocess.Popen(
-            ["python3", str(script_path), f"--mode={mode}"],
+            [python_bin, str(script_path), f"--mode={mode}"],
             cwd=str(BASE_DIR),
             stdout=open(log_file, 'a'),
             stderr=subprocess.STDOUT,
@@ -488,6 +543,7 @@ from dashboard_modules import (
     get_bundle_version, init_bundle_version,
     artifact_health_bp, init_artifact_health_blueprint,
     mission_params_bp, init_mission_params_blueprint, get_mission_params,
+    pool_manager_bp, init_pool_manager_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -541,7 +597,8 @@ init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=so
 init_version_blueprint(BASE_DIR)
 init_bundle_version(STATIC_DIR, BASE_DIR)
 init_artifact_health_blueprint(WORKSPACE_DIR / "artifacts")
-init_mission_params_blueprint(MISSION_PATH, BASE_DIR / "missions", io_utils)
+init_mission_params_blueprint(MISSION_PATH, BASE_DIR / "missions", io_utils, emit_callback=lambda room, data: emit_widget_update(room, data))
+init_pool_manager_blueprint(socketio)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -558,6 +615,8 @@ app.register_blueprint(semantic_bp)
 app.register_blueprint(version_bp)
 app.register_blueprint(artifact_health_bp)
 app.register_blueprint(mission_params_bp)
+app.register_blueprint(pool_manager_bp)
+print("[Dashboard] pool_manager_bp registered successfully at /api/pool/*")
 
 # Conductor status and control API (enhanced singleton with takeover support)
 try:
@@ -828,26 +887,59 @@ threading.Thread(target=queue_auto_start_watcher, daemon=True).start()
 # MAIN ROUTE
 # =============================================================================
 
+# Pre-rendered HTML cache to avoid 5.7s render_template_string() on every request
+_rendered_html_cache = {
+    'html': None,
+    'js_version': None,
+    'css_version': None,
+}
+
+def get_rendered_index():
+    """Get cached rendered HTML; re-render only when bundle version changes."""
+    versions = get_bundle_version()
+    js_v = versions.get('js')
+    css_v = versions.get('css')
+    if (_rendered_html_cache['html'] is not None and
+            _rendered_html_cache['js_version'] == js_v and
+            _rendered_html_cache['css_version'] == css_v):
+        return _rendered_html_cache['html']
+    # Render and cache
+    template = HTML_BUNDLED_TEMPLATE if app.config['USE_BUNDLED'] else HTML_TEMPLATE
+    html = render_template_string(template, bundle_js_version=js_v, bundle_css_version=css_v)
+    _rendered_html_cache['html'] = html
+    _rendered_html_cache['js_version'] = js_v
+    _rendered_html_cache['css_version'] = css_v
+    return html
+
 @app.route('/')
 def index():
-    # Select template based on configuration
-    # Use bundled template in production (USE_BUNDLED=true)
-    # Use legacy template in development (USE_BUNDLED=false)
-    template_name = "main_bundled" if app.config['USE_BUNDLED'] else "main"
-    # Get bundle version for cache-busting
-    bundle_version = get_bundle_version()
-    template = HTML_BUNDLED_TEMPLATE if app.config['USE_BUNDLED'] else HTML_TEMPLATE
-    return render_template_string(
-        template,
-        bundle_js_version=bundle_version['js'],
-        bundle_css_version=bundle_version['css']
-    )
+    return get_rendered_index()
 
 
 @app.route('/favicon.ico')
 def favicon():
     """Serve favicon from static directory."""
     return send_file(STATIC_DIR / 'favicon.ico', mimetype='image/x-icon')
+
+
+@app.route('/static/dist/<path:filename>')
+def serve_dist_gz(filename):
+    """Serve pre-compressed .gz files for dist assets when client accepts gzip."""
+    dist_dir = STATIC_DIR / 'dist'
+    gz_path = dist_dir / (filename + '.gz')
+    plain_path = dist_dir / filename
+
+    if gz_path.exists() and 'gzip' in request.accept_encodings:
+        mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+        resp = send_file(gz_path, mimetype=mime)
+        resp.headers['Content-Encoding'] = 'gzip'
+        resp.headers['Vary'] = 'Accept-Encoding'
+        return resp
+
+    if plain_path.exists():
+        return send_file(plain_path)
+
+    abort(404)
 
 
 # =============================================================================
@@ -957,14 +1049,14 @@ def api_chat_history():
 @socketio.on('connect')
 def handle_connect():
     global seen_messages
+    # Chat history is loaded via REST /api/chat-history (loadInitialChatHistory)
+    # Only populate seen_messages set here to avoid duplicate detection issues
     history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
-    fallback_provider = get_llm_provider()
     for msg in history[-30:]:
         role = str(msg.get('role', '')).strip().lower()
-        emit('message', _serialize_chat_message(msg, fallback_provider))
         if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
             msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
-            seen_messages.add(msg_id)
+            seen_messages.append(msg_id)
 
 
 @socketio.on('send_message')
@@ -992,6 +1084,7 @@ def handle_send_message(data):
 # =============================================================================
 
 _widget_state = {}
+_widget_state_ts: dict = {}  # key -> float timestamp of last write (for TTL pruning)
 _client_subscriptions = {}  # Track which rooms each client subscribes to
 
 @socketio.on('connect', namespace='/widgets')
@@ -1085,10 +1178,29 @@ def handle_subscribe_all():
 
 
 def get_initial_room_data(room: str) -> dict:
-    """Get initial data to send when client subscribes to a room."""
+    """Get initial data to send when client subscribes to a room.
+
+    Uses TTL cache where available to avoid redundant expensive calls
+    (pgrep, rglob, etc.) when multiple clients connect simultaneously.
+    """
     try:
         if room == 'mission_status':
-            return get_claude_status()
+            # Check TTL cache first — /api/status may have already computed this
+            try:
+                from dashboard_modules.cache import get_dashboard_cache
+                cached = get_dashboard_cache().get('api_status')
+                if cached is not None:
+                    return cached
+            except Exception:
+                pass
+            from dashboard_modules.mission_status_schema import build_mission_status
+            result = build_mission_status(get_claude_status())
+            try:
+                from dashboard_modules.cache import get_dashboard_cache
+                get_dashboard_cache().set('api_status', result, ttl_seconds=0.75)
+            except Exception:
+                pass
+            return result
         elif room == 'journal':
             return {'entries': get_recent_journal(15)}
         elif room == 'atlasforge_stats':
@@ -1102,7 +1214,20 @@ def get_initial_room_data(room: str) -> dict:
         elif room == 'backup_status':
             return get_backup_status_data()
         elif room == 'file_events':
-            return get_recent_file_events()
+            try:
+                from dashboard_modules.cache import get_dashboard_cache
+                cached = get_dashboard_cache().get('file_events')
+                if cached is not None:
+                    return cached
+            except Exception:
+                pass
+            result = get_recent_file_events()
+            try:
+                from dashboard_modules.cache import get_dashboard_cache
+                get_dashboard_cache().set('file_events', result, ttl_seconds=5.0)
+            except Exception:
+                pass
+            return result
         elif room == 'glassbox_archive':
             return get_glassbox_archive_status()
         elif room == 'recommendations':
@@ -1113,16 +1238,26 @@ def get_initial_room_data(room: str) -> dict:
             return get_mission_params()
         elif room == 'mission_agents':
             try:
-                from agent_stream_manager import get_active_agents as _get_agents
+                from agent_stream_manager import get_active_agents as _get_agents, get_agent_stream_lines as _get_lines
                 agents = _get_agents()
-                return {'event': 'initial_state', 'agents': agents.get('mission', [])}
+                mission_agents = agents.get('mission', [])
+                for agent_info in mission_agents:
+                    aid = agent_info.get('agent_id')
+                    if aid:
+                        agent_info['stream_lines'] = _get_lines(aid, limit=100)
+                return {'event': 'initial_state', 'agents': mission_agents}
             except Exception:
                 return {'event': 'initial_state', 'agents': []}
         elif room == 'investigation_agents':
             try:
-                from agent_stream_manager import get_active_agents as _get_agents
+                from agent_stream_manager import get_active_agents as _get_agents, get_agent_stream_lines as _get_lines
                 agents = _get_agents()
-                return {'event': 'initial_state', 'agents': agents.get('investigation', [])}
+                inv_agents = agents.get('investigation', [])
+                for agent_info in inv_agents:
+                    aid = agent_info.get('agent_id')
+                    if aid:
+                        agent_info['stream_lines'] = _get_lines(aid, limit=100)
+                return {'event': 'initial_state', 'agents': inv_agents}
             except Exception:
                 return {'event': 'initial_state', 'agents': []}
     except Exception as e:
@@ -1133,21 +1268,12 @@ def get_initial_room_data(room: str) -> dict:
 def get_atlasforge_exploration_stats() -> dict:
     """Get AtlasForge exploration stats for WebSocket push."""
     try:
-        from atlasforge_enhancements.exploration_graph import get_exploration_graph
-        graph = get_exploration_graph()
-        if graph:
-            return {
-                'exploration': {
-                    'nodes_by_type': graph.get_node_counts_by_type(),
-                    'total_insights': graph.get_insight_count(),
-                    'total_edges': graph.get_edge_count()
-                },
-                'coverage_pct': graph.get_coverage_percentage(),
-                'drift_history': graph.get_drift_history(),
-                'recent_explorations': graph.get_recent_explorations(8)
-            }
+        from exploration_hooks import get_af_dashboard_data
+        return get_af_dashboard_data()
     except ImportError:
         pass
+    except Exception as e:
+        logger.debug(f"get_atlasforge_exploration_stats failed: {e}")
     return {}
 
 
@@ -1182,16 +1308,12 @@ def get_glassbox_summary() -> dict:
 def get_exploration_data() -> dict:
     """Get exploration graph data for WebSocket push."""
     try:
-        from atlasforge_enhancements.exploration_graph import get_exploration_graph
-        graph = get_exploration_graph()
-        if graph:
-            return {
-                'nodes': graph.get_recent_nodes(20),
-                'edges': graph.get_recent_edges(30),
-                'insights': graph.get_recent_insights(10)
-            }
+        from exploration_hooks import get_visualization_data
+        return get_visualization_data()
     except ImportError:
         pass
+    except Exception as e:
+        logger.debug(f"get_exploration_data failed: {e}")
     return {}
 
 
@@ -1343,12 +1465,25 @@ def broadcast_state_change(event_type: str, data: dict):
     """
     timestamp = datetime.now().isoformat()
 
-    # Determine which room(s) to notify based on event type
+    # Mission-status events route through the canonical schema helper
+    _mission_status_events = {
+        'mission_stage_change', 'mission_iteration_change',
+        'mission_started', 'mission_stopped',
+    }
+
+    if event_type in _mission_status_events:
+        try:
+            from dashboard_modules.mission_status_schema import emit_mission_status
+            # Merge incoming data with full status to ensure complete payload
+            status = get_claude_status()
+            status.update(data)
+            emit_mission_status(status, event_type=event_type)
+        except Exception:
+            pass
+        return
+
+    # Non-mission-status events use the original path
     room_mapping = {
-        'mission_stage_change': 'mission_status',
-        'mission_iteration_change': 'mission_status',
-        'mission_started': 'mission_status',
-        'mission_stopped': 'mission_status',
         'journal_entry': 'journal',
         'atlasforge_exploration': 'atlasforge_stats',
         'atlasforge_drift_alert': 'atlasforge_stats',
@@ -1381,13 +1516,54 @@ def check_and_emit_widget_updates():
         return
     _ws_state_cache['last_check'] = now
 
-    # Mission status check
+    # Prune stale _widget_state on mission transition to prevent unbounded accumulation
     try:
         current_status = get_claude_status()
-        status_key = f"{current_status.get('rd_stage')}:{current_status.get('running')}:{current_status.get('rd_iteration')}"
+        current_mission_id = current_status.get('mission_id')
+        if current_mission_id and _widget_state.get('_tracked_mission_id') != current_mission_id:
+            _widget_state.clear()
+            _widget_state_ts.clear()
+            _widget_state['_tracked_mission_id'] = current_mission_id
+    except Exception:
+        pass
+
+    # TTL pruning: belt-and-suspenders for long missions — remove keys with timestamps >600s old
+    try:
+        TTL = 600
+        stale_keys = [k for k, ts in list(_widget_state_ts.items())
+                      if now - ts > TTL and k != '_tracked_mission_id']
+        for k in stale_keys:
+            _widget_state.pop(k, None)
+            _widget_state_ts.pop(k, None)
+        if stale_keys:
+            pass  # no bookkeeping needed — stale keys already removed above
+    except Exception:
+        pass
+
+    # Mission status check — routed through canonical schema
+    try:
+        from dashboard_modules.mission_status_schema import emit_mission_status
+        current_status = get_claude_status()
+        new_stage = current_status.get('rd_stage') or None
+        if not new_stage:
+            new_stage = 'N/A'
+        # Use '||' as delimiter — safe against any valid stage name (PLANNING,
+        # BUILDING, TESTING, ANALYZING, CYCLE_END, COMPLETE) which never contain '||'.
+        status_key = f"{new_stage}||{current_status.get('running')}||{current_status.get('rd_iteration')}"
         if _widget_state.get('mission_status_key') != status_key:
+            # Extract previous stage from the stored key before overwriting
+            prev_key = _widget_state.get('mission_status_key') or ''
+            prev_stage = prev_key.split('||')[0] if prev_key else ''
             _widget_state['mission_status_key'] = status_key
-            emit_widget_update('mission_status', current_status)
+            _widget_state_ts['mission_status_key'] = now
+
+            if prev_stage and prev_stage != 'N/A' and prev_stage != new_stage:
+                # Stage transition — set event_type and old_stage so the JS
+                # toast handler (showToast) fires for this status update.
+                emit_mission_status(current_status, event_type='stage_change', old_stage=prev_stage)
+            else:
+                # Running/iteration changed only — plain status update, no toast
+                emit_mission_status(current_status)
     except Exception:
         pass
 
@@ -1397,6 +1573,7 @@ def check_and_emit_widget_updates():
         journal_key = f"{len(journal)}:{journal[0]['timestamp'] if journal else ''}"
         if _widget_state.get('journal_key') != journal_key:
             _widget_state['journal_key'] = journal_key
+            _widget_state_ts['journal_key'] = now
             emit_widget_update('journal', {'entries': journal})
     except Exception:
         pass
@@ -1405,10 +1582,12 @@ def check_and_emit_widget_updates():
     try:
         if now - _widget_state.get('atlasforge_last_check', 0) > 10:
             _widget_state['atlasforge_last_check'] = now
+            _widget_state_ts['atlasforge_last_check'] = now
             atlasforge_data = get_atlasforge_exploration_stats()
             atlasforge_key = str(atlasforge_data.get('exploration', {}).get('total_insights', 0))
             if _widget_state.get('atlasforge_key') != atlasforge_key:
                 _widget_state['atlasforge_key'] = atlasforge_key
+                _widget_state_ts['atlasforge_key'] = now
                 emit_widget_update('atlasforge_stats', atlasforge_data)
     except Exception:
         pass
@@ -1449,6 +1628,7 @@ def check_and_emit_widget_updates():
                     'total_count': rec_count
                 })
             _widget_state['recommendations_key'] = rec_key
+            _widget_state_ts['recommendations_key'] = now
     except Exception:
         pass
 
@@ -1456,10 +1636,12 @@ def check_and_emit_widget_updates():
     try:
         if now - _widget_state.get('gate_last_check', 0) > 5:
             _widget_state['gate_last_check'] = now
+            _widget_state_ts['gate_last_check'] = now
             gate_data = get_subprocess_gate_status()
             gate_key = f"{gate_data.get('should_defer')}:{gate_data.get('process_type')}:{gate_data.get('is_stalled')}"
             if _widget_state.get('gate_key') != gate_key:
                 _widget_state['gate_key'] = gate_key
+                _widget_state_ts['gate_key'] = now
                 emit_widget_update('subprocess_gate', gate_data)
     except Exception:
         pass
@@ -1468,10 +1650,13 @@ def check_and_emit_widget_updates():
     try:
         if now - _widget_state.get('mission_params_last_check', 0) > 30:
             _widget_state['mission_params_last_check'] = now
+            _widget_state_ts['mission_params_last_check'] = now
             params_data = get_mission_params()
-            params_key = f"{params_data.get('mission_id')}:{params_data.get('parameters', {}).get('current_cycle')}:{params_data.get('parameters', {}).get('current_stage')}"
+            _p = params_data.get('parameters', {})
+            params_key = f"{params_data.get('mission_id')}:{_p.get('current_cycle')}:{_p.get('current_stage')}:{_p.get('cycle_budget')}:{_p.get('max_iterations')}"
             if _widget_state.get('mission_params_key') != params_key:
                 _widget_state['mission_params_key'] = params_key
+                _widget_state_ts['mission_params_key'] = now
                 emit_widget_update('mission_params', params_data)
     except Exception:
         pass
@@ -1680,7 +1865,7 @@ def watch_chat():
             role = str(msg.get('role', '')).strip().lower()
             if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
                 msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
-                seen_messages.add(msg_id)
+                seen_messages.append(msg_id)
     except:
         pass
 
@@ -1694,11 +1879,8 @@ def watch_chat():
                 if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
                     msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
                     if msg_id not in seen_messages:
-                        seen_messages.add(msg_id)
+                        seen_messages.append(msg_id)
                         socketio.emit('message', _serialize_chat_message(msg, fallback_provider))
-
-            if len(seen_messages) > 500:
-                seen_messages = set(list(seen_messages)[-250:])
 
             check_and_emit_widget_updates()
 
@@ -1717,29 +1899,21 @@ def watch_engine_stage():
         try:
             time.sleep(2)
             from af_engine import StateManager, STAGES
+            from dashboard_modules.mission_status_schema import emit_mission_status
             sm = StateManager(MISSION_PATH)
             current_stage = sm.current_stage
             current_mission = sm.mission_id
 
             if current_stage != _last_stage or current_mission != _last_mission_id:
+                old_stage = _last_stage
                 _last_stage = current_stage
                 _last_mission_id = current_mission
-                cycles_remaining = max(0, sm.cycle_budget - sm.cycle_number)
-                payload = {
-                    "mission_id": sm.mission_id,
-                    "stage": current_stage,
-                    "iteration": sm.iteration,
-                    "cycle": sm.cycle_number,
-                    "cycle_budget": sm.cycle_budget,
-                    "cycles_remaining": cycles_remaining,
-                    "is_last_cycle": sm.cycle_number >= sm.cycle_budget,
-                    "stages": STAGES,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                emit_widget_update('mission_status', {
-                    'event': 'engine_stage_change',
-                    'data': payload
-                })
+                # Build full status from get_claude_status() + engine-specific fields
+                status = get_claude_status()
+                status['stages'] = STAGES
+                status['cycles_remaining'] = max(0, sm.cycle_budget - sm.cycle_number)
+                status['is_last_cycle'] = sm.cycle_number >= sm.cycle_budget
+                emit_mission_status(status, event_type='engine_stage_change', old_stage=old_stage)
         except Exception:
             pass
 
@@ -1774,6 +1948,18 @@ def get_agent_stream(agent_id):
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/api/active-agents')
+def get_active_agents_endpoint():
+    """Return currently active (running) agents grouped by context.
+    Used by the frontend reconciliation check to close ghost tabs."""
+    try:
+        from agent_stream_manager import get_active_agents
+        agents = get_active_agents()
+        return jsonify({'success': True, 'agents': agents})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'agents': {'mission': [], 'investigation': []}})
+
+
 @app.route('/api/internal/reload-agent-stream', methods=['POST'])
 def reload_agent_stream_module():
     """Force-reload agent_stream_manager and set dashboard mode. Called after code updates."""
@@ -1785,6 +1971,18 @@ def reload_agent_stream_module():
         from agent_stream_manager import set_dashboard_mode
         set_dashboard_mode(True)
         return jsonify({'success': True, 'message': 'agent_stream_manager reloaded and set to dashboard mode'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/internal/reload-template', methods=['POST'])
+def reload_html_template():
+    """Hot-reload the HTML template from disk without restarting the server."""
+    global HTML_BUNDLED_TEMPLATE, HTML_TEMPLATE
+    try:
+        HTML_BUNDLED_TEMPLATE = load_template("main_bundled")
+        HTML_TEMPLATE = load_template("main")
+        return jsonify({'success': True, 'message': 'Templates reloaded from disk'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -1973,5 +2171,22 @@ if __name__ == '__main__':
 
     print(f"Access at: {protocol}://localhost:{PORT}")
     print("=" * 50)
+
+    # Pre-warm the template cache so the first request doesn't pay 5.7s penalty
+    with app.app_context():
+        _warm_start = time.time()
+        get_rendered_index()
+        _warm_ms = (time.time() - _warm_start) * 1000
+        print(f"[Startup] Template cache warmed in {_warm_ms:.0f}ms")
+
+    # Pre-warm agent stream cache (avoids 30-40s cold-start disk reads on first client reconnect)
+    try:
+        from agent_stream_manager import prewarm_active_agents as _prewarm
+        _prewarm_start = time.time()
+        _prewarm_n = _prewarm()
+        _prewarm_ms = (time.time() - _prewarm_start) * 1000
+        print(f"[AgentStream] Pre-warm complete: {_prewarm_n} agents cached in {_prewarm_ms:.0f}ms")
+    except Exception as e:
+        print(f"[AgentStream] Pre-warm failed (non-critical): {e}")
 
     socketio.run(app, host='::', port=PORT, ssl_context=ssl_ctx, allow_unsafe_werkzeug=True, use_reloader=False)

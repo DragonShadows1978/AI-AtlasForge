@@ -38,6 +38,22 @@ INVESTIGATION_STATE_PATH = STATE_DIR / "investigation_state.json"
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 from ground_rules_loader import load_ground_rules
 
+# Agent streaming support
+import threading as _threading
+import uuid as _uuid
+_investigation_agent_counter = 0
+_investigation_agent_counter_lock = _threading.Lock()
+
+def _next_investigation_agent_id() -> tuple:
+    """Return (agent_id, label) for a new investigation agent."""
+    global _investigation_agent_counter
+    with _investigation_agent_counter_lock:
+        _investigation_agent_counter += 1
+        n = _investigation_agent_counter
+    agent_id = f"inv_{_uuid.uuid4().hex[:8]}"
+    label = f"Sub-{n}"
+    return agent_id, label
+
 # Shared provider routing (dashboard toggle)
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
@@ -558,6 +574,9 @@ def invoke_claude(
     start_time = time.time()
     provider = _get_active_llm_provider()
     env = os.environ.copy()
+    # Prevent "Claude Code cannot be launched inside another Claude Code session" error
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
     if provider == "codex":
         cmd = ["codex"]
@@ -626,8 +645,97 @@ def invoke_claude(
             cmd.extend(["--model", model.value])
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
+        # Add stream-json for real-time agent activity visibility
+        cmd.extend(["--output-format", "stream-json"])
         full_prompt = prompt
 
+    # Claude provider: use streaming Popen for real-time agent activity
+    if provider == "claude":
+        _agent_id, _agent_label = _next_investigation_agent_id()
+        _stream_file = None
+        _comp = None
+        _recon = None
+        try:
+            from agent_stream_manager import (
+                register_agent as _reg,
+                update_agent_pid as _upd_pid,
+                complete_agent as _comp_fn,
+                stream_stdout_to_file as _stream_fn,
+                reconstruct_text_from_stream_file as _recon_fn,
+            )
+            _stream_file = _reg('investigation', _agent_id, _agent_label, pid=0)
+            _comp = _comp_fn
+            _recon = _recon_fn
+        except Exception:
+            _agent_id = None
+            _stream_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                start_new_session=True
+            )
+        except Exception as e:
+            return f"ERROR: {str(e)}", time.time() - start_time
+
+        if _stream_file and _agent_id:
+            try:
+                _upd_pid(_agent_id, proc.pid)
+                t = _threading.Thread(
+                    target=_stream_fn,
+                    args=(proc, _stream_file, _agent_id),
+                    daemon=True,
+                    name=f"stream-{_agent_id}"
+                )
+                t.start()
+            except Exception:
+                _stream_file = None
+                _agent_id = None
+
+        try:
+            proc.stdin.write(full_prompt)
+            proc.stdin.close()
+        except Exception:
+            pass
+
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try: proc.kill(); proc.wait(timeout=5)
+            except Exception: pass
+            if _agent_id and _comp:
+                try: _comp(_agent_id, error='timeout')
+                except Exception: pass
+            return "ERROR: Timeout", time.time() - start_time
+
+        elapsed = time.time() - start_time
+        try:
+            stderr_text = proc.stderr.read()
+        except Exception:
+            stderr_text = ""
+
+        if proc.returncode == 0:
+            if _stream_file and _recon:
+                response = _recon(_stream_file, provider='claude')
+            else:
+                response = ""
+            if _agent_id and _comp:
+                try: _comp(_agent_id)
+                except Exception: pass
+            return response, elapsed
+        else:
+            if _agent_id and _comp:
+                try: _comp(_agent_id, error=f'rc:{proc.returncode}')
+                except Exception: pass
+            return f"ERROR: {stderr_text}", elapsed
+
+    # Non-Claude providers: use original subprocess.run() path
     try:
         result = subprocess.run(
             cmd,
@@ -1564,6 +1672,38 @@ class InvestigationRunner:
         self.ground_rules = load_investigation_ground_rules()
         # URL metadata extracted from query (GitHub repos, GitLab projects, docs, etc.)
         self.url_metadata: List[Dict[str, Any]] = []
+        # Check validator availability at startup (non-fatal warning if missing)
+        self._validator_available = self._check_validator_health()
+
+    def _check_validator_health(self) -> bool:
+        """Check that investigation_validator is importable at startup.
+
+        Returns True if the validator package exists and imports cleanly.
+        Logs a warning (non-fatal) if not available.
+        """
+        try:
+            import sys
+            import importlib
+            from atlasforge_config import WORKSPACE_DIR
+            validator_path = WORKSPACE_DIR / "investigation_validator"
+            if not validator_path.exists() or not validator_path.is_dir():
+                logger.warning(
+                    f"investigation_validator not found at {validator_path}. "
+                    "Validation will be skipped. To fix: ensure the directory exists and is accessible."
+                )
+                return False
+            validator_path_str = str(validator_path)
+            if validator_path_str not in sys.path:
+                sys.path.insert(0, validator_path_str)
+            importlib.import_module("orchestrator")
+            importlib.import_module("models")
+            return True
+        except ImportError as e:
+            logger.warning(f"investigation_validator import check failed: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"investigation_validator health check error: {e}")
+            return False
 
     def run(
         self,
@@ -1853,7 +1993,7 @@ class InvestigationRunner:
             return []
 
     def _run_subagents(self, research_directions: List[Dict[str, str]]) -> List[SubagentResult]:
-        """Run subagents in parallel."""
+        """Run subagents in parallel, managed by the global SubagentPoolManager."""
         results = []
 
         # Since subagents run in PARALLEL, each agent gets the full time budget
@@ -1863,15 +2003,46 @@ class InvestigationRunner:
         # Cap at 5 minutes to prevent runaway agents, but no artificial floor
         timeout_per_agent = min(timeout_per_agent, 300)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(research_directions)) as executor:
+        requested = len(research_directions)
+        inv_id = self.config.investigation_id
+        inv_start = time.time()
+
+        # Request slots from pool manager (graceful fallback if unavailable)
+        pool = None
+        granted = requested
+        try:
+            from subagent_pool_manager import get_pool_manager
+            pool = get_pool_manager()
+            slot_req = pool.request_slots(
+                inv_id=inv_id,
+                count=requested,
+                priority=10,  # NORMAL priority
+                query=self.config.query,
+            )
+            granted = slot_req.granted
+            if granted < requested:
+                self._log(
+                    f"[Pool] Granted {granted}/{requested} slots "
+                    f"(quota={slot_req.quota_limit}, reason={slot_req.reason})"
+                )
+            else:
+                self._log(f"[Pool] Granted all {granted} slots")
+        except Exception as pool_exc:
+            logger.warning(f"[Pool] Pool manager unavailable, running unconstrained: {pool_exc}")
+
+        # Only run as many subagents as granted by the pool
+        active_directions = research_directions[:max(1, granted)]
+        skipped_directions = research_directions[max(1, granted):]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(active_directions)) as executor:
             futures = {}
 
-            for i, direction in enumerate(research_directions):
+            for i, direction in enumerate(active_directions):
                 focus_area = direction.get("focus_area", f"Area {i+1}")
                 base_prompt = direction.get("prompt", "Explore this area")
                 research_type = direction.get("research_type", "both")
 
-                subagent_id = f"{self.config.investigation_id}_sub_{i}"
+                subagent_id = f"{inv_id}_sub_{i}"
                 full_prompt = build_subagent_prompt(
                     focus_area,
                     base_prompt,
@@ -1905,6 +2076,34 @@ class InvestigationRunner:
                         status="failed",
                         error=str(e)
                     ))
+                finally:
+                    # Release one slot per completed subagent
+                    if pool is not None:
+                        try:
+                            pool.release_slots(inv_id, 1)
+                        except Exception:
+                            pass
+
+        # Stub results for pool-rate-limited directions
+        for i, direction in enumerate(skipped_directions):
+            focus_area = direction.get("focus_area", f"Area {granted + i + 1}")
+            results.append(SubagentResult(
+                subagent_id=f"{inv_id}_sub_{granted + i}_skipped",
+                focus_area=focus_area,
+                findings="[Skipped: pool rate-limit applied, insufficient quota]",
+                elapsed_seconds=0,
+                status="skipped",
+                error="pool_rate_limited",
+            ))
+
+        # Notify pool manager that investigation is done
+        if pool is not None:
+            try:
+                elapsed = time.time() - inv_start
+                success = any(r.status not in ("failed", "skipped") for r in results)
+                pool.notify_investigation_complete(inv_id, elapsed_sec=elapsed, success=success)
+            except Exception:
+                pass
 
         return results
 

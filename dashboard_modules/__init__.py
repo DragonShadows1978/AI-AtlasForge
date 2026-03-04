@@ -71,6 +71,7 @@ from .version_checker import version_bp, init_version_blueprint
 from .bundle_version import get_bundle_version, init_bundle_version
 from .artifact_health import artifact_health_bp, init_artifact_health_blueprint
 from .mission_params import mission_params_bp, init_mission_params_blueprint, get_mission_params
+from .pool_manager import pool_manager_bp, init_pool_manager_blueprint
 
 __all__ = [
     # Blueprints
@@ -104,6 +105,9 @@ __all__ = [
     'mission_params_bp',
     'init_mission_params_blueprint',
     'get_mission_params',
+    # Pool manager blueprint
+    'pool_manager_bp',
+    'init_pool_manager_blueprint',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]

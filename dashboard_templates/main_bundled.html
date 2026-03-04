@@ -26,8 +26,8 @@
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-RPG4P5WJ.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-XWZFCXPN.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-7DAUWKVF.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-BZJUU22D.js" as="script">
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->
@@ -266,6 +266,40 @@
         .queue-project-hint{font-size:0.75em;padding:2px 6px;border-radius:3px;width:100%;margin-top:2px}
         .queue-project-hint.new-project{color:#f0a500;background:rgba(240,165,0,0.1);border:1px solid rgba(240,165,0,0.3)}
         .btn-create-project{white-space:nowrap;flex-shrink:0}
+
+        /* Subagent Pool Widget */
+        .pool-global-metrics{margin-bottom:10px}
+        .pool-metric-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+        .pool-metric-label{font-size:0.8em;color:var(--text-dim)}
+        .pool-metric-value{font-size:0.9em;font-weight:600;color:var(--text)}
+        .pool-bar-track{height:8px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;overflow:hidden;margin:4px 0}
+        .pool-bar-fill{height:100%;border-radius:4px;position:absolute;top:0;left:0;transition:width 0.4s ease}
+        .pool-bar-active{background:var(--green,#3fb950)}
+        .pool-bar-queued{background:var(--yellow,#d29922)}
+        .pool-metric-sub{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+        .pool-badge{font-size:0.72em;padding:2px 7px;border-radius:10px;font-weight:500}
+        .pool-badge-active{background:rgba(63,185,80,0.15);color:var(--green,#3fb950)}
+        .pool-badge-idle{background:rgba(255,255,255,0.07);color:var(--text-dim)}
+        .pool-badge-investigations{background:rgba(88,166,255,0.15);color:var(--accent,#58a6ff)}
+        .pool-investigations{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+        .pool-investigation{background:rgba(255,255,255,0.04);border-radius:6px;padding:8px 10px;border:1px solid rgba(255,255,255,0.06)}
+        .pool-inv-header{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+        .pool-inv-id{font-family:monospace;font-size:0.75em;color:var(--text-dim)}
+        .pool-inv-priority{font-size:0.7em;padding:1px 6px;border-radius:8px;font-weight:600}
+        .pool-priority-critical{background:rgba(248,81,73,0.2);color:#f85149}
+        .pool-priority-high{background:rgba(210,153,34,0.2);color:#d29922}
+        .pool-priority-normal{background:rgba(88,166,255,0.15);color:var(--accent,#58a6ff)}
+        .pool-priority-low{background:rgba(255,255,255,0.07);color:var(--text-dim)}
+        .pool-inv-slots{margin-left:auto;font-size:0.78em;color:var(--text);font-weight:500}
+        .pool-inv-query{font-size:0.75em;color:var(--text-dim);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+        .pool-inv-footer{display:flex;justify-content:space-between;margin-top:4px}
+        .pool-inv-quota{font-size:0.7em;color:var(--text-dim)}
+        .pool-inv-time{font-size:0.7em;color:var(--text-dim)}
+        .pool-empty-state{font-size:0.8em;color:var(--text-dim);text-align:center;padding:12px 0;font-style:italic}
+        .pool-timestamp{font-size:0.7em;color:var(--text-dim);text-align:right;margin-top:6px}
+        #pool-status-badge{font-size:0.75em;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:auto;margin-right:8px}
+        #pool-status-badge.badge-active{background:rgba(63,185,80,0.2);color:var(--green,#3fb950)}
+        #pool-status-badge.badge-idle{background:rgba(255,255,255,0.07);color:var(--text-dim)}
     </style>
 </head>
 <body>
@@ -499,6 +533,10 @@
                             <option value="50">50</option>
                             <option value="100">100</option>
                         </select>
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Iterations:</label>
+                        <input type="number" id="max-iterations-input" min="1" max="50" value="10"
+                            style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 60px; font-size: 0.85em;"
+                            title="Max iterations per cycle (1-50)">
                     </div>
                     <div class="btn-group">
                         <button class="btn primary" onclick="setMission()">Set Mission</button>
@@ -513,12 +551,16 @@
                 <div id="investigation-mode-controls" style="display: none;">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Subagents:</label>
-                        <select id="investigation-subagents" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+                        <select id="investigation-subagents" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" onchange="(function(s){var i=document.getElementById('investigation-subagents-custom');if(i)i.style.display=s.value==='custom'?'inline-block':'none';})(this)">
                             <option value="3">3 subagents</option>
                             <option value="5" selected>5 subagents</option>
                             <option value="7">7 subagents</option>
                             <option value="10">10 subagents</option>
+                            <option value="custom">Custom</option>
                         </select>
+                        <input type="number" id="investigation-subagents-custom" min="1" max="50" value="15"
+                            style="display: none; width: 60px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);"
+                            title="Custom subagent count (1-50)">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Timeout:</label>
                         <select id="investigation-timeout" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
                             <option value="5">5 min</option>
@@ -531,6 +573,19 @@
                             <option value="claude" selected>Claude</option>
                             <option value="codex">Codex</option>
                             <option value="gemini">Gemini</option>
+                        </select>
+                        <label style="font-size: 0.85em; color: var(--text-dim);">Auto-archive:</label>
+                        <input type="checkbox" id="auto-archive-enabled" checked
+                            onchange="handleAutoArchiveSettingChange()"
+                            title="Automatically archive completed investigations after delay"
+                            style="cursor: pointer;">
+                        <select id="auto-archive-delay" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);"
+                            onchange="handleAutoArchiveSettingChange()">
+                            <option value="3">3s</option>
+                            <option value="5" selected>5s</option>
+                            <option value="10">10s</option>
+                            <option value="30">30s</option>
+                            <option value="60">60s</option>
                         </select>
                     </div>
                     <div class="btn-group">
@@ -766,8 +821,19 @@
                     <div id="investigation-log" style="max-height: 150px; overflow-y: auto; font-size: 0.8em; color: var(--text-dim); margin-top: 10px; padding: 8px; background: var(--bg); border-radius: 4px;">
                     </div>
                 </div>
+                <!-- Auto-archive countdown indicator -->
+                <div id="auto-archive-countdown" style="display: none; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px; background: rgba(88, 166, 255, 0.1); border-radius: 4px; border: 1px solid rgba(88, 166, 255, 0.3);">
+                    <span style="font-size: 0.8em; color: var(--text-dim);">Auto-archiving in</span>
+                    <span id="auto-archive-seconds" style="font-weight: bold; color: var(--accent); min-width: 1.5em; text-align: center;">5</span>
+                    <span style="font-size: 0.8em; color: var(--text-dim);">s</span>
+                    <div style="flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;">
+                        <div id="auto-archive-progress-bar" style="height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.9s linear; width: 100%;"></div>
+                    </div>
+                </div>
                 <div class="btn-group" style="margin-top: 10px;">
                     <button class="btn" onclick="viewInvestigationReport()" id="view-report-btn" style="display: none;">View Report</button>
+                    <button class="btn" onclick="pinInvestigation()" id="pin-investigation-btn" style="display: none;" title="Keep visible, prevent auto-archive">&#128204; Pin</button>
+                    <button class="btn" onclick="unpinInvestigation()" id="unpin-investigation-btn" style="display: none;" title="Allow auto-archive">Unpin</button>
                     <button class="btn" onclick="dismissInvestigation()" id="dismiss-investigation-btn" style="display: none;">Dismiss</button>
                 </div>
             </div>
@@ -873,6 +939,18 @@
                 </div>
             </div>
 
+            <!-- Subagent Pool Widget -->
+            <div class="card" id="subagent-pool-widget-card">
+                <div class="card-header" onclick="toggleCard('subagent-pool-widget')">
+                    <h3>Subagent Pool</h3>
+                    <span id="pool-status-badge" class="badge badge-idle">0/50</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content" id="subagent-pool-body">
+                    <div class="pool-empty-state">Loading pool status...</div>
+                </div>
+            </div>
+
             <!-- Artifact Health Widget -->
             <div class="card" id="artifact-health-widget-card">
                 <div class="card-header" onclick="toggleCard('artifact-health-widget')">
@@ -931,10 +1009,12 @@
                     <div class="analytics-stat-grid">
                         <div class="analytics-stat-box">
                             <div class="analytics-stat-value" id="mission-params-cycle-budget">-</div>
+                            <div id="mission-params-cycle-budget-original" style="font-size:0.7em; color:var(--text-dim); min-height:1em;"></div>
                             <div class="analytics-stat-label">Cycle Budget</div>
                         </div>
                         <div class="analytics-stat-box">
                             <div class="analytics-stat-value" id="mission-params-max-iter">-</div>
+                            <div id="mission-params-max-iter-original" style="font-size:0.7em; color:var(--text-dim); min-height:1em;"></div>
                             <div class="analytics-stat-label">Max Iterations</div>
                         </div>
                     </div>
@@ -963,10 +1043,30 @@
                     <!-- Trend chart (lazy-loaded on widget open) -->
                     <div id="param-trend-container" style="margin-top:10px; display:none;">
                         <div style="font-size:0.78em; color:var(--text-dim); margin-bottom:4px; text-align:center;">Parameter Trend (last 20 missions)</div>
-                        <canvas id="param-trend-chart" height="110"></canvas>
+                        <canvas id="param-trend-chart" height="110" style="width:100%;display:block;"></canvas>
                     </div>
-                    <div style="margin-top:6px; text-align:center;">
+                    <div style="margin-top:6px; text-align:center; display:flex; gap:6px; justify-content:center;">
                         <button onclick="toggleParamTrend()" style="font-size:0.75em; padding:2px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer;">Trend</button>
+                        <button id="mission-params-edit-btn" onclick="toggleMissionParamEdit()" style="font-size:0.75em; padding:2px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer; display:none;">&#9998; Edit</button>
+                    </div>
+                    <!-- Live-edit panel (shown for in-progress missions only) -->
+                    <div id="mission-params-edit-panel" style="display:none; margin-top:10px; padding:8px; border:1px solid var(--border); border-radius:4px; background:var(--surface2);">
+                        <div style="font-size:0.8em; color:var(--text-dim); margin-bottom:6px;">Edit Parameters (takes effect at next cycle boundary)</div>
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <label style="font-size:0.82em;">Cycles:</label>
+                            <input type="number" id="edit-cycle-budget" min="1" max="10" style="width:55px; padding:3px 6px; background:var(--bg); border:1px solid var(--border); border-radius:3px; color:var(--text); font-size:0.85em;" title="Total cycle budget (1-10)">
+                            <span id="edit-cycle-budget-hint" style="font-size:0.75em; color:var(--text-dim);"></span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
+                            <label style="font-size:0.82em;">Iterations:</label>
+                            <input type="number" id="edit-max-iterations" min="1" max="50" style="width:55px; padding:3px 6px; background:var(--bg); border:1px solid var(--border); border-radius:3px; color:var(--text); font-size:0.85em;" title="Max iterations per cycle (1-50)">
+                            <span id="edit-max-iterations-hint" style="font-size:0.75em; color:var(--text-dim);"></span>
+                        </div>
+                        <div style="margin-top:8px; display:flex; gap:6px; align-items:center;">
+                            <button onclick="applyMissionParamEdit()" style="font-size:0.8em; padding:3px 10px; background:var(--accent); border:none; border-radius:3px; color:#fff; cursor:pointer;">Apply</button>
+                            <button onclick="closeMissionParamEdit()" style="font-size:0.8em; padding:3px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer;">Cancel</button>
+                            <span id="mission-params-edit-status" style="font-size:0.75em; color:var(--accent);"></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1355,8 +1455,66 @@
             </div>
 
             <!-- AtlasForge: Exploration Graph Visualization -->
+            <div class="card" id="atlasforge-exploration-graph-card">
+                <div class="card-header" onclick="toggleCard('atlasforge-exploration-graph')">
+                    <h3>Exploration Graph</h3>
+                    <button onclick="event.stopPropagation(); toggleExplorationGraph()" style="font-size:0.75em; padding:2px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer; margin-right:4px;">Toggle</button>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div class="stat-row" style="font-size:0.82em; margin-bottom:6px;">
+                        <span class="stat-label">Nodes</span><span class="stat-value" id="graph-node-count">0</span>
+                        <span class="stat-label" style="margin-left:12px;">Edges</span><span class="stat-value" id="graph-edge-count">0</span>
+                    </div>
+                    <!-- Bug D: explicit display:block + width:100% to prevent 300x150 default -->
+                    <div id="exploration-graph-container" style="display:none;">
+                        <canvas id="exploration-graph-canvas" height="400" style="width:100%;display:block;"></canvas>
+                    </div>
+                    <div id="graph-node-details" style="margin-top:8px; font-size:0.82em;"></div>
+                    <div id="graph-tooltip" class="graph-tooltip" style="display:none; position:fixed; background:var(--surface2); border:1px solid var(--border); border-radius:4px; padding:8px; pointer-events:none; z-index:1000;">
+                        <div class="tt-name" style="font-weight:500;"></div>
+                        <div class="tt-type" style="font-size:0.85em; color:var(--text-dim);"></div>
+                        <div class="tt-path" style="font-size:0.75em; color:var(--text-dim);"></div>
+                        <div class="tt-summary" style="font-size:0.75em; margin-top:4px;"></div>
+                    </div>
+                </div>
+            </div>
+
             <!-- AtlasForge: Insight Search Widget -->
+            <div class="card" id="atlasforge-insight-search-card">
+                <div class="card-header" onclick="toggleCard('atlasforge-insight-search')">
+                    <h3>Insight Search</h3>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                        <input type="text" id="insight-search-input" placeholder="Search insights..." style="flex:1; padding:4px 8px; background:var(--bg); border:1px solid var(--border); border-radius:3px; color:var(--text); font-size:0.85em;">
+                        <button onclick="searchInsights()" style="padding:4px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text); cursor:pointer; font-size:0.85em;">Search</button>
+                    </div>
+                    <div id="insight-search-results" style="max-height:200px; overflow-y:auto; font-size:0.85em;">
+                        <div style="color:var(--text-dim);">Enter a query to search insights</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Decision Graph Widget -->
+            <div class="card" id="decision-graph-widget-card">
+                <div class="card-header" onclick="toggleCard('decision-graph-widget')">
+                    <h3>Decision Graph <span id="decision-invocation-count" class="badge">0</span> invocations</h3>
+                    <button onclick="event.stopPropagation(); toggleDecisionGraph()" style="font-size:0.75em; padding:2px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:3px; color:var(--text-dim); cursor:pointer; margin-right:4px;">Toggle</button>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
+                </div>
+                <div class="card-content">
+                    <div style="font-size:0.82em; margin-bottom:4px;">
+                        <span style="color:var(--text-dim);">Errors: </span><span id="decision-error-count">0</span>
+                    </div>
+                    <!-- Bug D: explicit display:block + width:100% to prevent 300x150 default -->
+                    <div id="decision-graph-container" style="display:none;">
+                        <canvas id="decision-graph-canvas" height="300" style="width:100%;display:block;"></canvas>
+                    </div>
+                    <div id="decision-node-details" style="margin-top:8px; font-size:0.82em;"></div>
+                </div>
+            </div>
 
             <!-- Token Integrity Widget -->
             <div class="card" id="token-integrity-card">
@@ -1377,10 +1535,35 @@
 
             </div><!-- End widget-column-2 -->
 
-        <!-- Right Panel - AtlasForge Activity Log -->
+        <!-- Right Panel - Activity (3-way toggle: AtlasForge / Mission / Investigation) -->
         <div class="card chat-container">
-            <h3>AtlasForge Activity <span id="chat-socket-indicator" class="ws-indicator ws-unknown" title="Chat connection status"></span></h3>
-            <div id="chat-messages" class="chat-messages"></div>
+            <!-- Toggle header -->
+            <div class="activity-toggle-header">
+                <button id="activity-btn-atlasforge" class="activity-tab-btn active" onclick="switchActivityPanel('atlasforge')" title="AtlasForge activity log">AtlasForge</button>
+                <button id="activity-btn-mission" class="activity-tab-btn" onclick="switchActivityPanel('mission')" title="Mission agent streams">Mission</button>
+                <button id="activity-btn-investigation" class="activity-tab-btn" onclick="switchActivityPanel('investigation')" title="Investigation agent streams">Investigation</button>
+                <span id="chat-socket-indicator" class="ws-indicator ws-unknown" title="Chat connection status" style="margin-left:auto;"></span>
+            </div>
+            <!-- AtlasForge Activity panel (existing chat feed) -->
+            <div id="atlasforge-activity-panel" class="activity-panel" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0;">
+                <div id="chat-messages" class="chat-messages" style="flex:1;overflow-y:auto;"></div>
+            </div>
+            <!-- Mission Activity panel -->
+            <div id="mission-activity-panel" class="activity-panel" style="display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0;">
+                <div id="mission-agent-tabs" class="agent-tab-grid"></div>
+                <div id="mission-stream-header" class="agent-stream-header"></div>
+                <div id="mission-agent-stream" class="agent-stream-pane">
+                    <div class="idle-message">Waiting for agents...</div>
+                </div>
+            </div>
+            <!-- Investigation Activity panel -->
+            <div id="investigation-activity-panel" class="activity-panel" style="display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0;">
+                <div id="investigation-agent-tabs" class="agent-tab-grid"></div>
+                <div id="investigation-stream-header" class="agent-stream-header"></div>
+                <div id="investigation-agent-stream" class="agent-stream-pane">
+                    <div class="idle-message">No active investigations.</div>
+                </div>
+            </div>
         </div>
     </div><!-- End container -->
     </div><!-- End mobile-scroll-wrapper -->
@@ -1748,7 +1931,7 @@
                 <div class="glassbox-panel">
                     <h3>Spending Trend <span id="analytics-trend-period" style="color: var(--text-dim); font-size: 0.85em;">(30 Days)</span></h3>
                     <div class="glassbox-panel-content">
-                        <canvas id="analytics-trend-canvas" width="500" height="250" style="width: 100%; height: 250px;"></canvas>
+                        <canvas id="analytics-trend-canvas" width="500" height="250" style="width:100%;height:250px;display:block;"></canvas>
                         <div id="analytics-trend-tooltip" class="analytics-chart-tooltip" style="display: none;"></div>
                         <div id="analytics-trend-summary" style="margin-top: 15px; display: flex; gap: 20px;">
                             <div class="stat-row" style="flex: 1;">
@@ -2735,6 +2918,13 @@
                 </div>
                 <!-- Drift context container (shown only for drift_halt recommendations) -->
                 <div id="rec-modal-drift-context" style="display: none;"></div>
+                <div class="rec-detail">
+                    <label>Project:</label>
+                    <input type="text" id="rec-project-name-input"
+                           class="mission-input"
+                           style="min-height: auto; padding: 8px; width: 220px; font-size: 0.9em;"
+                           placeholder="Auto-detecting...">
+                </div>
                 <div class="rec-detail">
                     <label>Cycle Budget:</label>
                     <select id="rec-modal-cycles" class="mission-input" style="min-height: auto; padding: 8px; width: auto;">

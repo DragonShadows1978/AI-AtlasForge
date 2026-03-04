@@ -1215,8 +1215,9 @@ export function closeRecommendationModal() {
     if (modal) modal.style.display = 'none';
     currentRecommendationId = null;
 
-    // Remove modal-open class from body
-    document.body.classList.remove('modal-open');
+    // Remove modal-open class only if no other modals are still visible
+    const _visibleModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]');
+    if (_visibleModals.length === 0) document.body.classList.remove('modal-open');
 }
 
 /**
@@ -1394,8 +1395,9 @@ export function closeExpandedRecModal() {
     const modal = document.getElementById('expanded-recommendations-modal');
     if (modal) modal.style.display = 'none';
 
-    // Remove modal-open class from body
-    document.body.classList.remove('modal-open');
+    // Remove modal-open class only if no other modals are still visible
+    const _visibleModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]');
+    if (_visibleModals.length === 0) document.body.classList.remove('modal-open');
 
     // Refresh main widget to reflect any changes
     refreshRecommendations();

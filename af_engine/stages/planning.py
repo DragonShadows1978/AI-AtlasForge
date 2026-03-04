@@ -60,33 +60,30 @@ IMPORTANT: You are AUTONOMOUS. Do NOT ask clarifying questions. Make reasonable 
 In PLANNING stage, you may ONLY write to artifacts/ or research/ directories.
 Do NOT write actual code yet. Save implementation for BUILDING stage.
 
-=== RESEARCH PHASE (BEFORE Implementation Planning) ===
-Your implementation plan should be EVIDENCE-BASED, not just based on training data.
-
+=== RESEARCH PHASE ===
 MANDATORY: Knowledge Base Consultation
 The Knowledge Base context above (if present) contains SEMANTIC SEARCH RESULTS from past missions.
-- These are learnings from similar problems you've solved before
-- PAY ATTENTION to "Gotchas to Avoid" - these are past failures to prevent
+- PAY ATTENTION to "Gotchas to Avoid" — these are past failures to prevent
 - Apply "Relevant Techniques" if they match your current problem
-- Similar Past Missions show approaches that worked (or didn't)
 
-Research Tasks:
-1. **FIRST**: Review any Knowledge Base context above and incorporate relevant learnings
-2. Use WebSearch to find current best practices for the task (include year 2025)
-3. Use WebFetch to get official documentation if relevant technologies are involved
-4. Search for similar problems and their solutions (prior art)
-5. Look for common pitfalls and "what NOT to do" guidance
-6. Document research findings in {research_dir}/research_findings.md
+If RESEARCH FINDINGS are shown above (pre-computed automatically), your research task is
+focused and specific — do NOT re-research what is already covered:
 
-Research Questions to Answer:
-- What are the current best practices for this type of work?
-- What tools or frameworks are commonly used?
-- What are known failure modes or antipatterns?
-- What recent developments (2024-2025) are relevant?
-- **What did past missions teach us about similar problems?**
+1. **Fill knowledge gaps** listed in the RESEARCH FINDINGS section above
+2. **Explore the specific codebase** for implementation details:
+   - Read relevant source files before designing changes
+   - Verify assumptions against actual code, not training data
+   - Append codebase-specific findings to {research_dir}/research_findings.md
+3. If NO pre-computed research is shown above, conduct full evidence-based research:
+   - Use WebSearch to find current best practices (include year in query)
+   - Use WebFetch to get official documentation for relevant technologies
+   - Document ALL findings in {research_dir}/research_findings.md
 
-Cite sources for architectural decisions when available.
-If research reveals better approaches than initially considered, adjust your plan.
+Every major architectural decision MUST cite either:
+  (a) The pre-computed RESEARCH FINDINGS above, or
+  (b) A specific source you consulted during this planning session
+
+Decisions not backed by evidence MUST be explicitly flagged as assumptions.
 
 === IMPLEMENTATION PLANNING ===
 
@@ -110,7 +107,15 @@ Respond with JSON:
     "kb_learnings_applied": ["list any KB learnings you incorporated, or empty if none"],
     "research_conducted": ["topic1: key finding", "topic2: key finding"],
     "sources_consulted": ["url1", "url2"],
-    "key_requirements": ["requirement1", "requirement2", ...],
+    "research_summary": {{
+        "topics_researched": ["topic1", "topic2"],
+        "sources_consulted": 0,
+        "primary_sources": 0,
+        "knowledge_gaps_identified": ["gap1", "gap2"],
+        "key_findings": ["finding1", "finding2"],
+        "confidence_level": "high"
+    }},
+    "key_requirements": ["requirement1", "requirement2"],
     "assumptions": ["any assumptions you made"],
     "approach": "Brief description of chosen approach",
     "approach_rationale": "Why this approach (cite KB learnings and sources if available)",
@@ -136,7 +141,7 @@ Respond with JSON:
         """
         status = response.get("status", "")
 
-        if status == "plan_complete":
+        if status.lower().strip() == "plan_complete":
             # Create events for stage completion
             events = [
                 Event(
@@ -147,6 +152,7 @@ Respond with JSON:
                         "status": status,
                         "kb_learnings": response.get("kb_learnings_applied", []),
                         "steps_planned": len(response.get("steps", [])),
+                        "research_summary": response.get("research_summary", {}),
                     }
                 )
             ]

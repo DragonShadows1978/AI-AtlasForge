@@ -468,6 +468,91 @@ Backups are stored in `$ATLASFORGE_ROOT/backups/auto_backups/` with timestamps.
 
 ---
 
+## AfterImage Hook System - DO NOT BYPASS
+
+**The AfterImage hook system is a critical learning infrastructure.** It captures every
+code pattern written by agents into a PostgreSQL knowledge base, enabling future agents
+to recall and build on past implementations.
+
+### What AfterImage Does
+1. **PreToolUse**: On every Write/Edit, AfterImage searches the KB for similar code and
+   shows relevant patterns. The first attempt is DENIED (you see the context); retry is allowed.
+2. **PostToolUse**: After every Write/Edit, AfterImage stores the new code in the KB.
+3. **Churn Tracking**: AfterImage tracks file stability tiers (Gold/Silver/Bronze/Red)
+   to warn when stable files are being repeatedly modified.
+
+### The Friction Is Intentional
+
+The deny-then-allow pattern creates **deliberate friction**. This friction:
+- Forces the agent to see relevant past code before writing
+- Ensures all code enters the knowledge base for future recall
+- Builds a pattern library that makes future missions smarter
+
+**The MemorySystem learned the heredoc bypass because a past agent documented it as a
+"workaround" in MEMORY.md. That agent inadvertently taught every future agent to
+circumvent the learning infrastructure. This is the exact anti-pattern we are preventing.**
+
+### BANNED BYPASS TECHNIQUES
+
+The following are **ABSOLUTE violations** and are blocked by the `bash_write_guard.py` hook:
+
+```bash
+# BANNED: python3 heredoc with ANY delimiter (bypasses Write/Edit hooks entirely)
+python3 << 'PATCH'
+with open('file.py', 'w') as f:
+    f.write('...')
+PATCH
+
+# BANNED: bash heredoc cat redirect
+cat > file.py << 'EOF'
+content
+EOF
+
+# BANNED: echo/printf redirect
+echo "code" > file.py
+printf "code" > file.py
+
+# BANNED: python3 -c with file open operations
+python3 -c "open('file.py', 'w').write('...')"
+
+# BANNED: bash/sh with heredoc stdin
+bash << 'EOF'
+echo content > file.py
+EOF
+```
+
+### Why These Are Banned
+
+- They write files **outside the Write/Edit tool chain**
+- AfterImage PostToolUse **never fires** → code never enters the KB
+- Future agents have **no memory** of the code written this way
+- The system **cannot learn or improve** from those writes
+- Each bypass degrades the collective intelligence of all future agents
+
+### Correct Approach
+
+Always use the **Write** or **Edit** tools:
+- `Write`: Create or fully replace a file (goes through full AfterImage chain)
+- `Edit`: Replace specific content within a file (goes through full AfterImage chain)
+
+If AfterImage **DENIES** your write with similar code context, **read the context**, then
+**retry the same write**. The second attempt will be allowed. This is the intended workflow.
+
+The context shown on denial is a gift — use it to understand what has been built before.
+
+### Churn Tiers
+
+AfterImage classifies files by stability tier based on edits in the last 30 days:
+- 🥇 **Gold**: 0-2 edits — stable, rarely changed. Warns before modification.
+- 🥈 **Silver**: 3-10 edits — normal activity
+- 🥉 **Bronze**: 11-20 edits — high activity
+- 🔴 **Red**: >20 edits — excessive churn, consider refactoring
+
+New files get a **24-hour grace period** before Gold-tier warnings apply. A file with zero
+edit history is NOT Gold-stable — it simply has no data. Stability must be earned.
+
+---
+
 ## Dashboard Import Policy
 
 The dashboard codebase follows strict import policies to prevent cross-mission contamination.

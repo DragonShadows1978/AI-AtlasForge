@@ -601,6 +601,8 @@ class AtlasForgeEnhancer:
         Returns:
             Dict with relevant files, concepts, insights
         """
+        if not self._ensure_initialized("exploration"):
+            return {}
         return self.exploration_advisor.what_do_we_know(topic)
 
     def get_related_explorations(self, path: str) -> List[Dict]:
@@ -613,6 +615,8 @@ class AtlasForgeEnhancer:
         Returns:
             List of related explorations
         """
+        if not self._ensure_initialized("exploration"):
+            return []
         node = self.exploration_graph.get_file_node(path)
         if not node:
             return []
@@ -630,6 +634,8 @@ class AtlasForgeEnhancer:
 
     def get_exploration_stats(self) -> Dict:
         """Get statistics about exploration coverage."""
+        if not self._ensure_initialized("exploration"):
+            return {}
         return self.exploration_graph.get_exploration_stats()
 
     # =========================================================================
@@ -653,6 +659,8 @@ class AtlasForgeEnhancer:
         Returns:
             Tuple of (scaffolded_prompt, analysis)
         """
+        if not self._ensure_initialized("scaffold"):
+            return (prompt, {})
         scaffolded, analysis = self.scaffold_calibrator.apply_scaffolds_to_prompt(
             prompt,
             previous_response,
@@ -684,6 +692,8 @@ class AtlasForgeEnhancer:
         if not app_id:
             return {'error': 'No application to record outcome for'}
 
+        if not self._ensure_initialized("scaffold"):
+            return {'error': 'Scaffold not initialized'}
         return self.scaffold_calibrator.record_outcome(app_id, response)
 
     def analyze_for_bias(self, text: str) -> Dict:
@@ -700,6 +710,8 @@ class AtlasForgeEnhancer:
 
     def get_scaffold_effectiveness(self) -> Dict:
         """Get report on scaffold effectiveness."""
+        if not self._ensure_initialized("scaffold"):
+            return {}
         return self.scaffold_calibrator.get_effectiveness_report()
 
     # =========================================================================
@@ -746,10 +758,13 @@ class AtlasForgeEnhancer:
             files_created, files_modified,
             cycle_summary
         )
-        report['continuity'] = {
-            'key_concepts': checkpoint.key_concepts,
-            'summary': checkpoint.summary
-        }
+        if checkpoint is None:
+            report['continuity'] = {}
+        else:
+            report['continuity'] = {
+                'key_concepts': checkpoint.key_concepts,
+                'summary': checkpoint.summary
+            }
 
         # 2. Process explorations
         exploration = self.process_exploration_output(cycle_output)
@@ -760,15 +775,17 @@ class AtlasForgeEnhancer:
             cycle_output,
             f"{self.llm_provider}_cycle_{cycle_number}"
         )
-        report['drift'] = {
-            'similarity': continuity.overall_similarity,
-            'severity': continuity.drift_severity,
-            'alert': continuity.alert_level,
-            'healing_needed': continuity.healing_recommended
-        }
-
-        if continuity.healing_recommended:
-            report['healing_prompt'] = continuity.healing_prompt
+        if continuity is None:
+            report['drift'] = {}
+        else:
+            report['drift'] = {
+                'similarity': continuity.overall_similarity,
+                'severity': continuity.drift_severity,
+                'alert': continuity.alert_level,
+                'healing_needed': continuity.healing_recommended
+            }
+            if continuity.healing_recommended:
+                report['healing_prompt'] = continuity.healing_prompt
 
         # 4. Analyze for bias patterns
         bias = self.analyze_for_bias(cycle_output)
@@ -778,9 +795,11 @@ class AtlasForgeEnhancer:
             'top_concerns': bias.get('priority_biases', [])
         }
 
-        # Save all data
-        self.exploration_graph.save()
-        self.scaffold_calibrator.save()
+        # Save all data (guard against uninitialized components)
+        if self.exploration_graph is not None:
+            self.exploration_graph.save()
+        if self.scaffold_calibrator is not None:
+            self.scaffold_calibrator.save()
 
         return report
 
@@ -837,6 +856,67 @@ class AtlasForgeEnhancer:
             status['knowledge_transfer'] = self.knowledge_transfer.get_stats()
 
         return status
+
+    # =========================================================================
+    # LIFECYCLE TRACKING (Called by af_engine/integrations/enhancer.py)
+    # =========================================================================
+
+    def track_stage_completion(self, stage: str, status: str = ""):
+        """
+        Record stage completion for mission lifecycle tracking.
+
+        Called by EnhancerIntegration.on_stage_completed(). Increments the
+        internal cycle counter when CYCLE_END completes and saves the graph.
+
+        Args:
+            stage: The stage name that just completed (e.g. 'BUILDING', 'CYCLE_END')
+            status: Optional status string (e.g. 'complete', 'failed')
+        """
+        try:
+            with self._lock:
+                stage_upper = str(stage).upper() if stage else ""
+                if stage_upper == "CYCLE_END":
+                    self.current_cycle += 1
+                if self.exploration_graph is not None:
+                    self.exploration_graph.save()
+                logger.debug(
+                    f"Stage tracked: {stage} status={status} cycle={self.current_cycle}"
+                )
+        except Exception as e:
+            logger.warning(f"track_stage_completion failed: {e}")
+
+    def finalize_mission(
+        self,
+        mission_id: str,
+        total_cycles: int = 0,
+        final_report: Optional[Dict] = None
+    ):
+        """
+        Finalize mission tracking and persist all enhancement data.
+
+        Called by EnhancerIntegration.on_mission_completed(). Saves exploration
+        graph, scaffold calibrator, and logs a summary.
+
+        Args:
+            mission_id: The mission being finalized
+            total_cycles: How many cycles the mission ran
+            final_report: Optional final report dict
+        """
+        try:
+            with self._lock:
+                if self.exploration_graph is not None:
+                    self.exploration_graph.save()
+                if self.scaffold_calibrator is not None:
+                    self.scaffold_calibrator.save()
+                summary = {
+                    'mission_id': mission_id,
+                    'total_cycles': total_cycles,
+                    'final_cycle': self.current_cycle,
+                    'finalized_at': datetime.now().isoformat()
+                }
+                logger.info(f"Mission finalized: {summary}")
+        except Exception as e:
+            logger.warning(f"finalize_mission failed: {e}")
 
     # =========================================================================
     # FEATURE 4: KNOWLEDGE TRANSFER (Cross-Mission)
@@ -949,10 +1029,14 @@ class AtlasForgeEnhancer:
         Returns:
             List of matching insights with similarity scores
         """
+        if not self._ensure_initialized("exploration"):
+            return []
         return self.exploration_advisor.what_insights_do_we_have(query, top_k)
 
     def get_insight_coverage(self) -> Dict:
         """Get statistics about insight embedding coverage."""
+        if not self._ensure_initialized("exploration"):
+            return {}
         return self.exploration_graph.get_insight_coverage()
 
     # =========================================================================
@@ -974,6 +1058,8 @@ class AtlasForgeEnhancer:
         Returns:
             Dict with nodes, edges, and positions ready for rendering
         """
+        if not self._ensure_initialized("exploration"):
+            return {'nodes': [], 'edges': []}
         return self.exploration_graph.export_for_visualization(width, height)
 
 

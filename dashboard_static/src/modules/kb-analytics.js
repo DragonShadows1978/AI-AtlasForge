@@ -954,8 +954,9 @@ export function closeRecommendationModal() {
     if (modal) modal.style.display = 'none';
     currentRecommendationId = null;
 
-    // Remove modal-open class from body
-    document.body.classList.remove('modal-open');
+    // Remove modal-open class only if no other modals are still visible
+    const _visibleModals = document.querySelectorAll('.modal.show, .modal[style*="display: flex"], .modal[style*="display:flex"]');
+    if (_visibleModals.length === 0) document.body.classList.remove('modal-open');
 
     // Reset footer
     const footer = document.getElementById('recommendation-modal-footer');

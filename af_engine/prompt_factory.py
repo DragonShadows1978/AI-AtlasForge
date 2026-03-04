@@ -66,7 +66,7 @@ class PromptFactory:
             cycle_number=state.cycle_number,
             cycle_budget=state.cycle_budget,
             iteration=state.iteration,
-            max_iterations=mission.get("max_iterations", 10),
+            max_iterations=state.max_iterations,
             history=state.history,
             cycle_history=state.cycle_history,
             preferences=mission.get("preferences", {}),
@@ -298,6 +298,53 @@ class PromptFactory:
             lines.append("")
 
         return "\n".join(lines)
+
+    def inject_research_context(
+        self,
+        prompt: str,
+        research_context: str,
+    ) -> str:
+        """
+        Inject pre-computed research findings into the planning prompt.
+
+        Positions the research block immediately before the PLANNING STAGE
+        section, ensuring the agent reads evidence before its task instructions.
+
+        Args:
+            prompt: Original prompt
+            research_context: Formatted research context string from ResearchOrchestrator
+
+        Returns:
+            Prompt with research findings injected
+        """
+        # Guard against None inputs
+        if not research_context:
+            return prompt if prompt is not None else ""
+        if prompt is None:
+            return ""
+
+        # Sanitize ALL known structural markers to prevent prompt corruption
+        _STRUCTURAL_MARKERS = [
+            "=== PLANNING STAGE ===",
+            "=== CURRENT MISSION ===",
+            "=== GROUND RULES ===",
+            "=== GROUND RULES (READ CAREFULLY) ===",
+            "=== LEARNINGS FROM PAST MISSIONS ===",
+            "=== CRASH RECOVERY ===",
+            "=== RECENT HISTORY ===",
+            "=== ANALYZING STAGE ===",
+            "=== BUILDING STAGE ===",
+            "=== TESTING STAGE ===",
+        ]
+        safe_context = research_context
+        for m in _STRUCTURAL_MARKERS:
+            safe_context = safe_context.replace(m, m.replace("===", "(ref)"))
+
+        marker = "=== PLANNING STAGE ==="
+        if marker in prompt:
+            return prompt.replace(marker, f"{safe_context}\n\n{marker}", 1)
+        # Fallback: append at end
+        return f"{prompt}\n\n{safe_context}"
 
     def inject_recovery_context(
         self,

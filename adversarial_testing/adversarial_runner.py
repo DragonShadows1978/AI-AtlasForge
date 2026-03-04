@@ -12,6 +12,7 @@ The runner produces a comprehensive TestSuiteReport with epistemic metrics.
 
 import json
 import sys
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
@@ -34,6 +35,7 @@ from .epistemic_metrics import (
     TestSuiteReport,
     RigorLevel
 )
+from .blind_agent_runner import BlindAgentRedTeam, RedTeamOrchestrator, run_quick_blind_agent
 
 
 @dataclass
@@ -47,6 +49,10 @@ class AdversarialConfig:
     # Red team settings
     enable_red_team: bool = True
     red_team_model: Optional[ModelType] = None  # Defaults to main model
+    # Blind agent red team (preferred when workspace_dir is provided)
+    workspace_dir: Optional[Path] = None         # If set, use BlindAgentRedTeam
+    blind_agent_count: int = 3                   # Number of parallel blind agents
+    blind_agent_timeout: int = 300               # Per-agent timeout in seconds
 
     # Mutation testing settings
     enable_mutation: bool = True
@@ -193,6 +199,58 @@ class AdversarialRunner:
 
         self.metrics = EpistemicMetrics()
 
+    def launch_blind_agent_team(
+        self,
+        workspace_dir: Path,
+        mission_desc: str = "",
+        n_agents: Optional[int] = None,
+        timeout: Optional[int] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> RedTeamResult:
+        """
+        Launch a parallel blind agent red team against a workspace directory.
+
+        This is the primary red team mechanism for workspace-based testing.
+        Each agent is a real Claude subprocess with full tool access that
+        explores the codebase, runs tests, and tries to break the code.
+        All agents appear as tabs in the Mission Activity dashboard.
+
+        Args:
+            workspace_dir: Path to the codebase to attack
+            mission_desc: Brief description of what the code does
+            n_agents: Number of parallel agents (defaults to config.blind_agent_count)
+            timeout: Per-agent timeout in seconds (defaults to config.blind_agent_timeout)
+            progress_callback: Optional progress callback
+
+        Returns:
+            RedTeamResult with aggregated findings from all agents
+        """
+        n = n_agents or self.config.blind_agent_count
+        t = timeout or self.config.blind_agent_timeout
+        if progress_callback:
+            progress_callback("Launching {} red team agent(s) via RedTeamOrchestrator against {}...".format(n, workspace_dir))
+
+        # Prefer RedTeamOrchestrator (hierarchical, parallel, timeout-resilient).
+        # Falls back to BlindAgentRedTeam automatically if hierarchical_framework
+        # is not available.
+        orchestrator = RedTeamOrchestrator(timeout=t, n_agents=n)
+        result = orchestrator.launch(
+            workspace_dir=Path(workspace_dir),
+            mission_desc=mission_desc or "workspace at {}".format(workspace_dir),
+            n_agents=n,
+            timeout=t,
+        )
+
+        if progress_callback:
+            progress_callback(
+                "Red team complete: {} finding(s) ({} critical, {} high)".format(
+                    result.total_issues,
+                    len(result.critical_findings),
+                    len(result.high_findings),
+                )
+            )
+        return result
+
     def run_full_suite(
         self,
         code_path: Path,
@@ -200,6 +258,9 @@ class AdversarialRunner:
         specification: str = "",
         function_names: Optional[List[str]] = None,
         self_test_findings: int = 0,
+        self_test_passed: int = 0,
+        workspace_dir: Optional[Path] = None,
+        mission_desc: str = "",
         progress_callback: Optional[Callable[[str], None]] = None
     ) -> AdversarialResults:
         """
@@ -243,20 +304,23 @@ class AdversarialRunner:
             if progress_callback:
                 progress_callback(msg)
 
+        # Resolve effective workspace_dir (arg overrides config)
+        effective_workspace = workspace_dir or self.config.workspace_dir
+
         # Run components (parallel or sequential)
         if self.config.enable_parallel and self.config.max_workers > 1:
             self._run_parallel(
                 results, code, code_path, test_command, specification,
-                function_names, log_progress
+                function_names, log_progress, effective_workspace, mission_desc
             )
         else:
             self._run_sequential(
                 results, code, code_path, test_command, specification,
-                function_names, log_progress
+                function_names, log_progress, effective_workspace, mission_desc
             )
 
         # Compute epistemic score
-        results.report.self_test_passed = 0  # Would come from actual test run
+        results.report.self_test_passed = self_test_passed
         results.report.self_test_failed = self_test_findings
         results.report.epistemic_score = self.metrics.compute_full_score(
             red_team=results.report.red_team_result,
@@ -283,22 +347,38 @@ class AdversarialRunner:
         test_command: str,
         specification: str,
         function_names: Optional[List[str]],
-        log_progress: Callable[[str], None]
+        log_progress: Callable[[str], None],
+        workspace_dir: Optional[Path] = None,
+        mission_desc: str = "",
     ):
         """Run all components sequentially."""
 
-        # 1. Red Team Analysis
-        if self.red_team_agent and self.config.enable_red_team:
-            log_progress("Running red team analysis...")
-            try:
-                results.report.red_team_result = self.red_team_agent.analyze_code(
-                    code=code,
-                    description=f"Code from {code_path.name}",
-                    session_id=f"rt_{self.config.mission_id}"
-                )
-                log_progress(f"Red team found {results.report.red_team_result.total_issues} issues")
-            except Exception as e:
-                results.errors.append(f"Red team failed: {e}")
+        # 1. Red Team Analysis — prefer blind agent team when workspace_dir is available
+        if self.config.enable_red_team:
+            if workspace_dir:
+                log_progress(f"Launching blind agent red team against {workspace_dir}...")
+                try:
+                    results.report.red_team_result = self.launch_blind_agent_team(
+                        workspace_dir=workspace_dir,
+                        mission_desc=mission_desc or f"Code from {code_path.name}",
+                        progress_callback=log_progress,
+                    )
+                    log_progress(
+                        f"Blind red team found {results.report.red_team_result.total_issues} issues"
+                    )
+                except Exception as e:
+                    results.errors.append(f"Blind agent red team failed: {e}")
+            elif self.red_team_agent:
+                log_progress("Running red team analysis (code snippet mode)...")
+                try:
+                    results.report.red_team_result = self.red_team_agent.analyze_code(
+                        code=code,
+                        description=f"Code from {code_path.name}",
+                        session_id=f"rt_{self.config.mission_id}"
+                    )
+                    log_progress(f"Red team found {results.report.red_team_result.total_issues} issues")
+                except Exception as e:
+                    results.errors.append(f"Red team failed: {e}")
 
         # 2. Mutation Testing
         if self.mutation_tester and self.config.enable_mutation and test_command:
@@ -359,22 +439,34 @@ class AdversarialRunner:
         test_command: str,
         specification: str,
         function_names: Optional[List[str]],
-        log_progress: Callable[[str], None]
+        log_progress: Callable[[str], None],
+        workspace_dir: Optional[Path] = None,
+        mission_desc: str = "",
     ):
         """Run components in parallel where possible."""
 
         tasks = {}
 
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-            # Submit tasks
-            if self.red_team_agent and self.config.enable_red_team:
-                tasks['red_team'] = executor.submit(
-                    self.red_team_agent.analyze_code,
-                    code=code,
-                    description=f"Code from {code_path.name}",
-                    session_id=f"rt_{self.config.mission_id}"
-                )
-                log_progress("Submitted red team analysis...")
+            # Submit red team — prefer blind agent team when workspace_dir available
+            if self.config.enable_red_team:
+                if workspace_dir:
+                    tasks['red_team'] = executor.submit(
+                        self.launch_blind_agent_team,
+                        workspace_dir=workspace_dir,
+                        mission_desc=mission_desc or f"Code from {code_path.name}",
+                    )
+                    log_progress(
+                        f"Submitted blind agent red team ({self.config.blind_agent_count} agents)..."
+                    )
+                elif self.red_team_agent:
+                    tasks['red_team'] = executor.submit(
+                        self.red_team_agent.analyze_code,
+                        code=code,
+                        description=f"Code from {code_path.name}",
+                        session_id=f"rt_{self.config.mission_id}"
+                    )
+                    log_progress("Submitted red team analysis...")
 
             if self.blind_validator and self.config.enable_blind_validation and specification:
                 tasks['validation'] = executor.submit(
@@ -387,10 +479,13 @@ class AdversarialRunner:
             # Mutation and property testing are harder to parallelize safely
             # Run them sequentially after parallel tasks complete
 
-            # Collect parallel results
+            # Collect parallel results using a shared deadline so total wait
+            # is bounded by config.timeout_seconds regardless of task count
+            deadline = time.monotonic() + self.config.timeout_seconds
             for name, future in tasks.items():
+                remaining = max(1, deadline - time.monotonic())
                 try:
-                    result = future.result(timeout=self.config.timeout_seconds)
+                    result = future.result(timeout=remaining)
                     if name == 'red_team':
                         results.report.red_team_result = result
                         log_progress(f"Red team found {result.total_issues} issues")
@@ -482,6 +577,7 @@ def run_adversarial_testing(
     specification: str = "",
     mission_id: str = "default",
     model: ModelType = ModelType.BALANCED,
+    self_test_passed: int = 0,
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> AdversarialResults:
     """
@@ -493,6 +589,7 @@ def run_adversarial_testing(
         specification: Original specification
         mission_id: Mission identifier
         model: Model to use
+        self_test_passed: Number of self-tests that passed (for metrics)
         progress_callback: Progress callback
 
     Returns:
@@ -507,6 +604,7 @@ def run_adversarial_testing(
         code_path=code_path,
         test_command=test_command,
         specification=specification,
+        self_test_passed=self_test_passed,
         progress_callback=progress_callback
     )
 

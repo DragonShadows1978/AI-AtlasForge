@@ -20,6 +20,7 @@ Endpoints:
 - GET /api/investigation/<id>/export - Export investigation report as markdown/JSON
 """
 
+import html
 import threading
 import re
 import subprocess
@@ -107,9 +108,42 @@ def api_investigation_start():
             "message": "No query provided"
         }), 400
 
-    max_subagents = min(int(data.get('max_subagents', 5)), 10)  # Cap at 10
-    timeout_minutes = min(int(data.get('timeout_minutes', 10)), 30)  # Cap at 30
+    try:
+        timeout_minutes = min(int(data.get('timeout_minutes', 10)), 30)  # Cap at 30
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "message": "timeout_minutes must be an integer"}), 400
     deliverable_format = data.get('deliverable_format')  # e.g., "HTML", "JSON", "markdown"
+
+    # Auto-detect optimal subagent count when not explicitly provided
+    resource_suggestion = None
+    if 'max_subagents' not in data:
+        try:
+            from subagent_pool_manager import get_resource_detector, get_allocation_learner
+            _det = get_resource_detector()
+            _sug = _det.suggest_optimal_count(query=query)
+            max_subagents = _sug.suggested
+            resource_suggestion = {
+                "suggested": _sug.suggested,
+                "rationale": _sug.rationale,
+                "min_suggested": _sug.min_suggested,
+                "max_suggested": _sug.max_suggested,
+                "auto_detected": True,
+            }
+            try:
+                _kb_count = get_allocation_learner().recommend_count(query)
+                if _kb_count is not None:
+                    resource_suggestion["kb_suggestion"] = _kb_count
+                    max_subagents = (_sug.suggested + _kb_count) // 2
+                    resource_suggestion["final"] = max_subagents
+            except Exception:
+                pass
+        except Exception:
+            max_subagents = 5
+    else:
+        try:
+            max_subagents = min(int(data.get('max_subagents', 5)), 50)  # Cap at 50
+        except (ValueError, TypeError):
+            return jsonify({"success": False, "message": "max_subagents must be an integer"}), 400
 
     # Check if an investigation is already running
     from investigation_engine import (
@@ -183,13 +217,17 @@ def api_investigation_start():
     _investigation_thread.start()
 
     format_msg = f" (output: {deliverable_format})" if deliverable_format else ""
-    return jsonify({
+    response_data = {
         "success": True,
         "investigation_id": config.investigation_id,
         "message": f"Investigation started with {max_subagents} subagents{format_msg}",
         "workspace_dir": str(config.workspace_dir),
-        "deliverable_format": deliverable_format
-    })
+        "deliverable_format": deliverable_format,
+        "max_subagents": max_subagents,
+    }
+    if resource_suggestion is not None:
+        response_data["resource_suggestion"] = resource_suggestion
+    return jsonify(response_data)
 
 
 # =============================================================================
@@ -223,16 +261,23 @@ def api_investigation_status(investigation_id=None):
     # Enrich with attachment metadata from config.json
     inv_id = status.get("investigation_id") or investigation_id
     if inv_id and BASE_DIR:
-        config_path = BASE_DIR / "investigations" / inv_id / "config.json"
-        if config_path.exists():
-            try:
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                status["has_attachments"] = config.get("has_attachments", False)
-                status["attachment_count"] = config.get("attachment_count", 0)
-                status["attachments"] = config.get("attachments", [])
-            except Exception:
-                pass
+        try:
+            investigations_dir = (Path(BASE_DIR) / "investigations").resolve()
+            config_path = (investigations_dir / inv_id / "config.json").resolve()
+            # H1: validate path stays within investigations directory (prevent traversal)
+            if not str(config_path).startswith(str(investigations_dir) + "/"):
+                raise ValueError("Invalid investigation_id")
+            if config_path.exists():
+                try:
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+                    status["has_attachments"] = config.get("has_attachments", False)
+                    status["attachment_count"] = config.get("attachment_count", 0)
+                    status["attachments"] = config.get("attachments", [])
+                except Exception:
+                    pass
+        except (ValueError, OSError):
+            pass
 
     return jsonify(status)
 
@@ -268,6 +313,16 @@ def api_investigation_report(investigation_id):
     report_file = Path(report_path)
     if not report_file.exists():
         return jsonify({"error": "Report file not found"}), 404
+
+    # H2: validate report_path resolves within BASE_DIR (prevent arbitrary file read)
+    if BASE_DIR:
+        try:
+            base_resolved = Path(BASE_DIR).resolve()
+            report_resolved = report_file.resolve()
+            if not str(report_resolved).startswith(str(base_resolved) + "/"):
+                return jsonify({"error": "Invalid report path"}), 403
+        except (ValueError, OSError):
+            return jsonify({"error": "Invalid report path"}), 403
 
     try:
         report_content = report_file.read_text()
@@ -373,6 +428,11 @@ def api_investigation_dismiss():
     })
 
 
+def _safe_filename(name: str) -> str:
+    """Strip CRLF from filename to prevent Content-Disposition header injection (C3-2)."""
+    return str(name).replace('\r', '').replace('\n', '')
+
+
 # =============================================================================
 # TAGS STORAGE (in-memory + persistent)
 # =============================================================================
@@ -383,6 +443,8 @@ INVESTIGATION_TAGS_PATH = None
 def _get_tags_path():
     """Get the path to investigation tags storage."""
     global INVESTIGATION_TAGS_PATH
+    if STATE_DIR is None:  # C3-3: guard against null STATE_DIR
+        raise RuntimeError('STATE_DIR not configured')
     if INVESTIGATION_TAGS_PATH is None:
         INVESTIGATION_TAGS_PATH = STATE_DIR / "investigation_tags.json"
     return INVESTIGATION_TAGS_PATH
@@ -421,8 +483,13 @@ def _enrich_investigation_with_metadata(inv: dict) -> dict:
 
     # Add attachment metadata from investigation config.json
     if inv_id and BASE_DIR:
-        config_path = BASE_DIR / "investigations" / inv_id / "config.json"
-        if config_path.exists():
+        investigations_dir = (Path(BASE_DIR) / "investigations").resolve()
+        config_path = (investigations_dir / inv_id / "config.json").resolve()
+        if not str(config_path).startswith(str(investigations_dir) + "/"):
+            enriched["has_attachments"] = False
+            enriched["attachment_count"] = 0
+            enriched["attachments"] = []
+        elif config_path.exists():
             try:
                 with open(config_path, 'r') as f:
                     config = json.load(f)
@@ -534,8 +601,11 @@ def api_investigation_history():
     from investigation_engine import load_investigation_state
 
     # Parse query params
-    limit = int(request.args.get('limit', 50))
-    offset = int(request.args.get('offset', 0))
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+    except (ValueError, TypeError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
     search = request.args.get('search', '').strip().lower()
     search_content = request.args.get('search_content', 'false').lower() == 'true'
     status_filter = request.args.get('status', '')
@@ -852,26 +922,33 @@ def api_delete_investigation_tag(investigation_id, tag):
 
 def _build_pdf_html(investigation_id, status, enriched, report_content):
     """Build HTML optimized for PDF export."""
-    # Escape HTML entities in report content
+    # Escape HTML entities in all user-supplied fields (C3-1: XSS fix)
     import html
+    _esc_id = html.escape(str(investigation_id))
+    _esc_query = html.escape(str(status.get("query", "N/A")))
+    _esc_status_val = html.escape(str(status.get("status", "N/A")))
+    _esc_completed = html.escape(str(enriched.get("timestamp_display", "N/A")))
+    _esc_elapsed = html.escape(str(enriched.get("elapsed_display", "N/A")))
+    _esc_subagents = html.escape(str(status.get("subagent_count", "N/A")))
+    _esc_tags = html.escape(', '.join(str(t) for t in enriched.get("tags", [])) or "None")
     escaped_report = html.escape(report_content) if report_content else 'No report available'
 
     return f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Investigation Report: {investigation_id}</title>
+    <title>Investigation Report: {_esc_id}</title>
 </head>
 <body>
     <h1>Investigation Report</h1>
     <div class="meta">
-        <p><strong>ID:</strong> {investigation_id}</p>
-        <p><strong>Query:</strong> {html.escape(status.get("query", "N/A"))}</p>
-        <p><strong>Status:</strong> {status.get("status", "N/A")}</p>
-        <p><strong>Completed:</strong> {enriched.get("timestamp_display", "N/A")}</p>
-        <p><strong>Duration:</strong> {enriched.get("elapsed_display", "N/A")}</p>
-        <p><strong>Subagents:</strong> {status.get("subagent_count", "N/A")}</p>
-        <p><strong>Tags:</strong> {', '.join(enriched.get("tags", [])) or 'None'}</p>
+        <p><strong>ID:</strong> {_esc_id}</p>
+        <p><strong>Query:</strong> {_esc_query}</p>
+        <p><strong>Status:</strong> {_esc_status_val}</p>
+        <p><strong>Completed:</strong> {_esc_completed}</p>
+        <p><strong>Duration:</strong> {_esc_elapsed}</p>
+        <p><strong>Subagents:</strong> {_esc_subagents}</p>
+        <p><strong>Tags:</strong> {_esc_tags}</p>
     </div>
     <hr>
     <div class="report">
@@ -924,6 +1001,15 @@ def api_export_investigation(investigation_id):
     # Load findings if available
     findings = None
     workspace_dir = status.get("workspace_dir")
+    # H3: validate workspace_dir resolves within BASE_DIR (prevent path traversal)
+    if workspace_dir and BASE_DIR:
+        try:
+            base_resolved = Path(BASE_DIR).resolve()
+            ws_resolved = Path(workspace_dir).resolve()
+            if not str(ws_resolved).startswith(str(base_resolved) + "/"):
+                workspace_dir = None
+        except (ValueError, OSError):
+            workspace_dir = None
     if workspace_dir:
         findings_path = Path(workspace_dir) / "artifacts" / "findings.json"
         if findings_path.exists():
@@ -957,7 +1043,7 @@ def api_export_investigation(investigation_id):
                 pdf,
                 mimetype='application/pdf',
                 headers={
-                    'Content-Disposition': f'attachment; filename=investigation_{investigation_id}.pdf'
+                    'Content-Disposition': f'attachment; filename=investigation_{_safe_filename(investigation_id)}.pdf'
                 }
             )
         except Exception as e:
@@ -986,18 +1072,25 @@ def api_export_investigation(investigation_id):
                 json.dumps(export_data, indent=2),
                 mimetype='application/json',
                 headers={
-                    'Content-Disposition': f'attachment; filename=investigation_{investigation_id}.json'
+                    'Content-Disposition': f'attachment; filename=investigation_{_safe_filename(investigation_id)}.json'
                 }
             )
         return jsonify(export_data)
 
     elif export_format == 'html':
         # Convert markdown to simple HTML
+        _esc_id = html.escape(str(investigation_id))
+        _esc_query = html.escape(str(status.get("query", "N/A")))
+        _esc_status = html.escape(str(status.get("status", "N/A")))
+        _esc_completed = html.escape(str(enriched.get("timestamp_display", "N/A")))
+        _esc_elapsed = html.escape(str(enriched.get("elapsed_display", "N/A")))
+        _esc_subagents = html.escape(str(status.get("subagent_count", "N/A")))
+        _esc_tags = ''.join(f'<span class="tag">{html.escape(str(t))}</span>' for t in enriched.get("tags", [])) or 'None'
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Investigation Report: {investigation_id}</title>
+    <title>Investigation Report: {_esc_id}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                max-width: 900px; margin: 40px auto; padding: 20px; background: #0d1117; color: #c9d1d9; }}
@@ -1011,17 +1104,17 @@ def api_export_investigation(investigation_id):
 <body>
     <h1>Investigation Report</h1>
     <div class="meta">
-        <p><strong>ID:</strong> {investigation_id}</p>
-        <p><strong>Query:</strong> {status.get("query", "N/A")}</p>
-        <p><strong>Status:</strong> {status.get("status", "N/A")}</p>
-        <p><strong>Completed:</strong> {enriched.get("timestamp_display", "N/A")}</p>
-        <p><strong>Duration:</strong> {enriched.get("elapsed_display", "N/A")}</p>
-        <p><strong>Subagents:</strong> {status.get("subagent_count", "N/A")}</p>
-        <p><strong>Tags:</strong> {''.join(f'<span class="tag">{t}</span>' for t in enriched.get("tags", [])) or 'None'}</p>
+        <p><strong>ID:</strong> {_esc_id}</p>
+        <p><strong>Query:</strong> {_esc_query}</p>
+        <p><strong>Status:</strong> {_esc_status}</p>
+        <p><strong>Completed:</strong> {_esc_completed}</p>
+        <p><strong>Duration:</strong> {_esc_elapsed}</p>
+        <p><strong>Subagents:</strong> {_esc_subagents}</p>
+        <p><strong>Tags:</strong> {_esc_tags}</p>
     </div>
     <hr>
     <div class="report">
-        <pre>{report_content}</pre>
+        <pre>{html.escape(report_content)}</pre>
     </div>
 </body>
 </html>"""
@@ -1031,7 +1124,7 @@ def api_export_investigation(investigation_id):
                 html_content,
                 mimetype='text/html',
                 headers={
-                    'Content-Disposition': f'attachment; filename=investigation_{investigation_id}.html'
+                    'Content-Disposition': f'attachment; filename=investigation_{_safe_filename(investigation_id)}.html'
                 }
             )
         return Response(html_content, mimetype='text/html')
@@ -1059,7 +1152,7 @@ def api_export_investigation(investigation_id):
                 full_markdown,
                 mimetype='text/markdown',
                 headers={
-                    'Content-Disposition': f'attachment; filename=investigation_{investigation_id}.md'
+                    'Content-Disposition': f'attachment; filename=investigation_{_safe_filename(investigation_id)}.md'
                 }
             )
         return Response(full_markdown, mimetype='text/markdown')
@@ -1306,6 +1399,8 @@ SAVED_SEARCHES_PATH = None
 def _get_saved_searches_path():
     """Get the path to saved searches storage."""
     global SAVED_SEARCHES_PATH
+    if STATE_DIR is None:  # C3-3: guard against null STATE_DIR
+        raise RuntimeError('STATE_DIR not configured')
     if SAVED_SEARCHES_PATH is None:
         SAVED_SEARCHES_PATH = STATE_DIR / "investigation_saved_searches.json"
     return SAVED_SEARCHES_PATH
@@ -1517,3 +1612,68 @@ def api_suggest_tags():
         "suggestions": suggestions,
         "query_keywords": words[:10]  # Return extracted keywords for debugging
     })
+
+
+# =============================================================================
+# INVESTIGATION SETTINGS (auto-archive config)
+# =============================================================================
+
+DEFAULT_INVESTIGATION_SETTINGS = {
+    "auto_archive_enabled": True,
+    "auto_archive_delay_seconds": 5
+}
+
+
+def _get_investigation_settings_path():
+    """Return path to investigation settings file."""
+    if STATE_DIR:
+        return Path(STATE_DIR) / "investigation_settings.json"
+    if BASE_DIR:
+        return Path(BASE_DIR) / "state" / "investigation_settings.json"
+    return Path("/home/vader/AI-AtlasForge/state/investigation_settings.json")
+
+
+def _load_investigation_settings():
+    """Load investigation settings from disk, applying defaults for missing keys."""
+    path = _get_investigation_settings_path()
+    if path.exists():
+        try:
+            with open(path, 'r') as f:
+                settings = json.load(f)
+            merged = dict(DEFAULT_INVESTIGATION_SETTINGS)
+            merged.update(settings)
+            return merged
+        except Exception:
+            pass
+    return dict(DEFAULT_INVESTIGATION_SETTINGS)
+
+
+def _save_investigation_settings(settings):
+    """Persist investigation settings to disk."""
+    path = _get_investigation_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(settings, f, indent=2)
+
+
+@investigation_bp.route('/api/investigation/settings', methods=['GET'])
+def api_get_investigation_settings():
+    """Get investigation settings (auto-archive config etc.)."""
+    settings = _load_investigation_settings()
+    return jsonify(settings)
+
+
+@investigation_bp.route('/api/investigation/settings', methods=['POST'])
+def api_save_investigation_settings():
+    """Save investigation settings."""
+    data = request.get_json() or {}
+    settings = _load_investigation_settings()
+
+    if 'auto_archive_enabled' in data:
+        settings['auto_archive_enabled'] = bool(data['auto_archive_enabled'])
+    if 'auto_archive_delay_seconds' in data:
+        delay = int(data['auto_archive_delay_seconds'])
+        settings['auto_archive_delay_seconds'] = max(3, min(60, delay))
+
+    _save_investigation_settings(settings)
+    return jsonify({"success": True, "settings": settings})

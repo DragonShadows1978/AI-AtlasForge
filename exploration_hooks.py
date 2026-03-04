@@ -1116,12 +1116,11 @@ def log_write_tool(file_path: str, content_length: int = 0, success: bool = True
         duration_ms=duration_ms
     )
 
-    # Emit WebSocket event for real-time dashboard updates during BUILDING stage
+    # Emit WebSocket event for real-time dashboard updates (all stages)
     if success and WEBSOCKET_EVENTS_AVAILABLE:
         try:
             mission_id, workspace = _get_mission_info()
-            stage = _get_mission_stage()
-            if mission_id and stage == "BUILDING":
+            if mission_id:
                 # Determine file type based on path
                 file_type = "code"
                 if "/artifacts/" in file_path or file_path.endswith(".md"):
@@ -1153,12 +1152,11 @@ def log_edit_tool(file_path: str, old_string_preview: str = "", new_string_previ
         duration_ms=duration_ms
     )
 
-    # Emit WebSocket event for real-time dashboard updates during BUILDING stage
+    # Emit WebSocket event for real-time dashboard updates (all stages)
     if success and WEBSOCKET_EVENTS_AVAILABLE:
         try:
             mission_id, _ = _get_mission_info()
-            stage = _get_mission_stage()
-            if mission_id and stage == "BUILDING":
+            if mission_id:
                 emit_file_modified(file_path, mission_id, "modified")
         except Exception:
             pass  # Silent failure - don't block file edits

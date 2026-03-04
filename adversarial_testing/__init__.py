@@ -6,9 +6,14 @@ by spawning independent agents to adversarially test code, generate property-bas
 tests, perform mutation analysis, and validate implementations against original specs.
 
 Key Components:
+    - RedTeamOrchestrator: PRIMARY parallel red-team runner. Dispatches each attack
+      domain as an independent WorkUnit via HierarchicalExperiment. Falls back to
+      BlindAgentRedTeam if hierarchical_framework is unavailable.
+    - run_quick_blind_agent: Convenience wrapper around RedTeamOrchestrator.
     - AdversarialRunner: Main orchestrator for adversarial testing
     - EnhancedAdversarialRunner: Production-ready runner with cost estimation & resilience
     - RedTeamAgent: Spawns fresh LLM instances to break code
+    - BlindAgentRedTeam: Legacy monolithic runner, now used as fallback only
     - PropertyTesting: Generates edge cases via property-based testing
     - MutationTesting: Verifies test quality through code mutation
     - BlindValidator: Independent validation against original specification
@@ -18,7 +23,19 @@ Key Components:
     - ResilientRunner: Error handling with retries and graceful degradation
 
 Usage:
-    # Simple usage
+    # Parallel red team (preferred — uses RedTeamOrchestrator internally)
+    from adversarial_testing import run_quick_blind_agent
+    from pathlib import Path
+
+    result = run_quick_blind_agent(
+        workspace_dir=Path("/path/to/workspace"),
+        mission_desc="Brief description of the codebase",
+        n_agents=4,
+        timeout=300,
+    )
+    print(f"Findings: {result.total_issues} ({len(result.critical_findings)} critical)")
+
+    # Full adversarial suite
     from adversarial_testing import AdversarialRunner
 
     runner = AdversarialRunner(mission_id="my_mission")
@@ -55,6 +72,7 @@ from .adversarial_runner import (
     run_adversarial_testing
 )
 from .red_team_agent import RedTeamAgent, RedTeamResult, AttackCategory
+from .blind_agent_runner import BlindAgentRedTeam, RedTeamOrchestrator, run_quick_blind_agent
 from .property_testing import PropertyTester, PropertyTestResult, PropertyType
 from .mutation_testing import MutationTester, MutationResult, MutationScore
 from .blind_validator import BlindValidator, ValidationResult, ValidationStatus
@@ -153,6 +171,9 @@ __all__ = [
     'RedTeamAgent',
     'RedTeamResult',
     'AttackCategory',
+    'BlindAgentRedTeam',
+    'RedTeamOrchestrator',
+    'run_quick_blind_agent',
 
     # Property testing
     'PropertyTester',

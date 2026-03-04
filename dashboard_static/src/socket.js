@@ -22,7 +22,7 @@ const CONFIG = {
     health: {
         pingInterval: 30000,    // Ping every 30 seconds
         pongTimeout: 5000,      // Expect pong within 5 seconds
-        staleThreshold: 60000   // Consider connection stale after 60 seconds
+        staleThreshold: 180000  // Consider connection stale after 180 seconds (3 min, handles throttled tabs + active streaming)
     },
     // Polling fallback settings (when WebSocket unavailable)
     polling: {
@@ -84,7 +84,10 @@ const eventHandlers = {
     queue_updated: [],
     queue_paused: [],
     queue_resumed: [],
-    mission_params: []
+    mission_params: [],
+    mission_agents: [],
+    investigation_agents: [],
+    pool_status: []
 };
 
 // =============================================================================
@@ -220,6 +223,20 @@ function stopHealthCheck() {
         clearInterval(connectionState.healthCheckTimer);
         connectionState.healthCheckTimer = null;
     }
+}
+
+
+// =============================================================================
+// ACTIVITY-AWARE KEEP-ALIVE
+// =============================================================================
+
+/**
+ * Notify the socket health checker that the connection is actively receiving data.
+ * Call this whenever a streaming event arrives (agent_stream_line, etc.) to prevent
+ * the stale-connection check from triggering during active streams.
+ */
+function notifyConnectionActive() {
+    connectionState.lastPong = Date.now();
 }
 
 // =============================================================================
@@ -544,11 +561,13 @@ function initWidgetSocket() {
         // Update events
         widgetSocket.on('update', (data) => {
             const { room, data: payload, timestamp } = data;
+            connectionState.lastPong = Date.now();  // Any received message proves connection is alive
             dispatchUpdate(room, payload);
         });
 
         widgetSocket.on('state_change', (data) => {
             const { event, room, data: payload, timestamp } = data;
+            connectionState.lastPong = Date.now();  // Any received message proves connection is alive
             console.log(`State change: ${event} in ${room}`);
             dispatchUpdate(room, payload);
         });
@@ -570,19 +589,33 @@ function initWidgetSocket() {
 
 function resubscribeToRooms() {
     if (connectionState.subscribedRooms.size === 0) {
-        // Subscribe to default rooms
-        subscribeToRoom('mission_status');
-        subscribeToRoom('journal');
-        subscribeToRoom('atlasforge_stats');
-        subscribeToRoom('analytics');
-        // Subscribe to new real-time push rooms
-        subscribeToRoom('file_events');
-        subscribeToRoom('glassbox_archive');
-        subscribeToRoom('glassbox');
-        subscribeToRoom('recommendations');
-        subscribeToRoom('mission_params');
-        // Subscribe to queue events
-        subscribeToRoom('queue_updated');
+        // Critical rooms subscribed immediately on connect
+        const criticalRooms = [
+            'mission_status',
+            'journal',
+            'analytics',
+            'mission_params',
+            'mission_agents',
+            'investigation_agents',
+        ];
+        // Non-critical rooms deferred 2s to avoid blocking initial render
+        const deferredRooms = [
+            'atlasforge_stats',
+            'glassbox',
+            'glassbox_archive',
+            'file_events',
+            'recommendations',
+            'queue_updated',
+            'pool_status',
+        ];
+
+        criticalRooms.forEach(room => subscribeToRoom(room));
+
+        setTimeout(() => {
+            if (widgetSocket && widgetSocket.connected) {
+                deferredRooms.forEach(room => subscribeToRoom(room));
+            }
+        }, 2000);
     } else {
         // Resubscribe to previously subscribed rooms
         connectionState.subscribedRooms.forEach(room => {
@@ -638,7 +671,9 @@ export function subscribeToAll() {
  */
 export function registerHandler(room, handler) {
     if (eventHandlers[room]) {
-        eventHandlers[room].push(handler);
+        if (!eventHandlers[room].includes(handler)) {
+            eventHandlers[room].push(handler);
+        }
     } else {
         console.warn(`Unknown room: ${room}`);
     }
@@ -784,6 +819,7 @@ document.addEventListener('visibilitychange', () => {
 
 // Make registerHandler available globally for widgets.js integration
 window.registerSocketHandler = registerHandler;
+window.notifySocketConnectionActive = notifyConnectionActive;
 window.unregisterSocketHandler = unregisterHandler;
 window.subscribeToSocketRoom = subscribeToRoom;
 window.unsubscribeFromSocketRoom = unsubscribeFromRoom;

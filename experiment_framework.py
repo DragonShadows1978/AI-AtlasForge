@@ -330,6 +330,9 @@ def _invoke_claude_cli(
     if system_prompt:
         cmd.extend(["--system-prompt", system_prompt])
 
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+
     try:
         result = subprocess.run(
             cmd,
@@ -338,6 +341,7 @@ def _invoke_claude_cli(
             text=True,
             timeout=timeout,
             cwd=str(cwd),
+            env=env,
             start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
@@ -388,6 +392,9 @@ def _invoke_codex_cli(
             f"{prompt}"
         )
 
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+
     try:
         result = subprocess.run(
             cmd,
@@ -396,6 +403,7 @@ def _invoke_codex_cli(
             text=True,
             timeout=timeout,
             cwd=str(cwd),
+            env=env,
             start_new_session=True  # Prevent FD inheritance blocking from background processes
         )
 
@@ -437,6 +445,9 @@ def _invoke_gemini_cli(
             f"{prompt}"
         )
 
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+
     try:
         result = subprocess.run(
             cmd,
@@ -445,6 +456,7 @@ def _invoke_gemini_cli(
             text=True,
             timeout=timeout,
             cwd=str(cwd),
+            env=env,
             start_new_session=True
         )
 

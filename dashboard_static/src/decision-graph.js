@@ -2,6 +2,12 @@
  * Dashboard Decision Graph Module (ES6)
  * Canvas-based decision graph visualization for tool invocations
  * Dependencies: core.js, api.js
+ *
+ * Hardening applied (2026-02-26):
+ *   Bug A: Explicit canvas.width/canvas.height assignment before drawing
+ *   Bug B: getBoundingClientRect -> offsetWidth -> parentElement.clientWidth -> fallback chain
+ *   Bug C: _decisionGraphVisible/_decisionGraphRendered state flags with reset on close
+ *   Bug D: <canvas> element in HTML has style="width:100%;display:block;"
  */
 
 import { escapeHtml } from './core.js';
@@ -13,6 +19,64 @@ import { api } from './api.js';
 
 let decisionGraphData = null;
 let decisionGraphNodes = [];
+
+// Bug C: visibility / render state flags - reset on close so reopen gets fresh render
+let _decisionGraphVisible = false;
+let _decisionGraphRendered = false;
+let _decisionGraphResizeObserver = null;
+
+// =============================================================================
+// TOGGLE + STATE MANAGEMENT
+// =============================================================================
+
+/** Toggle the decision graph widget open/closed. Wire to the card header button. */
+export function toggleDecisionGraph() {
+    const container = document.getElementById('decision-graph-container');
+    if (!container) return;
+    _decisionGraphVisible = !_decisionGraphVisible;
+    container.style.display = _decisionGraphVisible ? 'block' : 'none';
+    if (_decisionGraphVisible && !_decisionGraphRendered) {
+        // Trigger a fresh data load + render now that container is visible
+        refreshDecisionGraph();
+    }
+    if (_decisionGraphVisible) {
+        // ResizeObserver: observe canvas so chart repaints on container resize
+        const canvas = document.getElementById('decision-graph-canvas');
+        if (canvas && !_decisionGraphResizeObserver) {
+            _decisionGraphResizeObserver = new ResizeObserver(() => {
+                if (decisionGraphData && _decisionGraphVisible) {
+                    renderDecisionGraph(decisionGraphData);
+                }
+            });
+            _decisionGraphResizeObserver.observe(canvas);
+        }
+    } else {
+        // Bug C: reset rendered flag on close so next open fetches fresh data
+        _decisionGraphRendered = false;
+        // ResizeObserver: disconnect to prevent zombie observers
+        if (_decisionGraphResizeObserver) {
+            _decisionGraphResizeObserver.disconnect();
+            _decisionGraphResizeObserver = null;
+        }
+    }
+    // Recalc card height so maxHeight expands/contracts to fit the canvas
+    if (typeof window.recalcCardHeight === 'function') {
+        window.recalcCardHeight('decision-graph-widget');
+    }
+}
+
+/** Reset state flags - exported for test use */
+export function resetDecisionGraphState() {
+    _decisionGraphVisible = false;
+    _decisionGraphRendered = false;
+    decisionGraphData = null;
+    decisionGraphNodes = [];
+}
+
+/** Get current visibility/render state - exported for test use */
+export function getDecisionGraphState() {
+    return { visible: _decisionGraphVisible, rendered: _decisionGraphRendered };
+}
 
 // =============================================================================
 // DECISION GRAPH FUNCTIONS
@@ -38,10 +102,26 @@ export async function refreshDecisionGraph() {
 function renderDecisionGraph(data) {
     const canvas = document.getElementById('decision-graph-canvas');
     if (!canvas) return;
+
+    // Bug C: skip render when widget is not visible (offsetParent===null means hidden)
+    if (canvas.offsetParent === null && !_decisionGraphVisible) return;
+
     const ctx = canvas.getContext('2d');
 
-    const w = canvas.width;
-    const h = canvas.height;
+    // Bug B: robust dimension reading - getBoundingClientRect -> offsetWidth -> parent -> fallback
+    const rect = canvas.getBoundingClientRect();
+    let w = rect.width || canvas.offsetWidth || canvas.parentElement?.clientWidth || 400;
+    let h = rect.height || canvas.offsetHeight || canvas.parentElement?.clientHeight || 300;
+    // If still zero (e.g., transitioning from display:none), use CSS computed style
+    if (w < 10) {
+        const cs = window.getComputedStyle(canvas);
+        w = parseFloat(cs.width) || 400;
+        h = parseFloat(cs.height) || 300;
+    }
+
+    // Bug A: explicit canvas pixel dimension assignment before drawing
+    canvas.width = w;
+    canvas.height = h;
 
     ctx.fillStyle = '#0d1117';
     ctx.fillRect(0, 0, w, h);
@@ -54,6 +134,7 @@ function renderDecisionGraph(data) {
         ctx.font = '12px monospace';
         ctx.textAlign = 'center';
         ctx.fillText('No tool invocations yet', w / 2, h / 2);
+        _decisionGraphRendered = true;
         return;
     }
 
@@ -122,6 +203,8 @@ function renderDecisionGraph(data) {
             showDecisionNodeDetails(clicked);
         }
     };
+
+    _decisionGraphRendered = true;
 }
 
 export function showDecisionNodeDetails(node) {
