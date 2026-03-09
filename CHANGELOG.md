@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.1] - 2026-03-08
+
+### Added
+
+- feat: add vision module and claude_hooks as integrated repo components
+- docs: update v1.11.0 changelog with full feature list
+
+### Fixed
+
+- fix: update stale workspace/glassbox paths after glassbox move to repo root
+- fix: update backup-core-files.py paths from mini-mind-v2 to AI-AtlasForge
+- Release v1.10.0 - Automated release pipeline, clean push, conductor fixes
+- Release v1.9.1 - Dashboard persistence and stage gate fixes
+
+### Other
+
+- Release v2.0.0 — Agent Streaming, Dashboard Modularization, Red Team Overhaul
+- Release v1.12.0 - automated release pipeline
+- Release v1.11.0 - automated release pipeline
+- feat: make investigation_validator permanent (was symlink)
+- Release v1.10.0 - automated release pipeline
+- Release v1.9.0 - Modular engine only, legacy af_engine.py retired
+
+### Stats
+
+```
+ vision/desktop_vision.py                           |  253 +
+ vision/screen_capture.py                           |  279 +
+ vision/x11_bindings.py                             |  401 ++
+ websocket_events.py                                |   59 +-
+ 14687 files changed, 22738 insertions(+), 228636 deletions(-)
+```
+
+_Full diff: `git diff v2.0.0..v2.0.1`_
+
+
 ## [1.12.0] - 2026-03-01
 
 ### Added
