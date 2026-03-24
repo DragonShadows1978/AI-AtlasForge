@@ -20,10 +20,11 @@ export const stages = ['PLANNING', 'BUILDING', 'TESTING', 'ANALYZING', 'CYCLE_EN
  * @returns {string} - Escaped HTML string
  */
 export function escapeHtml(text) {
-    if (!text) return '';
+    if (text == null) return '';
+    text = String(text);
     const div = document.createElement('div');
     div.textContent = text;
-    return div.innerHTML;
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 /**
@@ -50,12 +51,14 @@ export function showToast(msg, typeOrDuration = 3000, duration = 3000) {
     // Remove any previous type classes
     t.classList.remove('toast-success', 'toast-error', 'toast-info', 'toast-warning');
 
-    // Add type class if not default info
-    if (toastType !== 'info') {
-        t.classList.add(`toast-${toastType}`);
+    // Add type class if not default info (allowlist prevents unexpected class injection)
+    const ALLOWED_TOAST_TYPES = new Set(['success', 'error', 'info', 'warning']);
+    const safeToastType = ALLOWED_TOAST_TYPES.has(toastType) ? toastType : 'info';
+    if (safeToastType !== 'info') {
+        t.classList.add(`toast-${safeToastType}`);
     }
 
-    t.innerHTML = msg;
+    t.textContent = msg;
     t.classList.add('show');
     setTimeout(() => {
         t.classList.remove('show');
@@ -69,7 +72,7 @@ export function showToast(msg, typeOrDuration = 3000, duration = 3000) {
  * @param {string} type - Notification type (success, error, info, warning)
  */
 export function showNotification(message, type = 'info') {
-    showToast(message);
+    showToast(message, type);
 }
 
 /**
@@ -78,9 +81,11 @@ export function showNotification(message, type = 'info') {
  * @returns {string} - Formatted string (e.g., "1.5 MB")
  */
 export function formatBytes(bytes) {
+    if (bytes == null || !isFinite(bytes) || bytes < 0) return '0 B';
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
 }
 
 /**
@@ -89,8 +94,11 @@ export function formatBytes(bytes) {
  * @returns {string} - Formatted string
  */
 export function formatNumber(n) {
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    if (n == null || !isFinite(n)) return '0';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    if (abs >= 1000000) return sign + (abs / 1000000).toFixed(1) + 'M';
+    if (abs >= 1000) return sign + (abs / 1000).toFixed(1) + 'K';
     return n.toString();
 }
 
@@ -100,7 +108,8 @@ export function formatNumber(n) {
  * @returns {string} - Formatted string (e.g., "1.5h")
  */
 export function formatDuration(seconds) {
-    if (!seconds) return '0s';
+    if (seconds == null || !isFinite(seconds) || seconds < 0) return '0s';
+    if (seconds === 0) return '0s';
     if (seconds < 60) return seconds.toFixed(0) + 's';
     if (seconds < 3600) return (seconds / 60).toFixed(1) + 'm';
     return (seconds / 3600).toFixed(1) + 'h';
@@ -112,6 +121,7 @@ export function formatDuration(seconds) {
  * @returns {string} - Formatted string (e.g., "5m ago")
  */
 export function formatTimeAgo(timestampOrDateStr) {
+    if (timestampOrDateStr == null || timestampOrDateStr === 0) return '-';
     let timestamp;
     if (typeof timestampOrDateStr === 'string') {
         // Parse ISO date string to Unix timestamp (seconds)
@@ -134,8 +144,9 @@ export function formatTimeAgo(timestampOrDateStr) {
  * @returns {string} - Formatted string (e.g., "Dec 15")
  */
 export function formatDate(isoDate) {
-    if (!isoDate) return '';
+    if (isoDate == null || isoDate === '') return '';
     const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return '';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 

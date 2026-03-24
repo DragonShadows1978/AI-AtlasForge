@@ -17,6 +17,7 @@ prompt if Claude didn't provide one.
 """
 
 import pytest
+from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 
@@ -32,10 +33,12 @@ class TestCycleEndToPlanningTransition:
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
+            orch.root = Path(__file__).parent.parent
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
             orch.state.get_field = Mock(return_value="Original mission statement")
+            orch._validate_continuation_drift = Mock(side_effect=lambda p, c: (p, False))
 
             # Set up cycles to have budget remaining
             orch.cycles = Mock()
@@ -82,10 +85,12 @@ class TestCycleEndToPlanningTransition:
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
+            orch.root = Path(__file__).parent.parent
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
             orch.state.get_field = Mock(return_value="Original mission statement")
+            orch._validate_continuation_drift = Mock(side_effect=lambda p, c: (p, False))
 
             # Set up cycles to have budget remaining
             orch.cycles = Mock()
@@ -137,10 +142,12 @@ class TestCycleEndToPlanningTransition:
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
+            orch.root = Path(__file__).parent.parent
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
             orch.state.get_field = Mock(return_value="Original mission")
+            orch._validate_continuation_drift = Mock(side_effect=lambda p, c: (p, False))
 
             orch.cycles = Mock()
             orch.cycles.current_cycle = 1
@@ -265,10 +272,12 @@ class TestTwoCycleMissionScenario:
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
+            orch.root = Path(__file__).parent.parent
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
             orch.state.get_field = Mock(return_value="Two-cycle test mission")
+            orch._validate_continuation_drift = Mock(side_effect=lambda p, c: (p, False))
 
             # Exactly 2 cycles - the bug scenario
             orch.cycles = Mock()
@@ -372,6 +381,9 @@ class TestCycleEndHandlerWarning:
         mock_context.cycle_number = 1
         mock_context.cycle_budget = 3
         mock_context.mission_id = "test_mission"
+        mock_context.workspace_dir = "/tmp/test_workspace"
+        mock_context.artifacts_dir = "/tmp/test_workspace/artifacts"
+        mock_context.mission = {"mission_id": "test_mission"}
 
         response = {
             "status": "cycle_complete",
@@ -399,6 +411,9 @@ class TestCycleEndHandlerWarning:
         mock_context.cycle_number = 1
         mock_context.cycle_budget = 3
         mock_context.mission_id = "test_mission"
+        mock_context.workspace_dir = "/tmp/test_workspace"
+        mock_context.artifacts_dir = "/tmp/test_workspace/artifacts"
+        mock_context.mission = {"mission_id": "test_mission"}
 
         response = {
             "status": "cycle_complete",

@@ -17,6 +17,7 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import logging
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,18 @@ from typing import Optional
 # =============================================================================
 
 STREAM_DIR = Path('/home/vader/AI-AtlasForge/state/agent_streams')
+CODEX_SESSIONS_DIR = Path.home() / '.codex' / 'sessions'
+CODEX_TRANSCRIPT_DISCOVERY_TIMEOUT = 12.0
+CODEX_TRANSCRIPT_POLL_INTERVAL = 0.2
+CODEX_TRANSCRIPT_MAX_SCAN = 200
+RECENT_AGENT_WINDOW_SECONDS = 1800
+
+logger = logging.getLogger(__name__)
+
+# Sentinel used by prewarm_active_agents() to claim a slot in self._agents
+# before file I/O completes, eliminating the TOCTOU window between the
+# first-check lock and the insert lock.
+_PREWARM_SENTINEL = object()
 
 
 def _ensure_stream_dir():
@@ -40,13 +53,15 @@ def _ensure_stream_dir():
 class AgentContext:
     """Metadata for a single spawned agent subprocess."""
 
-    def __init__(self, agent_id: str, context: str, label: str, pid: int):
+    def __init__(self, agent_id: str, context: str, label: str, pid: Optional[int] = None):
         self.agent_id = agent_id
         self.context = context      # 'mission' | 'investigation'
         self.label = label          # Display label e.g. "PLAN Agent 1", "Sub-0"
-        # Sanitize agent_id to prevent path traversal: strip / \ and ..
-        safe_id = agent_id.replace('/', '_').replace('\\', '_').replace('..', '__')
-        self.stream_file = STREAM_DIR / f"{context}_{safe_id}.jsonl"
+        # Sanitize agent_id and context to prevent path traversal: whitelist-only approach
+        import re as _re
+        safe_id = _re.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
+        safe_context = _re.sub(r'[^a-zA-Z0-9_\-]', '_', context)
+        self.stream_file = STREAM_DIR / f"{safe_context}_{safe_id}.jsonl"
         self.status = 'running'     # 'running' | 'complete' | 'error'
         self.spawned_at = time.time()
         self.started_at: float = self.spawned_at   # Timing: set at construction
@@ -68,6 +83,18 @@ class AgentContext:
             'pid': self.pid,
             'error': self.error,
         }
+
+
+def _copy_agent_fields(info: dict) -> dict:
+    """Normalize agent metadata for reconnect replay."""
+    agent = dict(info)
+    started_at = agent.get('started_at') or agent.get('spawned_at')
+    completed_at = agent.get('completed_at')
+    if started_at is not None:
+        agent['started_at'] = started_at
+    if completed_at is not None and started_at is not None:
+        agent['duration_seconds'] = round(completed_at - started_at, 1)
+    return agent
 
 
 # =============================================================================
@@ -96,6 +123,53 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
     if not isinstance(obj, dict):
         # Valid JSON but not an object (e.g. null, number, array) — treat as raw
         return {'event_type': 'raw', 'display_text': raw[:400], 'raw': raw}
+
+    # Codex exec transcript format
+    record_type = obj.get('type', '')
+    payload = obj.get('payload', {})
+    if record_type == 'event_msg' and isinstance(payload, dict):
+        event_type = payload.get('type', '')
+        if event_type == 'agent_message':
+            message = str(payload.get('message', '')).strip()
+            if message:
+                return {
+                    'event_type': 'thinking',
+                    'display_text': message[:600],
+                    'raw': raw,
+                }
+            return None
+        if event_type in ('task_started', 'task_complete', 'token_count', 'user_message'):
+            return None
+
+    if record_type == 'response_item' and isinstance(payload, dict):
+        item_type = payload.get('type', '')
+        if item_type == 'function_call':
+            name = payload.get('name', '?')
+            args = payload.get('arguments', '')
+            if not isinstance(args, str):
+                try:
+                    args = json.dumps(args)
+                except Exception:
+                    args = str(args)
+            return {
+                'event_type': 'tool_call',
+                'display_text': f"{name}({args[:300]})",
+                'raw': raw,
+            }
+        if item_type == 'function_call_output':
+            output = payload.get('output', '')
+            if not isinstance(output, str):
+                try:
+                    output = json.dumps(output)
+                except Exception:
+                    output = str(output)
+            return {
+                'event_type': 'tool_result',
+                'display_text': output[:400],
+                'raw': raw,
+            }
+        if item_type in ('message', 'reasoning'):
+            return None
 
     msg_type = obj.get('type', '')
     message = obj.get('message', {})
@@ -155,6 +229,88 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
     return None
 
 
+def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) -> bool:
+    """Return True when candidate workspace is the same as or inside expected workspace."""
+    expected = (expected_workspace or '').strip()
+    candidate = (candidate_workspace or '').strip()
+    if not expected or not candidate:
+        return False
+
+    try:
+        expected_path = Path(expected).expanduser().resolve()
+        candidate_path = Path(candidate).expanduser().resolve()
+        return candidate_path == expected_path or expected_path in candidate_path.parents
+    except OSError:
+        return candidate == expected or candidate.startswith(expected + os.sep)
+
+
+def _is_codex_exec_session_payload(payload: dict) -> bool:
+    """Return True only for headless Codex exec sessions."""
+    if not isinstance(payload, dict):
+        return False
+
+    originator = str(payload.get('originator') or '').strip().lower()
+    source = str(payload.get('source') or '').strip().lower()
+
+    if source and source != 'exec':
+        return False
+    if originator and originator != 'codex_exec':
+        return False
+
+    return source == 'exec' or originator == 'codex_exec'
+
+
+def _codex_transcript_matches_workspace(jsonl_path: Path, workspace_path: str) -> bool:
+    """Return True if the Codex transcript belongs to the workspace."""
+    try:
+        with open(jsonl_path, 'r', encoding='utf-8', errors='replace') as f:
+            for idx, line in enumerate(f):
+                if idx > 40:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict) or record.get('type') != 'session_meta':
+                    continue
+                payload = record.get('payload', {})
+                if not _is_codex_exec_session_payload(payload):
+                    return False
+                return _workspace_paths_match(workspace_path, payload.get('cwd', ''))
+    except (OSError, IOError):
+        return False
+    return False
+
+
+def _find_codex_transcript_for_workspace(workspace_path: str, started_at: float) -> Optional[Path]:
+    """Find the newest matching Codex exec transcript for a workspace."""
+    if not CODEX_SESSIONS_DIR.exists():
+        return None
+
+    try:
+        files = sorted(
+            CODEX_SESSIONS_DIR.rglob('*.jsonl'),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return None
+
+    lower_bound = started_at - 30.0
+    for path in files[:CODEX_TRANSCRIPT_MAX_SCAN]:
+        try:
+            if path.stat().st_mtime < lower_bound:
+                break
+        except OSError:
+            continue
+        if _codex_transcript_matches_workspace(path, workspace_path):
+            return path
+    return None
+
+
 # =============================================================================
 # AGENT STREAM WATCHER — daemon thread tailing JSONL file
 # =============================================================================
@@ -166,7 +322,7 @@ class AgentStreamWatcher(threading.Thread):
 
     Stops when:
     - Agent is marked complete/error
-    - 120s inactivity timeout elapses
+    - 600s inactivity timeout elapses
     """
 
     INACTIVITY_TIMEOUT = 600  # seconds
@@ -196,6 +352,10 @@ class AgentStreamWatcher(threading.Thread):
         while True:
             # Check for inactivity timeout
             if time.time() - last_activity > self.INACTIVITY_TIMEOUT:
+                logger.warning(
+                    f"Stream watcher for agent {self.ctx.agent_id} exiting after "
+                    f"{self.INACTIVITY_TIMEOUT}s inactivity"
+                )
                 _manager.complete_agent(self.ctx.agent_id, error=None)
                 break
 
@@ -258,8 +418,15 @@ class AgentStreamWatcher(threading.Thread):
 # Dashboard IPC: port where the dashboard HTTPS server listens.
 # Subprocesses POST agent events here so the dashboard process can re-emit
 # them to connected browser clients via its own SocketIO instance.
-_DASHBOARD_IPC_PORT = int(os.environ.get('ATLASFORGE_PORT', '5010'))
-_DASHBOARD_IPC_URL = f'https://localhost:{_DASHBOARD_IPC_PORT}/api/internal/agent-event'
+def _get_ipc_url():
+    _DEFAULT_PORT = 5010
+    try:
+        port = int(os.environ.get('ATLASFORGE_PORT', str(_DEFAULT_PORT)))
+        if not (1 <= port <= 65535):
+            port = _DEFAULT_PORT
+    except (ValueError, TypeError):
+        port = _DEFAULT_PORT
+    return f'https://localhost:{port}/api/internal/agent-event'
 
 # Module-level flag: True when this code is running INSIDE the dashboard process
 _running_in_dashboard: bool = False
@@ -271,7 +438,7 @@ def set_dashboard_mode(in_dashboard: bool = True):
     _running_in_dashboard = in_dashboard
 
 
-def _emit_via_ipc(room: str, payload: dict):
+def _emit_via_ipc(room: str, payload: dict, retries: int = 2):
     """
     Post an agent event to the dashboard's internal IPC endpoint.
 
@@ -279,25 +446,35 @@ def _emit_via_ipc(room: str, payload: dict):
     cannot access the dashboard process's SocketIO instance directly.
     Runs in a daemon thread to avoid blocking the caller.
     Falls back silently on any error — streaming is non-critical.
+
+    retries: number of additional attempts after the first on transient failure.
+    agent_spawned events use retries=2 to reduce dropped initial registrations.
     """
     def _post():
-        try:
-            import ssl
-            body = json.dumps({'room': room, 'payload': payload}).encode('utf-8')
-            req = urllib.request.Request(
-                _DASHBOARD_IPC_URL,
-                data=body,
-                headers={'Content-Type': 'application/json'},
-                method='POST',
-            )
-            ssl_ctx = ssl.create_default_context()
-            ssl_ctx.check_hostname = False
-            ssl_ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=3, context=ssl_ctx) as resp:
-                pass  # Fire-and-forget; ignore response body
-        except Exception as e:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(f"IPC emit failed (room={room}): {e}")
+        import ssl
+        import logging as _logging
+        log = _logging.getLogger(__name__)
+        body = json.dumps({'room': room, 'payload': payload}).encode('utf-8')
+        ipc_url = _get_ipc_url()
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        for attempt in range(retries + 1):
+            try:
+                req = urllib.request.Request(
+                    ipc_url,
+                    data=body,
+                    headers={'Content-Type': 'application/json'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(req, timeout=3, context=ssl_ctx) as resp:
+                    pass  # Fire-and-forget; ignore response body
+                return  # Success
+            except Exception as e:
+                if attempt < retries:
+                    time.sleep(0.2 * (attempt + 1))
+                else:
+                    log.warning(f"IPC emit failed after {retries + 1} attempts (room={room}): {e}")
 
     t = threading.Thread(target=_post, daemon=True)
     t.start()
@@ -314,20 +491,26 @@ def _emit_to_socketio(room: str, payload: dict):
         pass  # Non-critical
 
 
-def _emit(room: str, payload: dict):
+def _emit(room: str, payload: dict, retries: int = 0):
     """
     Route emission: direct SocketIO when in dashboard process, HTTP IPC otherwise.
+    retries is passed through to _emit_via_ipc for lifecycle events that need reliability.
     """
     if _running_in_dashboard:
         _emit_to_socketio(room, payload)
     else:
-        _emit_via_ipc(room, payload)
+        _emit_via_ipc(room, payload, retries=retries)
 
 
 def _emit_agent_event(ctx: AgentContext, payload: dict):
-    """Emit an agent lifecycle event to the appropriate SocketIO room."""
+    """Emit an agent lifecycle event to the appropriate SocketIO room.
+
+    agent_spawned events use retries=2 so transient IPC failures don't silently
+    drop the initial registration that makes the agent tab appear in the dashboard.
+    """
     room = 'mission_agents' if ctx.context == 'mission' else 'investigation_agents'
-    _emit(room, payload)
+    retries = 2 if payload.get('event') == 'agent_spawned' else 0
+    _emit(room, payload, retries=retries)
 
 
 def _emit_agent_stream_line(ctx: AgentContext, event: dict):
@@ -359,7 +542,7 @@ class AgentStreamManager:
         self._lock = threading.Lock()
         _ensure_stream_dir()
 
-    def register_agent(self, context: str, agent_id: str, label: str, pid: int) -> Path:
+    def register_agent(self, context: str, agent_id: str, label: str, pid: Optional[int] = None) -> Path:
         """
         Called at agent spawn time.
 
@@ -367,7 +550,7 @@ class AgentStreamManager:
             context: 'mission' | 'investigation'
             agent_id: Unique agent identifier
             label: Display label (e.g. "PLAN Agent 1")
-            pid: Subprocess PID (0 if not yet known)
+            pid: Subprocess PID (None if not yet known)
 
         Returns:
             Path to the agent's stream file (write stdout here)
@@ -389,7 +572,11 @@ class AgentStreamManager:
         """Update PID after process is spawned (if PID wasn't known at register time)."""
         with self._lock:
             if agent_id in self._agents:
-                self._agents[agent_id].pid = pid
+                entry = self._agents[agent_id]
+                # Skip sentinel — plain object() has no .pid attribute
+                if entry is _PREWARM_SENTINEL:
+                    return
+                entry.pid = pid
                 self._save_state_locked()
 
     def _write_snapshot(self, ctx: 'AgentContext'):
@@ -410,8 +597,8 @@ class AgentStreamManager:
             with open(tmp, 'w') as f:
                 json.dump(snapshot, f)
             tmp.replace(snapshot_path)
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.warning("_write_snapshot failed: %s", e)
 
     def complete_agent(self, agent_id: str, error: Optional[str] = None):
         """Mark agent as complete or error. Called when subprocess exits."""
@@ -423,31 +610,39 @@ class AgentStreamManager:
             # Already a tombstone — nothing to do
             if isinstance(entry, dict) and entry.get('_tombstone'):
                 return
+            # Guard against _PREWARM_SENTINEL: a plain object() has no .status attribute.
+            # Race: prewarm_active_agents placed a sentinel; real AgentContext not yet registered.
+            if entry is _PREWARM_SENTINEL:
+                return
+            # Guard against double-complete: only transition from 'running'
+            if entry.status != 'running':
+                return
             ctx = entry
             ctx.status = 'error' if error else 'complete'
             ctx.error = error
             ctx.completed_at = time.time()
             self._save_state_locked()
+            # Replace heavy AgentContext with lightweight tombstone atomically —
+            # no gap between status change and tombstone visibility to readers.
+            self._agents[agent_id] = {
+                '_tombstone': True,
+                'agent_id': agent_id,
+                'context': ctx.context,
+                'label': ctx.label,
+                'stream_file': str(ctx.stream_file),
+                'snapshot_file': str(ctx.stream_file.with_suffix('.snapshot.json')),
+                'status': ctx.status,
+                'started_at': ctx.started_at,
+                'completed_at': ctx.completed_at,
+                'error': ctx.error,
+            }
 
-        # Error logging (non-critical — failures are silently swallowed)
+        # Non-critical post-completion work outside lock
         if error:
             self._log_agent_error(ctx, error)
 
         # Write snapshot for fast replay on reconnect
         self._write_snapshot(ctx)
-
-        # Replace heavy AgentContext with lightweight tombstone dict to free _parsed_lines memory
-        with self._lock:
-            if agent_id in self._agents and not isinstance(self._agents[agent_id], dict):
-                self._agents[agent_id] = {
-                    '_tombstone': True,
-                    'agent_id': agent_id,
-                    'context': ctx.context,
-                    'stream_file': ctx.stream_file,
-                    'snapshot_file': ctx.stream_file.with_suffix('.snapshot.json'),
-                    'status': ctx.status,
-                    'completed_at': ctx.completed_at,
-                }
 
     def _log_agent_error(self, ctx: 'AgentContext', error: str):
         """Write agent error to journal log, GlassBox, and emit via SocketIO."""
@@ -551,6 +746,9 @@ class AgentStreamManager:
                 # Skip tombstones (completed agents replaced with lightweight dicts)
                 if isinstance(entry, dict):
                     continue
+                # Skip prewarm sentinels — plain object() has no .status
+                if entry is _PREWARM_SENTINEL:
+                    continue
                 if entry.status == 'running':
                     memory_agents[agent_id] = entry.to_dict()
 
@@ -562,6 +760,49 @@ class AgentStreamManager:
 
         mission = [v for v in memory_agents.values() if v.get('context') == 'mission']
         investigation = [v for v in memory_agents.values() if v.get('context') == 'investigation']
+        return {'mission': mission, 'investigation': investigation}
+
+    def get_recent_agents(self, limit: int = 6, max_age_seconds: int = RECENT_AGENT_WINDOW_SECONDS) -> dict:
+        """Return recent running/completed agents grouped by context for reconnect replay."""
+        now = time.time()
+        by_id = {}
+
+        with self._lock:
+            for agent_id, entry in self._agents.items():
+                if entry is _PREWARM_SENTINEL:
+                    continue
+                info = dict(entry) if isinstance(entry, dict) else entry.to_dict()
+                status = info.get('status')
+                if status not in ('running', 'complete', 'error'):
+                    continue
+                ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
+                if max_age_seconds and ts and (now - ts) > max_age_seconds:
+                    continue
+                by_id[agent_id] = _copy_agent_fields(info)
+
+        for agent_id, info in self._load_disk_agents().items():
+            if agent_id in by_id or not isinstance(info, dict):
+                continue
+            status = info.get('status')
+            if status not in ('running', 'complete', 'error'):
+                continue
+            ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
+            if max_age_seconds and ts and (now - ts) > max_age_seconds:
+                continue
+            by_id[agent_id] = _copy_agent_fields(info)
+
+        def _sort_key(info: dict):
+            status_rank = 0 if info.get('status') == 'running' else 1
+            ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
+            return (status_rank, -ts)
+
+        recent = sorted(by_id.values(), key=_sort_key)
+
+        mission = [v for v in recent if v.get('context') == 'mission']
+        investigation = [v for v in recent if v.get('context') == 'investigation']
+        if limit is not None and limit >= 0:
+            mission = mission[:limit]
+            investigation = investigation[:limit]
         return {'mission': mission, 'investigation': investigation}
 
     def _load_disk_agents(self) -> dict:
@@ -582,9 +823,12 @@ class AgentStreamManager:
           2. Tombstone: read .snapshot.json (completed agents — fast, no JSONL re-parse)
           3. Disk fallback: scan STREAM_DIR for matching .jsonl (cold-start / cross-process)
         """
-        # Clamp limit: non-positive or None is meaningless. Python list[-0:] returns ALL (since
-        # -0==0), list[--1:]=list[1:] returns all-but-first, and list[-None:] raises TypeError.
-        if limit is None or limit <= 0:
+        # limit=None means "return all lines" (no limit).
+        # limit=0 means "return no lines" (empty).
+        # limit<0 is invalid — raise ValueError (ASM-NEW-4: consistent with get_stream_history).
+        if limit is not None and limit < 0:
+            raise ValueError(f'limit must be non-negative, got {limit}')
+        if limit == 0:
             return []
 
         with self._lock:
@@ -594,14 +838,15 @@ class AgentStreamManager:
             # Not in memory at all — scan disk
             return self._get_stream_lines_from_disk(agent_id, limit)
 
-        # Tombstone: completed agent — read snapshot for fast replay
-        if isinstance(entry, dict) and entry.get('_tombstone'):
+        # Tombstone: completed agent stored as plain dict — read snapshot for fast replay
+        if isinstance(entry, dict):
             snap_path = entry.get('snapshot_file')
             if snap_path and Path(snap_path).exists():
                 try:
                     with open(snap_path) as f:
                         data = json.load(f)
-                    return data.get('lines', [])[-limit:]
+                    lines_all = data.get('lines', [])
+                    return lines_all if limit is None else lines_all[-limit:]
                 except Exception:
                     pass
             # Snapshot missing — fall back to JSONL
@@ -610,16 +855,21 @@ class AgentStreamManager:
                 return self._parse_jsonl_file(Path(stream_file), limit)
             return []
 
+        # Sentinel: prewarm slot not yet replaced with a real AgentContext
+        if entry is _PREWARM_SENTINEL:
+            return self._get_stream_lines_from_disk(agent_id, limit)
+
         # Live AgentContext
         ctx = entry
         with ctx._lock:
-            lines = list(ctx._parsed_lines)[-limit:]
+            all_lines = list(ctx._parsed_lines)
+            lines = all_lines if limit is None else all_lines[-limit:]
 
         # Disk fallback: if buffer is empty but stream file exists, re-parse from disk
         if not lines and ctx.stream_file.exists():
             try:
                 disk_lines = self._parse_jsonl_file(ctx.stream_file, limit=None)
-                lines = disk_lines[-limit:]
+                lines = disk_lines if limit is None else disk_lines[-limit:]
                 # Populate in-memory buffer from disk so future calls are fast
                 with ctx._lock:
                     if not ctx._parsed_lines:
@@ -629,24 +879,45 @@ class AgentStreamManager:
 
         return lines
 
-    def _parse_jsonl_file(self, path: Path, limit: Optional[int] = None) -> list:
-        """Parse a JSONL stream file and return list of event dicts."""
+    _MAX_JSONL_BYTES = 10 * 1024 * 1024  # 10 MiB default cap
+
+    def _parse_jsonl_file(
+        self,
+        path: Path,
+        limit: Optional[int] = None,
+        max_bytes: int = _MAX_JSONL_BYTES,
+    ) -> list:
+        """Parse a JSONL stream file with a configurable size cap."""
+        # ASM-NEW-4: internal consistency — reject negative limits uniformly.
+        # Public callers (get_agent_stream_lines) already validate, but this
+        # catches programming errors in future callers of this private method.
+        if limit is not None and limit < 0:
+            raise ValueError(f'_parse_jsonl_file: limit must be non-negative, got {limit}')
+        # C3-B fix (optimized): early-exit before any I/O when limit=0
+        if limit == 0:
+            return []
         disk_lines = []
         try:
-            for raw_line in path.read_text().splitlines():
-                event = _parse_jsonl_line(raw_line)
-                if event:
-                    disk_lines.append({**event, 'timestamp': ''})
+            bytes_read = 0
+            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+                for raw_line in fh:
+                    bytes_read += len(raw_line.encode('utf-8', errors='replace'))
+                    if bytes_read > max_bytes:
+                        break
+                    event = _parse_jsonl_line(raw_line)
+                    if event:
+                        disk_lines.append({**event, 'timestamp': ''})
         except Exception:
             pass
-        if limit is not None:
+        if limit is not None and limit > 0:
             return disk_lines[-limit:]
         return disk_lines
 
     def _get_stream_lines_from_disk(self, agent_id: str, limit: int) -> list:
         """Scan STREAM_DIR for any file matching *_{agent_id}.jsonl and parse it."""
         _ensure_stream_dir()
-        safe_id = agent_id.replace('/', '_').replace('\\', '_').replace('..', '__')
+        import re as _re_safe
+        safe_id = _re_safe.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
         for context in ('mission', 'investigation'):
             candidate = STREAM_DIR / f"{context}_{safe_id}.jsonl"
             if candidate.exists():
@@ -660,14 +931,19 @@ class AgentStreamManager:
         Scans STREAM_DIR for .jsonl files. Optionally filters by mission_id.
         Returns newest-first, up to limit entries.
         """
+        # ASM-NEW-3: reject negative limit
+        if limit is not None and limit < 0:
+            raise ValueError(f'limit must be non-negative, got {limit}')
         _ensure_stream_dir()
 
-        # Collect currently running stream file names (skip tombstones)
+        # Collect currently running stream file names (skip tombstones and sentinels)
         with self._lock:
             active_files = {
                 entry.stream_file.name
                 for entry in self._agents.values()
-                if not isinstance(entry, dict) and entry.status == 'running'
+                if not isinstance(entry, dict)
+                and entry is not _PREWARM_SENTINEL
+                and entry.status == 'running'
             }
 
         # Phase 1: Fast scan — collect mtime only (no file reads) so we can sort+limit before any I/O
@@ -687,6 +963,8 @@ class AgentStreamManager:
 
         # Sort newest-first; trim to limit*3 before expensive enrichment
         candidates.sort(key=lambda t: t[0], reverse=True)
+        if limit is None:
+            limit = len(candidates)  # no-op limit: keep all
         candidates = candidates[:limit * 3]
 
         manifests = []
@@ -737,7 +1015,7 @@ class AgentStreamManager:
         if mission_id:
             manifests = [m for m in manifests if m.get('mission_id') == mission_id]
 
-        return manifests[:limit]
+        return manifests[:limit] if limit is not None else manifests
 
     def cleanup_old_stream_files(self, max_age_hours: int = 24) -> int:
         """
@@ -746,16 +1024,21 @@ class AgentStreamManager:
 
         Returns: count of files deleted.
         """
+        # ASM-NEW-1: reject non-positive, None, or bool max_age_hours to prevent
+        # deleting all files. bool is a subtype of int (True==1, False==0) so
+        # we must reject it explicitly before the numeric check.
+        if isinstance(max_age_hours, bool) or max_age_hours is None or max_age_hours <= 0:
+            raise ValueError(f'max_age_hours must be a positive integer, got {max_age_hours!r}')
         _ensure_stream_dir()
         cutoff = time.time() - (max_age_hours * 3600)
         deleted = 0
 
-        # Collect active stream file paths under lock (skip tombstones)
+        # Collect active stream file paths under lock (skip tombstones and sentinels)
         with self._lock:
             active_paths = {
                 entry.stream_file
                 for entry in self._agents.values()
-                if not isinstance(entry, dict)
+                if not isinstance(entry, dict) and entry is not _PREWARM_SENTINEL
             }
 
         for p in STREAM_DIR.iterdir():
@@ -790,35 +1073,65 @@ class AgentStreamManager:
         """
         reaped = []
 
-        # Collect candidates from in-memory state (skip tombstones)
+        # Collect candidates from in-memory state (skip tombstones and sentinels)
         with self._lock:
             candidates = [
                 (aid, entry.pid, entry.spawned_at)
                 for aid, entry in self._agents.items()
-                if not isinstance(entry, dict) and entry.status == 'running' and entry.pid > 0
+                if not isinstance(entry, dict)
+                and entry is not _PREWARM_SENTINEL
+                and entry.status == 'running'
+                and entry.pid is not None and entry.pid > 0
             ]
 
         # Also check disk state for cross-process agents (registered by conductor)
-        disk_agents = self._load_disk_agents()
-        for aid, info in disk_agents.items():
-            if info.get('status') == 'running' and info.get('pid', 0) > 0:
-                with self._lock:
+        with self._lock:
+            disk_agents = self._load_disk_agents()
+            for aid, info in disk_agents.items():
+                if info.get('status') == 'running' and (info.get('pid') or 0) > 0:
                     if aid not in self._agents:
                         candidates.append((aid, info['pid'], info.get('spawned_at', 0)))
 
         for agent_id, pid, spawned_at in candidates:
             if not _is_pid_alive(pid, spawned_at):
-                # Re-check status under lock to prevent double-reap from concurrent threads
+                # Atomically hydrate (if disk-only) and tombstone under a single lock
+                # acquisition so no concurrent thread can slip in between.
+                ctx_for_io = None
                 with self._lock:
                     entry = self._agents.get(agent_id)
                     if entry is not None:
                         if isinstance(entry, dict):
                             continue  # Already tombstoned
+                        if entry is _PREWARM_SENTINEL:
+                            continue  # Prewarm claimed this slot; let prewarm handle it
                         if entry.status != 'running':
                             continue  # Already completed by another thread
+                        ctx_for_io = entry
                     else:
+                        # Agent only exists on disk — hydrate a minimal ctx
                         self._hydrate_disk_agent(agent_id, disk_agents.get(agent_id, {}))
-                self.complete_agent(agent_id, error='process_died')
+                        ctx_for_io = self._agents[agent_id]
+                    # Complete atomically inside the same lock block
+                    ctx_for_io.status = 'error'
+                    ctx_for_io.error = 'process_died'
+                    ctx_for_io.completed_at = time.time()
+                    self._save_state_locked()
+                    # Replace with tombstone immediately so no other thread sees 'running'
+                    self._agents[agent_id] = {
+                        '_tombstone': True,
+                        'agent_id': agent_id,
+                        'context': ctx_for_io.context,
+                        'label': ctx_for_io.label,
+                        'stream_file': str(ctx_for_io.stream_file),
+                        'snapshot_file': str(ctx_for_io.stream_file.with_suffix('.snapshot.json')),
+                        'status': 'error',
+                        'started_at': ctx_for_io.started_at,
+                        'completed_at': ctx_for_io.completed_at,
+                        'error': ctx_for_io.error,
+                    }
+                # I/O outside the lock (non-critical, idempotent)
+                self._log_agent_error(ctx_for_io, 'process_died')
+                self._write_snapshot(ctx_for_io)
                 reaped.append(agent_id)
 
         return reaped
@@ -829,7 +1142,7 @@ class AgentStreamManager:
             agent_id=agent_id,
             context=disk_info.get('context', 'mission'),
             label=disk_info.get('label', agent_id),
-            pid=disk_info.get('pid', 0),
+            pid=disk_info.get('pid') or None,
         )
         ctx.spawned_at = disk_info.get('spawned_at', time.time())
         ctx.started_at = disk_info.get('started_at', ctx.spawned_at)
@@ -849,12 +1162,16 @@ class AgentStreamManager:
         for agent_id, info in disk_agents.items():
             with self._lock:
                 if agent_id in self._agents:
-                    continue  # Already tracked in memory
+                    continue  # Already tracked in memory (AgentContext or tombstone)
+                # Claim the slot with a sentinel so concurrent threads skip this agent
+                # while we do file I/O below. Without this, two threads could both see
+                # agent_id absent, both build a ctx, and one would overwrite the other.
+                self._agents[agent_id] = _PREWARM_SENTINEL
             ctx = AgentContext(
                 agent_id=agent_id,
                 context=info.get('context', 'mission'),
                 label=info.get('label', agent_id),
-                pid=info.get('pid', 0),
+                pid=info.get('pid') or None,
             )
             ctx.spawned_at = info.get('spawned_at', time.time())
             ctx.started_at = info.get('started_at', ctx.spawned_at)
@@ -880,18 +1197,23 @@ class AgentStreamManager:
                     '_tombstone': True,
                     'agent_id': agent_id,
                     'context': ctx.context,
-                    'stream_file': ctx.stream_file,
-                    'snapshot_file': ctx.stream_file.with_suffix('.snapshot.json'),
+                    'label': ctx.label,
+                    'stream_file': str(ctx.stream_file),
+                    'snapshot_file': str(ctx.stream_file.with_suffix('.snapshot.json')),
                     'status': ctx.status,
+                    'started_at': ctx.started_at,
                     'completed_at': ctx.completed_at,
+                    'error': ctx.error,
                 }
                 with self._lock:
-                    if agent_id not in self._agents:
+                    # Replace sentinel with tombstone; skip if another thread claimed slot
+                    if self._agents.get(agent_id) is _PREWARM_SENTINEL:
                         self._agents[agent_id] = tombstone
                         warmed += 1
             else:
                 with self._lock:
-                    if agent_id not in self._agents:
+                    # Replace sentinel with live ctx; skip if another thread claimed slot
+                    if self._agents.get(agent_id) is _PREWARM_SENTINEL:
                         self._agents[agent_id] = ctx
                         warmed += 1
         return warmed
@@ -902,26 +1224,29 @@ class AgentStreamManager:
             state = {
                 agent_id: (entry if isinstance(entry, dict) else entry.to_dict())
                 for agent_id, entry in self._agents.items()
-                if not (isinstance(entry, dict) and entry.get('_tombstone'))
+                if entry is not _PREWARM_SENTINEL
+                and not (isinstance(entry, dict) and entry.get('_tombstone'))
             }
             tmp = self.STATE_FILE.with_suffix('.tmp')
             with open(tmp, 'w') as f:
                 json.dump(state, f, indent=2)
             tmp.replace(self.STATE_FILE)
-        except Exception:
-            pass  # Non-critical
+        except Exception as e:
+            logger.warning("_save_state_locked failed: %s", e)
 
 
 # =============================================================================
 # PID HEALTH CHECK — used by reaper to detect dead agent processes
 # =============================================================================
 
-def _is_pid_alive(pid: int, expected_start_time: float = 0) -> bool:
+def _is_pid_alive(pid, expected_start_time: float = 0) -> bool:
     """Check if a process is still alive, with PID reuse protection.
 
     Uses /proc/{pid}/stat (Linux-native, zero-overhead) with os.kill fallback.
     Guards against PID reuse by comparing process start time against expected_start_time.
     """
+    if pid is None or pid <= 0:
+        return False
     try:
         stat_path = f'/proc/{pid}/stat'
         if not os.path.exists(stat_path):
@@ -967,7 +1292,7 @@ _manager = AgentStreamManager()
 # MODULE-LEVEL API
 # =============================================================================
 
-def register_agent(context: str, agent_id: str, label: str, pid: int = 0) -> Path:
+def register_agent(context: str, agent_id: str, label: str, pid: Optional[int] = None) -> Path:
     """Register a new agent and return its stream file path."""
     return _manager.register_agent(context, agent_id, label, pid)
 
@@ -985,6 +1310,11 @@ def complete_agent(agent_id: str, error: Optional[str] = None):
 def get_active_agents() -> dict:
     """Return active agents grouped by context (for WebSocket initial_data)."""
     return _manager.get_active_agents()
+
+
+def get_recent_agents(limit: int = 6, max_age_seconds: int = RECENT_AGENT_WINDOW_SECONDS) -> dict:
+    """Return recent running/completed agents grouped by context."""
+    return _manager.get_recent_agents(limit=limit, max_age_seconds=max_age_seconds)
 
 
 def get_agent_stream_lines(agent_id: str, limit: int = 200) -> list:
@@ -1033,7 +1363,63 @@ def stream_stdout_to_file(proc, stream_file: Path, agent_id: str):
     except Exception:
         pass
     finally:
-        complete_agent(agent_id, error=None)
+        try:
+            proc.wait()
+            error = None if proc.returncode == 0 else f"Process exited with code {proc.returncode}"
+        except Exception as _wait_exc:
+            error = f"Process wait failed: {_wait_exc}"
+        complete_agent(agent_id, error=error)
+
+
+def stream_codex_session_to_file(proc, stream_file: Path, workspace_path: str, started_at: Optional[float] = None):
+    """Mirror matching Codex exec transcript entries into the agent stream file."""
+    started_at = started_at or time.time()
+    deadline = time.time() + CODEX_TRANSCRIPT_DISCOVERY_TIMEOUT
+    transcript_path = None
+
+    while time.time() < deadline:
+        transcript_path = _find_codex_transcript_for_workspace(workspace_path, started_at)
+        if transcript_path is not None:
+            break
+        time.sleep(CODEX_TRANSCRIPT_POLL_INTERVAL)
+
+    if transcript_path is None:
+        logger.warning("No Codex transcript found for workspace %s", workspace_path)
+        return
+
+    idle_after_exit = 0
+    file_pos = 0
+
+    try:
+        with open(stream_file, 'a', buffering=1, encoding='utf-8') as dest:
+            while True:
+                chunk = ''
+                try:
+                    with open(transcript_path, 'r', encoding='utf-8', errors='replace') as src:
+                        src.seek(file_pos)
+                        chunk = src.read()
+                        file_pos = src.tell()
+                except (OSError, IOError):
+                    chunk = ''
+
+                if chunk:
+                    dest.write(chunk)
+                    dest.flush()
+
+                if proc.poll() is None:
+                    idle_after_exit = 0
+                    time.sleep(CODEX_TRANSCRIPT_POLL_INTERVAL)
+                    continue
+
+                if chunk:
+                    idle_after_exit = 0
+                else:
+                    idle_after_exit += 1
+                    if idle_after_exit >= 10:
+                        break
+                time.sleep(CODEX_TRANSCRIPT_POLL_INTERVAL)
+    except Exception:
+        logger.exception("Failed to mirror Codex transcript for workspace %s", workspace_path)
 
 
 def reconstruct_text_from_stream_file(stream_file: Path, provider: str = 'claude') -> str:

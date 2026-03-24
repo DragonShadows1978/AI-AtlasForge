@@ -28,6 +28,16 @@ const agentActivityState = {
         agentOrder: [],
     },
     activePanel: 'atlasforge', // 'atlasforge' | 'mission' | 'investigation'
+    research: {
+        agent_id: null,
+        status: 'idle',   // 'idle' | 'running' | 'complete' | 'error'
+        topics: [],       // array of {index, label, status, sources}
+        total_topics: 0,
+        sources_found: 0,
+        last_message: '',
+        started_at: null,
+        _hideTimer: null,
+    },
 };
 
 let _reconcileTimer = null;
@@ -62,7 +72,7 @@ export function initAgentActivity() {
     // Start periodic reconciliation to close ghost tabs (agent_complete events dropped
     // during brief WebSocket lag that doesn't trigger a full reconnect cycle).
     if (_reconcileTimer) clearInterval(_reconcileTimer);
-    _reconcileTimer = setInterval(_reconcileAllAgentTabs, 10000);
+    _reconcileTimer = setInterval(_reconcileAllAgentTabs, 3000);
 }
 
 // =============================================================================
@@ -70,6 +80,10 @@ export function initAgentActivity() {
 // =============================================================================
 
 export function handleMissionAgentEvent(data) {
+    if (data && data.event === 'research_progress') {
+        _handleResearchProgress(data);
+        return;
+    }
     _updateAgentPanel('mission', data);
 }
 
@@ -254,12 +268,14 @@ function _appendStreamLine(context, data) {
     }
 }
 
-function _closeAgentTab(context, agent_id, isError, durationSeconds, lineCount) {
+function _closeAgentTab(context, agent_id, isError, durationSeconds, lineCount, retain = false) {
     const state = agentActivityState[context];
     if (!state || !state.agents[agent_id]) return;
 
     const agent = state.agents[agent_id];
-    agent.status = isError ? 'error' : 'complete';
+    // Set 'closing' immediately so _reconcileAgentTabs won't re-spawn this tab
+    // during the 2000ms animation window. isError stays permanent on the object.
+    agent.status = isError ? 'error' : 'closing';
 
     if (durationSeconds != null) agent.duration_seconds = durationSeconds;
     if (lineCount != null) agent.line_count = lineCount;
@@ -289,6 +305,15 @@ function _closeAgentTab(context, agent_id, isError, durationSeconds, lineCount) 
 
     tab.style.opacity = '0.4';
     tab.style.transition = 'opacity 0.3s ease';
+    const dot = tab.querySelector('.pulse-dot');
+    if (dot) dot.style.animation = 'none';
+
+    if (retain) {
+        agent.status = isError ? 'error' : 'complete';
+        if (context === 'mission') _updateMissionBadge();
+        return;
+    }
+
     setTimeout(() => {
         tab.remove();
         delete state.agents[agent_id];
@@ -312,7 +337,7 @@ function _closeAgentTab(context, agent_id, isError, durationSeconds, lineCount) 
     }, 2000);
 }
 
-function _errorAgentTab(context, agent_id, errorMsg) {
+function _errorAgentTab(context, agent_id, errorMsg, retain = false) {
     const state = agentActivityState[context];
     if (!state || !state.agents[agent_id]) return;
 
@@ -325,6 +350,11 @@ function _errorAgentTab(context, agent_id, errorMsg) {
         tab.classList.add('error');
         const dot = tab.querySelector('.pulse-dot');
         if (dot) dot.style.animation = 'none';
+    }
+
+    if (retain) {
+        if (context === 'mission') _updateMissionBadge();
+        return;
     }
 
     const runningAgents = Object.values(state.agents).filter(a => a.status === 'running');
@@ -424,26 +454,30 @@ function _rebuildFromState(context, agents) {
     }
 
     agents.forEach(agentInfo => {
-        if (agentInfo.status === 'running') {
-            _spawnAgentTab(context, {
-                agent_id: agentInfo.agent_id,
-                label: agentInfo.label,
-            });
+        _spawnAgentTab(context, {
+            agent_id: agentInfo.agent_id,
+            label: agentInfo.label,
+        });
 
-            if (agentInfo.stream_lines && agentInfo.stream_lines.length > 0) {
-                // Lines embedded in initial_state payload — skip REST call entirely
-                agentInfo.stream_lines.forEach(line => {
-                    _appendStreamLine(context, {
-                        agent_id: agentInfo.agent_id,
-                        event_type: line.event_type,
-                        text: line.display_text || line.text || '',
-                        timestamp: line.timestamp,
-                    });
+        if (agentInfo.stream_lines && agentInfo.stream_lines.length > 0) {
+            // Lines embedded in initial_state payload — skip REST call entirely
+            agentInfo.stream_lines.forEach(line => {
+                _appendStreamLine(context, {
+                    agent_id: agentInfo.agent_id,
+                    event_type: line.event_type,
+                    text: line.display_text || line.text || '',
+                    timestamp: line.timestamp,
                 });
-            } else {
-                // Fallback: REST call (no embedded lines, e.g. first start with empty cache)
-                _fetchAgentStreamLines(context, agentInfo.agent_id);
-            }
+            });
+        } else {
+            // Fallback: REST call (no embedded lines, e.g. first start with empty cache)
+            _fetchAgentStreamLines(context, agentInfo.agent_id);
+        }
+
+        if (agentInfo.status === 'error') {
+            _errorAgentTab(context, agentInfo.agent_id, agentInfo.error || 'Agent failed', true);
+        } else if (agentInfo.status !== 'running') {
+            _closeAgentTab(context, agentInfo.agent_id, false, agentInfo.duration_seconds, agentInfo.line_count, true);
         }
     });
 }
@@ -492,14 +526,27 @@ function _reconcileAgentTabs(context, activeAgents) {
 
     const activeIds = new Set(activeAgents.map(a => a.agent_id));
 
+    // Close ghost tabs: UI shows running but server says agent is gone
     Object.keys(state.agents).forEach(agent_id => {
         const agent = state.agents[agent_id];
-        // Only reconcile 'running' agents — completed/error tabs are already being removed
         if (agent && agent.status === 'running' && !activeIds.has(agent_id)) {
-            // Server says this agent is not active — it completed/died without the client
-            // receiving the agent_complete event. Force-close the ghost tab.
             _closeAgentTab(context, agent_id, false, null, null);
         }
+    });
+
+    // Spawn missing tabs: server has running agents the UI never received agent_spawned for.
+    // Primary recovery path when agent_spawned was dropped due to handler registration race.
+    activeAgents.forEach(agentInfo => {
+        const existing = state.agents[agentInfo.agent_id];
+        if (!existing) {
+            _spawnAgentTab(context, {
+                agent_id: agentInfo.agent_id,
+                label: agentInfo.label || agentInfo.agent_id,
+            });
+            _fetchAgentStreamLines(context, agentInfo.agent_id);
+        }
+        // If existing.status === 'closing': tab is mid-animation (2s), skip re-spawn.
+        // Reconcile runs every 3s so next cycle it will be gone from state entirely.
     });
 }
 
@@ -657,6 +704,88 @@ function _injectStyles() {
         }
     `;
     document.head.appendChild(style);
+}
+
+// =============================================================================
+// RESEARCH WIDGET
+// =============================================================================
+
+function _handleResearchProgress(data) {
+    const rs = agentActivityState.research;
+    rs.agent_id = data.agent_id || rs.agent_id;
+    rs.status = data.status || 'running';
+    rs.last_message = data.message || '';
+    rs.sources_found = data.sources_found || rs.sources_found;
+    rs.total_topics = data.total_topics || rs.total_topics;
+
+    // Track per-topic state
+    if (typeof data.topic_index === 'number') {
+        const idx = data.topic_index;
+        while (rs.topics.length <= idx) {
+            rs.topics.push({ index: rs.topics.length, label: '', status: 'pending', sources: 0 });
+        }
+        rs.topics[idx].status = (rs.status === 'complete') ? 'done' : 'active';
+        rs.topics[idx].sources = data.sources_found || 0;
+        if (data.message) rs.topics[idx].label = data.message.slice(0, 60);
+        // Mark previous topics as done
+        for (let i = 0; i < idx; i++) {
+            if (rs.topics[i].status === 'active') rs.topics[i].status = 'done';
+        }
+    }
+
+    if (rs.status === 'running' && !rs.started_at) {
+        rs.started_at = Date.now();
+        // Auto-switch to Mission panel when research starts
+        if (agentActivityState.activePanel !== 'mission') {
+            switchActivityPanel('mission');
+        }
+    }
+
+    _renderResearchWidget();
+
+    // Hide widget 30s after completion
+    if (rs.status === 'complete' || rs.status === 'error') {
+        if (rs._hideTimer) clearTimeout(rs._hideTimer);
+        rs._hideTimer = setTimeout(() => {
+            const w = document.getElementById('research-progress-widget');
+            if (w) w.style.display = 'none';
+            agentActivityState.research.status = 'idle';
+        }, 30000);
+    }
+}
+
+function _renderResearchWidget() {
+    const rs = agentActivityState.research;
+    const w = document.getElementById('research-progress-widget');
+    if (!w) return;
+
+    w.style.display = 'block';
+
+    const badge = document.getElementById('research-status-badge');
+    if (badge) {
+        badge.textContent = rs.status;
+        badge.className = 'research-badge ' + rs.status;
+    }
+
+    const srcs = document.getElementById('research-sources');
+    if (srcs) srcs.textContent = rs.sources_found + ' source' + (rs.sources_found !== 1 ? 's' : '');
+
+    const msg = document.getElementById('research-message');
+    if (msg) msg.textContent = rs.last_message.slice(0, 120);
+
+    const topicList = document.getElementById('research-topics-list');
+    if (topicList) {
+        topicList.innerHTML = '';
+        const total = rs.total_topics || rs.topics.length;
+        for (let i = 0; i < total; i++) {
+            const t = rs.topics[i] || { index: i, label: 'Topic ' + (i + 1), status: 'pending', sources: 0 };
+            const icon = t.status === 'done' ? '\u2713' : t.status === 'active' ? '\u25B6' : '\u25CB';
+            const li = document.createElement('div');
+            li.className = 'research-topic-item ' + t.status;
+            li.textContent = icon + ' ' + (t.label || ('Topic ' + (i + 1)));
+            topicList.appendChild(li);
+        }
+    }
 }
 
 // =============================================================================

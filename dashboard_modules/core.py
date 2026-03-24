@@ -16,20 +16,35 @@ These routes depend on functions from the main dashboard_v2.py module.
 
 from flask import Blueprint, jsonify, request, abort, send_file
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import json
+import os
+import logging
 import mimetypes
+import re
+
+logger = logging.getLogger(__name__)
 
 # TTL cache for hot endpoints
 def _get_ttl_cache():
     try:
         from dashboard_modules.cache import get_dashboard_cache
         return get_dashboard_cache()
-    except Exception:
+    except Exception as e:
+        logger.debug("TTL cache unavailable: %s", e)
         return None
 
 # Create Blueprint
 core_bp = Blueprint('core', __name__)
+
+# Import shared allowed modes — prevents drift between core_bp and dashboard_v2
+try:
+    from dashboard_v2 import _ALLOWED_MODES
+except ImportError:
+    _ALLOWED_MODES = {"rd", "free"}
+
+# Valid source_type values for recommendation filtering (must match DB CHECK constraint in suggestion_storage.py)
+_VALID_SOURCE_TYPES = {'drift_halt', 'successful_completion', 'manual', 'merged'}
 
 # Constants - will be set by init function
 BASE_DIR = None
@@ -162,7 +177,8 @@ def api_health():
             services["mission_file"] = True
         else:
             services["mission_file"] = True
-    except Exception:
+    except Exception as e:
+        logger.debug("Health check: mission_file failed: %s", e)
         services["mission_file"] = False
 
     # Check state directory is writable
@@ -171,7 +187,8 @@ def api_health():
         test_file.write_text("ok")
         test_file.unlink()
         services["state_dir"] = True
-    except Exception:
+    except Exception as e:
+        logger.debug("Health check: state_dir not writable: %s", e)
         services["state_dir"] = False
 
     # Check signal file can be written
@@ -186,7 +203,8 @@ def api_health():
             test_signal.write_text('{"test": true}')
             test_signal.unlink()
             services["signal_file_writable"] = True
-    except Exception:
+    except Exception as e:
+        logger.debug("Health check: signal_file not writable: %s", e)
         services["signal_file_writable"] = False
 
     # Check af_engine module health
@@ -199,7 +217,8 @@ def api_health():
         _sm_check = _SM(MISSION_PATH)
         _ = _sm_check.current_stage  # force state load
         services["af_engine"] = True
-    except Exception:
+    except Exception as e:
+        logger.debug("Health check: af_engine not healthy: %s", e)
         services["af_engine"] = False
 
     elapsed_ms = (time.time() - start) * 1000
@@ -212,7 +231,7 @@ def api_health():
 
     return jsonify({
         "healthy": overall_healthy,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "uptime_seconds": uptime_seconds,
         "services": services,
         "latency_ms": round(elapsed_ms, 2)
@@ -260,20 +279,24 @@ def api_engine_status():
             "stages": STAGES,
             "error": None,
         })
-    except ImportError as e:
-        engine_data["error"] = f"af_engine not importable: {e}"
-    except Exception as e:
-        engine_data["error"] = str(e)
+    except ImportError:
+        logger.warning("af_engine import error", exc_info=True)
+        engine_data["error"] = "af_engine not importable"
+    except Exception:
+        logger.exception("Engine state error")
+        engine_data["error"] = "Internal server error"
 
     elapsed_ms = (_time.time() - _start) * 1000
     engine_data["latency_ms"] = round(elapsed_ms, 2)
-    engine_data["timestamp"] = datetime.now().isoformat()
+    engine_data["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     return jsonify(engine_data)
 
 
 @core_bp.route('/api/start/<mode>', methods=['POST'])
 def api_start(mode):
+    if mode not in _ALLOWED_MODES:
+        return jsonify({"success": False, "message": "Invalid mode"}), 400
     success, message = start_claude(mode)
     return jsonify({"success": success, "message": message})
 
@@ -345,7 +368,7 @@ def api_narrative_chat():
     """Get or send chat messages to narrative workflow."""
     if request.method == 'POST':
         if send_message_to_narrative:
-            data = request.get_json()
+            data = request.get_json(silent=True) or {}
             message = data.get('message', '')
             if message:
                 send_message_to_narrative(message)
@@ -365,19 +388,33 @@ def api_narrative_mission():
         return jsonify({"error": "Narrative not available"}), 503
 
     if request.method == 'POST':
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         story_number = data.get('story_number')
         story_title = data.get('story_title')
         story_genre = data.get('story_genre')
         story_logline = data.get('story_logline')
 
-        if not story_number or not story_title:
+        if story_number is None or not story_title:
             return jsonify({"success": False, "message": "story_number and story_title required"})
+        if not isinstance(story_title, str):
+            return jsonify({"success": False, "message": "story_title must be a string"}), 400
+
+        try:
+            story_number = int(story_number)
+        except (ValueError, TypeError, OverflowError):
+            return jsonify({"success": False, "message": "story_number must be an integer"}), 400
 
         import uuid
+        # Strip null bytes and control characters before using in path
+        story_title = re.sub(r'[\x00-\x1f\x7f]', '', story_title)
+        if not story_title:
+            return jsonify({"success": False, "message": "story_title cannot be empty"}), 400
         safe_title = story_title.replace(" ", "_").replace("/", "-")[:50]
         project_base = Path("/media/vader/TIE-FIGHTER/RCFT - Narrative Project/01 - Narrative Research/Completed")
-        story_workspace = project_base / f"{story_number:03d}_{safe_title}"
+        story_workspace = (project_base / f"{story_number:03d}_{safe_title}").resolve()
+        _proj_base = str(project_base.resolve()) + "/"
+        if not (str(story_workspace) + "/").startswith(_proj_base):
+            return jsonify({"success": False, "message": "Invalid story title"}), 400
         story_workspace.mkdir(parents=True, exist_ok=True)
 
         new_mission = {
@@ -391,8 +428,8 @@ def api_narrative_mission():
             "step_results": [],
             "files_created": [],
             "story_workspace": str(story_workspace),
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
             "history": [],
             "approval_pending": None,
         }
@@ -463,8 +500,8 @@ def api_narrative_reset():
         "step_results": [],
         "files_created": [],
         "story_workspace": None,
-        "created_at": datetime.now().isoformat(),
-        "last_updated": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
         "history": [],
         "approval_pending": None,
     }
@@ -498,7 +535,7 @@ def api_journal():
 @core_bp.route('/api/mission', methods=['GET', 'POST'])
 def api_mission():
     if request.method == 'POST':
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         import logging as _logging
         import uuid
 
@@ -562,7 +599,10 @@ def api_mission():
                 save_audit_log(audit, mission_dir)
                 applied_cycle_budget = config.cycle_budget
             else:
-                cycle_budget = max(1, int(data.get('cycle_budget', 3)))
+                try:
+                    cycle_budget = max(1, int(data.get('cycle_budget', 3)))
+                except (ValueError, TypeError, OverflowError):
+                    return jsonify({"success": False, "message": "Invalid cycle_budget: must be an integer"}), 400
                 active_provider = get_llm_provider() if get_llm_provider else "claude"
                 new_mission = {
                     "mission_id": mission_id, "problem_statement": problem_statement,
@@ -570,9 +610,9 @@ def api_mission():
                     "preferences": {}, "success_criteria": [],
                     "current_stage": "PLANNING", "iteration": 0, "max_iterations": 10,
                     "artifacts": {"plan": None, "code": [], "tests": []}, "history": [],
-                    "created_at": datetime.now().isoformat(),
-                    "last_updated": datetime.now().isoformat(),
-                    "cycle_started_at": datetime.now().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                    "cycle_started_at": datetime.now(timezone.utc).isoformat(),
                     "cycle_budget": cycle_budget, "current_cycle": 1, "cycle_history": [],
                     "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
                     "project_name": resolved_project_name, "llm_provider": active_provider,
@@ -585,8 +625,8 @@ def api_mission():
                 from mission_analytics import get_analytics
                 analytics = get_analytics()
                 analytics.start_mission(mission_id, problem_statement)
-            except Exception as e:
-                _logging.warning(f"Analytics: Failed to register mission: {e}")
+            except Exception:
+                _logging.warning("Analytics: Failed to register mission", exc_info=True)
 
             response_msg = f"Mission saved with {applied_cycle_budget} cycle(s)."
             if resolved_project_name:
@@ -605,13 +645,16 @@ def api_mission():
         try:
             from af_engine import StateManager
             mission = StateManager(MISSION_PATH).mission
-        except Exception:
+        except Exception as e:
+            logger.debug("StateManager unavailable, falling back to atomic_read_json: %s", e)
             mission = io_utils.atomic_read_json(MISSION_PATH, {})
         return jsonify(mission)
 
 
 @core_bp.route('/api/mission/reset', methods=['POST'])
 def api_mission_reset():
+    if send_message_to_claude is None:
+        return jsonify({"error": "Message handler not initialized"}), 503
     send_message_to_claude("reset")
     return jsonify({"success": True, "message": "Reset command sent"})
 
@@ -622,7 +665,7 @@ def api_suggest_project_name():
     Suggest a project name based on problem statement text.
     Returns suggested name, strategies tried, and existing projects.
     """
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     problem_statement = data.get('problem_statement', '')
 
     if not problem_statement or len(problem_statement) < 5:
@@ -634,8 +677,9 @@ def api_suggest_project_name():
         return jsonify(result)
     except ImportError:
         return jsonify({"error": "project_name_resolver module not found"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("suggest_project_name failed")
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 # =============================================================================
@@ -656,7 +700,7 @@ def api_approve_proposal(proposal_id):
         for i, p in enumerate(proposals.get("pending", [])):
             if p.get("id") == proposal_id:
                 p["status"] = "approved"
-                p["approved_at"] = datetime.now().isoformat()
+                p["approved_at"] = datetime.now(timezone.utc).isoformat()
                 proposals.setdefault("approved", []).append(p)
                 proposals["pending"].pop(i)
                 break
@@ -673,7 +717,7 @@ def api_reject_proposal(proposal_id):
         for i, p in enumerate(proposals.get("pending", [])):
             if p.get("id") == proposal_id:
                 p["status"] = "rejected"
-                p["rejected_at"] = datetime.now().isoformat()
+                p["rejected_at"] = datetime.now(timezone.utc).isoformat()
                 proposals.setdefault("rejected", []).append(p)
                 proposals["pending"].pop(i)
                 break
@@ -703,16 +747,18 @@ def api_recommendations():
 
     source_type_filter = request.args.get('source_type')
 
+    if source_type_filter and source_type_filter not in _VALID_SOURCE_TYPES:
+        return jsonify({"items": [], "error": "Invalid source_type"}), 400
+
     try:
         if source_type_filter:
             items = storage.get_filtered(source_type=source_type_filter)
         else:
             items = storage.get_all()
         return jsonify({"items": items})
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite read failed: {e}")
-        return jsonify({"items": [], "error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite read failed")
+        return jsonify({"items": [], "error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations', methods=['POST'])
@@ -722,19 +768,28 @@ def api_add_recommendation():
     if not storage:
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     import uuid
+
+    source_type = data.get("source_type", "manual")
+    if source_type not in _VALID_SOURCE_TYPES:
+        return jsonify({"success": False, "error": "Invalid source_type"}), 400
+
+    try:
+        suggested_cycles = max(1, min(10, int(data.get("suggested_cycles", 3))))
+    except (ValueError, TypeError, OverflowError):
+        return jsonify({"success": False, "error": "suggested_cycles must be an integer 1-10"}), 400
 
     recommendation = {
         "id": f"rec_{uuid.uuid4().hex[:8]}",
         "mission_title": data.get("mission_title", "Untitled Mission"),
         "mission_description": data.get("mission_description", ""),
-        "suggested_cycles": data.get("suggested_cycles", 3),
+        "suggested_cycles": suggested_cycles,
         "source_mission_id": data.get("source_mission_id"),
         "source_mission_summary": data.get("source_mission_summary", ""),
         "rationale": data.get("rationale", ""),
-        "created_at": datetime.now().isoformat(),
-        "source_type": data.get("source_type", "manual")
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_type": source_type
     }
 
     # Auto-tag and check for similar suggestions
@@ -744,118 +799,55 @@ def api_add_recommendation():
         analyzer = get_analyzer()
         recommendation = analyzer.on_new_suggestion(recommendation)
         similar_to = recommendation.get('similar_to', [])
-    except Exception as e:
+        if not isinstance(similar_to, list):
+            similar_to = []
+    except Exception:
         import logging
-        logging.warning(f"Auto-tagging failed: {e}")
+        logging.warning("Auto-tagging failed", exc_info=True)
 
     try:
+        # Strip similar_to before storage — it is not in ALLOWED_COLUMNS
+        recommendation.pop('similar_to', None)
         storage.add(recommendation)
         response = {"success": True, "recommendation": recommendation}
         if similar_to:
             response["merge_candidates"] = similar_to
             response["has_similar"] = True
         return jsonify(response)
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite add failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite add failed")
+        return jsonify({"success": False, "error": "An internal error occurred"}), 500
 
 
-@core_bp.route('/api/recommendations/similarity-analysis', methods=['GET'])
-def api_similarity_analysis():
-    """Analyze recommendations for similarity and suggest groupings."""
+@core_bp.route('/api/recommendations/merge-candidates', methods=['GET'])
+def api_merge_candidates():
+    """Return all suggestions as merge candidates (no similarity gating)."""
+    import logging
     storage = _get_suggestion_storage()
     if storage:
         try:
             items = storage.get_all()
         except Exception:
-            items = []
+            logging.exception("merge-candidates storage error")
+            return jsonify({"error": "Failed to load suggestions"}), 500
     else:
         recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
         items = recommendations.get("items", [])
 
-    if len(items) < 2:
-        return jsonify({"groups": [], "message": "Need at least 2 suggestions for similarity analysis"})
+    candidates = []
+    for item in items:
+        candidates.append({
+            "id": item.get("id"),
+            "mission_title": item.get("mission_title", ""),
+            "mission_description": (item.get("mission_description", "") or "")[:200],
+            "suggested_cycles": item.get("suggested_cycles", 3),
+            "auto_tags": item.get("auto_tags", []),
+            "priority_score": item.get("priority_score", 50),
+        })
 
-    try:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.metrics.pairwise import cosine_similarity
-    except ImportError:
-        return jsonify({"error": "scikit-learn not installed"}), 500
-
-    # Build text corpus from title + description
-    texts = [f"{r.get('mission_title', '')} {r.get('mission_description', '')}" for r in items]
-
-    # Calculate TF-IDF similarity
-    vectorizer = TfidfVectorizer(stop_words='english', min_df=1)
-    try:
-        tfidf_matrix = vectorizer.fit_transform(texts)
-        sim_matrix = cosine_similarity(tfidf_matrix)
-    except ValueError:
-        return jsonify({"groups": [], "message": "Not enough text content for similarity analysis"})
-
-    threshold = float(request.args.get('threshold', 0.3))
-    n = len(items)
-    pairs = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            if sim_matrix[i][j] >= threshold:
-                pairs.append((i, j, sim_matrix[i][j]))
-
-    pairs.sort(key=lambda x: x[2], reverse=True)
-    parent = list(range(n))
-
-    def find(x):
-        if parent[x] != x:
-            parent[x] = find(parent[x])
-        return parent[x]
-
-    def union(x, y):
-        px, py = find(x), find(y)
-        if px != py:
-            parent[px] = py
-
-    for i, j, _ in pairs:
-        union(i, j)
-
-    group_map = {}
-    for i in range(n):
-        root = find(i)
-        if root not in group_map:
-            group_map[root] = []
-        group_map[root].append(i)
-
-    groups = []
-    for indices in group_map.values():
-        if len(indices) >= 2:
-            group_items = []
-            for idx in indices:
-                item = items[idx]
-                avg_sim = 0
-                for other_idx in indices:
-                    if other_idx != idx:
-                        avg_sim += sim_matrix[idx][other_idx]
-                if len(indices) > 1:
-                    avg_sim /= (len(indices) - 1)
-                group_items.append({
-                    "id": item.get("id"),
-                    "mission_title": item.get("mission_title"),
-                    "mission_description": item.get("mission_description", "")[:200],
-                    "suggested_cycles": item.get("suggested_cycles", 3),
-                    "similarity_score": round(avg_sim, 3)
-                })
-            group_items.sort(key=lambda x: x["similarity_score"], reverse=True)
-            groups.append({
-                "items": group_items,
-                "avg_similarity": round(sum(g["similarity_score"] for g in group_items) / len(group_items), 3)
-            })
-
-    groups.sort(key=lambda x: x["avg_similarity"], reverse=True)
     return jsonify({
-        "groups": groups,
-        "threshold": threshold,
-        "total_items": len(items),
-        "items_in_groups": sum(len(g["items"]) for g in groups)
+        "candidates": candidates,
+        "total": len(candidates),
     })
 
 
@@ -867,13 +859,30 @@ def api_merge_recommendations():
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
     import uuid
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     source_ids = data.get("source_ids", [])
     merged_data = data.get("merged_data", {})
+    if not isinstance(merged_data, dict):
+        merged_data = {}
     delete_sources = data.get("delete_sources", True)
 
+    if not isinstance(source_ids, list):
+        return jsonify({"success": False, "error": "source_ids must be a list"}), 400
+    # Validate each element is a hashable scalar (string or int) before dedup
+    for sid in source_ids:
+        if not isinstance(sid, (str, int)):
+            return jsonify({"success": False, "error": "source_ids elements must be strings or integers"}), 400
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for sid in source_ids:
+        if sid not in seen:
+            seen.add(sid)
+            deduped.append(sid)
+    source_ids = deduped
+
     if len(source_ids) < 2:
-        return jsonify({"success": False, "error": "Need at least 2 recommendations to merge"}), 400
+        return jsonify({"success": False, "error": "Need at least 2 unique recommendations to merge"}), 400
 
     try:
         # Get source descriptions from database
@@ -887,27 +896,43 @@ def api_merge_recommendations():
                     "description": rec.get("mission_description", "")
                 })
 
+        # Validate all source_ids were found before proceeding
+        if len(source_descriptions) < len(source_ids):
+            return jsonify({"success": False,
+                            "error": "One or more source recommendations not found"}), 404
+
+        try:
+            _merged_cycles = max(1, min(10, int(merged_data.get("suggested_cycles", 3))))
+        except (ValueError, TypeError, OverflowError):
+            _merged_cycles = 3
         new_rec = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
             "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
             "mission_description": merged_data.get("mission_description", ""),
-            "suggested_cycles": int(merged_data.get("suggested_cycles", 3)),
+            "suggested_cycles": _merged_cycles,
             "rationale": merged_data.get("rationale", ""),
             "source_type": "merged",
             "merged_from": source_ids,
             "merged_source_descriptions": source_descriptions,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
-        # Delete sources and add new merged record
-        if delete_sources:
-            storage.delete_multiple(source_ids)
+        # Add new record first, then delete sources (atomic safety: if add fails, sources remain)
         storage.add(new_rec)
+        if delete_sources:
+            try:
+                storage.delete_multiple(source_ids)
+            except Exception:
+                # Rollback: remove newly added to prevent duplicates
+                try:
+                    storage.delete(new_rec["id"])
+                except Exception:
+                    logger.error("Rollback failed: could not delete merged rec %s", new_rec["id"])
+                raise
         return jsonify({"success": True, "new_recommendation": new_rec})
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite merge failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite merge failed")
+        return jsonify({"success": False, "error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/analyze', methods=['GET'])
@@ -923,10 +948,9 @@ def api_analyze_recommendations():
         analyzer = get_analyzer()
         result = analyzer.analyze_all(persist=True)
         return jsonify(result)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("analyze_recommendations failed")
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/auto-tag', methods=['POST'])
@@ -942,8 +966,9 @@ def api_auto_tag_recommendations():
         analyzer = get_analyzer()
         result = analyzer.auto_tag_all(persist=True)
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("auto_tag_recommendations failed")
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/health-report', methods=['GET'])
@@ -960,8 +985,9 @@ def api_health_report():
         analyzer = get_analyzer()
         result = analyzer.get_health_report()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("health_report failed")
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>', methods=['GET'])
@@ -976,10 +1002,9 @@ def api_get_recommendation(rec_id):
         if rec:
             return jsonify(rec)
         return jsonify({"error": "Recommendation not found"}), 404
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite get failed: {e}")
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite get failed")
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>', methods=['DELETE'])
@@ -992,10 +1017,9 @@ def api_delete_recommendation(rec_id):
     try:
         deleted = storage.delete(rec_id)
         return jsonify({"success": True, "deleted": deleted})
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite delete failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite delete failed")
+        return jsonify({"success": False, "error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>', methods=['PUT'])
@@ -1005,7 +1029,7 @@ def api_update_recommendation(rec_id):
     if not storage:
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     # Input validation
     if "suggested_cycles" in data:
@@ -1016,7 +1040,7 @@ def api_update_recommendation(rec_id):
                     "success": False,
                     "error": "Cycle count must be between 1 and 10"
                 }), 400
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             return jsonify({
                 "success": False,
                 "error": "Cycle count must be a valid number"
@@ -1048,17 +1072,19 @@ def api_update_recommendation(rec_id):
             updates["mission_title"] = str(data["mission_title"]).strip()
         if "mission_description" in data:
             updates["mission_description"] = data["mission_description"]
-        if "suggested_cycles" in data:
-            updates["suggested_cycles"] = int(data["suggested_cycles"])
+        if "suggested_cycles" in data and data["suggested_cycles"] is not None:
+            try:
+                updates["suggested_cycles"] = int(data["suggested_cycles"])
+            except (ValueError, TypeError):
+                return jsonify({"success": False, "error": "suggested_cycles must be an integer"}), 400
         if "rationale" in data:
             updates["rationale"] = data["rationale"]
-        updates["last_edited_at"] = datetime.now().isoformat()
+        updates["last_edited_at"] = datetime.now(timezone.utc).isoformat()
         storage.update(rec_id, updates)
         return jsonify({"success": True})
-    except Exception as e:
-        import logging
-        logging.error(f"SQLite update failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception:
+        logger.exception("SQLite update failed")
+        return jsonify({"success": False, "error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/<rec_id>/set-mission', methods=['POST'])
@@ -1071,16 +1097,19 @@ def api_set_mission_from_recommendation(rec_id):
     if not storage:
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
-    data = request.get_json() or {}
-    cycle_budget = int(data.get("cycle_budget", 3))
+    data = request.get_json(silent=True) or {}
+    try:
+        cycle_budget = max(1, min(10, int(data.get("cycle_budget", 3))))
+    except (ValueError, TypeError, OverflowError):
+        return jsonify({"success": False, "error": "cycle_budget must be a valid integer"}), 400
     user_project_name = data.get("project_name")  # Optional user-specified project name
 
     try:
         target_rec = storage.get_by_id(rec_id)
-    except Exception as e:
+    except Exception:
         import logging
-        logging.error(f"SQLite get failed: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        logging.exception("SQLite get failed")
+        return jsonify({"success": False, "error": "An internal error occurred"}), 500
 
     if not target_rec:
         return jsonify({"success": False, "error": "Recommendation not found"}), 404
@@ -1159,8 +1188,8 @@ def api_set_mission_from_recommendation(rec_id):
             "preferences": {}, "success_criteria": [],
             "current_stage": "PLANNING", "iteration": 0, "max_iterations": 10,
             "artifacts": {"plan": None, "code": [], "tests": []}, "history": [],
-            "created_at": datetime.now().isoformat(), "last_updated": datetime.now().isoformat(),
-            "cycle_started_at": datetime.now().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(), "last_updated": datetime.now(timezone.utc).isoformat(),
+            "cycle_started_at": datetime.now(timezone.utc).isoformat(),
             "cycle_budget": max(1, cycle_budget), "current_cycle": 1, "cycle_history": [],
             "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
             "project_name": resolved_project_name,
@@ -1173,13 +1202,13 @@ def api_set_mission_from_recommendation(rec_id):
     try:
         from mission_analytics import get_analytics
         get_analytics().start_mission(mission_id, problem_statement)
-    except Exception as _e:
-        _rlog.warning(f"Analytics: Failed to register mission: {_e}")
+    except Exception:
+        _rlog.warning("Analytics: Failed to register mission", exc_info=True)
 
     try:
         storage.delete(rec_id)
-    except Exception as _e:
-        _rlog.warning(f"SQLite delete failed: {_e}")
+    except Exception:
+        _rlog.warning("SQLite delete failed", exc_info=True)
 
     response_msg = f"Mission set with {applied_cycle_budget} cycle(s)."
     if resolved_project_name:
@@ -1218,6 +1247,7 @@ def api_mission_logs():
                     "file_name": log_file.name
                 })
             except Exception:
+                logger.warning("Skipping unreadable log file %s", log_file.name, exc_info=True)
                 continue
 
     logs.sort(key=lambda x: x.get("completed_at") or "", reverse=True)
@@ -1230,13 +1260,18 @@ def api_mission_log_detail(mission_id):
     if not MISSION_LOGS_DIR or not MISSION_LOGS_DIR.exists():
         return jsonify({"error": "Mission logs directory not found"}), 404
 
-    for log_file in MISSION_LOGS_DIR.glob(f"{mission_id}*.json"):
+    # Validate mission_id before using in glob to prevent glob injection
+    if not re.match(r'^[a-zA-Z0-9_-]+$', mission_id):
+        return jsonify({"error": "Invalid mission_id"}), 400
+
+    for log_file in MISSION_LOGS_DIR.glob(f"{mission_id}_report.json"):
         try:
             with open(log_file, 'r') as f:
                 data = json.load(f)
             return jsonify(data)
-        except Exception as e:
-            return jsonify({"error": f"Error reading log: {e}"}), 500
+        except Exception:
+            logger.exception("Error reading log %s", log_file.name)
+            return jsonify({"error": "An internal error occurred"}), 500
 
     return jsonify({"error": "Mission log not found"}), 404
 
@@ -1244,6 +1279,13 @@ def api_mission_log_detail(mission_id):
 # =============================================================================
 # FILE DOWNLOAD ROUTES
 # =============================================================================
+
+_MISSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]+\Z')
+
+
+def _validate_mission_id(mission_id: str) -> bool:
+    """Validate mission_id against path traversal attacks."""
+    return bool(isinstance(mission_id, str) and mission_id and _MISSION_ID_RE.match(mission_id))
 
 @core_bp.route('/api/download/<path:filepath>')
 def download_file(filepath):
@@ -1256,12 +1298,19 @@ def download_file(filepath):
     Uses centralized workspace resolver for correct path resolution
     with both shared and legacy workspaces.
     """
+    if not filepath or not filepath.strip():
+        abort(400)
+
     # Check if this is a mission-specific path
     if filepath.startswith('mission/'):
         parts = filepath.split('/', 2)
         if len(parts) >= 3:
             mission_id = parts[1]
+            if not _validate_mission_id(mission_id):
+                abort(400)
             relative_path = parts[2]
+            if not relative_path or not relative_path.strip():
+                abort(400)
 
             # Use centralized workspace resolver
             from .workspace_resolver import resolve_mission_workspace
@@ -1278,27 +1327,75 @@ def download_file(filepath):
         full_path = WORKSPACE_DIR / filepath
         allowed_base = WORKSPACE_DIR
 
+    # Basic sanity check on the unresolved path (catches obvious traversals).
+    # Uses non-resolving check to avoid symlink info leak (different error paths).
+    # The authoritative containment check happens post-open inside _safe_read_bytes.
     try:
-        full_path = full_path.resolve()
-    except Exception:
-        abort(404)
-
-    try:
-        full_path.relative_to(allowed_base.resolve())
-    except ValueError:
+        full_path.relative_to(allowed_base)
+    except (ValueError, OSError):
         abort(403)
-
-    if not full_path.exists() or not full_path.is_file():
-        abort(404)
 
     mime_type, _ = mimetypes.guess_type(str(full_path))
 
+    from io import BytesIO
+
+    # Pass the *unresolved* path so O_NOFOLLOW sees symlinks,
+    # and allowed_base for post-open fd containment check.
+    try:
+        data = _safe_read_bytes(full_path, allowed_base=allowed_base)
+    except IOError:
+        abort(500)  # read error (distinct from access denial)
+    if data is None:
+        abort(403)  # symlink, not found, or access denied
+
     return send_file(
-        full_path,
+        BytesIO(data),
         mimetype=mime_type or 'application/octet-stream',
         as_attachment=True,
-        download_name=full_path.name
+        download_name=re.sub(r'[^\w.\-]', '_', full_path.name)
     )
+
+
+def _safe_read_bytes(path, max_bytes=0, allowed_base=None):
+    """Read file bytes using O_NOFOLLOW to prevent symlink TOCTOU attacks.
+
+    O_NOFOLLOW only blocks symlinks in the final path component. Directory
+    component symlinks are not blocked by the kernel flag. The post-open
+    /proc/self/fd/ containment check provides defense-in-depth against
+    directory component symlink attacks.
+
+    If allowed_base is provided, performs post-open containment check by
+    reading the fd's real path from /proc/self/fd/ and verifying it resides
+    inside the allowed directory.  This prevents TOCTOU races where a symlink
+    is swapped in between a pre-open resolve() and the actual open().
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None  # symlink or access denied
+    # Post-open containment: verify the *actual* file the fd points to
+    if allowed_base is not None:
+        try:
+            real_path = Path(os.readlink(f"/proc/self/fd/{fd}")).resolve()
+            allowed_resolved = Path(allowed_base).resolve()
+            real_path.relative_to(allowed_resolved)
+        except Exception:
+            os.close(fd)
+            return None  # fd points outside allowed_base or allowed_base is invalid
+    try:
+        f = os.fdopen(fd, 'rb')
+    except Exception:
+        os.close(fd)
+        return None
+    try:
+        return f.read(max_bytes) if max_bytes else f.read()
+    except Exception as e:
+        raise IOError(f"Read error: {e}") from e
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
 
 
 _TEXT_MIME_TYPES = {
@@ -1310,6 +1407,8 @@ _TEXT_MIME_TYPES = {
 
 def _classify_file_type(mime_type):
     """Return 'image', 'text', or 'binary' for a given mime type."""
+    if mime_type is None:
+        return 'binary'
     if mime_type.startswith('image/'):
         return 'image'
     if mime_type.startswith('text/') or mime_type in _TEXT_MIME_TYPES:
@@ -1328,62 +1427,80 @@ def get_file_content(filepath):
         if len(parts) < 3:
             return jsonify({"error": "Invalid path"}), 400
         mission_id = parts[1]
+        if not _validate_mission_id(mission_id):
+            return jsonify({"error": "Invalid mission_id"}), 400
         relative_path = parts[2]
+        if not relative_path or not relative_path.strip():
+            return jsonify({"error": "Empty file path"}), 400
         from .workspace_resolver import resolve_mission_workspace
         missions_dir = BASE_DIR / "missions"
         mission_workspace = resolve_mission_workspace(mission_id, missions_dir, WORKSPACE_DIR, io_utils)
         full_path = mission_workspace / relative_path
         allowed_base = mission_workspace
     else:
+        if not filepath or not filepath.strip():
+            return jsonify({"error": "Empty file path"}), 400
         full_path = WORKSPACE_DIR / filepath
         allowed_base = WORKSPACE_DIR
 
+    # Basic sanity check on unresolved path (non-resolving to avoid symlink info leak);
+    # authoritative check is post-open.
     try:
-        full_path.resolve().relative_to(allowed_base.resolve())
-    except ValueError:
+        full_path.relative_to(allowed_base)
+    except (ValueError, OSError):
         return jsonify({"error": "Access denied"}), 403
-
-    if not full_path.exists() or not full_path.is_file():
-        return jsonify({"error": "File not found"}), 404
 
     mime_type, _ = mimetypes.guess_type(str(full_path))
     mime_type = mime_type or 'application/octet-stream'
-    stat = full_path.stat()
     file_type = _classify_file_type(mime_type)
 
-    if file_type == 'image':
-        data = _b64.b64encode(full_path.read_bytes()).decode('utf-8')
-        return jsonify({
-            "name": full_path.name,
-            "file_type": "image",
-            "mime_type": mime_type,
-            "size": stat.st_size,
-            "content": data,
-            "truncated": False
-        })
-    elif file_type == 'text':
-        raw = full_path.read_bytes()
-        truncated = len(raw) > MAX_TEXT_BYTES
-        if truncated:
-            raw = raw[:MAX_TEXT_BYTES]
-        content = raw.decode('utf-8', errors='replace')
-        return jsonify({
-            "name": full_path.name,
-            "file_type": "text",
-            "mime_type": mime_type,
-            "size": stat.st_size,
-            "content": content,
-            "truncated": truncated
-        })
-    else:
-        return jsonify({
-            "name": full_path.name,
-            "file_type": "binary",
-            "mime_type": mime_type,
-            "size": stat.st_size,
-            "content": None,
-            "truncated": False
-        })
+    try:
+        if file_type == 'image':
+            raw = _safe_read_bytes(full_path, allowed_base=allowed_base)
+            if raw is None:
+                return jsonify({"error": "Access denied — symlink not allowed"}), 403
+            data = _b64.b64encode(raw).decode('utf-8')
+            return jsonify({
+                "name": full_path.name,
+                "file_type": "image",
+                "mime_type": mime_type,
+                "size": len(raw),
+                "content": data,
+                "truncated": False
+            })
+        elif file_type == 'text':
+            raw = _safe_read_bytes(full_path, max_bytes=MAX_TEXT_BYTES + 1, allowed_base=allowed_base)
+            if raw is None:
+                return jsonify({"error": "Access denied — symlink not allowed"}), 403
+            read_size = len(raw)
+            truncated = read_size > MAX_TEXT_BYTES
+            if truncated:
+                raw = raw[:MAX_TEXT_BYTES]
+            content = raw.decode('utf-8', errors='replace')
+            return jsonify({
+                "name": full_path.name,
+                "file_type": "text",
+                "mime_type": mime_type,
+                "size": read_size if not truncated else None,
+                "content": content,
+                "truncated": truncated
+            })
+        else:
+            # Single safe read — no second open to avoid TOCTOU race
+            raw = _safe_read_bytes(full_path, allowed_base=allowed_base)
+            if raw is None:
+                return jsonify({"error": "Access denied — symlink not allowed"}), 403
+            size = len(raw)
+            return jsonify({
+                "name": full_path.name,
+                "file_type": "binary",
+                "mime_type": mime_type,
+                "size": size,
+                "content": None,
+                "truncated": False
+            })
+    except IOError:
+        return jsonify({"error": "Internal read error"}), 500
 
 
 @core_bp.route('/api/files')

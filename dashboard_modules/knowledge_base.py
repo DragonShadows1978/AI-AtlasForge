@@ -11,6 +11,10 @@ Contains routes for:
 
 from flask import Blueprint, jsonify, request
 import json
+import logging
+import os
+
+logger = logging.getLogger(__name__)
 
 # Create Blueprint
 knowledge_base_bp = Blueprint('knowledge_base', __name__, url_prefix='/api/knowledge-base')
@@ -28,8 +32,9 @@ def api_kb_stats():
         kb = get_knowledge_base()
         stats = kb.get_statistics()
         return jsonify(stats)
-    except Exception as e:
-        return jsonify({"error": str(e), "total_missions": 0, "total_learnings": 0})
+    except Exception:
+        logger.exception("Error fetching KB stats")
+        return jsonify({"error": "Internal error", "total_missions": 0, "total_learnings": 0})
 
 
 @knowledge_base_bp.route('/learnings')
@@ -41,7 +46,7 @@ def api_kb_learnings():
         domain = request.args.get('domain', '')
         learning_type = request.args.get('type', '')
         source_type = request.args.get('source_type', '')  # 'mission', 'investigation', or '' for all
-        limit = min(request.args.get('limit', 50, type=int), 500)  # Cap at 500
+        limit = max(1, min(request.args.get('limit', 50, type=int), 500))  # Clamp to [1, 500]
 
         import sqlite3
         with sqlite3.connect(kb.db_path) as conn:
@@ -90,8 +95,9 @@ def api_kb_learnings():
             learnings.append(data)
 
         return jsonify({"learnings": learnings})
-    except Exception as e:
-        return jsonify({"error": str(e), "learnings": []})
+    except Exception:
+        logger.exception("Error fetching KB learnings")
+        return jsonify({"error": "Internal error", "learnings": []})
 
 
 @knowledge_base_bp.route('/learnings/<learning_id>')
@@ -143,8 +149,9 @@ def api_kb_learning_detail(learning_id):
                 data["investigation_report_path"] = str(report_path)
 
         return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error fetching learning detail")
+        return jsonify({"error": "Internal error"})
 
 
 @knowledge_base_bp.route('/learnings/<learning_id>', methods=['PATCH'])
@@ -180,8 +187,9 @@ def api_kb_update_learning(learning_id):
         kb._semantic_index.invalidate()
 
         return jsonify({"success": True, "updated": list(updates.keys())})
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error updating learning")
+        return jsonify({"error": "Internal error"})
 
 
 # =============================================================================
@@ -197,7 +205,7 @@ def api_kb_search():
         query = request.args.get('q', '')
         domain = request.args.get('domain', '')
         learning_type = request.args.get('type', '')
-        top_k = min(request.args.get('top_k', 10, type=int), 100)  # Cap at 100
+        top_k = max(1, min(request.args.get('top_k', 10, type=int), 100))  # Clamp to [1, 100]
 
         if not query:
             return jsonify({"error": "Missing query parameter 'q'", "results": []})
@@ -218,8 +226,9 @@ def api_kb_search():
                 results.append(l.to_dict() if hasattr(l, 'to_dict') else l.__dict__)
 
         return jsonify({"query": query, "results": results})
-    except Exception as e:
-        return jsonify({"error": str(e), "results": []})
+    except Exception:
+        logger.exception("Error searching KB")
+        return jsonify({"error": "Internal error", "results": []})
 
 
 @knowledge_base_bp.route('/missions')
@@ -254,8 +263,9 @@ def api_kb_missions():
             })
 
         return jsonify({"missions": missions})
-    except Exception as e:
-        return jsonify({"error": str(e), "missions": []})
+    except Exception:
+        logger.exception("Error fetching KB missions")
+        return jsonify({"error": "Internal error", "missions": []})
 
 
 @knowledge_base_bp.route('/domains')
@@ -272,8 +282,9 @@ def api_kb_domains():
             domains = [row[0] for row in cursor.fetchall() if row[0]]
 
         return jsonify({"domains": domains})
-    except Exception as e:
-        return jsonify({"error": str(e), "domains": []})
+    except Exception:
+        logger.exception("Error fetching KB domains")
+        return jsonify({"error": "Internal error", "domains": []})
 
 
 # =============================================================================
@@ -284,18 +295,25 @@ def api_kb_domains():
 def api_kb_clusters():
     """Get learning clusters with themes and coherence."""
     try:
+        import math
         from mission_knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
-        threshold = float(request.args.get('threshold', 0.7))
+        try:
+            threshold = float(request.args.get('threshold', 0.7))
+            if not math.isfinite(threshold):
+                return jsonify({"error": "Invalid threshold value"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid threshold value"}), 400
         clusters = kb.get_learning_clusters(distance_threshold=threshold)
 
         return jsonify({
             "clusters": clusters,
             "count": len(clusters)
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "clusters": []})
+    except Exception:
+        logger.exception("Error fetching KB clusters")
+        return jsonify({"error": "Internal error", "clusters": []})
 
 
 @knowledge_base_bp.route('/hierarchical-clusters')
@@ -307,26 +325,34 @@ def api_kb_hierarchical_clusters():
 
         result = kb.get_hierarchical_clusters()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "clusters": []})
+    except Exception:
+        logger.exception("Error fetching hierarchical clusters")
+        return jsonify({"error": "Internal error", "clusters": []})
 
 
 @knowledge_base_bp.route('/duplicates')
 def api_kb_duplicates():
     """Get duplicate learning groups."""
     try:
+        import math
         from mission_knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
-        threshold = float(request.args.get('threshold', 0.85))
+        try:
+            threshold = float(request.args.get('threshold', 0.85))
+            if not math.isfinite(threshold):
+                return jsonify({"error": "Invalid threshold value"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid threshold value"}), 400
         duplicates = kb.find_duplicate_learnings(threshold=threshold)
 
         return jsonify({
             "duplicate_groups": duplicates,
             "count": len(duplicates)
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "duplicate_groups": []})
+    except Exception:
+        logger.exception("Error fetching KB duplicates")
+        return jsonify({"error": "Internal error", "duplicate_groups": []})
 
 
 @knowledge_base_bp.route('/merge', methods=['POST'])
@@ -364,8 +390,9 @@ def api_kb_merge():
             "merged": deleted,
             "kept": keep_id
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "success": False})
+    except Exception:
+        logger.exception("Error merging KB learnings")
+        return jsonify({"error": "Internal error", "success": False})
 
 
 @knowledge_base_bp.route('/batch-delete', methods=['POST'])
@@ -400,8 +427,9 @@ def api_kb_batch_delete():
         kb._semantic_index.invalidate()
 
         return jsonify({"success": True, "deleted": deleted})
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error batch deleting KB learnings")
+        return jsonify({"error": "Internal error"})
 
 
 # =============================================================================
@@ -416,8 +444,9 @@ def api_kb_ingest():
         kb = get_knowledge_base()
         result = kb.ingest_all_mission_logs()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "error"})
+    except Exception:
+        logger.exception("Error ingesting KB")
+        return jsonify({"error": "Internal error", "status": "error"})
 
 
 @knowledge_base_bp.route('/rebuild-index', methods=['POST'])
@@ -433,8 +462,9 @@ def api_kb_rebuild_index():
             "status": "success" if success else "error",
             "success": success
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "error"})
+    except Exception:
+        logger.exception("Error rebuilding KB index")
+        return jsonify({"error": "Internal error", "status": "error"})
 
 
 @knowledge_base_bp.route('/index-status')
@@ -452,8 +482,9 @@ def api_kb_index_status():
             "pending_count": len(getattr(index, '_pending_additions', [])),
             "has_cache": index._cluster_cache is not None
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "fitted": False})
+    except Exception:
+        logger.exception("Error fetching KB index status")
+        return jsonify({"error": "Internal error", "fitted": False})
 
 
 # =============================================================================
@@ -464,11 +495,20 @@ def api_kb_index_status():
 def api_kb_related(learning_id):
     """Get learnings related to a specific learning."""
     try:
+        import math
         from mission_knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
-        threshold = float(request.args.get('threshold', 0.6))
-        max_results = int(request.args.get('max', 10))
+        try:
+            threshold = float(request.args.get('threshold', 0.6))
+            if not math.isfinite(threshold):
+                return jsonify({"error": "Invalid threshold value"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid threshold value"}), 400
+        try:
+            max_results = max(1, min(int(request.args.get('max', 10)), 100))  # Clamp to [1, 100]
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid max value"}), 400
 
         related = kb.get_related_learnings(
             learning_id,
@@ -480,8 +520,9 @@ def api_kb_related(learning_id):
             "related": related,
             "learning_id": learning_id
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "related": []})
+    except Exception:
+        logger.exception("Error fetching related learnings")
+        return jsonify({"error": "Internal error", "related": []})
 
 
 @knowledge_base_bp.route('/learning-chains')
@@ -491,7 +532,10 @@ def api_kb_learning_chains():
         from mission_knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
-        min_length = int(request.args.get('min_length', 3))
+        try:
+            min_length = max(1, min(int(request.args.get('min_length', 3)), 100))  # Clamp to [1, 100]
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid min_length value"}), 400
 
         chains = kb.get_learning_chains(min_chain_length=min_length)
 
@@ -499,8 +543,9 @@ def api_kb_learning_chains():
             "chains": chains,
             "count": len(chains)
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "chains": []})
+    except Exception:
+        logger.exception("Error fetching learning chains")
+        return jsonify({"error": "Internal error", "chains": []})
 
 
 # =============================================================================
@@ -532,9 +577,10 @@ def api_kb_analytics():
             result['source_filter'] = source_type
 
         return jsonify(result)
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching KB analytics")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "accumulation": {"missions": [], "total_learnings": 0},
             "type_distribution": {"distribution": {}, "total": 0},
             "top_themes": {"themes": [], "total_themes": 0},
@@ -550,8 +596,9 @@ def api_kb_analytics_accumulation():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify(analytics.get_learning_accumulation())
-    except Exception as e:
-        return jsonify({"error": str(e), "missions": [], "total_learnings": 0})
+    except Exception:
+        logger.exception("Error fetching KB accumulation")
+        return jsonify({"error": "Internal error", "missions": [], "total_learnings": 0})
 
 
 @knowledge_base_bp.route('/analytics/types')
@@ -561,8 +608,9 @@ def api_kb_analytics_types():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify(analytics.get_type_distribution())
-    except Exception as e:
-        return jsonify({"error": str(e), "distribution": {}, "total": 0})
+    except Exception:
+        logger.exception("Error fetching KB type distribution")
+        return jsonify({"error": "Internal error", "distribution": {}, "total": 0})
 
 
 @knowledge_base_bp.route('/analytics/themes')
@@ -573,8 +621,9 @@ def api_kb_analytics_themes():
         analytics = get_kb_analytics()
         top_n = min(request.args.get('top_n', 10, type=int), 100)  # Cap at 100
         return jsonify(analytics.get_top_themes(top_n=top_n))
-    except Exception as e:
-        return jsonify({"error": str(e), "themes": [], "total_themes": 0})
+    except Exception:
+        logger.exception("Error fetching KB themes")
+        return jsonify({"error": "Internal error", "themes": [], "total_themes": 0})
 
 
 @knowledge_base_bp.route('/analytics/transfer')
@@ -584,8 +633,9 @@ def api_kb_analytics_transfer():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify(analytics.get_transfer_rate())
-    except Exception as e:
-        return jsonify({"error": str(e), "transfer_rate": 0, "total_missions": 0})
+    except Exception:
+        logger.exception("Error fetching KB transfer rate")
+        return jsonify({"error": "Internal error", "transfer_rate": 0, "total_missions": 0})
 
 
 @knowledge_base_bp.route('/analytics/learnings-by-theme')
@@ -602,8 +652,9 @@ def api_kb_learnings_by_theme():
             return jsonify({"error": "Theme parameter required"}), 400
 
         return jsonify(analytics.get_learnings_by_theme(theme, theme_type))
-    except Exception as e:
-        return jsonify({"error": str(e), "by_mission": {}, "total_learnings": 0})
+    except Exception:
+        logger.exception("Error fetching learnings by theme")
+        return jsonify({"error": "Internal error", "by_mission": {}, "total_learnings": 0})
 
 
 @knowledge_base_bp.route('/analytics/mission-profile')
@@ -619,8 +670,9 @@ def api_kb_mission_profile():
             return jsonify({"error": "mission_id parameter required"}), 400
 
         return jsonify(analytics.get_mission_profile(mission_id))
-    except Exception as e:
-        return jsonify({"error": str(e), "total_learnings": 0})
+    except Exception:
+        logger.exception("Error fetching mission profile")
+        return jsonify({"error": "Internal error", "total_learnings": 0})
 
 
 @knowledge_base_bp.route('/analytics/missions')
@@ -630,8 +682,9 @@ def api_kb_all_missions():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify({"missions": analytics.get_all_missions()})
-    except Exception as e:
-        return jsonify({"error": str(e), "missions": []})
+    except Exception:
+        logger.exception("Error fetching all missions")
+        return jsonify({"error": "Internal error", "missions": []})
 
 
 @knowledge_base_bp.route('/analytics/chains')
@@ -641,8 +694,9 @@ def api_kb_analytics_chains():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify({"chains": analytics.get_learning_chains()})
-    except Exception as e:
-        return jsonify({"error": str(e), "chains": []})
+    except Exception:
+        logger.exception("Error fetching analytics chains")
+        return jsonify({"error": "Internal error", "chains": []})
 
 
 @knowledge_base_bp.route('/cache-stats')
@@ -656,9 +710,10 @@ def api_kb_cache_stats():
     try:
         from kb_analytics import get_cache_stats
         return jsonify(get_cache_stats())
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching cache stats")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "hits": 0,
             "misses": 0,
             "hit_rate": 0
@@ -677,12 +732,13 @@ def api_kb_investigations():
         kb = get_knowledge_base()
 
         investigation_id = request.args.get('investigation_id')
-        limit = min(request.args.get('limit', 50, type=int), 500)
+        limit = max(1, min(request.args.get('limit', 50, type=int), 500))
 
         learnings = kb.get_investigation_learnings(investigation_id=investigation_id, limit=limit)
         return jsonify({"learnings": learnings})
-    except Exception as e:
-        return jsonify({"error": str(e), "learnings": []})
+    except Exception:
+        logger.exception("Error fetching investigation learnings")
+        return jsonify({"error": "Internal error", "learnings": []})
 
 
 @knowledge_base_bp.route('/investigations/stats')
@@ -694,9 +750,10 @@ def api_kb_investigation_stats():
 
         stats = kb.get_investigation_stats()
         return jsonify(stats)
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching investigation stats")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "total_investigation_learnings": 0,
             "investigation_count": 0,
             "by_type": {},
@@ -713,8 +770,9 @@ def api_kb_ingest_investigations():
         kb = get_knowledge_base()
         result = kb.ingest_all_investigations()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "error"})
+    except Exception:
+        logger.exception("Error ingesting investigations")
+        return jsonify({"error": "Internal error", "status": "error"})
 
 
 @knowledge_base_bp.route('/investigations/ingest/<investigation_id>', methods=['POST'])
@@ -727,17 +785,23 @@ def api_kb_ingest_single_investigation(investigation_id):
 
         kb = get_knowledge_base()
 
-        # Find investigation directory
+        # Validate investigation_id format and path
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]{1,128}$', investigation_id):
+            return jsonify({"error": "Invalid investigation ID format"}), 400
+
         investigations_dir = INVESTIGATIONS_DIR
-        inv_dir = investigations_dir / investigation_id
+        inv_dir = (investigations_dir / investigation_id).resolve()
+        if not str(inv_dir).startswith(str(investigations_dir.resolve()) + os.sep):
+            return jsonify({"error": "Invalid investigation ID"}), 400
 
         if not inv_dir.exists():
             return jsonify({"error": f"Investigation {investigation_id} not found"}), 404
 
         result = kb.ingest_investigation(inv_dir)
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "error"})
+    except Exception:
+        return jsonify({"error": "Failed to ingest investigation", "status": "error"}), 500
 
 
 @knowledge_base_bp.route('/analytics/investigations')
@@ -747,9 +811,10 @@ def api_kb_analytics_investigations():
         from kb_analytics import get_kb_analytics
         analytics = get_kb_analytics()
         return jsonify(analytics.get_investigation_analytics())
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching investigation analytics")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "total_investigations": 0,
             "total_learnings": 0,
             "by_type": {},
@@ -794,8 +859,8 @@ def api_kb_recommendations():
         engine = get_recommendation_engine()
 
         # Parse query parameters
-        page = request.args.get('page', 1, type=int)
-        per_page = min(request.args.get('per_page', 20, type=int), 100)
+        page = max(1, request.args.get('page', 1, type=int))
+        per_page = max(1, min(request.args.get('per_page', 20, type=int), 100))
         complexity = request.args.get('complexity')
         priority = request.args.get('priority', type=int)
         investigation_id = request.args.get('investigation_id')
@@ -816,9 +881,10 @@ def api_kb_recommendations():
         )
 
         return jsonify(result)
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching recommendations")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "recommendations": [],
             "total": 0,
             "page": 1,
@@ -838,8 +904,9 @@ def api_kb_recommendation_investigations():
 
         investigations = engine.get_distinct_investigations()
         return jsonify({"investigations": investigations})
-    except Exception as e:
-        return jsonify({"error": str(e), "investigations": []})
+    except Exception:
+        logger.exception("Error fetching recommendation investigations")
+        return jsonify({"error": "Internal error", "investigations": []})
 
 
 @knowledge_base_bp.route('/recommendations/delete-all', methods=['DELETE'])
@@ -851,8 +918,9 @@ def api_kb_delete_all_recommendations():
 
         result = engine.delete_all_pending_recommendations()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "success": False})
+    except Exception:
+        logger.exception("Error deleting all recommendations")
+        return jsonify({"error": "Internal error", "success": False})
 
 
 @knowledge_base_bp.route('/recommendations/bulk-delete', methods=['POST'])
@@ -873,8 +941,9 @@ def api_kb_bulk_delete_recommendations():
 
         result = engine.delete_recommendations_by_ids(ids)
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "success": False})
+    except Exception:
+        logger.exception("Error bulk deleting recommendations")
+        return jsonify({"error": "Internal error", "success": False})
 
 
 @knowledge_base_bp.route('/recommendations/<recommendation_id>')
@@ -889,8 +958,9 @@ def api_kb_recommendation_detail(recommendation_id):
             return jsonify({"error": "Recommendation not found"}), 404
 
         return jsonify(rec)
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error fetching recommendation detail")
+        return jsonify({"error": "Internal error"})
 
 
 @knowledge_base_bp.route('/recommendations/<recommendation_id>/accept', methods=['POST'])
@@ -905,8 +975,9 @@ def api_kb_accept_recommendation(recommendation_id):
             return jsonify({"status": "accepted", "recommendation_id": recommendation_id})
         else:
             return jsonify({"error": "Failed to accept recommendation"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error accepting recommendation")
+        return jsonify({"error": "Internal error"})
 
 
 @knowledge_base_bp.route('/recommendations/<recommendation_id>/reject', methods=['POST'])
@@ -921,8 +992,9 @@ def api_kb_reject_recommendation(recommendation_id):
             return jsonify({"status": "rejected", "recommendation_id": recommendation_id})
         else:
             return jsonify({"error": "Failed to reject recommendation"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error rejecting recommendation")
+        return jsonify({"error": "Internal error"})
 
 
 @knowledge_base_bp.route('/recommendations/<recommendation_id>/convert', methods=['POST'])
@@ -947,8 +1019,9 @@ def api_kb_convert_recommendation(recommendation_id):
             "status": "converted",
             "mission_data": mission_data
         })
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    except Exception:
+        logger.exception("Error converting recommendation")
+        return jsonify({"error": "Internal error"})
 
 
 @knowledge_base_bp.route('/recommendations/generate', methods=['POST'])
@@ -960,8 +1033,9 @@ def api_kb_generate_recommendations():
 
         result = engine.generate_from_all_investigations()
         return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e), "status": "error"})
+    except Exception:
+        logger.exception("Error generating recommendations")
+        return jsonify({"error": "Internal error", "status": "error"})
 
 
 @knowledge_base_bp.route('/recommendations/stats')
@@ -973,9 +1047,10 @@ def api_kb_recommendation_stats():
 
         stats = engine.get_stats()
         return jsonify(stats)
-    except Exception as e:
+    except Exception:
+        logger.exception("Error fetching recommendation stats")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "total_recommendations": 0,
             "by_status": {},
             "by_complexity": {},
@@ -992,12 +1067,22 @@ def api_kb_recommendation_stats():
 def api_kb_investigation_report(investigation_id):
     """Get the investigation report content for a given investigation ID."""
     try:
+        import re
+        import os
         from pathlib import Path
         import markdown
         from atlasforge_config import INVESTIGATIONS_DIR
 
+        # Validate investigation_id format
+        if not re.match(r'^[a-zA-Z0-9_-]{1,128}$', investigation_id):
+            return jsonify({"error": "Invalid investigation ID format"}), 400
+
         investigations_dir = INVESTIGATIONS_DIR
-        report_path = investigations_dir / investigation_id / "artifacts" / "investigation_report.md"
+        report_path = (investigations_dir / investigation_id / "artifacts" / "investigation_report.md").resolve()
+
+        # Path traversal check
+        if not str(report_path).startswith(str(investigations_dir.resolve()) + os.sep):
+            return jsonify({"error": "Invalid investigation ID"}), 400
 
         if not report_path.exists():
             return jsonify({"error": f"Report not found for investigation {investigation_id}"}), 404
@@ -1007,7 +1092,7 @@ def api_kb_investigation_report(investigation_id):
         # Try to convert to HTML if markdown library is available
         try:
             html_content = markdown.markdown(content, extensions=['tables', 'fenced_code'])
-        except:
+        except Exception:
             html_content = None
 
         return jsonify({
@@ -1017,5 +1102,5 @@ def api_kb_investigation_report(investigation_id):
             "html_content": html_content,
             "exists": True
         })
-    except Exception as e:
-        return jsonify({"error": str(e), "exists": False})
+    except Exception:
+        return jsonify({"error": "Internal error loading report", "exists": False}), 500

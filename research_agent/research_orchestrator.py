@@ -20,11 +20,14 @@ Usage:
 
 import sys
 import json
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -49,6 +52,16 @@ class ResearchConfig:
     enable_parallel: bool = True
     max_workers: int = 3
     simulate_search: bool = False  # Use for testing
+    use_web_search: bool = False  # Enable real web search via --allowedTools WebSearch
+
+    def __post_init__(self):
+        # Guard against None/invalid values that crash at runtime
+        if self.timeout_seconds is None or isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, int):
+            self.timeout_seconds = 300
+        if not isinstance(self.max_workers, int) or self.max_workers < 1:
+            self.max_workers = 1
+        if not isinstance(self.max_topics, int) or self.max_topics < 1:
+            self.max_topics = 5
 
 
 @dataclass
@@ -137,7 +150,7 @@ class ResearchOrchestrator:
 
     TOPIC_EXTRACTION_PROMPT = """Analyze this mission and identify research topics.
 
-Mission: {mission}
+Mission: $mission
 
 Identify 3-5 specific topics to research that would help plan this mission.
 Consider:
@@ -148,15 +161,15 @@ Consider:
 5. Recent developments (2024-2025)
 
 Respond in JSON:
-{{
+{
     "topics": [
-        {{
+        {
             "topic": "topic name",
             "why": "why this is important to research",
             "priority": "high|medium|low"
-        }}
+        }
     ]
-}}
+}
 """
 
     def __init__(self, config: Optional[ResearchConfig] = None):
@@ -172,12 +185,13 @@ Respond in JSON:
         self.web_researcher = WebResearcher(
             model=self.config.model,
             max_results_per_query=self.config.max_results_per_query,
-            timeout_seconds=self.config.timeout_seconds // 3
+            timeout_seconds=max(1, self.config.timeout_seconds // 3),
+            use_web_search=self.config.use_web_search
         )
 
         self.synthesizer = KnowledgeSynthesizer(
             model=self.config.model,
-            timeout_seconds=self.config.timeout_seconds // 2
+            timeout_seconds=max(1, self.config.timeout_seconds // 2)
         )
 
     def extract_topics(self, mission: str) -> List[Dict[str, str]]:
@@ -190,7 +204,8 @@ Respond in JSON:
         Returns:
             List of topic dicts with topic, why, and priority
         """
-        prompt = self.TOPIC_EXTRACTION_PROMPT.format(mission=mission)
+        import string as _string
+        prompt = _string.Template(self.TOPIC_EXTRACTION_PROMPT).safe_substitute(mission=mission)
 
         response, _ = invoke_fresh_llm(
             prompt=prompt,
@@ -200,12 +215,15 @@ Respond in JSON:
 
         try:
             import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            _balanced = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
+            _fallback = re.search(r'\{.*?\}', response, re.DOTALL)
+            json_match = _balanced or _fallback
             if json_match:
                 parsed = json.loads(json_match.group(0))
                 return parsed.get("topics", [])
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError) as _e:
+            import logging as _log
+            _log.getLogger(__name__).debug("JSON parse error in extract_research_topics: %s", _e)
 
         # Fallback: extract keywords from mission
         return [{"topic": mission, "why": "Main mission topic", "priority": "high"}]
@@ -260,7 +278,10 @@ Respond in JSON:
 
         def log_progress(msg: str):
             if progress_callback:
-                progress_callback(msg)
+                try:
+                    progress_callback(msg)
+                except Exception as _cb_exc:
+                    logger.debug("[Research] progress_callback raised: %s", _cb_exc)
 
         # Extract topics if not provided
         if not topics:
@@ -269,8 +290,13 @@ Respond in JSON:
             topics = [t.get("topic", "") for t in topic_data if t.get("topic")]
             topics = topics[:self.config.max_topics]
 
+        if not topics:
+            logger.warning("Research: no topics extracted from mission — skipping research phase")
+            if progress_callback:
+                progress_callback("Warning: could not extract research topics from mission statement.")
+
         findings.topics_researched = topics
-        log_progress(f"Researching {len(topics)} topics: {', '.join(topics[:3])}...")
+        log_progress(f"Researching {len(topics)} topics: {', '.join(str(t) for t in topics[:3])}...")
 
         # Research each topic
         if self.config.enable_parallel and len(topics) > 1:
@@ -285,18 +311,36 @@ Respond in JSON:
                 1 for r in result.results if r.is_primary_source
             )
 
-        # Synthesize findings
+        # Synthesize findings using per-topic synthesis + merge
         if findings.research_results:
             log_progress("Synthesizing research findings...")
             try:
-                findings.synthesis = self.synthesizer.synthesize(
-                    topic=mission,
-                    research_results=findings.research_results,
-                    context=context
+                per_topic = self._synthesize_per_topic(
+                    findings.research_results, context, log_progress
                 )
+                if len(per_topic) > 1:
+                    log_progress(f"Merging {len(per_topic)} per-topic syntheses...")
+                    merged = self.synthesizer.merge_syntheses(per_topic)
+                    merged.topic = mission
+                    findings.synthesis = merged
+                elif len(per_topic) == 1:
+                    findings.synthesis = per_topic[0]
+                    findings.synthesis.topic = mission
+                else:
+                    raise RuntimeError("Per-topic synthesis produced no results")
                 log_progress(f"Synthesis complete. Confidence: {findings.synthesis.synthesis_confidence.value}")
             except Exception as e:
-                findings.errors.append(f"Synthesis failed: {e}")
+                # Fallback: single flat synthesis (original behavior)
+                log_progress(f"Per-topic synthesis failed ({e}), falling back to flat synthesis...")
+                try:
+                    findings.synthesis = self.synthesizer.synthesize(
+                        topic=mission,
+                        research_results=findings.research_results,
+                        context=context
+                    )
+                    log_progress(f"Fallback synthesis complete. Confidence: {findings.synthesis.synthesis_confidence.value}")
+                except Exception as e2:
+                    findings.errors.append(f"Synthesis failed: {e2}")
 
         # Extract and inject code to AI-AfterImage
         try:
@@ -338,22 +382,83 @@ Respond in JSON:
         """Research topics in parallel."""
         results = []
 
-        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
+        try:
             futures = {
                 executor.submit(self.research_topic, topic, context): topic
                 for topic in topics
             }
 
-            for future in futures:
-                topic = futures[future]
-                try:
-                    result = future.result(timeout=self.config.timeout_seconds)
-                    results.append(result)
-                    log_progress(f"Completed research: {topic}")
-                except Exception as e:
-                    log_progress(f"Failed to research {topic}: {e}")
+            try:
+                for future in as_completed(futures, timeout=self.config.timeout_seconds):
+                    topic = futures[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        log_progress(f"Completed research: {topic}")
+                    except Exception as e:
+                        log_progress(f"Failed to research {topic}: {e}")
+            except TimeoutError:
+                log_progress(f"Parallel research timed out after {self.config.timeout_seconds}s; returning {len(results)} results")
+                # Cancel pending futures to avoid blocking shutdown
+                for f in futures:
+                    f.cancel()
+        finally:
+            executor.shutdown(wait=False)
 
         return results
+
+    def _synthesize_per_topic(
+        self,
+        research_results: List[WebResearchResult],
+        context: str,
+        log_progress: Callable[[str], None]
+    ) -> List[SynthesisResult]:
+        """
+        Synthesize research results grouped by topic.
+
+        Each WebResearchResult has a .topic field. This method calls
+        synthesize_single() for each result, producing a per-topic
+        SynthesisResult that can later be merged.
+
+        Args:
+            research_results: List of WebResearchResult (each has .topic)
+            context: Additional context for synthesis
+            log_progress: Progress callback
+
+        Returns:
+            List of SynthesisResult, one per topic
+        """
+        syntheses = []
+        for result in research_results:
+            if not result.results:
+                continue
+            log_progress(f"Synthesizing topic: {result.topic}")
+            synthesis = self.synthesizer.synthesize_single(
+                topic=result.topic,
+                research=result,
+                context=context
+            )
+            syntheses.append(synthesis)
+        return syntheses
+
+    def merge_research_syntheses(
+        self,
+        syntheses: List[SynthesisResult]
+    ) -> SynthesisResult:
+        """
+        Merge multiple SynthesisResult objects into one.
+
+        Public convenience method for callers who run multiple
+        quick_research() calls and want to combine the results.
+
+        Args:
+            syntheses: List of SynthesisResult to merge
+
+        Returns:
+            Merged SynthesisResult with deduplicated recommendations and gaps
+        """
+        return self.synthesizer.merge_syntheses(syntheses)
 
     def quick_research(
         self,
@@ -435,14 +540,15 @@ Respond in JSON:
         except Exception as e:
             # Log but don't fail the research
             import logging
-            logging.getLogger(__name__).debug(f"Code extraction skipped: {e}")
+            logging.getLogger(__name__).warning(f"Code extraction skipped: {e}")
 
 
 def research_for_mission(
     mission: str,
     topics: Optional[List[str]] = None,
     model: ModelType = ModelType.BALANCED,
-    simulate: bool = False
+    simulate: bool = False,
+    use_web_search: bool = False
 ) -> ResearchFindings:
     """
     Convenience function to research for a mission.
@@ -452,13 +558,15 @@ def research_for_mission(
         topics: Optional specific topics
         model: Model to use
         simulate: Use simulated searches
+        use_web_search: Enable real web search via --allowedTools WebSearch
 
     Returns:
         ResearchFindings
     """
     config = ResearchConfig(
         model=model,
-        simulate_search=simulate
+        simulate_search=simulate,
+        use_web_search=use_web_search
     )
     orchestrator = ResearchOrchestrator(config)
     return orchestrator.research_for_planning(mission, topics)

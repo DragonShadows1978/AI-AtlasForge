@@ -19,6 +19,8 @@ Architecture:
 
 import json
 import os
+import re
+import secrets
 import signal
 import subprocess
 import threading
@@ -31,7 +33,11 @@ from flask import Flask, render_template_string, jsonify, request, Response, sen
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import mimetypes
 
+import logging
+
 import io_utils
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CONFIGURATION
@@ -86,7 +92,7 @@ TIMELINE_PAGE_HTML = load_template("timeline")
 # =============================================================================
 
 app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path='/static')
-app.config['SECRET_KEY'] = 'atlasforge-secret'
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
 
 # Template toggle: use bundled template by default in production
 # Set FLASK_USE_BUNDLED=false to use legacy template
@@ -116,6 +122,7 @@ app._start_time = time.time()
 # Track seen messages for deduplication (bounded deque prevents unbounded growth)
 from collections import deque as _deque
 seen_messages = _deque(maxlen=200)
+_seen_messages_lock = threading.Lock()
 
 # =============================================================================
 # WEBSOCKET STATE TRACKING (for real-time push)
@@ -179,8 +186,8 @@ try:
     _startup_reaped = _startup_reap()
     if _startup_reaped:
         print(f"[PID Reaper] Startup cleanup: reaped {len(_startup_reaped)} stale agents: {_startup_reaped}")
-except Exception:
-    pass
+except Exception as e:
+    logger.warning("Startup agent reap failed: %s", e)
 
 
 def _start_agent_pid_reaper():
@@ -197,8 +204,8 @@ def _start_agent_pid_reaper():
                 reaped = reap_dead_agents()
                 if reaped:
                     _reaper_logger.info(f"PID reaper: cleaned up {len(reaped)} dead agents: {reaped}")
-            except Exception:
-                pass
+            except Exception as e:
+                _reaper_logger.debug("PID reaper loop error: %s", e)
 
     t = threading.Thread(target=_reaper_loop, daemon=True, name="agent-pid-reaper")
     t.start()
@@ -222,13 +229,13 @@ def find_process(script_name: str) -> dict | None:
                 cmdline = cmdline_path.read_text().replace('\x00', ' ')
                 if script_name in cmdline and 'python' in cmdline:
                     return {"pid": pid, "cmd": cmdline}
-        except:
-            pass
+        except Exception as e:
+            logger.debug("find_process: PID file read failed: %s", e)
 
     # Fallback to pgrep with strict pattern
     try:
         # Use ^python3.*script_name to avoid matching 'tail -f' etc.
-        pattern = f"python3.*{script_name}"
+        pattern = f"python3.*{re.escape(script_name)}"
         result = subprocess.run(
             ["pgrep", "-af", pattern],
             capture_output=True, text=True, timeout=5
@@ -238,14 +245,15 @@ def find_process(script_name: str) -> dict | None:
                 parts = line.split(None, 1)
                 if parts:
                     return {"pid": int(parts[0]), "cmd": parts[1] if len(parts) > 1 else ""}
-    except:
-        pass
+    except Exception as e:
+        logger.debug("find_process: pgrep fallback failed: %s", e)
     return None
 
 
 # Process detection cache: avoids repeated pgrep subprocess calls (50-500ms each)
 _process_cache: dict = {'pid': None, 'valid': False, 'checked_at': 0.0}
 _PROCESS_CACHE_TTL = 3.0  # seconds (was 1.0 — pgrep fallback costs 50-500ms)
+_process_cache_lock = threading.Lock()
 
 
 def find_process_cached(script_name: str) -> dict | None:
@@ -255,15 +263,17 @@ def find_process_cached(script_name: str) -> dict | None:
     Falls through to find_process() on cache miss or expiry.
     """
     now = time.time()
-    if now - _process_cache['checked_at'] < _PROCESS_CACHE_TTL:
-        if _process_cache['valid']:
-            return {'pid': _process_cache['pid'], 'cmd': ''}
-        return None
+    with _process_cache_lock:
+        if now - _process_cache['checked_at'] < _PROCESS_CACHE_TTL:
+            if _process_cache['valid']:
+                return {'pid': _process_cache['pid'], 'cmd': ''}
+            return None
 
     result = find_process(script_name)
-    _process_cache['pid'] = result['pid'] if result else None
-    _process_cache['valid'] = result is not None
-    _process_cache['checked_at'] = now
+    with _process_cache_lock:
+        _process_cache['pid'] = result['pid'] if result else None
+        _process_cache['valid'] = result is not None
+        _process_cache['checked_at'] = now
     return result
 
 
@@ -328,8 +338,9 @@ def _load_env_file_values(env_path: Path) -> dict:
             value = value.strip().strip('"').strip("'")
             if key:
                 values[key] = value
-    except Exception:
+    except Exception as e:
         # Never block dashboard operations on optional .env parsing.
+        logger.debug(".env parse failed: %s", e)
         return {}
 
     return values
@@ -395,6 +406,8 @@ def get_claude_status() -> dict:
 
 def get_recent_journal(n: int = 10) -> list:
     """Get recent journal entries."""
+    if n <= 0:
+        return []
     entries = []
     if CLAUDE_JOURNAL_PATH.exists():
         try:
@@ -413,15 +426,19 @@ def get_recent_journal(n: int = 10) -> list:
                         "full_message": full_msg,
                         "is_truncated": is_truncated
                     })
-                except:
-                    pass
-        except:
-            pass
+                except Exception as e:
+                    logger.debug("get_recent_journal: skipping entry: %s", e)
+        except Exception as e:
+            logger.warning("get_recent_journal: failed to read journal: %s", e)
     return entries
 
 
+_ALLOWED_MODES = {"rd", "free"}
+
 def start_claude(mode: str = "rd") -> tuple[bool, str]:
     """Start Claude autonomous."""
+    if mode not in _ALLOWED_MODES:
+        return False, f"Invalid mode: {mode!r}. Allowed: {sorted(_ALLOWED_MODES)}"
     if find_process_cached("atlasforge_conductor.py"):
         return False, "Already running"
 
@@ -441,21 +458,26 @@ def start_claude(mode: str = "rd") -> tuple[bool, str]:
 
         venv_python = BASE_DIR / ".venv" / "bin" / "python3"
         python_bin = str(venv_python) if venv_python.exists() else "python3"
-        subprocess.Popen(
-            [python_bin, str(script_path), f"--mode={mode}"],
-            cwd=str(BASE_DIR),
-            stdout=open(log_file, 'a'),
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            env=env
-        )
+        log_fd = open(log_file, 'a')
+        try:
+            subprocess.Popen(
+                [python_bin, str(script_path), f"--mode={mode}"],
+                cwd=str(BASE_DIR),
+                stdout=log_fd,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=env
+            )
+        finally:
+            log_fd.close()
         time.sleep(2)
 
         if find_process_cached("atlasforge_conductor.py"):
             return True, f"Started in {mode} mode ({provider})"
         return False, "Failed to start"
     except Exception as e:
-        return False, str(e)
+        logger.error(f"start_claude failed: {e}")
+        return False, "An internal error occurred"
 
 
 def stop_claude() -> tuple[bool, str]:
@@ -468,15 +490,17 @@ def stop_claude() -> tuple[bool, str]:
         os.kill(proc["pid"], signal.SIGTERM)
         time.sleep(2)
 
-        if find_process_cached("atlasforge_conductor.py"):
-            os.kill(proc["pid"], signal.SIGKILL)
+        fresh = find_process("atlasforge_conductor.py")
+        if fresh:
+            os.kill(fresh["pid"], signal.SIGKILL)
             time.sleep(1)
 
         return True, "Stopped"
     except ProcessLookupError:
         return True, "Already stopped"
     except Exception as e:
-        return False, str(e)
+        logger.error(f"stop_claude failed: {e}")
+        return False, "An internal error occurred"
 
 
 def send_message_to_claude(message: str) -> bool:
@@ -591,8 +615,8 @@ try:
             io_utils,
             mission_data
         ))
-except Exception:
-    pass
+except Exception as e:
+    logger.warning("Failed to resolve mission workspace: %s", e)
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
 init_version_blueprint(BASE_DIR)
 init_bundle_version(STATIC_DIR, BASE_DIR)
@@ -784,8 +808,8 @@ def queue_auto_start_watcher():
                                 'mission_title': mission_title,
                                 'message': f"Started queued mission: {mission_title}"
                             })
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug("queue_mission_started emit failed: %s", e)
                         # Emit auto-start notification for browser notifications
                         try:
                             from websocket_events import emit_mission_auto_started
@@ -856,7 +880,8 @@ def queue_auto_start_watcher():
                 # Call queue/next endpoint to properly pop and create mission
                 try:
                     import requests
-                    resp = requests.post("http://localhost:5000/api/queue/next", timeout=10)
+                    _port = os.environ.get('ATLASFORGE_PORT', os.environ.get('PORT', '5010'))
+                    resp = requests.post(f"http://localhost:{_port}/api/queue/next", timeout=10)
                     if resp.status_code == 200:
                         data = resp.json()
                         started_id = data.get('mission_id', 'unknown')
@@ -926,8 +951,19 @@ def favicon():
 def serve_dist_gz(filename):
     """Serve pre-compressed .gz files for dist assets when client accepts gzip."""
     dist_dir = STATIC_DIR / 'dist'
-    gz_path = dist_dir / (filename + '.gz')
-    plain_path = dist_dir / filename
+    dist_dir_resolved = dist_dir.resolve()
+    try:
+        gz_path = (dist_dir / (filename + '.gz')).resolve()
+        plain_path = (dist_dir / filename).resolve()
+    except Exception:
+        abort(404)
+    # Path traversal guard: BOTH resolved paths must stay within dist_dir.
+    # Using AND (not OR) because each path is served independently — if gz_path
+    # escapes dist/ but plain_path is inside, a gzip-accepting client could still
+    # receive the unsafe gz file.
+    dist_prefix = str(dist_dir_resolved) + os.sep
+    if not (str(gz_path).startswith(dist_prefix) and str(plain_path).startswith(dist_prefix)):
+        abort(404)
 
     if gz_path.exists() and 'gzip' in request.accept_encodings:
         mime = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
@@ -1004,7 +1040,8 @@ def compress_response(response):
         data = response.get_data()
         if len(data) < min_size:
             return response
-    except Exception:
+    except Exception as e:
+        logger.debug("compress_response: get_data failed: %s", e)
         return response
 
     # Compress
@@ -1020,8 +1057,8 @@ def compress_response(response):
             response.headers['Content-Encoding'] = 'gzip'
             response.headers['Content-Length'] = len(compressed)
             response.headers['Vary'] = 'Accept-Encoding'
-    except Exception:
-        pass  # Keep original if compression fails
+    except Exception as e:
+        logger.debug("Response compression failed, keeping original: %s", e)
 
     return response
 
@@ -1051,16 +1088,21 @@ def handle_connect():
     global seen_messages
     # Chat history is loaded via REST /api/chat-history (loadInitialChatHistory)
     # Only populate seen_messages set here to avoid duplicate detection issues
-    history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
-    for msg in history[-30:]:
-        role = str(msg.get('role', '')).strip().lower()
-        if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
-            msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
-            seen_messages.append(msg_id)
+    # Clear before re-seeding to prevent unbounded growth on reconnect
+    with _seen_messages_lock:
+        seen_messages.clear()
+        history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
+        for msg in history[-30:]:
+            role = str(msg.get('role', '')).strip().lower()
+            if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
+                msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
+                seen_messages.append(msg_id)
 
 
 @socketio.on('send_message')
 def handle_send_message(data):
+    if not isinstance(data, dict):
+        return
     content = data.get('content', '')
     if content:
         def update_history(history):
@@ -1085,6 +1127,7 @@ def handle_send_message(data):
 
 _widget_state = {}
 _widget_state_ts: dict = {}  # key -> float timestamp of last write (for TTL pruning)
+_widget_state_lock = threading.Lock()
 _client_subscriptions = {}  # Track which rooms each client subscribes to
 
 @socketio.on('connect', namespace='/widgets')
@@ -1093,8 +1136,9 @@ def handle_widget_connect():
     global _ws_state_cache
     from flask import request as flask_request
     client_id = flask_request.sid
-    _ws_state_cache['connected_clients'] += 1
-    _client_subscriptions[client_id] = set()
+    with _widget_state_lock:
+        _ws_state_cache['connected_clients'] += 1
+        _client_subscriptions[client_id] = set()
 
     emit('connected', {
         'status': 'ok',
@@ -1110,22 +1154,26 @@ def handle_widget_disconnect():
     global _ws_state_cache
     from flask import request as flask_request
     client_id = flask_request.sid
-    _ws_state_cache['connected_clients'] = max(0, _ws_state_cache['connected_clients'] - 1)
-    if client_id in _client_subscriptions:
-        del _client_subscriptions[client_id]
+    with _widget_state_lock:
+        _ws_state_cache['connected_clients'] = max(0, _ws_state_cache['connected_clients'] - 1)
+        if client_id in _client_subscriptions:
+            del _client_subscriptions[client_id]
 
 
 @socketio.on('subscribe', namespace='/widgets')
 def handle_widget_subscribe(data):
     """Subscribe to specific widget updates."""
+    if not isinstance(data, dict):
+        return
     from flask import request as flask_request
     client_id = flask_request.sid
     room = data.get('room')
 
     if room in VALID_WS_ROOMS:
         join_room(room)
-        if client_id in _client_subscriptions:
-            _client_subscriptions[client_id].add(room)
+        with _widget_state_lock:
+            if client_id in _client_subscriptions:
+                _client_subscriptions[client_id].add(room)
 
         # Send initial data immediately after subscribing
         initial_data = get_initial_room_data(room)
@@ -1136,7 +1184,7 @@ def handle_widget_subscribe(data):
         })
     else:
         emit('error', {
-            'message': f'Invalid room: {room}',
+            'message': 'Invalid room specified',
             'valid_rooms': VALID_WS_ROOMS
         })
 
@@ -1148,9 +1196,17 @@ def handle_widget_unsubscribe(data):
     client_id = flask_request.sid
     room = data.get('room')
 
+    if room not in VALID_WS_ROOMS:
+        emit('error', {
+            'message': 'Invalid room specified',
+            'valid_rooms': VALID_WS_ROOMS
+        })
+        return
+
     leave_room(room)
-    if client_id in _client_subscriptions:
-        _client_subscriptions[client_id].discard(room)
+    with _widget_state_lock:
+        if client_id in _client_subscriptions:
+            _client_subscriptions[client_id].discard(room)
     emit('unsubscribed', {'room': room})
 
 
@@ -1168,8 +1224,9 @@ def handle_subscribe_all():
 
     for room in VALID_WS_ROOMS:
         join_room(room)
+    with _widget_state_lock:
         if client_id in _client_subscriptions:
-            _client_subscriptions[client_id].add(room)
+            _client_subscriptions[client_id].update(VALID_WS_ROOMS)
 
     emit('subscribed_all', {
         'rooms': VALID_WS_ROOMS,
@@ -1191,15 +1248,15 @@ def get_initial_room_data(room: str) -> dict:
                 cached = get_dashboard_cache().get('api_status')
                 if cached is not None:
                     return cached
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
             from dashboard_modules.mission_status_schema import build_mission_status
             result = build_mission_status(get_claude_status())
             try:
                 from dashboard_modules.cache import get_dashboard_cache
                 get_dashboard_cache().set('api_status', result, ttl_seconds=0.75)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Cache operation failed: %s", e)
             return result
         elif room == 'journal':
             return {'entries': get_recent_journal(15)}
@@ -1219,14 +1276,14 @@ def get_initial_room_data(room: str) -> dict:
                 cached = get_dashboard_cache().get('file_events')
                 if cached is not None:
                     return cached
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("file_events cache get failed: %s", e)
             result = get_recent_file_events()
             try:
                 from dashboard_modules.cache import get_dashboard_cache
                 get_dashboard_cache().set('file_events', result, ttl_seconds=5.0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("file_events cache set failed: %s", e)
             return result
         elif room == 'glassbox_archive':
             return get_glassbox_archive_status()
@@ -1238,30 +1295,33 @@ def get_initial_room_data(room: str) -> dict:
             return get_mission_params()
         elif room == 'mission_agents':
             try:
-                from agent_stream_manager import get_active_agents as _get_agents, get_agent_stream_lines as _get_lines
-                agents = _get_agents()
+                from agent_stream_manager import get_recent_agents as _get_agents, get_agent_stream_lines as _get_lines
+                agents = _get_agents(limit=6)
                 mission_agents = agents.get('mission', [])
                 for agent_info in mission_agents:
                     aid = agent_info.get('agent_id')
                     if aid:
                         agent_info['stream_lines'] = _get_lines(aid, limit=100)
                 return {'event': 'initial_state', 'agents': mission_agents}
-            except Exception:
+            except Exception as e:
+                logger.debug("mission_agents room data failed: %s", e)
                 return {'event': 'initial_state', 'agents': []}
         elif room == 'investigation_agents':
             try:
-                from agent_stream_manager import get_active_agents as _get_agents, get_agent_stream_lines as _get_lines
-                agents = _get_agents()
+                from agent_stream_manager import get_recent_agents as _get_agents, get_agent_stream_lines as _get_lines
+                agents = _get_agents(limit=6)
                 inv_agents = agents.get('investigation', [])
                 for agent_info in inv_agents:
                     aid = agent_info.get('agent_id')
                     if aid:
                         agent_info['stream_lines'] = _get_lines(aid, limit=100)
                 return {'event': 'initial_state', 'agents': inv_agents}
-            except Exception:
+            except Exception as e:
+                logger.debug("investigation_agents room data failed: %s", e)
                 return {'event': 'initial_state', 'agents': []}
     except Exception as e:
-        return {'error': str(e)}
+        logger.error(f'get_initial_room_data error for room {room}: {e}')
+        return {'error': 'Internal error'}
     return {}
 
 
@@ -1325,7 +1385,8 @@ def get_backup_status_data() -> dict:
     except ImportError:
         return {'error': 'Snapshot module not available'}
     except Exception as e:
-        return {'error': str(e)}
+        logger.error(f'get_backup_status_data error: {e}')
+        return {'error': 'Internal error'}
 
 
 def get_recent_file_events() -> dict:
@@ -1364,7 +1425,8 @@ def get_recent_file_events() -> dict:
             'workspace': str(mission_workspace)
         }
     except Exception as e:
-        return {'error': str(e), 'files': []}
+        logger.error(f'get_recent_file_events error: {e}')
+        return {'error': 'Internal error', 'files': []}
 
 
 def get_glassbox_archive_status() -> dict:
@@ -1394,7 +1456,8 @@ def get_glassbox_archive_status() -> dict:
             'mission_id': mission_id
         }
     except Exception as e:
-        return {'error': str(e), 'archived': False}
+        logger.error(f'get_glassbox_archive_status error: {e}')
+        return {'error': 'Internal error', 'archived': False}
 
 
 def get_recommendations_summary() -> dict:
@@ -1404,7 +1467,8 @@ def get_recommendations_summary() -> dict:
             from suggestion_storage import get_storage
             storage = get_storage()
             items = storage.get_all()
-        except Exception:
+        except Exception as e:
+            logger.debug("get_recommendations_summary: SQLite fallback to JSON: %s", e)
             recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
             items = recommendations_data.get("items", [])
         return {
@@ -1413,7 +1477,8 @@ def get_recommendations_summary() -> dict:
             'has_new': len(items) > 0
         }
     except Exception as e:
-        return {'error': str(e), 'count': 0, 'recent': []}
+        logger.error(f'get_recommendations_summary error: {e}')
+        return {'error': 'Internal error', 'count': 0, 'recent': []}
 
 
 def get_subprocess_gate_status() -> dict:
@@ -1445,7 +1510,8 @@ def get_subprocess_gate_status() -> dict:
     except ImportError:
         return {'available': False, 'timestamp': datetime.now().isoformat()}
     except Exception as e:
-        return {'available': False, 'error': str(e), 'timestamp': datetime.now().isoformat()}
+        logger.error(f'get_subprocess_gate_status error: {e}')
+        return {'available': False, 'error': 'Internal error', 'timestamp': datetime.now().isoformat()}
 
 
 def emit_widget_update(room: str, data: dict):
@@ -1478,8 +1544,8 @@ def broadcast_state_change(event_type: str, data: dict):
             status = get_claude_status()
             status.update(data)
             emit_mission_status(status, event_type=event_type)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to emit mission status: %s", e)
         return
 
     # Non-mission-status events use the original path
@@ -1512,33 +1578,34 @@ def check_and_emit_widget_updates():
 
     # Track timing for rate limiting
     now = time.time()
-    if now - _ws_state_cache.get('last_check', 0) < 1.5:  # Rate limit to ~0.67Hz (reduced from 2Hz for lower I/O load)
-        return
-    _ws_state_cache['last_check'] = now
+    with _widget_state_lock:
+        if now - _ws_state_cache.get('last_check', 0) < 1.5:  # Rate limit to ~0.67Hz (reduced from 2Hz for lower I/O load)
+            return
+        _ws_state_cache['last_check'] = now
 
     # Prune stale _widget_state on mission transition to prevent unbounded accumulation
     try:
         current_status = get_claude_status()
         current_mission_id = current_status.get('mission_id')
-        if current_mission_id and _widget_state.get('_tracked_mission_id') != current_mission_id:
-            _widget_state.clear()
-            _widget_state_ts.clear()
-            _widget_state['_tracked_mission_id'] = current_mission_id
-    except Exception:
-        pass
+        with _widget_state_lock:
+            if current_mission_id and _widget_state.get('_tracked_mission_id') != current_mission_id:
+                _widget_state.clear()
+                _widget_state_ts.clear()
+                _widget_state['_tracked_mission_id'] = current_mission_id
+    except Exception as e:
+        logger.debug("Widget state prune failed: %s", e)
 
     # TTL pruning: belt-and-suspenders for long missions — remove keys with timestamps >600s old
     try:
         TTL = 600
-        stale_keys = [k for k, ts in list(_widget_state_ts.items())
-                      if now - ts > TTL and k != '_tracked_mission_id']
-        for k in stale_keys:
-            _widget_state.pop(k, None)
-            _widget_state_ts.pop(k, None)
-        if stale_keys:
-            pass  # no bookkeeping needed — stale keys already removed above
-    except Exception:
-        pass
+        with _widget_state_lock:
+            stale_keys = [k for k, ts in list(_widget_state_ts.items())
+                          if now - ts > TTL and k != '_tracked_mission_id']
+            for k in stale_keys:
+                _widget_state.pop(k, None)
+                _widget_state_ts.pop(k, None)
+    except Exception as e:
+        logger.debug("TTL widget state prune failed: %s", e)
 
     # Mission status check — routed through canonical schema
     try:
@@ -1550,13 +1617,14 @@ def check_and_emit_widget_updates():
         # Use '||' as delimiter — safe against any valid stage name (PLANNING,
         # BUILDING, TESTING, ANALYZING, CYCLE_END, COMPLETE) which never contain '||'.
         status_key = f"{new_stage}||{current_status.get('running')}||{current_status.get('rd_iteration')}"
-        if _widget_state.get('mission_status_key') != status_key:
-            # Extract previous stage from the stored key before overwriting
+        with _widget_state_lock:
+            _status_changed = _widget_state.get('mission_status_key') != status_key
             prev_key = _widget_state.get('mission_status_key') or ''
+            if _status_changed:
+                _widget_state['mission_status_key'] = status_key
+                _widget_state_ts['mission_status_key'] = now
+        if _status_changed:
             prev_stage = prev_key.split('||')[0] if prev_key else ''
-            _widget_state['mission_status_key'] = status_key
-            _widget_state_ts['mission_status_key'] = now
-
             if prev_stage and prev_stage != 'N/A' and prev_stage != new_stage:
                 # Stage transition — set event_type and old_stage so the JS
                 # toast handler (showToast) fires for this status update.
@@ -1564,33 +1632,42 @@ def check_and_emit_widget_updates():
             else:
                 # Running/iteration changed only — plain status update, no toast
                 emit_mission_status(current_status)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Mission status widget update failed: %s", e)
 
     # Journal check
     try:
         journal = get_recent_journal(15)
         journal_key = f"{len(journal)}:{journal[0]['timestamp'] if journal else ''}"
-        if _widget_state.get('journal_key') != journal_key:
-            _widget_state['journal_key'] = journal_key
-            _widget_state_ts['journal_key'] = now
+        with _widget_state_lock:
+            _journal_changed = _widget_state.get('journal_key') != journal_key
+            if _journal_changed:
+                _widget_state['journal_key'] = journal_key
+                _widget_state_ts['journal_key'] = now
+        if _journal_changed:
             emit_widget_update('journal', {'entries': journal})
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Journal widget update failed: %s", e)
 
     # AtlasForge stats check (less frequent - every 10 seconds)
     try:
-        if now - _widget_state.get('atlasforge_last_check', 0) > 10:
-            _widget_state['atlasforge_last_check'] = now
-            _widget_state_ts['atlasforge_last_check'] = now
+        with _widget_state_lock:
+            _af_due = now - _widget_state.get('atlasforge_last_check', 0) > 10
+            if _af_due:
+                _widget_state['atlasforge_last_check'] = now
+                _widget_state_ts['atlasforge_last_check'] = now
+        if _af_due:
             atlasforge_data = get_atlasforge_exploration_stats()
             atlasforge_key = str(atlasforge_data.get('exploration', {}).get('total_insights', 0))
-            if _widget_state.get('atlasforge_key') != atlasforge_key:
-                _widget_state['atlasforge_key'] = atlasforge_key
-                _widget_state_ts['atlasforge_key'] = now
+            with _widget_state_lock:
+                _af_changed = _widget_state.get('atlasforge_key') != atlasforge_key
+                if _af_changed:
+                    _widget_state['atlasforge_key'] = atlasforge_key
+                    _widget_state_ts['atlasforge_key'] = now
+            if _af_changed:
                 emit_widget_update('atlasforge_stats', atlasforge_data)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("AtlasForge stats widget update failed: %s", e)
 
     # Recommendations check - detect new mission recommendations
     # Uses SQLite storage (primary) with JSON fallback for consistency with af_engine
@@ -1600,8 +1677,8 @@ def check_and_emit_widget_updates():
             from suggestion_storage import get_storage
             storage = get_storage()
             items = storage.get_all()
-        except Exception:
-            # Fallback to JSON if SQLite fails
+        except Exception as e:
+            logger.debug("Recommendations SQLite read failed, falling back to JSON: %s", e)
             recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
             items = recommendations_data.get("items", [])
 
@@ -1609,9 +1686,15 @@ def check_and_emit_widget_updates():
         latest_rec_id = items[0].get("id") if items else None  # SQLite returns sorted by priority
         rec_key = f"{rec_count}:{latest_rec_id}"
 
-        if _widget_state.get('recommendations_key') != rec_key and rec_count > 0:
+        with _widget_state_lock:
+            _rec_changed = _widget_state.get('recommendations_key') != rec_key and rec_count > 0
+            _prev_rec_key = _widget_state.get('recommendations_key', '0:')
+            if _rec_changed:
+                _widget_state['recommendations_key'] = rec_key
+                _widget_state_ts['recommendations_key'] = now
+        if _rec_changed:
             # New recommendation detected
-            prev_count = int(_widget_state.get('recommendations_key', '0:').split(':')[0]) if _widget_state.get('recommendations_key') else 0
+            prev_count = int(_prev_rec_key.split(':')[0]) if _prev_rec_key else 0
             if rec_count > prev_count and items:
                 # There's a new recommendation - emit notification
                 # Find most recently created item (not highest priority)
@@ -1627,39 +1710,49 @@ def check_and_emit_widget_updates():
                     },
                     'total_count': rec_count
                 })
-            _widget_state['recommendations_key'] = rec_key
-            _widget_state_ts['recommendations_key'] = now
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Recommendations widget update failed: %s", e)
 
     # Subprocess gate check (every 5 seconds)
     try:
-        if now - _widget_state.get('gate_last_check', 0) > 5:
-            _widget_state['gate_last_check'] = now
-            _widget_state_ts['gate_last_check'] = now
+        with _widget_state_lock:
+            _gate_due = now - _widget_state.get('gate_last_check', 0) > 5
+            if _gate_due:
+                _widget_state['gate_last_check'] = now
+                _widget_state_ts['gate_last_check'] = now
+        if _gate_due:
             gate_data = get_subprocess_gate_status()
             gate_key = f"{gate_data.get('should_defer')}:{gate_data.get('process_type')}:{gate_data.get('is_stalled')}"
-            if _widget_state.get('gate_key') != gate_key:
-                _widget_state['gate_key'] = gate_key
-                _widget_state_ts['gate_key'] = now
+            with _widget_state_lock:
+                _gate_changed = _widget_state.get('gate_key') != gate_key
+                if _gate_changed:
+                    _widget_state['gate_key'] = gate_key
+                    _widget_state_ts['gate_key'] = now
+            if _gate_changed:
                 emit_widget_update('subprocess_gate', gate_data)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Subprocess gate widget update failed: %s", e)
 
     # Mission params check (every 30 seconds — parameters rarely change mid-mission)
     try:
-        if now - _widget_state.get('mission_params_last_check', 0) > 30:
-            _widget_state['mission_params_last_check'] = now
-            _widget_state_ts['mission_params_last_check'] = now
+        with _widget_state_lock:
+            _params_due = now - _widget_state.get('mission_params_last_check', 0) > 30
+            if _params_due:
+                _widget_state['mission_params_last_check'] = now
+                _widget_state_ts['mission_params_last_check'] = now
+        if _params_due:
             params_data = get_mission_params()
             _p = params_data.get('parameters', {})
             params_key = f"{params_data.get('mission_id')}:{_p.get('current_cycle')}:{_p.get('current_stage')}:{_p.get('cycle_budget')}:{_p.get('max_iterations')}"
-            if _widget_state.get('mission_params_key') != params_key:
-                _widget_state['mission_params_key'] = params_key
-                _widget_state_ts['mission_params_key'] = now
+            with _widget_state_lock:
+                _params_changed = _widget_state.get('mission_params_key') != params_key
+                if _params_changed:
+                    _widget_state['mission_params_key'] = params_key
+                    _widget_state_ts['mission_params_key'] = now
+            if _params_changed:
                 emit_widget_update('mission_params', params_data)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Mission params widget update failed: %s", e)
 
 
 # =============================================================================
@@ -1669,11 +1762,15 @@ def check_and_emit_widget_updates():
 @app.route('/api/ws/status')
 def api_ws_status():
     """Get WebSocket connection status and statistics."""
+    with _widget_state_lock:
+        subs_snapshot = {k: list(v) for k, v in _client_subscriptions.items()}
+        clients = _ws_state_cache.get('connected_clients', 0)
+        last_chk = _ws_state_cache.get('last_check', 0)
     return jsonify({
-        'connected_clients': _ws_state_cache.get('connected_clients', 0),
+        'connected_clients': clients,
         'available_rooms': VALID_WS_ROOMS,
-        'client_subscriptions': {k: list(v) for k, v in _client_subscriptions.items()},
-        'last_check': _ws_state_cache.get('last_check', 0),
+        'client_subscriptions': subs_snapshot,
+        'last_check': last_chk,
         'timestamp': datetime.now().isoformat()
     })
 
@@ -1712,8 +1809,9 @@ def api_context_watcher_stats():
             'timestamp': datetime.now().isoformat()
         }), 503
     except Exception as e:
+        logger.error(f'api_context_watcher_stats error: {e}')
         return jsonify({
-            'error': str(e),
+            'error': 'Internal error',
             'enabled': False,
             'running': False,
             'timestamp': datetime.now().isoformat()
@@ -1841,8 +1939,9 @@ def api_restart_stats():
         return jsonify(stats)
 
     except Exception as e:
+        logger.error(f'api_restart_stats error: {e}')
         return jsonify({
-            'error': str(e),
+            'error': 'Internal error',
             'graceful_restarts': 0,
             'error_restarts': 0,
             'blocking_errors': 0,
@@ -1861,13 +1960,14 @@ def watch_chat():
 
     try:
         history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
-        for msg in history:
-            role = str(msg.get('role', '')).strip().lower()
-            if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
-                msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
-                seen_messages.append(msg_id)
-    except:
-        pass
+        with _seen_messages_lock:
+            for msg in history:
+                role = str(msg.get('role', '')).strip().lower()
+                if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
+                    msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
+                    seen_messages.append(msg_id)
+    except Exception as e:
+        logger.warning("watch_chat: failed to seed seen_messages from history: %s", e)
 
     while True:
         try:
@@ -1878,9 +1978,10 @@ def watch_chat():
                 role = str(msg.get('role', '')).strip().lower()
                 if role in ('claude', 'codex', 'gemini', 'system', 'suggestion'):
                     msg_id = f"{msg.get('timestamp')}:{msg.get('content', '')[:50]}"
-                    if msg_id not in seen_messages:
-                        seen_messages.append(msg_id)
-                        socketio.emit('message', _serialize_chat_message(msg, fallback_provider))
+                    with _seen_messages_lock:
+                        if msg_id not in seen_messages:
+                            seen_messages.append(msg_id)
+                            socketio.emit('message', _serialize_chat_message(msg, fallback_provider))
 
             check_and_emit_widget_updates()
 
@@ -1914,8 +2015,8 @@ def watch_engine_stage():
                 status['cycles_remaining'] = max(0, sm.cycle_budget - sm.cycle_number)
                 status['is_last_cycle'] = sm.cycle_number >= sm.cycle_budget
                 emit_mission_status(status, event_type='engine_stage_change', old_stage=old_stage)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("watch_engine_stage: iteration failed: %s", e)
 
 
 # =============================================================================
@@ -1934,7 +2035,8 @@ def get_agent_stream_history():
         manifests = get_stream_history(mission_id=mission_id, limit=limit)
         return jsonify({'success': True, 'agents': manifests, 'count': len(manifests)})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in get_agent_stream_history: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 @app.route('/api/agent-stream/<agent_id>')
@@ -1945,7 +2047,8 @@ def get_agent_stream(agent_id):
         lines = get_agent_stream_lines(agent_id, limit=200)
         return jsonify({'success': True, 'lines': lines})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in get_agent_stream: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 @app.route('/api/active-agents')
@@ -1957,7 +2060,8 @@ def get_active_agents_endpoint():
         agents = get_active_agents()
         return jsonify({'success': True, 'agents': agents})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e), 'agents': {'mission': [], 'investigation': []}})
+        logger.error(f"API error in get_active_agents: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred', 'agents': {'mission': [], 'investigation': []}})
 
 
 @app.route('/api/internal/reload-agent-stream', methods=['POST'])
@@ -1972,7 +2076,8 @@ def reload_agent_stream_module():
         set_dashboard_mode(True)
         return jsonify({'success': True, 'message': 'agent_stream_manager reloaded and set to dashboard mode'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in reload_agent_stream_module: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 @app.route('/api/internal/reload-template', methods=['POST'])
@@ -1984,7 +2089,8 @@ def reload_html_template():
         HTML_TEMPLATE = load_template("main")
         return jsonify({'success': True, 'message': 'Templates reloaded from disk'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in reload_html_template: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 @app.route('/api/internal/agent-event', methods=['POST'])
@@ -2000,12 +2106,16 @@ def internal_agent_event():
     POST body: {"room": "mission_agents"|"investigation_agents", "payload": {...}}
     """
     try:
+        if request.content_length and request.content_length > 1_048_576:  # 1MB limit
+            return jsonify({'success': False, 'error': 'Payload too large'}), 413
         data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'error': 'Invalid payload format'}), 400
         room = data.get('room', '')
         payload = data.get('payload', {})
 
         if room not in ('mission_agents', 'investigation_agents'):
-            return jsonify({'success': False, 'error': f'Invalid room: {room}'})
+            return jsonify({'success': False, 'error': 'Invalid room specified'})
 
         socketio.emit('update', {
             'room': room,
@@ -2015,7 +2125,8 @@ def internal_agent_event():
 
         return jsonify({'success': True, 'room': room})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in internal_agent_event: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 @app.route('/api/agent-stream/test-emit', methods=['POST'])
@@ -2030,7 +2141,13 @@ def test_agent_emit():
         from agent_stream_manager import register_agent, complete_agent, STREAM_DIR
         data = request.get_json(silent=True) or {}
         context = data.get('context', 'mission')
+        if context not in ('mission', 'investigation'):
+            context = 'mission'
         label = data.get('label', 'Test-Agent')
+        if not isinstance(label, str):
+            label = 'Test-Agent'
+        # Strip non-printable chars and truncate
+        label = re.sub(r'[^\x20-\x7E]', '', label)[:100]
         agent_id = f"test_{uuid.uuid4().hex[:8]}"
 
         stream_file = register_agent(context, agent_id, label=label)
@@ -2054,7 +2171,8 @@ def test_agent_emit():
         t.start()
         return jsonify({'success': True, 'agent_id': agent_id, 'context': context, 'label': label})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        logger.error(f"API error in test_agent_emit: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
 if __name__ == '__main__':
@@ -2157,7 +2275,10 @@ if __name__ == '__main__':
     print(f"Templates: {TEMPLATES_DIR}")
     print(f"Modules: dashboard_modules/")
     print("=" * 50)
-    PORT = int(os.environ.get('PORT', 5010))
+    try:
+        PORT = int(os.environ.get('PORT', 5010))
+    except (ValueError, TypeError):
+        PORT = 5010
 
     # Get SSL context if available
     ssl_ctx = get_ssl_context()

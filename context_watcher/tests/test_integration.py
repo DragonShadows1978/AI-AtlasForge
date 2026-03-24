@@ -22,7 +22,7 @@ from typing import Optional
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from workspace.ContextWatcher.context_watcher import (
+from context_watcher.context_watcher import (
     ContextWatcher,
     TokenState,
     SessionMonitor,
@@ -155,7 +155,7 @@ def test_threshold_detection_with_callback():
             f.write(create_mock_jsonl_entry("assistant", cache_creation=50000, cache_read=100, request_id="req1") + "\n")
 
         # Create session monitor with mocked transcript dir finder
-        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff)
+        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff, provider="claude")
         monitor.transcript_dir = transcript_dir
 
         # Process initial entries - should not trigger
@@ -205,7 +205,7 @@ def test_emergency_threshold():
             f.write(create_mock_jsonl_entry("user", request_id="req1") + "\n")
             f.write(create_mock_jsonl_entry("assistant", cache_creation=145000, cache_read=100, request_id="req1") + "\n")
 
-        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff)
+        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff, provider="claude")
         monitor.transcript_dir = transcript_dir
 
         signal = monitor.process_updates()
@@ -237,7 +237,7 @@ def test_no_false_positive_high_cache_read():
             f.write(create_mock_jsonl_entry("user", request_id="req1") + "\n")
             f.write(create_mock_jsonl_entry("assistant", cache_creation=150000, cache_read=50000, request_id="req1") + "\n")
 
-        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff)
+        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff, provider="claude")
         monitor.transcript_dir = transcript_dir
 
         signal = monitor.process_updates()
@@ -264,7 +264,7 @@ def test_handoff_only_triggers_once():
 
         jsonl_file = transcript_dir / "session.jsonl"
 
-        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff)
+        monitor = SessionMonitor("test-session", str(tmpdir), on_handoff, provider="claude")
         monitor.transcript_dir = transcript_dir
 
         # Write multiple entries that cross threshold
@@ -324,7 +324,7 @@ def test_stale_session_detection():
         transcript_dir = Path(tmpdir) / ".claude" / "projects" / "-test"
         transcript_dir.mkdir(parents=True)
 
-        monitor = SessionMonitor("test-session", str(tmpdir), lambda s: None)
+        monitor = SessionMonitor("test-session", str(tmpdir), lambda s: None, provider="claude")
         monitor.transcript_dir = transcript_dir
 
         # Initially not stale

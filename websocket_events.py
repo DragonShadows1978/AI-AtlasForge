@@ -21,6 +21,7 @@ Usage:
 
 import time
 import threading
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -29,9 +30,12 @@ from typing import Dict, Any, Optional
 # CONFIGURATION
 # =============================================================================
 
+logger = logging.getLogger(__name__)
+
 # Rate limiting: max events per second per event type
 MAX_EVENTS_PER_SECOND = 10
 DEBOUNCE_WINDOW_MS = 100  # Debounce rapid-fire events
+MAX_RATE_LIMIT_ENTRIES = 1000  # Cap on _last_emit_times dict size
 
 # Track last emit times for rate limiting
 _last_emit_times: Dict[str, float] = {}
@@ -39,6 +43,7 @@ _emit_lock = threading.Lock()
 
 # Cached socketio reference (lazy loaded)
 _socketio = None
+_socketio_lock = threading.Lock()
 
 # Event queue for events generated before socketio is available
 # This ensures no recommendations are lost if generated during dashboard startup
@@ -55,32 +60,39 @@ def _get_socketio():
     """
     Get socketio instance with lazy loading to avoid circular imports.
 
+    Thread-safe: uses double-checked locking to prevent duplicate init.
+
     Returns:
         SocketIO instance or None if not available
     """
     global _socketio
 
+    # Fast path: already initialized (no lock needed for read)
     if _socketio is not None:
         return _socketio
 
+    # Do the potentially-blocking import OUTSIDE the lock to avoid deadlock
+    # if dashboard_v2 itself imports from this module during initialization.
+    found = None
     try:
-        # Try to get socketio from dashboard_v2
         import sys
         if 'dashboard_v2' in sys.modules:
             dashboard = sys.modules['dashboard_v2']
             if hasattr(dashboard, 'socketio'):
-                _socketio = dashboard.socketio
-                return _socketio
-
-        # Try direct import as fallback
-        from dashboard_v2 import socketio
-        _socketio = socketio
-        return _socketio
-
+                found = dashboard.socketio
+        if found is None:
+            from dashboard_v2 import socketio as _sio
+            found = _sio
     except ImportError:
-        return None
+        pass
     except Exception:
-        return None
+        pass
+
+    # Assign under lock (double-checked) to prevent races between threads
+    with _socketio_lock:
+        if _socketio is None and found is not None:
+            _socketio = found
+        return _socketio
 
 
 def set_socketio(socketio_instance):
@@ -92,7 +104,8 @@ def set_socketio(socketio_instance):
         socketio_instance: The Flask-SocketIO instance
     """
     global _socketio
-    _socketio = socketio_instance
+    with _socketio_lock:
+        _socketio = socketio_instance
     # Flush any queued events now that socketio is available
     flush_queued_events()
 
@@ -103,6 +116,9 @@ def flush_queued_events():
 
     Call this after socketio is initialized to deliver pending events.
     Thread-safe with locking.
+
+    Atomically swaps the queue under the lock so only pre-existing events are
+    drained; any events enqueued AFTER the lock block are deferred to the next flush.
     """
     global _event_queue
 
@@ -110,11 +126,15 @@ def flush_queued_events():
     if socketio is None:
         return 0
 
-    flushed = 0
+    # Atomically drain the pre-existing queue content.
+    # Any events enqueued AFTER this lock block are deferred to the next flush.
     with _event_queue_lock:
-        events_to_flush = _event_queue.copy()
+        if not _event_queue:
+            return 0
+        events_to_flush = _event_queue
         _event_queue = []
 
+    flushed = 0
     for event in events_to_flush:
         try:
             socketio.emit(event['event'], {
@@ -124,8 +144,8 @@ def flush_queued_events():
                 'queued': True  # Mark as previously queued
             }, room=event['room'], namespace=event.get('namespace', '/widgets'))
             flushed += 1
-        except Exception:
-            pass  # Silent failure
+        except Exception as e:
+            logger.warning("flush_queued_events failed: %s", e)
 
     return flushed
 
@@ -168,6 +188,8 @@ def _should_emit(event_key: str) -> bool:
     now = time.time()
 
     with _emit_lock:
+        if MAX_EVENTS_PER_SECOND <= 0:
+            return True
         last_time = _last_emit_times.get(event_key, 0)
         min_interval = 1.0 / MAX_EVENTS_PER_SECOND
 
@@ -182,12 +204,26 @@ def _should_emit(event_key: str) -> bool:
         for k in keys_to_remove:
             del _last_emit_times[k]
 
+        # Cap dict size to prevent unbounded growth
+        if len(_last_emit_times) > MAX_RATE_LIMIT_ENTRIES:
+            sorted_keys = sorted(_last_emit_times, key=_last_emit_times.__getitem__)
+            for k in sorted_keys[:len(sorted_keys) // 2]:
+                del _last_emit_times[k]
+
         return True
 
 
-def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/widgets', queue_if_unavailable: bool = False):
+def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/widgets',
+               queue_if_unavailable: bool = False, event_key: str = None):
     """
-    Safely emit a WebSocket event with error handling.
+    Safely emit a WebSocket event with error handling and integrated rate limiting.
+
+    Rate limiting is checked only after confirming socketio availability:
+    - If socketio is unavailable and queue_if_unavailable=True: queue the event WITHOUT
+      consuming a rate-limit credit (queued events are not deliveries).
+    - If socketio is unavailable and queue_if_unavailable=False: drop silently WITHOUT
+      consuming a rate-limit credit.
+    - If socketio is available: check rate limit, then emit if allowed.
 
     Args:
         room: The room to emit to
@@ -195,11 +231,17 @@ def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/w
         data: Event data
         namespace: WebSocket namespace
         queue_if_unavailable: If True, queue the event when socketio is not available
+        event_key: Rate-limit key; if None, rate limiting is skipped (always emit)
     """
     socketio = _get_socketio()
     if socketio is None:
         if queue_if_unavailable:
             _queue_event(room, event, data, namespace)
+        # No rate-limit credit consumed when socketio unavailable (queue or drop)
+        return
+
+    # Rate limiting: only check when socketio is available (delivery is real)
+    if event_key is not None and not _should_emit(event_key):
         return
 
     try:
@@ -208,10 +250,8 @@ def _safe_emit(room: str, event: str, data: Dict[str, Any], namespace: str = '/w
             'data': data,
             'timestamp': datetime.now().isoformat()
         }, room=room, namespace=namespace)
-    except Exception:
-        # Silent failure - don't block main operations
-        pass
-
+    except Exception as e:
+        logger.debug("_safe_emit failed: %s", e)
 
 
 def emit_widget_update(room: str, data: Dict[str, Any]):
@@ -225,6 +265,7 @@ def emit_widget_update(room: str, data: Dict[str, Any]):
         room: The room name (must be in VALID_WS_ROOMS on the server)
         data: The event payload to deliver to all subscribers
     """
+    # No event_key: no rate limiting for generic widget updates (caller controls frequency)
     _safe_emit(room, 'update', data, namespace='/widgets', queue_if_unavailable=False)
 
 
@@ -243,8 +284,6 @@ def emit_file_created(file_path: str, file_type: str, mission_id: str, metadata:
         metadata: Optional additional metadata
     """
     event_key = f'file_created:{mission_id}:{file_path}'
-    if not _should_emit(event_key):
-        return
 
     path = Path(file_path)
     data = {
@@ -257,7 +296,7 @@ def emit_file_created(file_path: str, file_type: str, mission_id: str, metadata:
         'metadata': metadata or {}
     }
 
-    _safe_emit('file_events', 'update', data)
+    _safe_emit('file_events', 'update', data, event_key=event_key)
 
 
 def emit_file_modified(file_path: str, mission_id: str, change_type: str = 'modified'):
@@ -270,8 +309,6 @@ def emit_file_modified(file_path: str, mission_id: str, change_type: str = 'modi
         change_type: Type of change ('modified', 'appended', 'truncated')
     """
     event_key = f'file_modified:{mission_id}:{file_path}'
-    if not _should_emit(event_key):
-        return
 
     path = Path(file_path)
     data = {
@@ -282,7 +319,7 @@ def emit_file_modified(file_path: str, mission_id: str, change_type: str = 'modi
         'mission_id': mission_id
     }
 
-    _safe_emit('file_events', 'update', data)
+    _safe_emit('file_events', 'update', data, event_key=event_key)
 
 
 # =============================================================================
@@ -305,8 +342,6 @@ def emit_transcript_archived(
         stats: Optional manifest/stats data
     """
     event_key = f'transcript_archived:{mission_id}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'transcript_archived',
@@ -316,9 +351,9 @@ def emit_transcript_archived(
         'stats': stats or {}
     }
 
-    _safe_emit('glassbox_archive', 'update', data)
+    _safe_emit('glassbox_archive', 'update', data, event_key=event_key)
 
-    # Also emit to glassbox room for widget refresh
+    # Also emit to glassbox room for widget refresh (no rate-limit key: always deliver)
     _safe_emit('glassbox', 'state_change', {
         'event': 'transcript_archived',
         'mission_id': mission_id,
@@ -341,8 +376,6 @@ def emit_recommendation_added(recommendation: Dict, queue_if_unavailable: bool =
     """
     rec_id = recommendation.get('id', 'unknown')
     event_key = f'recommendation_added:{rec_id}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'new_recommendation',
@@ -357,7 +390,8 @@ def emit_recommendation_added(recommendation: Dict, queue_if_unavailable: bool =
         }
     }
 
-    _safe_emit('recommendations', 'update', data, queue_if_unavailable=queue_if_unavailable)
+    _safe_emit('recommendations', 'update', data,
+               queue_if_unavailable=queue_if_unavailable, event_key=event_key)
 
 
 # =============================================================================
@@ -377,6 +411,10 @@ def emit_mission_updated(mission_data: Dict, change_type: str):
     """
     mission_id = mission_data.get('mission_id', 'unknown')
     event_key = f'mission_updated:{mission_id}:{change_type}'
+
+    socketio = _get_socketio()
+    if socketio is None:
+        return
     if not _should_emit(event_key):
         return
 
@@ -407,6 +445,10 @@ def emit_stage_change(mission_id: str, old_stage: str, new_stage: str, iteration
         iteration: Current iteration
     """
     event_key = f'stage_change:{mission_id}:{new_stage}'
+
+    socketio = _get_socketio()
+    if socketio is None:
+        return
     if not _should_emit(event_key):
         return
 
@@ -418,6 +460,62 @@ def emit_stage_change(mission_id: str, old_stage: str, new_stage: str, iteration
         'running': True,
     }
     emit_mission_status(status, event_type='mission_stage_change', old_stage=old_stage)
+
+
+# =============================================================================
+# RESEARCH AGENT EVENTS
+# =============================================================================
+
+def emit_research_event(
+    agent_id: str,
+    label: str,
+    status: str,
+    message: str,
+    topic_index: int = 0,
+    total_topics: int = 0,
+    sources_found: int = 0
+):
+    """
+    Emit a research phase event to the mission_agents room.
+
+    Called by the ResearchStreamEmitter in af_engine/orchestrator.py during
+    the pre-planning research phase so progress is visible in Mission Activity.
+
+    Args:
+        agent_id: Unique ID for this research session (e.g. 'researcher_abc123')
+        label: Display label ('Researcher Agent')
+        status: 'running' | 'complete' | 'error'
+        message: Human-readable progress message
+        topic_index: Current topic being researched (1-based)
+        total_topics: Total topics to research
+        sources_found: Number of sources found so far
+    """
+    # M5 fix: validate status to prevent None/invalid values reaching the frontend
+    _valid_statuses = ('running', 'complete', 'error')
+    if status not in _valid_statuses:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "emit_research_event: invalid status %r; defaulting to 'running'", status)
+        status = 'running'
+
+    # Coerce message to str to handle None/int inputs safely
+    message = str(message) if message is not None else ''
+    # LT1 fix: include topic_index in rate-limit key to prevent 40-char prefix collisions
+    event_key = f'research_event:{agent_id}:{topic_index}:{message[:30]}'
+
+    data = {
+        'event': 'research_progress',
+        'agent_id': agent_id,
+        'label': label,
+        'status': status,
+        'message': message,
+        'topic_index': topic_index,
+        'total_topics': total_topics,
+        'sources_found': sources_found,
+        'timestamp': datetime.now().isoformat()
+    }
+
+    _safe_emit('mission_agents', 'update', data, event_key=event_key)
 
 
 # =============================================================================
@@ -434,8 +532,6 @@ def emit_glassbox_event(event_type: str, mission_id: str, data: Dict = None):
         data: Optional event data
     """
     event_key = f'glassbox:{mission_id}:{event_type}'
-    if not _should_emit(event_key):
-        return
 
     event_data = {
         'event': event_type,
@@ -443,7 +539,7 @@ def emit_glassbox_event(event_type: str, mission_id: str, data: Dict = None):
         'details': data or {}
     }
 
-    _safe_emit('glassbox', 'update', event_data)
+    _safe_emit('glassbox', 'update', event_data, event_key=event_key)
 
 
 # =============================================================================
@@ -459,8 +555,6 @@ def emit_exploration_update(mission_id: str, exploration_data: Dict):
         exploration_data: Exploration statistics and data
     """
     event_key = f'exploration:{mission_id}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'exploration_update',
@@ -468,7 +562,7 @@ def emit_exploration_update(mission_id: str, exploration_data: Dict):
         'exploration': exploration_data
     }
 
-    _safe_emit('exploration', 'update', data)
+    _safe_emit('exploration', 'update', data, event_key=event_key)
 
 
 def emit_drift_alert(mission_id: str, alert_level: str, similarity: float, details: Dict = None):
@@ -482,8 +576,6 @@ def emit_drift_alert(mission_id: str, alert_level: str, similarity: float, detai
         details: Optional drift analysis details
     """
     event_key = f'drift_alert:{mission_id}:{alert_level}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'drift_alert',
@@ -496,7 +588,7 @@ def emit_drift_alert(mission_id: str, alert_level: str, similarity: float, detai
     _safe_emit('atlasforge_stats', 'state_change', {
         'event': 'atlasforge_drift_alert',
         'data': data
-    })
+    }, event_key=event_key)
 
 
 # =============================================================================
@@ -510,9 +602,8 @@ def emit_journal_entry(entry: Dict):
     Args:
         entry: The journal entry dict
     """
-    event_key = f'journal:{entry.get("timestamp", time.time())}'
-    if not _should_emit(event_key):
-        return
+    _ts = entry.get("timestamp")
+    event_key = f'journal:{_ts}' if _ts is not None else f'journal:{entry.get("type", "unknown")}'
 
     data = {
         'event': 'new_entry',
@@ -526,7 +617,7 @@ def emit_journal_entry(entry: Dict):
         }
     }
 
-    _safe_emit('journal', 'update', data)
+    _safe_emit('journal', 'update', data, event_key=event_key)
 
 
 # =============================================================================
@@ -543,8 +634,6 @@ def emit_backup_created(mission_id: str, snapshot_id: str, snapshot_type: str = 
         snapshot_type: Type of snapshot ('manual', 'scheduled', 'stage_transition')
     """
     event_key = f'backup:{mission_id}:{snapshot_id}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'backup_created',
@@ -553,7 +642,7 @@ def emit_backup_created(mission_id: str, snapshot_id: str, snapshot_type: str = 
         'snapshot_type': snapshot_type
     }
 
-    _safe_emit('backup_status', 'update', data)
+    _safe_emit('backup_status', 'update', data, event_key=event_key)
 
 
 # =============================================================================
@@ -569,8 +658,6 @@ def emit_queue_updated(queue_data: Dict, change_type: str = 'updated'):
         change_type: Type of change ('added', 'removed', 'reordered', 'updated')
     """
     event_key = f'queue_updated:{change_type}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'queue_updated',
@@ -581,7 +668,7 @@ def emit_queue_updated(queue_data: Dict, change_type: str = 'updated'):
         'change_type': change_type
     }
 
-    _safe_emit('queue_updated', 'update', data)
+    _safe_emit('queue_updated', 'update', data, event_key=event_key)
 
 
 def emit_queue_paused(paused: bool, paused_at: str = None, reason: str = None):
@@ -594,8 +681,6 @@ def emit_queue_paused(paused: bool, paused_at: str = None, reason: str = None):
         reason: Reason for pause
     """
     event_key = 'queue_paused'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'queue_paused',
@@ -604,7 +689,7 @@ def emit_queue_paused(paused: bool, paused_at: str = None, reason: str = None):
         'pause_reason': reason
     }
 
-    _safe_emit('queue_paused', 'update', data)
+    _safe_emit('queue_paused', 'update', data, event_key=event_key)
 
 
 def emit_queue_resumed():
@@ -612,15 +697,13 @@ def emit_queue_resumed():
     Emit event when queue is resumed.
     """
     event_key = 'queue_resumed'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'queue_resumed',
         'paused': False
     }
 
-    _safe_emit('queue_resumed', 'update', data)
+    _safe_emit('queue_resumed', 'update', data, event_key=event_key)
 
 
 def emit_mission_auto_started(mission_id: str, mission_title: str, queue_id: str = None, source: str = "auto"):
@@ -642,8 +725,6 @@ def emit_mission_auto_started(mission_id: str, mission_title: str, queue_id: str
                 - "idle_auto_start" - Triggered by idle state detection
     """
     event_key = f'mission_auto_started:{mission_id}'
-    if not _should_emit(event_key):
-        return
 
     data = {
         'event': 'mission_auto_started',
@@ -654,4 +735,5 @@ def emit_mission_auto_started(mission_id: str, mission_title: str, queue_id: str
         'timestamp': datetime.now().isoformat()
     }
 
-    _safe_emit('queue_auto_start', 'update', data, queue_if_unavailable=True)
+    _safe_emit('queue_auto_start', 'update', data,
+               queue_if_unavailable=True, event_key=event_key)

@@ -39,6 +39,7 @@ Usage:
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -75,10 +76,38 @@ CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 DEFAULT_LLM_PROVIDER = "claude"
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 
-# Token thresholds
+# Token thresholds (legacy hardcoded — used as fallback when model is unknown)
 GRACEFUL_THRESHOLD = 130_000  # Trigger HANDOFF.md generation
 EMERGENCY_THRESHOLD = 140_000  # Kill Claude immediately
 EARLY_FAILURE_THRESHOLD = 2_000  # Warning for startup issues (not exhaustion)
+
+# Ratio-based thresholds for Claude provider (scales with context window)
+CLAUDE_GRACEFUL_CONTEXT_RATIO = 0.85  # 85% of context window
+CLAUDE_EMERGENCY_CONTEXT_RATIO = 0.92  # 92% of context window
+
+# Model context window lookup (tokens)
+# Used to compute dynamic thresholds when model is detected from JSONL
+MODEL_CONTEXT_WINDOWS = {
+    # Opus 4.6 — 1M context
+    "claude-opus-4-6": 1_000_000,
+    "claude-opus-4-6-20250514": 1_000_000,
+    # Sonnet 4.6
+    "claude-sonnet-4-6": 200_000,
+    "claude-sonnet-4-6-20250514": 200_000,
+    # Haiku 4.5
+    "claude-haiku-4-5": 200_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    # Legacy Opus 4 (200k)
+    "claude-opus-4-20250514": 200_000,
+    # Legacy Sonnet 4.5
+    "claude-sonnet-4-5-20250514": 200_000,
+    # Legacy 3.x models
+    "claude-3-5-sonnet-20241022": 200_000,
+    "claude-3-5-haiku-20241022": 200_000,
+    "claude-3-opus-20240229": 200_000,
+    "claude-3-sonnet-20240229": 200_000,
+    "claude-3-haiku-20240307": 200_000,
+}
 
 # Cache pattern indicating context exhaustion
 # When cache_read is low, Claude is NOT reusing context (hitting the wall)
@@ -99,22 +128,52 @@ CONTEXT_WATCHER_ENABLED = os.environ.get(
 TIME_BASED_HANDOFF_ENABLED = os.environ.get(
     "TIME_BASED_HANDOFF_ENABLED", "1"
 ).lower() in ("1", "true", "yes")
-TIME_BASED_HANDOFF_MINUTES = int(os.environ.get(
-    "TIME_BASED_HANDOFF_MINUTES", "55"
-))
+def _safe_int_env(name: str, default: int) -> int:
+    """Read an integer environment variable, falling back to default on ValueError or non-positive value."""
+    try:
+        val = int(os.environ.get(name, str(default)))
+        if val <= 0:
+            logger.warning("Env %s=%d is non-positive, clamping to default %d", name, val, default)
+            return default
+        return val
+    except ValueError:
+        return default
+
+
+def _safe_nonneg_int_env(name: str, default: int) -> int:
+    """Read an integer env var that may be 0, but rejects negative values with a warning."""
+    try:
+        val = int(os.environ.get(name, str(default)))
+        if val < 0:
+            logger.warning("Env %s=%d is negative, clamping to default %d", name, val, default)
+            return default
+        return val
+    except ValueError:
+        return default
+
+
+def _safe_float_env(name: str, default: float) -> float:
+    """Read a float environment variable, falling back to default on ValueError, non-finite, or negative value."""
+    try:
+        val = float(os.environ.get(name, str(default)))
+        return val if math.isfinite(val) and val > 0 else default
+    except ValueError:
+        return default
+
+TIME_BASED_HANDOFF_MINUTES = _safe_int_env("TIME_BASED_HANDOFF_MINUTES", 55)
 
 # Stage-aware adaptive timeout: base timeout per stage (minutes)
 STAGE_TIMEOUT_MINUTES = {
-    "PLANNING": int(os.environ.get("STAGE_TIMEOUT_PLANNING", "55")),
-    "BUILDING": int(os.environ.get("STAGE_TIMEOUT_BUILDING", "120")),
-    "TESTING": int(os.environ.get("STAGE_TIMEOUT_TESTING", "240")),
-    "ANALYZING": int(os.environ.get("STAGE_TIMEOUT_ANALYZING", "55")),
-    "CYCLE_END": int(os.environ.get("STAGE_TIMEOUT_CYCLE_END", "55")),
-    "COMPLETE": int(os.environ.get("STAGE_TIMEOUT_COMPLETE", "55")),
+    "PLANNING": _safe_int_env("STAGE_TIMEOUT_PLANNING", 55),
+    "BUILDING": _safe_int_env("STAGE_TIMEOUT_BUILDING", 120),
+    "TESTING": _safe_int_env("STAGE_TIMEOUT_TESTING", 240),
+    "ANALYZING": _safe_int_env("STAGE_TIMEOUT_ANALYZING", 55),
+    "CYCLE_END": _safe_int_env("STAGE_TIMEOUT_CYCLE_END", 55),
+    "COMPLETE": _safe_int_env("STAGE_TIMEOUT_COMPLETE", 55),
 }
-ACTIVITY_CHECK_INTERVAL_SECONDS = int(os.environ.get("ACTIVITY_CHECK_INTERVAL_SECONDS", "30"))
-INACTIVITY_THRESHOLD_MINUTES = int(os.environ.get("INACTIVITY_THRESHOLD_MINUTES", "15"))
-MAX_ABSOLUTE_TIMEOUT_MINUTES = int(os.environ.get("MAX_ABSOLUTE_TIMEOUT_MINUTES", "360"))
+ACTIVITY_CHECK_INTERVAL_SECONDS = _safe_int_env("ACTIVITY_CHECK_INTERVAL_SECONDS", 30)
+INACTIVITY_THRESHOLD_MINUTES = _safe_int_env("INACTIVITY_THRESHOLD_MINUTES", 15)
+MAX_ABSOLUTE_TIMEOUT_MINUTES = _safe_int_env("MAX_ABSOLUTE_TIMEOUT_MINUTES", 360)
 ACTIVITY_IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".mypy_cache", ".pytest_cache", "venv", ".venv"}
 
 # Subprocess activity detection (gate before handoff)
@@ -129,9 +188,7 @@ SUBPROCESS_CHECK_ENABLED = os.environ.get(
     "SUBPROCESS_CHECK_ENABLED", "1"
 ).lower() in ("1", "true", "yes")
 
-SUBPROCESS_CPU_THRESHOLD_PERCENT = float(os.environ.get(
-    "SUBPROCESS_CPU_THRESHOLD_PERCENT", "1.0"
-))
+SUBPROCESS_CPU_THRESHOLD_PERCENT = _safe_float_env("SUBPROCESS_CPU_THRESHOLD_PERCENT", 1.0)
 
 # Intelligent Subprocess Gate integration (Cycle 2)
 _INTELLIGENT_GATE_AVAILABLE = False
@@ -150,6 +207,12 @@ except ImportError:
 # Codex scanning
 CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
+CODEX_GRACEFUL_CONTEXT_RATIO = _safe_float_env("CODEX_GRACEFUL_CONTEXT_RATIO", 0.92)
+CODEX_EMERGENCY_CONTEXT_RATIO = _safe_float_env("CODEX_EMERGENCY_CONTEXT_RATIO", 0.97)
+CODEX_GRACEFUL_HEADROOM_TOKENS = _safe_nonneg_int_env("CODEX_GRACEFUL_HEADROOM_TOKENS", 0)
+CODEX_EMERGENCY_HEADROOM_TOKENS = _safe_nonneg_int_env("CODEX_EMERGENCY_HEADROOM_TOKENS", 0)
+CODEX_STARTUP_GRACE_SECONDS = _safe_int_env("CODEX_STARTUP_GRACE_SECONDS", 90)
+CODEX_MIN_OUTPUT_TOKENS_FOR_HANDOFF = _safe_int_env("CODEX_MIN_OUTPUT_TOKENS_FOR_HANDOFF", 2000)
 
 
 def _normalize_provider(provider: Optional[str]) -> str:
@@ -294,6 +357,9 @@ class TokenState:
     cache_creation_input_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    total_tokens_seen: int = 0
+    model_context_window: int = 0
+    model_name: str = ""
     timestamp: Optional[datetime] = None
     request_id: Optional[str] = None
 
@@ -307,7 +373,7 @@ class TokenState:
         )
 
     @classmethod
-    def from_usage(cls, usage: Dict[str, Any], request_id: Optional[str] = None) -> "TokenState":
+    def from_usage(cls, usage: Dict[str, Any], request_id: Optional[str] = None, model_name: str = "") -> "TokenState":
         """Create TokenState from JSONL usage dict."""
         def safe_int(value, default=0):
             """Safely convert value to int, returning default on failure."""
@@ -320,11 +386,19 @@ class TokenState:
             except (ValueError, TypeError):
                 return default
 
+        # If model_context_window not in usage data, look it up from model name
+        context_window = safe_int(usage.get("model_context_window", 0))
+        if context_window <= 0 and model_name:
+            context_window = MODEL_CONTEXT_WINDOWS.get(model_name, 0)
+
         return cls(
             cache_read_input_tokens=safe_int(usage.get("cache_read_input_tokens", 0)),
             cache_creation_input_tokens=safe_int(usage.get("cache_creation_input_tokens", 0)),
             input_tokens=safe_int(usage.get("input_tokens", 0)),
             output_tokens=safe_int(usage.get("output_tokens", 0)),
+            total_tokens_seen=safe_int(usage.get("total_tokens", 0)),
+            model_context_window=context_window,
+            model_name=model_name,
             timestamp=datetime.now(),
             request_id=request_id
         )
@@ -1000,7 +1074,7 @@ def is_p_mode_session(jsonl_path: Path) -> bool:
 
 
 def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) -> bool:
-    """Return True when candidate workspace refers to the same or child workspace."""
+    """Return True when candidate workspace is the same as or inside expected workspace."""
     expected = (expected_workspace or "").strip()
     candidate = (candidate_workspace or "").strip()
     if not expected or not candidate:
@@ -1012,14 +1086,28 @@ def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) ->
         return (
             candidate_path == expected_path
             or expected_path in candidate_path.parents
-            or candidate_path in expected_path.parents
         )
     except OSError:
         return (
             candidate == expected
             or candidate.startswith(expected + os.sep)
-            or expected.startswith(candidate + os.sep)
         )
+
+
+def _is_codex_exec_session_payload(payload: Dict[str, Any]) -> bool:
+    """Return True only for Codex exec/headless sessions."""
+    if not isinstance(payload, dict):
+        return False
+
+    originator = str(payload.get("originator") or "").strip().lower()
+    source = str(payload.get("source") or "").strip().lower()
+
+    if source and source != "exec":
+        return False
+    if originator and originator != "codex_exec":
+        return False
+
+    return source == "exec" or originator == "codex_exec"
 
 
 def _is_codex_file_for_workspace(jsonl_path: Path, workspace_path: str) -> bool:
@@ -1051,6 +1139,9 @@ def _is_codex_file_for_workspace(jsonl_path: Path, workspace_path: str) -> bool:
                 payload = record.get("payload", {})
                 if not isinstance(payload, dict):
                     continue
+
+                if not _is_codex_exec_session_payload(payload):
+                    return False
 
                 cwd = payload.get("cwd")
                 return _workspace_paths_match(workspace_path, cwd)
@@ -1169,6 +1260,7 @@ class SessionMonitor:
         self._codex_file_match_cache: Dict[str, Tuple[float, int, bool]] = {}
         self._codex_candidates: List[Path] = []
         self._codex_last_scan: float = 0.0
+        self._detected_model: str = ""  # Model name from JSONL (for dynamic thresholds)
 
         # Handoff state
         self.handoff_triggered = False
@@ -1360,10 +1452,18 @@ class SessionMonitor:
                 total_usage = {}
 
             usage = {
-                "input_tokens": last_usage.get("input_tokens", 0),
-                "output_tokens": last_usage.get("output_tokens", 0),
-                "cache_read_input_tokens": last_usage.get("cached_input_tokens", 0),
+                # Codex emits both incremental and cumulative token counts.
+                # Use cumulative totals here so threshold checks track true
+                # session growth against the model context window.
+                "input_tokens": total_usage.get("input_tokens", last_usage.get("input_tokens", 0)),
+                "output_tokens": total_usage.get("output_tokens", last_usage.get("output_tokens", 0)),
+                "cache_read_input_tokens": total_usage.get(
+                    "cached_input_tokens",
+                    last_usage.get("cached_input_tokens", 0),
+                ),
                 "cache_creation_input_tokens": 0,
+                "total_tokens": total_usage.get("total_tokens", 0),
+                "model_context_window": info.get("model_context_window", 0),
             }
             request_id = (
                 f"token_count:{total_usage.get('total_tokens', 0)}:"
@@ -1380,6 +1480,22 @@ class SessionMonitor:
             usage = message.get('usage', {})
             if not isinstance(usage, dict):
                 return None
+
+            # Extract model name for dynamic context window lookup
+            model_name = message.get('model', '')
+            if model_name and not self._detected_model:
+                self._detected_model = model_name
+                context_window = MODEL_CONTEXT_WINDOWS.get(model_name, 0)
+                if context_window > 0:
+                    logger.info(
+                        f"Session {self.session_id}: Detected model '{model_name}' "
+                        f"with {context_window:,} token context window"
+                    )
+                else:
+                    logger.warning(
+                        f"Session {self.session_id}: Unknown model '{model_name}', "
+                        f"falling back to legacy thresholds"
+                    )
 
             request_id = record.get('requestId')
         else:
@@ -1400,7 +1516,7 @@ class SessionMonitor:
                 # Drop oldest half
                 self.seen_request_ids = set(list(self.seen_request_ids)[-2500:])
 
-        return TokenState.from_usage(usage, request_id)
+        return TokenState.from_usage(usage, request_id, model_name=getattr(self, '_detected_model', '') or '')
 
     def _check_thresholds(self, tokens: TokenState) -> Optional[HandoffSignal]:
         """
@@ -1417,15 +1533,89 @@ class SessionMonitor:
             return None  # Already triggered
 
         total = tokens.total_context
+        tracked_total = (
+            (tokens.total_tokens_seen or (tokens.input_tokens + tokens.output_tokens))
+            if self.provider == "codex"
+            else max(tokens.total_tokens_seen, total)
+        )
         cache_read = tokens.cache_read_input_tokens
         cache_creation = tokens.cache_creation_input_tokens
 
         # Update peak
-        if total > self.peak_tokens:
-            self.peak_tokens = total
+        if tracked_total > self.peak_tokens:
+            self.peak_tokens = tracked_total
 
-        # Codex transcripts do not expose Claude cache-creation/cache-read
-        # signals. Keep token tracking for stats and rely on time-based handoff.
+        if self.provider == "codex":
+            context_window = tokens.model_context_window
+            if context_window <= 0:
+                return None
+
+            # Codex reports cumulative `total_tokens` separately from cached input.
+            # Use the reported total for exhaustion thresholds; treating cached
+            # replayed input as fully "consumed" context causes premature
+            # handoffs on large startup prompts and restored sessions.
+            graceful_threshold = int(context_window * CODEX_GRACEFUL_CONTEXT_RATIO)
+            emergency_threshold = int(context_window * CODEX_EMERGENCY_CONTEXT_RATIO)
+
+            # Large Codex windows can still fail abruptly when only a small amount
+            # of headroom remains. Reserve explicit tail room so handoff begins
+            # before the final high-burn stretch of the session.
+            if CODEX_GRACEFUL_HEADROOM_TOKENS > 0 and context_window > CODEX_GRACEFUL_HEADROOM_TOKENS:
+                graceful_threshold = min(
+                    graceful_threshold,
+                    context_window - CODEX_GRACEFUL_HEADROOM_TOKENS,
+                )
+            if CODEX_EMERGENCY_HEADROOM_TOKENS > 0 and context_window > CODEX_EMERGENCY_HEADROOM_TOKENS:
+                emergency_threshold = min(
+                    emergency_threshold,
+                    context_window - CODEX_EMERGENCY_HEADROOM_TOKENS,
+                )
+
+            elapsed_seconds = (datetime.now() - self.started_at).total_seconds()
+            startup_suppressed = (
+                tracked_total >= graceful_threshold
+                and elapsed_seconds < CODEX_STARTUP_GRACE_SECONDS
+                and tokens.output_tokens < CODEX_MIN_OUTPUT_TOKENS_FOR_HANDOFF
+            )
+            if startup_suppressed:
+                logger.info(
+                    f"Session {self.session_id}: Suppressing early Codex handoff "
+                    f"({tracked_total}/{context_window} tokens, output={tokens.output_tokens}, "
+                    f"elapsed={elapsed_seconds:.1f}s, effective_context={total})"
+                )
+                return None
+            level = None
+
+            if tracked_total >= emergency_threshold:
+                level = HandoffLevel.EMERGENCY
+                logger.warning(
+                    f"Session {self.session_id}: Codex emergency threshold reached "
+                    f"({tracked_total}/{context_window} tokens, threshold={emergency_threshold}, "
+                    f"reported_total={tokens.total_tokens_seen}, effective_context={total})"
+                )
+            elif tracked_total >= graceful_threshold:
+                level = HandoffLevel.GRACEFUL
+                logger.info(
+                    f"Session {self.session_id}: Codex graceful threshold reached "
+                    f"({tracked_total}/{context_window} tokens, threshold={graceful_threshold}, "
+                    f"reported_total={tokens.total_tokens_seen}, effective_context={total})"
+                )
+
+            if level:
+                self.handoff_triggered = True
+                self.handoff_level = level
+                return HandoffSignal(
+                    level=level,
+                    session_id=self.session_id,
+                    workspace_path=self.workspace_path,
+                    tokens_used=tracked_total,
+                    cache_read=cache_read,
+                    cache_creation=cache_creation,
+                )
+            return None
+
+        # Non-Claude providers without standardized token-pressure signals
+        # fall back to time-based handoff only.
         if self.provider != "claude":
             return None
 
@@ -1441,17 +1631,31 @@ class SessionMonitor:
         if cache_read < LOW_CACHE_READ_THRESHOLD:
             level = None
 
-            if cache_creation >= EMERGENCY_THRESHOLD:
+            # Compute thresholds dynamically from model context window
+            context_window = tokens.model_context_window
+            if context_window > 0:
+                graceful_thresh = int(context_window * CLAUDE_GRACEFUL_CONTEXT_RATIO)
+                emergency_thresh = int(context_window * CLAUDE_EMERGENCY_CONTEXT_RATIO)
+            else:
+                # Fallback to legacy hardcoded thresholds (unknown model)
+                graceful_thresh = GRACEFUL_THRESHOLD
+                emergency_thresh = EMERGENCY_THRESHOLD
+
+            if cache_creation >= emergency_thresh:
                 level = HandoffLevel.EMERGENCY
                 logger.warning(
                     f"Session {self.session_id}: EMERGENCY threshold reached! "
-                    f"cache_creation={cache_creation}, cache_read={cache_read}"
+                    f"cache_creation={cache_creation}, cache_read={cache_read}, "
+                    f"threshold={emergency_thresh}, context_window={context_window}, "
+                    f"model={tokens.model_name or 'unknown'}"
                 )
-            elif cache_creation >= GRACEFUL_THRESHOLD:
+            elif cache_creation >= graceful_thresh:
                 level = HandoffLevel.GRACEFUL
                 logger.info(
                     f"Session {self.session_id}: Graceful threshold reached. "
-                    f"cache_creation={cache_creation}, cache_read={cache_read}"
+                    f"cache_creation={cache_creation}, cache_read={cache_read}, "
+                    f"threshold={graceful_thresh}, context_window={context_window}, "
+                    f"model={tokens.model_name or 'unknown'}"
                 )
 
             if level:
@@ -1462,7 +1666,7 @@ class SessionMonitor:
                     level=level,
                     session_id=self.session_id,
                     workspace_path=self.workspace_path,
-                    tokens_used=total,
+                    tokens_used=tracked_total,
                     cache_read=cache_read,
                     cache_creation=cache_creation
                 )
@@ -1528,7 +1732,9 @@ class SessionMonitor:
             "current_jsonl": str(self.current_jsonl) if self.current_jsonl else None,
             "peak_tokens": self.peak_tokens,
             "last_tokens": {
-                "total": self.last_tokens.total_context if self.last_tokens else 0,
+                "total": (
+                    self.last_tokens.total_tokens_seen or self.last_tokens.total_context
+                ) if self.last_tokens else 0,
                 "cache_read": self.last_tokens.cache_read_input_tokens if self.last_tokens else 0,
                 "cache_creation": self.last_tokens.cache_creation_input_tokens if self.last_tokens else 0,
             } if self.last_tokens else None,
@@ -2031,9 +2237,12 @@ class ContextWatcher:
                 "emergency_handoffs": self._emergency_handoffs,
                 "sessions": session_stats,
                 "thresholds": {
-                    "graceful": GRACEFUL_THRESHOLD,
-                    "emergency": EMERGENCY_THRESHOLD,
-                    "low_cache_read": LOW_CACHE_READ_THRESHOLD
+                    "graceful_legacy": GRACEFUL_THRESHOLD,
+                    "emergency_legacy": EMERGENCY_THRESHOLD,
+                    "claude_graceful_ratio": CLAUDE_GRACEFUL_CONTEXT_RATIO,
+                    "claude_emergency_ratio": CLAUDE_EMERGENCY_CONTEXT_RATIO,
+                    "low_cache_read": LOW_CACHE_READ_THRESHOLD,
+                    "model_context_windows": MODEL_CONTEXT_WINDOWS,
                 },
                 "metrics": self._metrics.to_dict()
             }
@@ -2233,8 +2442,11 @@ if __name__ == "__main__":
     print(f"  Projects dir exists: {CLAUDE_PROJECTS_DIR.exists()}")
     print(f"  Codex sessions dir: {CODEX_SESSIONS_DIR}")
     print(f"  Codex dir exists: {CODEX_SESSIONS_DIR.exists()}")
-    print(f"  Graceful threshold: {GRACEFUL_THRESHOLD:,}")
-    print(f"  Emergency threshold: {EMERGENCY_THRESHOLD:,}")
+    print(f"  Graceful threshold (legacy fallback): {GRACEFUL_THRESHOLD:,}")
+    print(f"  Emergency threshold (legacy fallback): {EMERGENCY_THRESHOLD:,}")
+    print(f"  Claude graceful ratio: {CLAUDE_GRACEFUL_CONTEXT_RATIO}")
+    print(f"  Claude emergency ratio: {CLAUDE_EMERGENCY_CONTEXT_RATIO}")
+    print(f"  Known models: {', '.join(sorted(MODEL_CONTEXT_WINDOWS.keys()))}")
 
     # Test 1: Session classification
     print("\n[TEST 1] Session Classification")
@@ -2268,7 +2480,8 @@ if __name__ == "__main__":
     tokens = TokenState.from_usage(usage, "req_123")
     print(f"  Usage: {usage}")
     print(f"  Total context: {tokens.total_context:,}")
-    print(f"  Would trigger graceful: {tokens.cache_creation_input_tokens >= GRACEFUL_THRESHOLD}")
+    print(f"  Would trigger graceful (legacy 130k): {tokens.cache_creation_input_tokens >= GRACEFUL_THRESHOLD}")
+    print(f"  Model context window: {tokens.model_context_window:,}")
 
     # Test 4: ContextWatcher
     print("\n[TEST 4] ContextWatcher Instance")

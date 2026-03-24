@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import ssl
+import string
 import sys
 import threading
 import time
@@ -29,29 +30,56 @@ try:
     _DASHBOARD_PORT = int(os.environ.get('ATLASFORGE_PORT', '5010'))
 except (ValueError, TypeError):
     _DASHBOARD_PORT = 5010
-_IPC_SCHEME = os.environ.get('ATLASFORGE_IPC_SCHEME', 'http')
+# Bug 5 fix: whitelist-validate IPC scheme to prevent URL scheme injection
+# Cycle 2 Fix: wrap in try/except so invalid env var doesn't raise at import time.
+# An invalid ATLASFORGE_IPC_SCHEME would previously cause a module-level ValueError,
+# making the entire adversarial_testing pipeline unimportable (DoS). Fall back to
+# 'https' and emit a warning instead of crashing.
+_ALLOWED_IPC_SCHEMES = frozenset({'http', 'https'})
+_raw_ipc_scheme = os.environ.get('ATLASFORGE_IPC_SCHEME', 'https').strip().lower()
+if _raw_ipc_scheme not in _ALLOWED_IPC_SCHEMES:
+    logger.warning(
+        "Invalid ATLASFORGE_IPC_SCHEME %r (must be 'http' or 'https'); "
+        "falling back to 'https'", _raw_ipc_scheme
+    )
+    _raw_ipc_scheme = 'https'
+_IPC_SCHEME = _raw_ipc_scheme
 _IPC_URL = f'{_IPC_SCHEME}://localhost:{_DASHBOARD_PORT}/api/internal/agent-event'
-_SSL_CTX = ssl.create_default_context()
-_SSL_CTX.check_hostname = False
-_SSL_CTX.verify_mode = ssl.CERT_NONE
+# RT-3: SSL context scoped to dashboard IPC only (self-signed localhost cert)
+# Do NOT reuse for external connections -- verification is intentionally disabled.
+_DASHBOARD_SSL_CTX = ssl.create_default_context()
+_DASHBOARD_SSL_CTX.check_hostname = False
+_DASHBOARD_SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
 def _emit_red_team_event(payload: dict) -> None:
     """Fire-and-forget IPC emission to dashboard Mission Activity window.
 
-    Runs in a daemon thread — never blocks the red team, never raises.
+    Runs in a daemon thread -- never blocks the red team, never raises.
+    Bug 4 fix: validates host is localhost before using no-verify SSL context.
     """
     def _post():
         try:
+            # Bug 4 fix: only use no-verify SSL for localhost/loopback targets
+            from urllib.parse import urlparse
+            _parsed = urlparse(_IPC_URL)
+            _host = _parsed.hostname or ''
+            _is_local = _host in ('localhost', '127.0.0.1', '::1', '')
+            if not _is_local:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "Dashboard IPC target %r is not localhost; skipping no-verify SSL", _host
+                )
+                return
             body = json.dumps({'room': 'mission_agents', 'payload': payload}).encode()
             req = urllib.request.Request(
                 _IPC_URL, data=body,
                 headers={'Content-Type': 'application/json'}, method='POST'
             )
-            ctx = _SSL_CTX if _IPC_SCHEME == 'https' else None
+            ctx = _DASHBOARD_SSL_CTX if _IPC_SCHEME == 'https' else None
             urllib.request.urlopen(req, timeout=3, context=ctx).close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Dashboard IPC failed: %s", e)
     threading.Thread(target=_post, daemon=True).start()
 
 # Add parent to path for imports
@@ -106,12 +134,8 @@ class RedTeamResult:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        result = asdict(self)
-        result['findings'] = [
-            {**f, 'category': f['category'].value if isinstance(f['category'], AttackCategory) else f['category']}
-            for f in result['findings']
-        ]
-        return result
+        # Cycle 2 7b: asdict() already converts enums to values, so no post-processing needed
+        return asdict(self)
 
     @property
     def critical_findings(self) -> List[RedTeamFinding]:
@@ -166,17 +190,18 @@ Your approach:
 Be specific. Give concrete attack vectors. Don't just say "could be vulnerable" - show HOW.
 """
 
-    # Prompt template for code analysis
-    ANALYSIS_PROMPT_TEMPLATE = """Analyze this code for vulnerabilities and bugs.
+    # Iter 3 Fix M10: use string.Template ($code) instead of str.format({code})
+    # to avoid needing brace escaping that garbles user code containing { }
+    ANALYSIS_PROMPT_TEMPLATE = string.Template("""Analyze this code for vulnerabilities and bugs.
 I need you to BREAK this code. Find edge cases, bugs, and security issues.
 
 ## Code to Analyze:
 ```
-{code}
+$code
 ```
 
 ## Functional Description:
-{description}
+$description
 
 ## Your Task:
 Find as many issues as possible. For each issue:
@@ -192,9 +217,9 @@ Find as many issues as possible. For each issue:
 Think adversarially. What would BREAK this code?
 
 Respond in JSON format:
-{{
+{
     "findings": [
-        {{
+        {
             "category": "boundary",
             "severity": "high",
             "title": "Array index out of bounds",
@@ -203,11 +228,11 @@ Respond in JSON format:
             "affected_code": "process_items:15",
             "suggested_fix": "Add length check before access",
             "confidence": 0.95
-        }}
+        }
     ],
     "attack_vectors_tried": ["empty input", "null values", "huge arrays", "negative indices"]
-}}
-"""
+}
+""")
 
     def __init__(
         self,
@@ -241,6 +266,12 @@ Respond in JSON format:
         Returns:
             RedTeamResult with findings
         """
+        # Cycle 2 Fix 4.1: guard against None or empty code
+        if code is None or not isinstance(code, str):
+            raise TypeError(f"code must be a non-empty string, got {type(code).__name__}")
+        if not code.strip():
+            raise ValueError("code must not be empty or whitespace-only")
+
         if session_id is None:
             session_id = f"rt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -267,8 +298,8 @@ Respond in JSON format:
         })
         line_count += 1
 
-        # Build the analysis prompt
-        prompt = self.ANALYSIS_PROMPT_TEMPLATE.format(
+        # Iter 3 Fix M10: use safe_substitute — no brace escaping needed
+        prompt = self.ANALYSIS_PROMPT_TEMPLATE.safe_substitute(
             code=code,
             description=description
         )
@@ -292,6 +323,10 @@ Respond in JSON format:
         })
         line_count += 1
 
+        # RT1: guard None before constructing result
+        if response is None:
+            response = ""
+
         # Parse the response
         result = RedTeamResult(
             session_id=session_id,
@@ -301,12 +336,12 @@ Respond in JSON format:
             duration_ms=duration_ms,
             raw_response=response
         )
-
-        if response is None:
-            response = ""
         if response.startswith("ERROR:"):
+            # Cycle 2 Fix 4.2: sanitize control characters before logging
+            import re as _re
+            _sanitized = _re.sub(r'[\x00-\x1f\x7f-\x9f]', '', response[:200])
             logger.warning(
-                f"Red team analysis failed (duration={duration_ms:.0f}ms): {response[:200]}"
+                "Red team analysis failed (duration=%.0fms): %s", duration_ms, _sanitized
             )
             result.success = False
             result.error = response
@@ -340,7 +375,7 @@ Respond in JSON format:
                             severity=finding_data.get("severity") or "medium",
                             title=finding_data.get("title", "Unknown issue"),
                             description=finding_data.get("description", ""),
-                            reproduction_steps=finding_data.get("reproduction_steps", []),
+                            reproduction_steps=(lambda rs: [rs] if isinstance(rs, str) else rs if isinstance(rs, list) else [])(finding_data.get("reproduction_steps", [])),
                             affected_code=finding_data.get("affected_code", "unknown"),
                             suggested_fix=finding_data.get("suggested_fix", ""),
                             confidence=max(0.0, min(1.0, float(finding_data.get("confidence", 0.5))))
@@ -357,7 +392,7 @@ Respond in JSON format:
                             severity=finding_data.get("severity") or "medium",
                             title=finding_data.get("title", "Unknown issue"),
                             description=finding_data.get("description", ""),
-                            reproduction_steps=finding_data.get("reproduction_steps", []),
+                            reproduction_steps=(lambda rs: [rs] if isinstance(rs, str) else rs if isinstance(rs, list) else [])(finding_data.get("reproduction_steps", [])),
                             affected_code=finding_data.get("affected_code", "unknown"),
                             suggested_fix=finding_data.get("suggested_fix", ""),
                             confidence=safe_confidence
@@ -444,7 +479,18 @@ Respond in JSON format:
                 error=f"File not found: {file_path}"
             )
 
-        code = file_path.read_text()
+        try:
+            code = file_path.read_text()
+        except UnicodeDecodeError:
+            return RedTeamResult(
+                session_id=f"rt_error_{datetime.now().strftime('%H%M%S')}",
+                code_analyzed="",
+                agent_model=self.model.value,
+                timestamp=datetime.now().isoformat(),
+                duration_ms=0,
+                success=False,
+                error=f"Binary or non-UTF-8 file cannot be analyzed: {file_path}"
+            )
 
         if not description:
             description = f"Code from file: {file_path.name}"
@@ -508,13 +554,19 @@ Respond in JSON format:
         orchestrator = RedTeamOrchestrator(timeout=timeout, n_agents=n_agents)
         return orchestrator.launch(
             workspace_dir=Path(workspace_dir),
-            mission_desc=mission_desc or "Codebase at {}".format(workspace_dir),
+            mission_desc=mission_desc or f"Codebase at {workspace_dir}",
             n_agents=n_agents,
             timeout=timeout,
         )
 
     def _extract_json(self, text: str) -> Optional[dict]:
         """Extract JSON from response text."""
+        # RT-2: guard against None input
+        if text is None:
+            return None
+        # Guard against non-string types (int, list, etc.)
+        if not isinstance(text, str):
+            return None
         # Try direct parse
         try:
             return json.loads(text)

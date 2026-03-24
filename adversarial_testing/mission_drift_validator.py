@@ -17,6 +17,9 @@ zero knowledge of the implementation details, ensuring unbiased assessment.
 
 import sys
 import json
+import logging
+import math
+import string
 import hashlib
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
@@ -24,8 +27,10 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from enum import Enum
 
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+logger = logging.getLogger(__name__)
+
+# Add parent to path for imports — append (not insert) to avoid shadowing stdlib/site-packages
+sys.path.append(str(Path(__file__).parent.parent))
 
 from experiment_framework import invoke_fresh_llm, ModelType
 
@@ -75,8 +80,24 @@ class MissionDriftResult:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MissionDriftResult':
-        data['drift_severity'] = DriftSeverity(data['drift_severity'])
-        data['decision'] = DriftDecision(data['decision'])
+        data = dict(data)  # don't mutate caller's dict
+        sev = data.get('drift_severity')
+        try:
+            data['drift_severity'] = DriftSeverity(sev) if sev is not None else DriftSeverity.NONE
+        except ValueError:
+            data['drift_severity'] = DriftSeverity.NONE
+        dec = data.get('decision')
+        try:
+            data['decision'] = DriftDecision(dec) if dec is not None else DriftDecision.ALLOW
+        except ValueError:
+            data['decision'] = DriftDecision.ALLOW
+        # Guard list fields
+        for field_name in ('added_scope', 'lost_focus'):
+            if not isinstance(data.get(field_name), list):
+                data[field_name] = []
+        # Guard dict fields
+        if not isinstance(data.get('requirement_coverage'), dict):
+            data['requirement_coverage'] = {}
         return cls(**data)
 
 
@@ -102,7 +123,7 @@ class DriftTrackingState:
     failure_history: List[Dict] = field(default_factory=list)
     warning_issued: bool = False
     total_validations: int = 0
-    average_similarity: float = 1.0
+    average_similarity: float = 0.0
     last_validation_cycle: int = 0
 
     # Velocity tracking fields (Cycle 2 enhancement)
@@ -126,7 +147,32 @@ class DriftTrackingState:
         # Handle old data that doesn't have new fields
         allowed_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
-        return cls(**filtered_data)
+        # Type coercion: guard against null values from partial/corrupt JSON writes
+        coerced: dict = {}
+        for key, val in filtered_data.items():
+            if key in ('failure_count', 'consecutive_failures', 'total_validations',
+                       'last_validation_cycle', 'false_positive_overrides'):
+                try:
+                    coerced[key] = int(val) if val is not None else 0
+                except (ValueError, TypeError, OverflowError):
+                    coerced[key] = 0
+            elif key in ('average_similarity', 'velocity_acceleration',
+                         'dynamic_threshold_adjustment'):
+                try:
+                    fval = float(val) if val is not None else 0.0
+                    coerced[key] = fval if math.isfinite(fval) else 0.0
+                except (ValueError, TypeError, OverflowError):
+                    coerced[key] = 0.0
+            elif key == 'warning_issued':
+                coerced[key] = bool(val) if val is not None else False
+            elif key == 'phase_aware_mode':
+                coerced[key] = bool(val) if val is not None else True
+            elif key in ('failure_history', 'similarity_history', 'similarity_velocities',
+                         'completed_phases', 'phase_transitions'):
+                coerced[key] = val if isinstance(val, list) else []
+            else:
+                coerced[key] = val
+        return cls(**coerced)
 
     def update_velocity(self, new_similarity: float):
         """Update velocity tracking with a new similarity score.
@@ -139,6 +185,8 @@ class DriftTrackingState:
         Args:
             new_similarity: The latest semantic similarity score (0-1)
         """
+        if not isinstance(new_similarity, (int, float)) or not math.isfinite(new_similarity):
+            return
         self.similarity_history.append(new_similarity)
 
         # Compute velocity (change from previous cycle)
@@ -156,15 +204,15 @@ class DriftTrackingState:
                 # If drift is accelerating (velocity becoming more negative), lower tolerance
                 if self.velocity_acceleration < -0.05:
                     # Drift is accelerating - tighten thresholds
-                    self.dynamic_threshold_adjustment = min(
+                    self.dynamic_threshold_adjustment = max(
                         self.dynamic_threshold_adjustment - 0.5,
                         -2.0  # Max adjustment: reduce tolerance by 2 failures
                     )
                 elif self.velocity_acceleration > 0.05:
-                    # Drift is decelerating - can relax slightly
+                    # Drift is decelerating - can relax
                     self.dynamic_threshold_adjustment = min(
-                        self.dynamic_threshold_adjustment + 0.25,
-                        0.5  # Max relaxation: add 0.5 failures tolerance
+                        self.dynamic_threshold_adjustment + 0.5,
+                        2.0  # Symmetric with max tightening of -2.0
                     )
 
     def get_effective_thresholds(self, base_warn: int = 4, base_halt: int = 5) -> tuple:
@@ -173,9 +221,10 @@ class DriftTrackingState:
         Returns:
             Tuple of (warn_threshold, halt_threshold)
         """
-        adjustment = int(self.dynamic_threshold_adjustment)
-        warn = max(2, base_warn + adjustment)  # Never go below 2
-        halt = max(3, base_halt + adjustment)  # Never go below 3
+        adjustment = self.dynamic_threshold_adjustment
+        warn = max(2, round(base_warn + adjustment))  # Never go below 2
+        halt = max(3, round(base_halt + adjustment))  # Never go below 3
+        warn = min(warn, halt - 1)  # Always ensure warn < halt (INJECT_WARNING reachable)
         return (warn, halt)
 
     def get_velocity_summary(self) -> Dict[str, Any]:
@@ -197,7 +246,7 @@ class DriftTrackingState:
         recent_velocities = self.similarity_velocities[-3:]
         avg_velocity = sum(recent_velocities) / len(recent_velocities)
 
-        if avg_velocity < -0.1:
+        if avg_velocity <= -0.1:
             return 'deteriorating'
         elif avg_velocity > 0.05:
             return 'improving'
@@ -244,10 +293,10 @@ Be strict but fair. Mission drift compounds across cycles."""
     VALIDATION_PROMPT_TEMPLATE = """Evaluate whether this continuation prompt stays true to the original mission.
 
 ## ORIGINAL MISSION SPECIFICATION:
-{original_mission}
+$original_mission
 
-## CONTINUATION PROMPT (Cycle {cycle_number}):
-{continuation_prompt}
+## CONTINUATION PROMPT (Cycle $cycle_number):
+$continuation_prompt
 
 ## YOUR TASK:
 1. Extract the key requirements/objectives from the original mission
@@ -257,9 +306,9 @@ Be strict but fair. Mission drift compounds across cycles."""
 5. Assign a drift severity and provide reasoning
 
 Respond in JSON format ONLY:
-{{
+{
     "original_requirements": ["requirement 1", "requirement 2", ...],
-    "requirement_coverage": {{"requirement 1": true/false, "requirement 2": true/false, ...}},
+    "requirement_coverage": {"requirement 1": true/false, "requirement 2": true/false, ...},
     "added_scope": ["new objective 1", "new objective 2", ...],
     "lost_focus": ["deprioritized objective 1", ...],
     "drift_detected": true/false,
@@ -267,7 +316,7 @@ Respond in JSON format ONLY:
     "semantic_similarity": 0.0-1.0,
     "confidence": 0.0-1.0,
     "reasoning": "Detailed explanation of drift assessment"
-}}
+}
 
 SEVERITY GUIDE:
 - none: Continuation directly addresses original mission
@@ -294,6 +343,11 @@ SEVERITY GUIDE:
         """
         self.model = model
         self.timeout_seconds = timeout_seconds
+        if failure_threshold_warn >= failure_threshold_halt:
+            raise ValueError(
+                f"failure_threshold_warn ({failure_threshold_warn}) must be less than "
+                f"failure_threshold_halt ({failure_threshold_halt})"
+            )
         self.failure_threshold_warn = failure_threshold_warn
         self.failure_threshold_halt = failure_threshold_halt
 
@@ -324,13 +378,14 @@ SEVERITY GUIDE:
         if tracking_state is None:
             tracking_state = DriftTrackingState()
 
-        # Create hashes for traceability
-        orig_hash = hashlib.md5(original_mission.encode()).hexdigest()[:12]
-        cont_hash = hashlib.md5(continuation_prompt.encode()).hexdigest()[:12]
+        # Create hashes for traceability — use SHA-256 (MD5 is cryptographically broken)
+        orig_hash = hashlib.sha256(original_mission.encode()).hexdigest()[:12]
+        cont_hash = hashlib.sha256(continuation_prompt.encode()).hexdigest()[:12]
         validation_id = f"val_{orig_hash}_{cycle_number:03d}"
 
-        # Build evaluation prompt
-        prompt = self.VALIDATION_PROMPT_TEMPLATE.format(
+        # Build evaluation prompt — use safe_substitute to prevent KeyError/IndexError
+        # DoS from user-supplied content containing {0}, {key}, or {obj.attr}
+        prompt = string.Template(self.VALIDATION_PROMPT_TEMPLATE).safe_substitute(
             original_mission=original_mission,
             continuation_prompt=continuation_prompt,
             cycle_number=cycle_number
@@ -388,7 +443,7 @@ SEVERITY GUIDE:
             continuation_hash=cont_hash,
             drift_detected=False,
             drift_severity=DriftSeverity.NONE,
-            semantic_similarity=1.0,
+            semantic_similarity=0.5,
             requirement_coverage={},
             added_scope=[],
             lost_focus=[],
@@ -397,10 +452,10 @@ SEVERITY GUIDE:
             decision=DriftDecision.ALLOW,
             timestamp=datetime.now().isoformat(),
             duration_ms=duration_ms,
-            raw_response=response
+            raw_response=response or ""
         )
 
-        if response.startswith("ERROR:"):
+        if not isinstance(response, str) or response.startswith("ERROR:"):
             default_result.evaluator_reasoning = f"Evaluation error: {response}"
             return default_result
 
@@ -418,19 +473,29 @@ SEVERITY GUIDE:
             except ValueError:
                 severity = DriftSeverity.NONE
 
+            raw_sim = parsed.get("semantic_similarity", 1.0)
+            try:
+                similarity_score = max(0.0, min(1.0, float(raw_sim)))
+            except (ValueError, TypeError):
+                similarity_score = 0.5  # uncertain parse — treat as mid-drift, not safe
+            raw_conf = parsed.get("confidence", 0.5)
+            try:
+                confidence_score = max(0.0, min(1.0, float(raw_conf)))
+            except (ValueError, TypeError):
+                confidence_score = 0.5
             return MissionDriftResult(
                 validation_id=validation_id,
                 cycle_number=cycle_number,
                 original_mission_hash=orig_hash,
                 continuation_hash=cont_hash,
-                drift_detected=parsed.get("drift_detected", False),
+                drift_detected=bool(parsed.get("drift_detected", False)),
                 drift_severity=severity,
-                semantic_similarity=float(parsed.get("semantic_similarity", 1.0)),
-                requirement_coverage=parsed.get("requirement_coverage", {}),
-                added_scope=parsed.get("added_scope", []),
-                lost_focus=parsed.get("lost_focus", []),
-                evaluator_reasoning=parsed.get("reasoning", ""),
-                confidence=float(parsed.get("confidence", 0.5)),
+                semantic_similarity=similarity_score,
+                requirement_coverage=parsed.get("requirement_coverage", {}) if isinstance(parsed.get("requirement_coverage"), dict) else {},
+                added_scope=parsed.get("added_scope") if isinstance(parsed.get("added_scope"), list) else ([parsed["added_scope"]] if isinstance(parsed.get("added_scope"), str) else []),
+                lost_focus=parsed.get("lost_focus") if isinstance(parsed.get("lost_focus"), list) else ([parsed["lost_focus"]] if isinstance(parsed.get("lost_focus"), str) else []),
+                evaluator_reasoning=str(parsed.get("reasoning", "") or ""),
+                confidence=confidence_score,
                 decision=DriftDecision.ALLOW,  # Will be set later
                 timestamp=datetime.now().isoformat(),
                 duration_ms=duration_ms,
@@ -506,7 +571,26 @@ SEVERITY GUIDE:
         # Update velocity tracking (Cycle 2 enhancement)
         tracking_state.update_velocity(result.semantic_similarity)
 
-        if result.drift_detected and result.drift_severity in (
+        # Detect evaluation errors (LLM returned None / ERROR / unparseable response).
+        # Must be checked BEFORE the drift branch so that results with drift_detected=True
+        # but evaluator_reasoning indicating an error are treated as inconclusive, not
+        # real drift failures (prevents error results inflating failure_count).
+        reasoning = result.evaluator_reasoning or ""
+        is_evaluation_error = (
+            reasoning.startswith("Evaluation error:") or
+            reasoning.startswith("Parse error:") or
+            reasoning == "Failed to parse JSON response" or
+            reasoning.lower().startswith("error:") or
+            reasoning.lower().startswith("llm error:") or
+            reasoning.lower().startswith("timeout:")
+        )
+
+        if is_evaluation_error:
+            # LLM evaluation failed — treat as inconclusive; increment consecutive_failures
+            # for intervention backoff but do NOT count toward failure_count (which tracks
+            # real drift, not evaluator errors — avoids LLM outages triggering HALT).
+            tracking_state.consecutive_failures += 1
+        elif result.drift_detected and result.drift_severity in (
             DriftSeverity.MEDIUM, DriftSeverity.HIGH, DriftSeverity.CRITICAL
         ):
             # Count as a failure
@@ -564,14 +648,17 @@ SEVERITY GUIDE:
     ) -> str:
         """Generate a warning message to inject into continuation prompt."""
         failures = tracking_state.failure_count
-        remaining = self.failure_threshold_halt - failures
+        effective_warn, effective_halt = tracking_state.get_effective_thresholds(
+            self.failure_threshold_warn, self.failure_threshold_halt
+        )
+        remaining = max(1, effective_halt - failures)
 
         warning = f"""
 {'='*60}
-WARNING: MISSION DRIFT DETECTED (Attempt {failures}/{self.failure_threshold_halt})
+WARNING: MISSION DRIFT DETECTED (Attempt {failures}/{effective_halt})
 {'='*60}
 
-Mission drift has been detected in {failures} consecutive cycles.
+Mission drift has been detected in {tracking_state.consecutive_failures} consecutive cycles.
 Semantic similarity to original mission: {result.semantic_similarity:.1%}
 Drift severity: {result.drift_severity.value.upper()}
 
@@ -608,8 +695,8 @@ Ensure the next continuation stays STRICTLY within original mission scope.
         similarity_progression = []
 
         for failure in tracking_state.failure_history:
-            all_added_scope.extend(failure.get("added_scope", []))
-            all_lost_focus.extend(failure.get("lost_focus", []))
+            all_added_scope.extend(failure.get("added_scope") or [])
+            all_lost_focus.extend(failure.get("lost_focus") or [])
             severity_progression.append(failure.get("severity", "unknown"))
             similarity_progression.append(failure.get("similarity", 0))
 
@@ -774,7 +861,7 @@ def load_tracking_state(mission_dir: Path) -> Optional[DriftTrackingState]:
                 data = json.load(f)
             return DriftTrackingState.from_dict(data)
         except Exception as e:
-            print(f"Warning: Could not load tracking state: {e}")
+            logger.warning("Could not load tracking state: %s", e)
     return None
 
 
@@ -791,7 +878,7 @@ def save_validation_result(result: MissionDriftResult, mission_dir: Path):
     results_dir = mission_dir / "drift_validations"
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    result_path = results_dir / f"validation_cycle_{result.cycle_number:03d}.json"
+    result_path = results_dir / f"validation_cycle_{result.cycle_number:05d}.json"
     with open(result_path, 'w') as f:
         json.dump(result.to_dict(), f, indent=2)
 

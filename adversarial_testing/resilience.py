@@ -9,6 +9,9 @@ This module ensures adversarial testing doesn't fail due to transient issues:
 5. Progress reporting for long-running operations
 """
 
+import concurrent.futures
+import logging
+import math
 import time
 import sys
 import functools
@@ -18,7 +21,9 @@ from typing import Callable, TypeVar, Optional, List, Any, Dict
 from datetime import datetime
 from enum import Enum
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent))
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorType(Enum):
@@ -40,6 +45,34 @@ class RetryConfig:
     max_delay: float = 60.0  # seconds
     exponential_base: float = 2.0
     jitter: float = 0.1  # ±10% jitter
+
+    def __post_init__(self):
+        # RES-2: reject non-int and bool for max_retries
+        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
+            raise TypeError(f"max_retries must be int, got {type(self.max_retries).__name__}")
+        # P2: reject negative max_retries
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
+        # RES-6: validate numeric fields
+        for field_name in ('initial_delay', 'max_delay', 'exponential_base', 'jitter'):
+            val = getattr(self, field_name)
+            if not isinstance(val, (int, float)) or isinstance(val, bool):
+                raise TypeError(f"{field_name} must be a number, got {type(val).__name__}")
+            if not math.isfinite(val):
+                raise ValueError(f"{field_name} must be finite, got {val!r}")
+        if self.initial_delay < 0:
+            raise ValueError(f"initial_delay must be non-negative, got {self.initial_delay}")
+        if self.max_delay < 0:
+            raise ValueError(f"max_delay must be non-negative, got {self.max_delay}")
+        # Cycle 2 Fix 3.2: cross-field validation
+        if self.initial_delay > self.max_delay:
+            raise ValueError(f"initial_delay ({self.initial_delay}) must not exceed max_delay ({self.max_delay})")
+        if self.exponential_base < 1:
+            raise ValueError(f"exponential_base must be >= 1, got {self.exponential_base}")
+        if self.jitter < 0:
+            raise ValueError(f"jitter must be non-negative, got {self.jitter}")
+        if self.jitter > 1.0:
+            raise ValueError(f"jitter must be <= 1.0 (100%), got {self.jitter}")
 
 
 @dataclass
@@ -99,6 +132,12 @@ class ProgressTracker:
         total_items: int = 0,
         callback: Optional[Callable[[ProgressReport], None]] = None
     ):
+        # Reject non-int types (bool, float, str) — bool must be checked before int (bool is subclass of int)
+        if isinstance(total_items, bool) or not isinstance(total_items, int):
+            raise TypeError(f"total_items must be int, got {type(total_items).__name__}")
+        # Cycle 3 Fix P4a: reject negative total_items
+        if total_items < 0:
+            raise ValueError(f"total_items must be non-negative, got {total_items}")
         self.operation = operation
         self.total_items = total_items
         self.callback = callback
@@ -108,7 +147,9 @@ class ProgressTracker:
         self.items_completed = 0
         self.current_item = ""
         self.errors: List[ErrorRecord] = []
-        self.warnings: List[str] = []
+        # RES-C5-4: bound warnings to prevent unbounded memory growth
+        from collections import deque
+        self.warnings: deque = deque(maxlen=100)
         self._stage_times: Dict[str, float] = {}
 
     def set_callback(self, callback: Callable[[ProgressReport], None]):
@@ -129,11 +170,14 @@ class ProgressTracker:
         """Internal: exit a stage."""
         if stage_name in self._stage_times:
             duration = time.time() - self._stage_times[stage_name]
-            self.warnings.append(f"Stage '{stage_name}' completed in {duration:.1f}s")
+            import logging as _logging
+            _logging.getLogger(__name__).debug("Stage '%s' completed in %.1fs", stage_name, duration)
 
     def item_complete(self, item_name: str):
         """Mark an item as complete."""
-        self.items_completed += 1
+        if self.total_items == 0:
+            return  # Nothing to track — guard against unbounded increment when total=0
+        self.items_completed = min(self.items_completed + 1, self.total_items)
         self.current_item = item_name
         self._report()
 
@@ -171,7 +215,7 @@ class ProgressTracker:
             estimated_remaining_seconds=eta,
             current_item=self.current_item,
             errors_count=len(self.errors),
-            warnings=self.warnings[-5:]  # Last 5 warnings
+            warnings=list(self.warnings)[-5:]  # Last 5 warnings (deque doesn't support slicing)
         )
 
         self.callback(report)
@@ -191,7 +235,7 @@ class ProgressTracker:
                 }
                 for e in self.errors
             ],
-            "warnings": self.warnings
+            "warnings": list(self.warnings)
         }
 
 
@@ -226,15 +270,52 @@ def with_retry(
         def make_api_call():
             ...
     """
+    # C3-1a: validate config is a RetryConfig before using it
+    # Allow callables as config (legacy usage: with_retry(func, ...)) — treat as config=None
+    if config is not None and callable(config) and not isinstance(config, RetryConfig):
+        config = None
+    elif config is not None and not isinstance(config, RetryConfig):
+        raise TypeError(f"config must be a RetryConfig instance, got {type(config).__name__}: {config!r}")
+    # C3-1b: reject explicitly-empty error_types list
+    if error_types is not None and not isinstance(error_types, list):
+        raise TypeError(f"error_types must be a list, got {type(error_types).__name__}")
+    if isinstance(error_types, list) and len(error_types) == 0:
+        raise ValueError("error_types must not be empty; pass None to use defaults")
     config = config or RetryConfig()
     error_types = error_types or [ErrorType.TIMEOUT, ErrorType.RATE_LIMIT, ErrorType.NETWORK]
+
+    # Validate error_types elements are ErrorType enum members (not strings like "timeout")
+    if error_types is not None:
+        for et in error_types:
+            if not isinstance(et, ErrorType):
+                raise TypeError(f"error_types elements must be ErrorType, got {type(et).__name__}: {et!r}")
+
+    # R1: reject negative max_retries to prevent 'raise None' TypeError
+    if config.max_retries < 0:
+        raise ValueError(f"max_retries must be non-negative, got {config.max_retries}")
+    # Cycle 2 4c: reject negative/NaN/inf initial_delay
+    if not isinstance(config.initial_delay, (int, float)) or not math.isfinite(config.initial_delay) or config.initial_delay < 0:
+        raise ValueError(f"initial_delay must be a non-negative finite number, got {config.initial_delay!r}")
+    # Cycle 2 4b: snapshot config to prevent post-decoration mutation bypass
+    from dataclasses import replace as _dc_replace
+    config = _dc_replace(config)
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> T:
             last_error = None
+            error_type = ErrorType.UNKNOWN
 
             for attempt in range(config.max_retries + 1):
+                # Cycle 2 Fix (stale last_error): reset per-iteration so a
+                # prior attempt's exception cannot leak into a later iteration's
+                # re-raise if str(e) raises on the current exception.
+                # Invariant: every except branch below MUST assign last_error
+                # before any `raise` that exits the loop body, so last_error
+                # is always non-None when execution falls through to line 371.
+                # The guard at line 371 is defense-in-depth for future changes.
+                last_error = None
+                error_type = ErrorType.UNKNOWN
                 try:
                     return func(*args, **kwargs)
 
@@ -245,22 +326,36 @@ def with_retry(
                     last_error = e
                     error_type = ErrorType.NETWORK
                 except Exception as e:
-                    # Check for rate limiting
-                    error_str = str(e).lower()
-                    if "rate" in error_str and "limit" in error_str:
-                        last_error = e
+                    # RES-C5-1: programming errors should fail fast, never retry
+                    if isinstance(e, (AttributeError, TypeError, NameError, KeyError, IndexError)):
+                        raise
+                    # Set last_error BEFORE str(e) — if __str__ raises, last_error is still assigned
+                    last_error = e
+                    # R2: check for rate limiting with contiguous phrase match
+                    # to avoid false positives on normal messages containing both words
+                    import re as _re
+                    try:
+                        error_str = str(e).lower()
+                    except Exception:
+                        # Exception.__str__ raised — cannot classify, re-raise original
+                        raise e
+                    if _re.search(r'\brate[_\s-]?limit', error_str):
                         error_type = ErrorType.RATE_LIMIT
                     elif "timeout" in error_str:
-                        last_error = e
                         error_type = ErrorType.TIMEOUT
-                    elif "connection" in error_str or "network" in error_str:
-                        last_error = e
+                    elif _re.search(r'connection\s*(reset|refused|timed?\s*out|closed|error|abort)', error_str) or "network" in error_str:
                         error_type = ErrorType.NETWORK
                     else:
                         # Unknown error, don't retry
                         raise
 
                 if error_type not in error_types:
+                    # Cycle 3 Fix (#4): guard against last_error being None,
+                    # which would cause "TypeError: exceptions must derive from BaseException".
+                    if last_error is None:
+                        raise RuntimeError(
+                            "with_retry: error_type is set but last_error is None (internal error)"
+                        )
                     raise last_error
 
                 if attempt < config.max_retries:
@@ -269,13 +364,22 @@ def with_retry(
                         config.initial_delay * (config.exponential_base ** attempt),
                         config.max_delay
                     )
-                    jitter_range = delay * config.jitter
+                    effective_jitter = min(config.jitter, 0.9)  # cap at 90% to preserve minimum delay
+                    jitter_range = delay * effective_jitter
                     import random
                     delay += random.uniform(-jitter_range, jitter_range)
+                    # RES-1: clamp to non-negative; also re-apply max_delay cap AFTER jitter
+                    # so the jitter upside never exceeds the configured maximum.
+                    delay = max(0, min(config.max_delay, delay))
 
-                    print(f"Retry {attempt + 1}/{config.max_retries} after {delay:.1f}s ({error_type.value})")
+                    logger.warning(
+                        "Retry %d/%d after %.1fs (%s)",
+                        attempt + 1, config.max_retries, delay, error_type.value,
+                    )
                     time.sleep(delay)
 
+            if last_error is None:
+                raise RuntimeError("with_retry: last_error is None at end of retry loop (internal error)")
             raise last_error
 
         return wrapper
@@ -311,7 +415,9 @@ class ResilientRunner:
         self.retry_config = retry_config or RetryConfig()
         self.progress_callback = progress_callback
         self.max_code_size = max_code_size
-        self.error_log: List[ErrorRecord] = []
+        # RES-10: bound error_log to prevent unbounded memory growth
+        from collections import deque
+        self.error_log: deque = deque(maxlen=1000)
 
     def _log_progress(self, message: str):
         """Log progress if callback is set."""
@@ -322,92 +428,205 @@ class ResilientRunner:
         self,
         func: Callable[[], T],
         component: str,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
+        error_types: Optional[List[ErrorType]] = None
     ) -> Optional[T]:
         """
         Run a function with resilience features.
 
         Returns None if all retries fail (graceful degradation).
         """
+        # C3-1c: validate func is callable before any other checks
+        if not callable(func):
+            raise TypeError(f"operation must be callable, got {type(func).__name__}: {func!r}")
+        # RES-3: reject bool timeout (bool is subclass of int, passes isinstance check)
+        # Cycle 2 4d: reject NaN/inf/negative timeout (math.ceil(NaN) crashes, negative is nonsensical)
+        if timeout is not None and isinstance(timeout, bool):
+            raise ValueError(f"timeout must be a non-negative finite number, got {timeout!r}")
+        # Iter 3 Fix H6: also reject timeout=0 (zero timeout is useless and causes issues)
+        if timeout is not None and (not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError(f"timeout must be a positive finite number, got {timeout!r}")
+
+        # Red-team fix: validate error_types parity with with_retry()
+        if error_types is not None:
+            if not isinstance(error_types, list):
+                raise TypeError(f"error_types must be a list, got {type(error_types).__name__}")
+            if len(error_types) == 0:
+                raise ValueError("error_types must not be empty; pass None to use defaults")
+            for et in error_types:
+                if not isinstance(et, ErrorType):
+                    raise TypeError(f"error_types elements must be ErrorType, got {type(et).__name__}: {et!r}")
+        _error_types = error_types if error_types is not None else [ErrorType.TIMEOUT, ErrorType.RATE_LIMIT, ErrorType.NETWORK]
+
         last_error = None
+        # Cycle 5 Fix: create executor once outside the retry loop to prevent thread
+        # accumulation. Each retry previously created a new executor and called
+        # shutdown(wait=False), leaving up to max_retries orphaned threads alive.
+        import threading as _threading
+        _non_main_executor = None
+        try:
+            for attempt in range(self.retry_config.max_retries + 1):
+                try:
+                    if timeout is not None and timeout > 0:
+                        import signal
 
-        for attempt in range(self.retry_config.max_retries + 1):
-            try:
-                if timeout:
-                    import signal
+                        # Bug 16: SIGALRM only works from main thread; use thread-based
+                        # timeout as fallback when called from non-main threads
+                        if _threading.current_thread() is _threading.main_thread():
+                            def timeout_handler(signum, frame):
+                                raise TimeoutError(f"Operation timed out after {timeout}s")
 
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError(f"Operation timed out after {timeout}s")
+                            # Set the signal handler
+                            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                            signal.alarm(min(max(1, int(math.ceil(timeout))), 2**31 - 1))
 
-                    # Set the signal handler
-                    old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-                    signal.alarm(int(timeout))
-
-                    try:
+                            try:
+                                result = func()
+                            finally:
+                                signal.alarm(0)
+                                signal.signal(signal.SIGALRM, old_handler)
+                        else:
+                            # Thread-safe fallback: reuse single executor across retries
+                            if _non_main_executor is None:
+                                _non_main_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                            try:
+                                _fut = _non_main_executor.submit(func)
+                                result = _fut.result(timeout=timeout)
+                            except concurrent.futures.TimeoutError:
+                                raise TimeoutError(f"Operation timed out after {timeout}s")
+                    else:
                         result = func()
-                    finally:
-                        signal.alarm(0)
-                        signal.signal(signal.SIGALRM, old_handler)
-                else:
-                    result = func()
 
-                return result
+                    return result
 
-            except TimeoutError as e:
-                last_error = e
-                error_type = ErrorType.TIMEOUT
-                self._log_progress(f"Timeout in {component}: {e}")
-
-            except Exception as e:
-                error_str = str(e).lower()
-
-                if "rate" in error_str and "limit" in error_str:
-                    error_type = ErrorType.RATE_LIMIT
-                    self._log_progress(f"Rate limited in {component}, waiting...")
-                    # Wait longer for rate limits
-                    time.sleep(60)
-                elif "timeout" in error_str:
+                except TimeoutError as e:
+                    last_error = e
                     error_type = ErrorType.TIMEOUT
-                elif "connection" in error_str or "network" in error_str:
-                    error_type = ErrorType.NETWORK
-                else:
-                    error_type = ErrorType.API_ERROR
+                    self._log_progress(f"Timeout in {component}: {e}")
+                    if ErrorType.TIMEOUT not in _error_types:
+                        raise
 
-                last_error = e
-                self._log_progress(f"Error in {component}: {error_type.value} - {e}")
+                except (MemoryError, SystemExit, KeyboardInterrupt):
+                    # RES-C3-2: never retry fatal exceptions — propagate immediately
+                    raise
 
-            # Record error
-            self.error_log.append(ErrorRecord(
-                error_type=error_type,
-                message=str(last_error),
-                timestamp=datetime.now().isoformat(),
-                retry_count=attempt,
-                recovered=False,
-                component=component
-            ))
+                except (AttributeError, TypeError, ValueError, NameError, KeyError, IndexError):
+                    # R3: programming errors — fail fast, don't retry
+                    raise
 
-            if attempt < self.retry_config.max_retries:
-                delay = min(
-                    self.retry_config.initial_delay * (self.retry_config.exponential_base ** attempt),
-                    self.retry_config.max_delay
-                )
-                self._log_progress(f"Retrying {component} in {delay:.1f}s (attempt {attempt + 2})")
-                time.sleep(delay)
+                except Exception as e:
+                    import re as _re
+                    last_error = e  # Set before str(e) — guards against str(e) raising
+                    try:
+                        error_str = str(e).lower()
+                    except Exception:
+                        raise e  # str(e) raised — cannot classify, re-raise original
 
-        # All retries failed - graceful degradation
-        self._log_progress(f"All retries failed for {component}, skipping...")
-        if self.error_log:
-            self.error_log[-1].recovered = False
+                    # R2: use contiguous phrase match for rate limit detection
+                    if _re.search(r'\brate[_\s-]?limit', error_str):
+                        error_type = ErrorType.RATE_LIMIT
+                        if ErrorType.RATE_LIMIT not in _error_types:
+                            raise e
+                        self._log_progress(f"Rate limited in {component}, waiting...")
+                        last_error = e
+                        self.error_log.append(ErrorRecord(
+                            error_type=error_type,
+                            message=str(e),
+                            timestamp=datetime.now().isoformat(),
+                            retry_count=attempt,
+                            recovered=False,
+                            component=component
+                        ))
+                        if attempt < self.retry_config.max_retries:
+                            # Cycle 2 Fix (rate-limit flat sleep): use exponential backoff
+                            # instead of flat min(60, max_delay) to match normal retry path.
+                            _rl_delay = min(
+                                self.retry_config.initial_delay * (self.retry_config.exponential_base ** attempt),
+                                self.retry_config.max_delay
+                            )
+                            import random as _random
+                            # Cap jitter at 0.9 (same guard as with_retry) to prevent zero delay.
+                            _rl_effective_jitter = min(self.retry_config.jitter, 0.9)
+                            _rl_jitter = 1.0 + _random.uniform(
+                                -_rl_effective_jitter, _rl_effective_jitter
+                            )
+                            # C2-4: apply max_delay cap AFTER jitter — without this the
+                            # jitter multiplier can push the delay above max_delay.
+                            _rl_delay = max(0.0, min(self.retry_config.max_delay, _rl_delay * _rl_jitter))
+                            time.sleep(_rl_delay)
+                        continue
+                    elif "timeout" in error_str:
+                        error_type = ErrorType.TIMEOUT
+                    elif _re.search(r'connection\s*(reset|refused|timed?\s*out|closed|error|abort)', error_str) or "network" in error_str:
+                        error_type = ErrorType.NETWORK
+                    else:
+                        # RES-9: unknown/unexpected exceptions — fail fast, don't retry
+                        raise
 
-        return None
+                    last_error = e
+                    self._log_progress(f"Error in {component}: {error_type.value} - {e}")
+                    if error_type not in _error_types:
+                        raise last_error
+
+                # Record error
+                self.error_log.append(ErrorRecord(
+                    error_type=error_type,
+                    message=str(last_error),
+                    timestamp=datetime.now().isoformat(),
+                    retry_count=attempt,
+                    recovered=False,
+                    component=component
+                ))
+
+                if attempt < self.retry_config.max_retries:
+                    delay = min(
+                        self.retry_config.initial_delay * (self.retry_config.exponential_base ** attempt),
+                        self.retry_config.max_delay
+                    )
+                    # Use configured jitter to prevent thundering herd on retry storms
+                    import random as _random
+                    # Cap jitter at 0.9 (same as with_retry) so delay can never reach 0;
+                    # also apply max_delay cap AFTER jitter multiplication.
+                    _effective_jitter = min(self.retry_config.jitter, 0.9)
+                    jitter_factor = 1.0 + _random.uniform(-_effective_jitter, _effective_jitter)
+                    delay = max(0, min(self.retry_config.max_delay, delay * jitter_factor))
+                    self._log_progress(f"Retrying {component} in {delay:.1f}s (attempt {attempt + 2})")
+                    time.sleep(delay)
+
+            # All retries failed - graceful degradation
+            self._log_progress(f"All retries failed for {component}, skipping...")
+            if self.error_log:
+                self.error_log[-1].recovered = False
+
+            return None
+        finally:
+            if _non_main_executor is not None:
+                _non_main_executor.shutdown(wait=False, cancel_futures=True)
 
     def chunk_large_code(self, code: str, chunk_size: Optional[int] = None) -> List[str]:
         """
         Split large code into manageable chunks.
 
         Tries to split on function/class boundaries.
+
+        Note: When using SIGALRM-based timeouts elsewhere, the OS enforces a
+        minimum granularity of 1 second. Sub-second values are rounded up via
+        max(1, int(math.ceil(timeout))).
         """
-        chunk_size = chunk_size or self.max_code_size
+        # Cycle 2 Fix 3.3: guard against None code
+        # Iter 4 Fix B6: reject non-string types (bytes, int, etc.)
+        if not isinstance(code, str):
+            raise TypeError(f"code must be a string, got {type(code).__name__}")
+        # Cycle 2 Fix 3.1: reject bool (bool is subclass of int) and float
+        chunk_size = self.max_code_size if chunk_size is None else chunk_size
+        if isinstance(chunk_size, bool):
+            raise TypeError(f"chunk_size must be int, got bool: {chunk_size!r}")
+        if isinstance(chunk_size, float):
+            raise TypeError(f"chunk_size must be int, got float: {chunk_size!r}")
+        if not isinstance(chunk_size, int):
+            raise TypeError(f"chunk_size must be int, got {type(chunk_size).__name__}")
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size must be positive, got {chunk_size}")
 
         if len(code) <= chunk_size:
             return [code]
@@ -427,18 +646,26 @@ class ResilientRunner:
 
             if is_boundary and current_size > chunk_size // 2:
                 # Start a new chunk at this boundary
-                chunks.append('\n'.join(current_chunk))
+                # Iter 3 Fix L1: don't append empty chunks
+                if current_chunk:
+                    chunks.append('\n'.join(current_chunk))
                 current_chunk = [line]
-                current_size = len(line)
+                current_size = len(line) + 1  # +1 for trailing newline
             else:
-                current_chunk.append(line)
-                current_size += len(line) + 1
-
-                # Force split if chunk is too large
-                if current_size >= chunk_size:
+                # Pre-flush: if adding this line would exceed chunk_size and we
+                # already have content, flush first so multi-line chunks never
+                # exceed chunk_size.  Single lines larger than chunk_size are
+                # unavoidable and land as solo oversized chunks.
+                if current_chunk and current_size + len(line) + 1 > chunk_size:
                     chunks.append('\n'.join(current_chunk))
                     current_chunk = []
                     current_size = 0
+                # Single lines longer than chunk_size cannot be split without
+                # breaking syntax, so we accept the invariant violation. Long lines
+                # are unusual (generated code, minified output) and callers must
+                # handle oversized chunks gracefully.
+                current_chunk.append(line)
+                current_size += len(line) + 1
 
         if current_chunk:
             chunks.append('\n'.join(current_chunk))
@@ -468,25 +695,36 @@ class ResilientRunner:
                     "component": e.component,
                     "recovered": e.recovered
                 }
-                for e in self.error_log[-10:]  # Last 10 errors
+                for e in list(self.error_log)[-10:]  # Last 10 errors (deque doesn't support slicing)
             ]
         }
 
 
 def detect_error_type(exception: Exception) -> ErrorType:
     """Detect the type of error from an exception."""
-    error_str = str(exception).lower()
+    try:
+        error_str = str(exception).lower()
+    except Exception:
+        error_str = ""  # str() raised — treat as unknown
     exc_type = type(exception).__name__.lower()
 
     if isinstance(exception, TimeoutError) or "timeout" in error_str:
         return ErrorType.TIMEOUT
-    elif "rate" in error_str and "limit" in error_str:
+    # Cycle 2 R2-sibling: use contiguous phrase match (same regex as with_retry/run_with_resilience)
+    elif __import__('re').search(r'\brate[_\s-]?limit', error_str):
         return ErrorType.RATE_LIMIT
-    elif isinstance(exception, (ConnectionError, OSError)) or "connection" in error_str or "network" in error_str:
+    # RES-C5-3: filesystem OSError subclasses are SYSTEM errors, not NETWORK
+    elif isinstance(exception, (FileNotFoundError, FileExistsError, IsADirectoryError,
+                                NotADirectoryError, PermissionError)):
+        return ErrorType.UNKNOWN
+    # Iter 3 Fix M8: check ConnectionError separately from OSError to avoid
+    # misclassifying non-network OSError subclasses (BlockingIOError, etc.) as NETWORK
+    elif isinstance(exception, ConnectionError) or __import__('re').search(r'connection\s*(reset|refused|timed?\s*out|closed|error|abort)', error_str) or "network" in error_str:
         return ErrorType.NETWORK
     elif "parse" in error_str or "json" in exc_type or "decode" in error_str:
         return ErrorType.PARSE_ERROR
-    elif "too large" in error_str or "size" in error_str:
+    # Cycle 3 Fix P4b: narrow 'size' match to avoid false positives on 'resize', 'font_size', etc.
+    elif "too large" in error_str or __import__('re').search(r'\b(file|message|payload|content|request|response|data|body|buffer|object|maximum)\s+size\b|size\s+(limit|exceed|too)', error_str):
         return ErrorType.CODE_TOO_LARGE
     elif "api" in error_str or "http" in error_str:
         return ErrorType.API_ERROR
@@ -548,7 +786,7 @@ if __name__ == "__main__":
 
     # Test with failing function
     fail_result = resilient.run_with_resilience(
-        func=lambda: (_ for _ in ()).throw(ConnectionError("test")),
+        func=lambda: (_ for _ in ()).throw(ConnectionError("connection reset")),
         component="test_component"
     )
     print(f"   Graceful degradation: {fail_result is None}")

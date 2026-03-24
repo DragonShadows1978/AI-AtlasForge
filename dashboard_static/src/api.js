@@ -32,6 +32,9 @@ export async function api(endpoint, methodOrOptions = 'GET', body = null) {
     }
 
     const resp = await fetch(endpoint, opts);
+    if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    }
     return resp.json();
 }
 

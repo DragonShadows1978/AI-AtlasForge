@@ -520,6 +520,18 @@ class PromptFactory:
             parts.append(history_summary)
             parts.append("")
 
+        # Cycle history for multi-cycle missions
+        if context.cycle_history:
+            cycle_lines = ["=== CYCLE HISTORY ==="]
+            for cycle in context.cycle_history[-5:]:
+                if not isinstance(cycle, dict):
+                    continue
+                cycle_num = cycle.get("cycle", "?")
+                summary = cycle.get("summary", "No summary")
+                cycle_lines.append(f"  Cycle {cycle_num}: {summary}")
+            cycle_lines.append("")
+            parts.extend(cycle_lines)
+
         # Stage-specific prompt
         parts.append(stage_prompt)
 

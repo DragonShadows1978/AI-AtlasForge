@@ -27,8 +27,23 @@ import threading
 import fcntl
 import shlex
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+
+# ---------------------------------------------------------------------------
+# Subprocess environment allowlist — explicit safe variables only
+# ---------------------------------------------------------------------------
+_SAFE_ENV_EXACT = frozenset({
+    'PATH', 'HOME', 'USER', 'LANG', 'TERM', 'SHELL', 'DISPLAY',
+    'TMPDIR', 'TEMP', 'TMP',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY', 'GOOGLE_API_KEY',
+    'CLAUDE_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'OLLAMA_URL', 'OLLAMA_MODEL',
+    'ATLASFORGE_PORT', 'ATLASFORGE_ROOT', 'ATLASFORGE_DATA_DIR',
+})
+_SAFE_ENV_PREFIXES = ('LC_', 'XDG_')
 
 # Import local modules
 import io_utils
@@ -247,7 +262,7 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
 
     if provider == "gemini":
         # Force non-interactive prompt mode; prompt content is provided via stdin.
-        cmd = ["gemini", "-p", ""]
+        cmd = ["gemini"]
         if _gemini_autonomous_enabled():
             cmd.append("--yolo")
         cmd.extend(["--output-format", "json"])
@@ -330,8 +345,9 @@ def signal_handler(signum, frame):
     running = False
 
 
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
 
 
 # =============================================================================
@@ -376,15 +392,19 @@ def save_memory(memory: dict):
 
 def add_to_memory(key: str, value: str, max_items: int = 100):
     """Add an item to a memory list, keeping it bounded."""
+    if isinstance(max_items, bool):
+        raise TypeError(f"max_items must be an int or None, not bool (got {max_items!r})")
+    if max_items is not None and (not isinstance(max_items, int) or max_items < 0):
+        raise ValueError(f"max_items must be None (unlimited), 0 (unlimited), or a positive integer, got {max_items!r}")
     def update_fn(memory):
         if key not in memory:
             memory[key] = []
         memory[key].append({
             "content": value,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
-        # Keep bounded
-        if len(memory[key]) > max_items:
+        # Keep bounded (0 means no limit; None also means no limit)
+        if max_items is not None and max_items > 0 and len(memory[key]) > max_items:
             memory[key] = memory[key][-max_items:]
         return memory
 
@@ -393,9 +413,13 @@ def add_to_memory(key: str, value: str, max_items: int = 100):
 
 def append_journal(entry: dict):
     """Append to Claude's thought journal."""
-    entry["timestamp"] = datetime.now().isoformat()
+    entry["timestamp"] = datetime.now(timezone.utc).isoformat()
     with open(CLAUDE_JOURNAL_PATH, 'a') as f:
-        f.write(json.dumps(entry) + "\n")
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(json.dumps(entry) + "\n")
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def send_to_chat(message: str):
@@ -409,7 +433,7 @@ def send_to_chat(message: str):
             "role": "claude",
             "provider": provider,
             "content": message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         if len(history) > 500:
             history = history[-500:]
@@ -475,26 +499,82 @@ def get_active_claude_process():
         return _active_claude_process
 
 
+def _restore_active_claude(proc):
+    """Restore process ref if termination failed."""
+    global _active_claude_process
+    with _active_claude_lock:
+        if _active_claude_process is None:
+            _active_claude_process = proc
+
+
 def terminate_active_claude():
     """Terminate the active Claude subprocess for graceful handoff.
     Returns True if a process was terminated."""
+    global _active_claude_process
     with _active_claude_lock:
         proc = _active_claude_process
-    if proc is None:
+        if proc is None:
+            return False
+        _active_claude_process = None  # Atomically claim ownership
+    try:
+        if proc.pid is None or not isinstance(proc.pid, int) or proc.pid <= 0:
+            _restore_active_claude(proc)
+            return False
+    except (TypeError, AttributeError):
+        _restore_active_claude(proc)
+        return False
+    # Guard against PID reuse: verify the process is actually a Claude/LLM process
+    # Open /proc directly without exists() pre-check to avoid TOCTOU race
+    try:
+        with open(f"/proc/{proc.pid}/cmdline", 'rb') as f:
+            cmdline = f.read().replace(b'\x00', b' ').decode('utf-8', errors='replace')
+        if 'claude' not in cmdline and 'codex' not in cmdline and 'gemini' not in cmdline:
+            logger.warning(f"terminate_active_claude: PID {proc.pid} is not a Claude/LLM process (cmdline: {cmdline[:100]}), skipping kill")
+            _restore_active_claude(proc)
+            return False
+    except (OSError, IOError) as e:
+        logger.warning(f"terminate_active_claude: Cannot verify PID {proc.pid} via /proc: {e}, skipping kill for safety")
+        _restore_active_claude(proc)
         return False
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        pgid = os.getpgid(proc.pid)
+        # Guard: refuse to kill our own process group (subprocess shares conductor's pgid)
+        if pgid == os.getpgrp():
+            logger.error(f"terminate_active_claude: pgid {pgid} matches conductor's own process group, refusing to kill")
+            _restore_active_claude(proc)
+            return False
+        os.killpg(pgid, signal.SIGTERM)
+        logger.info(f"terminate_active_claude: SIGTERM sent to pgid={pgid} (pid={proc.pid})")
         proc.wait(timeout=10)
+        logger.info(f"terminate_active_claude: Process {proc.pid} terminated successfully")
         return True
-    except (ProcessLookupError, OSError):
+    except ProcessLookupError:
+        logger.warning(f"terminate_active_claude: Process {proc.pid} already dead")
+        return False
+    except OSError as e:
+        logger.warning(f"terminate_active_claude: OSError killing pid={proc.pid}: {e}")
+        _restore_active_claude(proc)
         return False
     except subprocess.TimeoutExpired:
+        sigkill_succeeded = False
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            proc.wait(timeout=5)
-        except (ProcessLookupError, OSError):
-            pass
-        return True
+            # Reuse pgid from SIGTERM — do not re-query getpgid to avoid PID reuse race
+            os.killpg(pgid, signal.SIGKILL)
+            logger.info(f"terminate_active_claude: SIGKILL sent to pgid={pgid} (pid={proc.pid})")
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning(f"terminate_active_claude: Process {proc.pid} survived SIGKILL (D-state?)")
+            logger.info(f"terminate_active_claude: Process {proc.pid} killed after SIGKILL")
+            sigkill_succeeded = True
+        except ProcessLookupError:
+            logger.warning(f"terminate_active_claude: Process {proc.pid} already dead during SIGKILL")
+            sigkill_succeeded = True
+        except OSError as e:
+            logger.warning(f"terminate_active_claude: OSError during SIGKILL pid={proc.pid}: {e}")
+            _restore_active_claude(proc)
+            sigkill_succeeded = False
+        return sigkill_succeeded
 
 
 
@@ -633,7 +713,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
 
     Args:
         prompt: The prompt to send
-        timeout: Timeout in seconds (default 20 min)
+        timeout: Timeout in seconds (default 20 min, must be > 0)
         cwd: Working directory (default BASE_DIR)
         stage: Current R&D stage (passed to build_llm_command for tool restrictions)
 
@@ -645,13 +725,17 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         - On exception: (None, "exception:<error_message>")
     """
     global _active_claude_process
+    import math
+    if not isinstance(timeout, (int, float)) or timeout <= 0 or math.isnan(timeout) or math.isinf(timeout):
+        raise ValueError(f"invoke_llm timeout must be a finite number > 0, got {timeout}")
     if cwd is None:
         cwd = BASE_DIR
 
     try:
         provider = get_llm_provider()
         command = build_llm_command(provider, stage=stage)
-        env = os.environ.copy()
+        env = {k: v for k, v in os.environ.items()
+               if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
         env.pop("CLAUDECODE", None)  # Prevent "nested session" error when spawning Claude CLI
         if provider == "gemini":
             # Gemini CLI is more reliable in headless mode when both HOME and
@@ -665,13 +749,23 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
 
         # For Claude provider: register agent for streaming before spawn
         _agent_id = None
+        _comp = None
         _stream_file = None
-        if provider == "claude":
+        _stream_thread = None
+        _process_started_at = time.time()
+        if provider in {"claude", "codex"}:
             _agent_id, _agent_label = _next_mission_agent_id(stage)
             try:
-                from agent_stream_manager import register_agent as _reg, update_agent_pid as _upd_pid, complete_agent as _comp, stream_stdout_to_file as _stream_fn
-                _stream_file = _reg('mission', _agent_id, _agent_label, pid=0)
-            except Exception:
+                from agent_stream_manager import (
+                    register_agent as _reg,
+                    update_agent_pid as _upd_pid,
+                    complete_agent as _comp,
+                    stream_stdout_to_file as _stream_fn,
+                    stream_codex_session_to_file as _stream_codex_fn,
+                )
+                _stream_file = _reg('mission', _agent_id, _agent_label, pid=None)
+            except Exception as e:
+                logger.warning('stream_register failed: %s', e)
                 _agent_id = None
                 _stream_file = None
 
@@ -699,16 +793,27 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         if _stream_file and _agent_id:
             try:
                 _upd_pid(_agent_id, proc.pid)
-                _stdout_thread = threading.Thread(
-                    target=_stream_fn,
-                    args=(proc, _stream_file, _agent_id),
-                    daemon=True,
-                    name=f"stream-{_agent_id}"
-                )
-                _stdout_thread.start()
-            except Exception:
+                if provider == "claude":
+                    _stream_thread = threading.Thread(
+                        target=_stream_fn,
+                        args=(proc, _stream_file, _agent_id),
+                        daemon=True,
+                        name=f"stream-{_agent_id}"
+                    )
+                elif provider == "codex":
+                    _stream_thread = threading.Thread(
+                        target=_stream_codex_fn,
+                        args=(proc, _stream_file, str(cwd), _process_started_at),
+                        daemon=True,
+                        name=f"stream-{_agent_id}"
+                    )
+                if _stream_thread is not None:
+                    _stream_thread.start()
+            except Exception as e:
+                logger.warning('stream_thread_setup failed: %s', e)
                 _stream_file = None
                 _agent_id = None
+                _stream_thread = None
 
         # Propagate LLM subprocess PID to activity monitor for subprocess detection
         try:
@@ -719,54 +824,86 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         except Exception:
             pass  # Non-critical enhancement
 
-        # Write prompt to stdin; stdout is consumed by stream thread (Claude) or below (others)
-        try:
-            proc.stdin.write(prompt)
-            proc.stdin.close()
-        except Exception:
-            pass
-
+        stdout = None  # initialized here so error-path code can safely reference them
+        stderr = ""
         try:
             if provider == "claude" and _stream_file:
+                # Streaming path: feed stdin manually because we do not use communicate().
+                try:
+                    proc.stdin.write(prompt)
+                    proc.stdin.close()
+                except BrokenPipeError as e:
+                    logger.error('proc.stdin.write broken pipe: %s', e)
+                    proc.wait(timeout=5)
+                    return None, f"broken_pipe:{e}"
+                except Exception as e:
+                    logger.debug('proc.stdin.write failed: %s', e)
                 # Streaming thread handles stdout; just wait for process
                 proc.wait(timeout=timeout)
                 stderr = proc.stderr.read() if proc.stderr else ""
                 stdout = None  # consumed by stream thread
             else:
-                stdout_data, stderr = proc.communicate(timeout=timeout)
+                # Non-streaming path: let communicate() own stdin end-to-end.
+                stdout_data, stderr = proc.communicate(input=prompt, timeout=timeout)
                 stdout = stdout_data
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                logger.info(f"SIGTERM sent to process group {pgid} (pid={proc.pid})")
                 proc.wait(timeout=10)
-            except (ProcessLookupError, OSError):
-                pass
+                logger.info(f"Process {proc.pid} terminated successfully after SIGTERM")
+            except ProcessLookupError:
+                logger.warning(f"Process {proc.pid} already dead when SIGTERM attempted")
+            except OSError as e:
+                logger.warning(f"OSError sending SIGTERM to process {proc.pid}: {e}")
             except subprocess.TimeoutExpired:
                 try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    pgid = os.getpgid(proc.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                    logger.info(f"SIGKILL sent to process group {pgid} (pid={proc.pid})")
                     proc.wait(timeout=5)
-                except (ProcessLookupError, OSError):
-                    pass
+                    logger.info(f"Process {proc.pid} terminated after SIGKILL")
+                except ProcessLookupError:
+                    logger.warning(f"Process {proc.pid} already dead when SIGKILL attempted")
+                except OSError as e:
+                    logger.warning(f"OSError sending SIGKILL to process {proc.pid}: {e}")
             logger.error(f"{provider} timed out after {timeout}s")
-            if _agent_id:
+            if provider == "codex" and _stream_thread:
+                _stream_thread.join(timeout=3)
+            if _agent_id and _comp:
                 try: _comp(_agent_id, error=f"timeout:{timeout}s")
-                except Exception: pass
+                except Exception as e: logger.debug("complete_agent failed after timeout: %s", e)
             return None, f"timeout:{timeout}s"
         finally:
             with _active_claude_lock:
                 _active_claude_process = None
 
         if proc.returncode == 0:
+            response = ''  # default; overwritten by each branch below
             if provider == "claude" and _stream_file:
                 # Reconstruct response from JSONL stream file
                 try:
                     from agent_stream_manager import reconstruct_text_from_stream_file as _recon
                     response = _recon(_stream_file, provider='claude')
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Stream reconstruction failed for {_stream_file}: {e}", exc_info=True)
                     response = ""
-                if _agent_id:
+                    # Return with error indicator so caller can distinguish from success
+                    return response, "stream_reconstruction_failed"
+                if _agent_id and _comp:
                     try: _comp(_agent_id)
-                    except Exception: pass
+                    except Exception as e: logger.debug("complete_agent failed: %s", e)
+            elif provider == "codex":
+                if _stream_thread:
+                    _stream_thread.join(timeout=3)
+                response = (stdout or "").strip()
+                if _agent_id and _comp:
+                    try: _comp(_agent_id)
+                    except Exception as e: logger.debug("complete_agent failed: %s", e)
+            elif provider == "claude":
+                # Claude without streaming (e.g. stream registration failed)
+                response = (stdout or "").strip()
             else:
                 response = (stdout or "").strip()
                 # Handle Gemini CLI JSON wrapper
@@ -778,6 +915,9 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     except json.JSONDecodeError:
                         pass
             logger.info(f"{provider} responded: {response[:200]}...")
+            if not response or not response.strip():
+                logger.warning(f"{provider} returned empty response despite exit code 0")
+                return '', 'empty_response'
             return response, None
         else:
             stderr_text = (stderr or "").strip()
@@ -813,9 +953,11 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     stderr_snippet = best_line[:500]
 
             logger.error(f"{provider} error: {stderr_text}")
-            if _agent_id:
+            if provider == "codex" and _stream_thread:
+                _stream_thread.join(timeout=3)
+            if _agent_id and _comp:
                 try: _comp(_agent_id, error=f"cli_error:{stderr_snippet[:80]}")
-                except Exception: pass
+                except Exception as e: logger.debug("complete_agent failed: %s", e)
             return None, f"cli_error:{stderr_snippet}"
 
     except Exception as e:
@@ -832,40 +974,71 @@ def _find_balanced_json(text: str) -> Optional[str]:
     This function correctly handles nested JSON structures by tracking brace
     depth rather than using regex patterns that fail on nested braces.
 
+    NOTE: This uses a "first-brace-wins" strategy -- it starts scanning from the
+    first '{' found in the text. If the text contains non-JSON content before the
+    actual JSON (e.g., markdown fences with a '{' in commentary), this may extract
+    the wrong object. Callers should strip obvious non-JSON prefixes before calling,
+    or validate the returned JSON and retry with a different start position if needed.
+
     Args:
         text: Input text that may contain JSON
 
     Returns:
         Extracted JSON string if found and balanced, None otherwise
     """
-    start = text.find('{')
-    if start == -1:
+    if not isinstance(text, str):
         return None
 
-    depth = 0
-    in_string = False
-    escape_next = False
+    search_from = 0
+    for _attempt in range(5):  # Limit retries to prevent O(n²)
+        start = text.find('{', search_from)
+        if start == -1:
+            return None
 
-    for i, char in enumerate(text[start:], start):
-        if escape_next:
-            escape_next = False
-            continue
-        if char == '\\' and in_string:
-            escape_next = True
-            continue
-        if char == '"' and not escape_next:
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if char == '{':
-            depth += 1
-        elif char == '}':
-            depth -= 1
-            if depth == 0:
-                return text[start:i+1]
+        depth = 0
+        in_string = False
+        escape_next = False
+        found_end = -1
 
-    return None  # Unbalanced braces
+        for i, char in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\' and in_string:
+                escape_next = True
+                continue
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    found_end = i
+                    break
+
+        if found_end == -1:
+            search_from = start + 1
+            continue  # Try next '{' instead of giving up
+
+        candidate = text[start:found_end + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            # Try with trailing comma cleanup before giving up on this candidate
+            cleaned = _cleanup_trailing_commas(candidate)
+            try:
+                json.loads(cleaned)
+                return cleaned  # Return the cleaned version that actually parsed
+            except json.JSONDecodeError:
+                # Not valid JSON even after cleanup; skip past this '{' and try the next one
+                search_from = start + 1
+
+    return None  # Exhausted retry attempts
 
 
 def _cleanup_trailing_commas(json_str: str) -> str:
@@ -956,17 +1129,17 @@ def extract_json_from_response(text: str) -> Optional[dict]:
 # HAIKU-POWERED HANDOFF SUMMARIES
 # =============================================================================
 
-HAIKU_MODEL = "claude-sonnet-4-5-20250929"
+HANDOFF_MODEL = "claude-sonnet-4-5-20250929"
 HAIKU_TIMEOUT = 10  # seconds
 HAIKU_MAX_TOKENS = 500
 
 HAIKU_HANDOFF_PROMPT = """You are generating a handoff summary for a Claude session that is ending due to context limits. Summarize what was being worked on concisely.
 
-Mission: {mission_id}
-Mission Objective: {mission_objective}
-Stage: {stage}
+Mission: $mission_id
+Mission Objective: $mission_objective
+Stage: $stage
 Recent activity context:
-{recent_context}
+$recent_context
 
 Format your response EXACTLY as:
 **Working on:** [what was being built/fixed - one line]
@@ -1000,7 +1173,9 @@ def invoke_haiku_summary(
     """
     try:
         provider = get_llm_provider()
-        prompt = HAIKU_HANDOFF_PROMPT.format(
+        import string as _string
+        _tmpl = _string.Template(HAIKU_HANDOFF_PROMPT)
+        prompt = _tmpl.safe_substitute(
             mission_id=mission_id,
             mission_objective=mission_objective or "No mission objective available.",
             stage=stage,
@@ -1010,10 +1185,11 @@ def invoke_haiku_summary(
         logger.info(f"Invoking Haiku summary with provider: {provider}")
         command = build_llm_command(
             provider,
-            model=HAIKU_MODEL if provider == "claude" else None
+            model=HANDOFF_MODEL if provider == "claude" else None
         )
 
-        haiku_env = os.environ.copy()
+        haiku_env = {k: v for k, v in os.environ.items()
+                     if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
         haiku_env.pop("CLAUDECODE", None)
         result = subprocess.run(
             command,
@@ -1066,6 +1242,8 @@ def get_recent_chat_context(n_messages: int = 5) -> str:
         Formatted string of recent messages
     """
     try:
+        if n_messages <= 0:
+            return "No recent messages."
         history = io_utils.atomic_read_json(CHAT_HISTORY_PATH, [])
         if not history:
             return "No recent messages."
@@ -1169,7 +1347,7 @@ def _log_retry_metrics(metrics: dict, completed_mission_id: str) -> None:
     """
     try:
         log_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "completed_mission_id": completed_mission_id,
             **metrics
         }
@@ -1229,7 +1407,7 @@ def _is_valid_mission(mission: dict) -> bool:
     return True
 
 
-def _calculate_backoff_interval(attempt: int, base_interval: float = 1.0) -> float:
+def _calculate_backoff_interval(attempt: int, base_interval: float = 1.0, max_interval: float = 300.0) -> float:
     """Calculate exponential backoff interval for retry attempts.
 
     Uses exponential backoff (1s, 2s, 4s, ...) to handle intermittent network
@@ -1239,12 +1417,13 @@ def _calculate_backoff_interval(attempt: int, base_interval: float = 1.0) -> flo
     Args:
         attempt: Zero-indexed attempt number (0 = first attempt)
         base_interval: Base interval in seconds (default 1.0)
+        max_interval: Upper bound on returned interval (default 300.0s / 5 min)
 
     Returns:
-        Sleep duration in seconds for this attempt
+        Sleep duration in seconds for this attempt, capped at max_interval
 
     Formula:
-        interval = base_interval * (2 ^ attempt)
+        interval = min(base_interval * (2 ^ attempt), max_interval)
 
     Examples:
         >>> _calculate_backoff_interval(0)  # First attempt
@@ -1256,7 +1435,15 @@ def _calculate_backoff_interval(attempt: int, base_interval: float = 1.0) -> flo
         >>> _calculate_backoff_interval(3)  # Fourth attempt
         8.0
     """
-    return base_interval * (2 ** attempt)
+    try:
+        attempt = max(0, int(attempt))
+    except (OverflowError, ValueError):
+        attempt = 0
+    base_interval = max(0.0, float(base_interval))
+    max_interval = max(0.0, float(max_interval))
+    # Cap attempt to prevent 2**attempt overflow (2**30 * any base > any sane max_interval)
+    attempt = min(attempt, 30)
+    return min(base_interval * (2 ** attempt), max_interval)
 
 
 def _wait_for_new_mission_with_retry(
@@ -1459,7 +1646,7 @@ def _wait_for_new_mission_with_retry(
                 interval = base_interval
             metrics["backoff_intervals"].append(interval)
             logger.debug(f"No new mission yet, retrying in {interval}s (attempt {attempt + 1}/{max_retries})")
-            time.sleep(interval)
+            time_module.sleep(interval)
 
     # All retries exhausted without finding a new mission
     metrics["reason"] = "max_retries"
@@ -1578,7 +1765,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
     state = load_state()
     state["mode"] = "rd"
     state["boot_count"] = state.get("boot_count", 0) + 1
-    state["last_boot"] = datetime.now().isoformat()
+    state["last_boot"] = datetime.now(timezone.utc).isoformat()
     save_state(state)
 
     # Install enhanced signal handlers for graceful takeover support
@@ -1600,9 +1787,19 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
     # Initialize R&D controller
     controller = atlasforge_engine.RDMissionController()
 
+    # Preload KB for faster first query (~1.6s savings)
+    try:
+        from af_engine.kb_cache import preload_kb
+        preload_kb()
+        logger.info("KB preloaded for faster first query")
+    except Exception as e:
+        logger.debug("KB preload failed (non-critical, lazy-load works): %s", e)
+
     cycle_count = 0
-    timeout_retries = 0  # Track consecutive timeout failures
+    timeout_retries = 0  # Track consecutive timeout/transport failures
+    parse_retries = 0  # Track consecutive parse-only retries (no-adapter path), separate from timeout_retries
     parse_failure_count = 0  # Track consecutive JSON parse failures (separate from transport)
+    empty_response_count = 0  # Track consecutive empty responses to prevent infinite loops
     _announced_mission_id = None  # Track which mission we've announced to avoid duplicate announcements
 
     try:
@@ -1671,7 +1868,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     "problem": controller.mission.get("original_problem_statement") or controller.mission.get("problem_statement", "")[:200],
                     "iterations": controller.mission.get("iteration", 0),
                     "total_cycles": total_cycles,
-                    "completed_at": datetime.now().isoformat()
+                    "completed_at": datetime.now(timezone.utc).isoformat()
                 }
                 add_to_memory("mission_history", json.dumps(mission_summary))
 
@@ -1860,7 +2057,8 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # Empty stdout with rc=0 is valid (rare but possible). This should
             # NOT increment timeout_retries or trigger 3-strike halt.
             if not response_text and not error_info:
-                logger.warning(f"Empty Claude response with rc=0 (not an error), continuing")
+                empty_response_count += 1
+                logger.warning(f"Empty Claude response #{empty_response_count} with rc=0 (not an error)")
                 # Log to CLI error tracker for trend analysis
                 try:
                     from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
@@ -1879,8 +2077,23 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     "type": "empty_response_warning",
                     "stage": current_stage,
                     "mission_id": controller.mission.get("mission_id"),
-                    "note": "rc=0 with empty stdout - not counting as error"
+                    "note": f"rc=0 with empty stdout #{empty_response_count} - not counting as error"
                 })
+
+                if empty_response_count >= 3:
+                    logger.error("3 consecutive empty responses — treating as retriable error")
+                    send_to_chat(f"[WARN] {empty_response_count} consecutive empty responses in {current_stage}")
+                    timeout_retries += 1
+                    empty_response_count = 0
+                    if timeout_retries >= MAX_CLAUDE_RETRIES:
+                        logger.error(f"Empty response loop exhausted {MAX_CLAUDE_RETRIES} retries")
+                        try:
+                            controller.update_stage("COMPLETE")
+                            send_to_chat(f"[FATAL] Mission halted — empty response loop in {current_stage}")
+                        except Exception:
+                            pass
+                        break
+
                 time.sleep(5)
                 continue
 
@@ -1961,9 +2174,8 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         send_to_chat(error_msg)
                         send_to_chat(fatal_msg)
                         send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
-                        # Add verbose error details for debugging (Cycle 3 enhancement)
                         if error_info:
-                            send_to_chat(f"[ERROR:DETAILS] Raw error: {error_info[:500]}")
+                            logger.error(f"Blocking error details: {error_info[:500]}")
                         logger.error(f"Blocking error: {error_reason.value} - {error_explanation}")
 
                         # Log blocking error to CLI error tracker
@@ -1990,6 +2202,11 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                             "error_info": error_info,
                             "mission_id": controller.mission.get("mission_id")
                         })
+                        try:
+                            controller.update_stage("COMPLETE")
+                            send_to_chat(f"[FATAL] Mission halted in {current_stage} — marking COMPLETE")
+                        except Exception as e:
+                            logger.error(f"Failed to update stage to COMPLETE during break cleanup: {e}")
                         break  # Exit loop - blocking errors don't retry
 
                     # Retriable error - increment counter
@@ -2018,9 +2235,8 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         fatal_msg = format_fatal_message(error_reason, error_explanation, MAX_CLAUDE_RETRIES)
                         send_to_chat(fatal_msg)
                         send_to_chat(f"[ERROR] Stage: {current_stage}, Mission: {controller.mission.get('mission_id')}")
-                        # Add verbose error details for debugging (Cycle 3 enhancement)
                         if error_info:
-                            send_to_chat(f"[ERROR:DETAILS] Raw error: {error_info[:500]}")
+                            logger.error(f"Retry-exhaustion error details: {error_info[:500]}")
                         append_journal({
                             "type": "claude_timeout_failure",
                             "stage": current_stage,
@@ -2030,6 +2246,11 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                             "error_info": error_info,
                             "mission_id": controller.mission.get("mission_id")
                         })
+                        try:
+                            controller.update_stage("COMPLETE")
+                            send_to_chat(f"[FATAL] Mission halted in {current_stage} after {timeout_retries} retries — marking COMPLETE")
+                        except Exception:
+                            pass
                         break  # Exit loop - mission needs intervention
 
                     # Log retriable error with attempt count
@@ -2069,16 +2290,23 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     )
                 else:
                     # No adapter available - fall back to old behavior
-                    timeout_retries += 1
-                    if timeout_retries >= MAX_CLAUDE_RETRIES:
+                    # Use parse_retries (separate from timeout_retries) to avoid conflating
+                    # parse failures with transport-level timeout/error retries.
+                    parse_retries += 1
+                    if parse_retries >= MAX_CLAUDE_RETRIES:
                         logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times to produce valid JSON (no adapter)")
+                        try:
+                            controller.update_stage("COMPLETE")
+                            send_to_chat(f"[FATAL] Mission halted in {current_stage} — JSON parse failures exhausted retries")
+                        except Exception as e:
+                            logger.error(f"Failed to update stage to COMPLETE after parse retries: {e}")
                         break
                     append_journal({
                         "type": "rd_raw_response",
                         "stage": current_stage,
                         "response": response_text[:1000]
                     })
-                    backoff_time = min(60, 10 * (2 ** (timeout_retries - 1)))
+                    backoff_time = min(60, 10 * (2 ** (parse_retries - 1)))
                     time.sleep(backoff_time)
                     continue
 
@@ -2090,12 +2318,24 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         f"[WARN:PARSE] {parse_failure_count} consecutive non-JSON responses. "
                         f"Using fallback adapter to keep mission alive."
                     )
+                    # Halt if fallback adapter is also failing — prevents infinite loop
+                    if parse_failure_count >= MAX_PARSE_FAILURES * 2:
+                        logger.error(f"Halting: {parse_failure_count} consecutive parse failures with fallback adapter")
+                        try:
+                            controller.update_stage("COMPLETE")
+                            send_to_chat(f"[FATAL] Mission halted — fallback adapter exhausted after {parse_failure_count} failures")
+                        except Exception as e:
+                            logger.error(f"Failed to halt after fallback exhaustion: {e}")
+                        break
             else:
-                # Successful JSON parse - reset parse failure counter
+                # Successful JSON parse - reset parse failure counter and parse retries
                 parse_failure_count = 0
+                parse_retries = 0
 
-            # Reset timeout counter on successful response (transport-level)
-            timeout_retries = 0
+                # Reset timeout counter only on successful parse (not on fallback responses)
+                # to prevent infinite loops when LLM consistently produces unparseable output
+                timeout_retries = 0
+                empty_response_count = 0
 
             # Log the response
             append_journal({
@@ -2133,7 +2373,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
     except Exception as e:
         logger.error(f"R&D Mode error: {e}", exc_info=True)
-        send_to_chat(f"R&D Error: {e}")
+        send_to_chat("R&D Error: an unexpected error occurred. Check logs for details.")
     finally:
         save_state(state)
         remove_pid()
@@ -2153,7 +2393,7 @@ def build_free_mode_prompt(state: dict) -> str:
     return f"""You are Claude, running AUTONOMOUSLY on a home server.
 You are not responding to a human - you are THINKING and WORKING on your own.
 
-CURRENT TIME: {datetime.now().isoformat()}
+CURRENT TIME: {datetime.now(timezone.utc).isoformat()}
 BOOT COUNT: {state.get('boot_count', 0)}
 TOTAL CYCLES: {state.get('total_cycles', 0)}
 
@@ -2203,7 +2443,7 @@ def run_free_mode():
     state = load_state()
     state["mode"] = "free"
     state["boot_count"] = state.get("boot_count", 0) + 1
-    state["last_boot"] = datetime.now().isoformat()
+    state["last_boot"] = datetime.now(timezone.utc).isoformat()
     save_state(state)
 
     send_to_chat(f"{provider_label} Free Mode starting (Boot #{state['boot_count']})")
@@ -2256,7 +2496,7 @@ def run_free_mode():
 
     except Exception as e:
         logger.error(f"Free Mode error: {e}", exc_info=True)
-        send_to_chat(f"Error: {e}")
+        send_to_chat("Error: an unexpected error occurred. Check logs for details.")
     finally:
         save_state(state)
         remove_pid()

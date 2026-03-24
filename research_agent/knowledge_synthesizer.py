@@ -72,7 +72,7 @@ class KnowledgeGap:
 class SynthesisResult:
     """Complete synthesis of research findings."""
     topic: str
-    summary: str
+    summary: str = ""
     recommendations: List[Recommendation] = field(default_factory=list)
     knowledge_gaps: List[KnowledgeGap] = field(default_factory=list)
     sources_used: List[str] = field(default_factory=list)
@@ -176,11 +176,11 @@ class KnowledgeSynthesizer:
 
     SYNTHESIS_PROMPT = """Synthesize these research findings into actionable recommendations.
 
-Topic: {topic}
-Context: {context}
+Topic: $topic
+Context: $context
 
 Research Findings:
-{findings}
+$findings
 
 Analyze the findings and produce:
 1. A brief summary (2-3 sentences)
@@ -200,10 +200,10 @@ Confidence levels:
 - speculative: Based on inference
 
 Respond in JSON:
-{{
+{
     "summary": "Brief synthesis summary",
     "recommendations": [
-        {{
+        {
             "title": "Recommendation title",
             "description": "What to do",
             "type": "architecture|implementation|tool|pattern|avoid|best_practice",
@@ -212,18 +212,18 @@ Respond in JSON:
             "sources": ["url1", "url2"],
             "alternatives": ["alternative approach"],
             "caveats": ["things to watch out for"]
-        }}
+        }
     ],
     "knowledge_gaps": [
-        {{
+        {
             "topic": "Gap topic",
             "description": "What we don't know",
             "importance": "critical|important|nice_to_have",
             "suggested_research": "What to search for"
-        }}
+        }
     ],
     "overall_confidence": "high|medium|low|speculative"
-}}
+}
 """
 
     def __init__(
@@ -289,7 +289,8 @@ Respond in JSON:
         findings_text = self._format_findings(all_results)
 
         # Run synthesis
-        prompt = self.SYNTHESIS_PROMPT.format(
+        import string as _string
+        prompt = _string.Template(self.SYNTHESIS_PROMPT).safe_substitute(
             topic=topic,
             context=context or "General research",
             findings=findings_text

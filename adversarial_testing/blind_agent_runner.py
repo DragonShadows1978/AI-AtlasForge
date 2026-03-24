@@ -28,7 +28,10 @@ Usage:
 import json
 import logging
 import os
+import re
+import shlex
 import signal
+import string
 import sys
 import threading
 import time
@@ -42,13 +45,34 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Subprocess environment allowlist — explicit safe variables only
+# ---------------------------------------------------------------------------
+_SAFE_ENV_EXACT = frozenset({
+    'PATH', 'HOME', 'USER', 'LANG', 'TERM', 'SHELL', 'DISPLAY',
+    'TMPDIR', 'TEMP', 'TMP',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'OLLAMA_URL', 'OLLAMA_MODEL',
+    # ATLASFORGE_* vars needed by subprocess — explicit allowlist, NOT prefix
+    'ATLASFORGE_PORT', 'ATLASFORGE_ROOT', 'ATLASFORGE_DATA_DIR',
+})
+_SAFE_ENV_PREFIXES = ('LC_', 'XDG_')
+
+# ---------------------------------------------------------------------------
 # Allowed workspace roots — path traversal guard
 # ---------------------------------------------------------------------------
+_ATLASFORGE_ROOT = Path(os.environ.get('ATLASFORGE_ROOT', '/home/vader/AI-AtlasForge')).resolve()
 _ALLOWED_WORKSPACE_ROOTS = [
-    Path("/home/vader/AI-AtlasForge/workspace").resolve(),
-    Path("/home/vader/AI-AtlasForge").resolve(),
-    Path("/tmp").resolve(),
+    (_ATLASFORGE_ROOT / 'workspace').resolve(),
 ]
+# Sanity check: ensure allowed roots are strictly *under* the repo root,
+# not equal to it (which would grant access to the entire repo).
+for _root in _ALLOWED_WORKSPACE_ROOTS:
+    if _root == _ATLASFORGE_ROOT:
+        raise RuntimeError(
+            f"SECURITY: allowed workspace root {_root} must be a subdirectory "
+            f"of {_ATLASFORGE_ROOT}, not the repo root itself"
+        )
 
 # ---------------------------------------------------------------------------
 # Adaptive timeout tiers based on .py file count in workspace
@@ -62,8 +86,8 @@ _TIMEOUT_TIERS = [
 # ---------------------------------------------------------------------------
 # Parent directory on path so we can import AtlasForge top-level modules
 # ---------------------------------------------------------------------------
-_ATLASFORGE_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(_ATLASFORGE_ROOT))
+_PACKAGE_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_PACKAGE_ROOT))
 
 # ---------------------------------------------------------------------------
 # Optional dashboard integration (agent_stream_manager)
@@ -154,80 +178,6 @@ _ATTACK_PROFILES = [
 # Prompt builder
 # ---------------------------------------------------------------------------
 
-_BLIND_AGENT_PROMPT = """\
-You are a BLIND adversarial security researcher and code quality analyst.
-
-You have NO prior knowledge of how this code was built, what the developer intended,
-or what the original tests check. You only know the workspace path below.
-
-Your mission: Explore the codebase at {workspace_dir}, understand what it does,
-and then BREAK it. Find bugs, vulnerabilities, and logic flaws.
-
-## Workspace
-{workspace_dir}
-
-## What this code is supposed to do
-{mission_desc}
-
-## Your attack focus for this session
-{focus_description}
-
-## Instructions
-
-1. **Explore first** — use your file tools (Read, Glob, Grep) to understand the code
-   structure. Look at the entry points, key modules, and existing tests.
-
-2. **Run existing tests** — if a test suite exists, run it:
-   ```
-   cd {workspace_dir} && python3 -m pytest tests/ -v 2>&1 | head -100
-   ```
-   Or for other languages/frameworks, use the appropriate test command.
-
-3. **Attack the code** — based on your focus area, try adversarial inputs:
-   - Import key modules and call functions with malformed/edge-case inputs
-   - Run scripts with adversarial arguments
-   - Look for code that will crash, hang, or produce wrong output
-
-4. **Document findings** — for each issue you find, note:
-   - Which file and line (or function name)
-   - What category of bug it is
-   - How severe you assess it (critical / high / medium / low / info)
-   - Steps to reproduce
-   - A suggested fix
-
-5. **Write your findings** to this JSON file:
-   {results_file}
-
-   Use this EXACT JSON structure:
-   ```json
-   {{
-       "findings": [
-           {{
-               "category": "boundary",
-               "severity": "high",
-               "title": "Short descriptive title",
-               "description": "Detailed description of the issue",
-               "reproduction_steps": ["step 1", "step 2"],
-               "affected_code": "filename.py:linenum or function_name",
-               "suggested_fix": "What should be done to fix this",
-               "confidence": 0.85
-           }}
-       ],
-       "attack_vectors_tried": [
-           "empty input to function X",
-           "None passed to Y",
-           "..."
-       ]
-   }}
-   ```
-
-6. If you find NO issues, write the JSON with an empty findings list and list what
-   you tried in attack_vectors_tried.
-
-Begin your investigation now. Be thorough. Be adversarial. Break things.
-"""
-
-
 # ---------------------------------------------------------------------------
 # New Red Team Hunt Prompt — writes findings incrementally as discovered
 # ---------------------------------------------------------------------------
@@ -238,16 +188,16 @@ workspace path below. You do NOT fix bugs. You do NOT need to find solutions.
 You just find everything that is wrong and write it down immediately.
 
 ## Workspace
-{workspace_dir}
+${workspace_dir}
 
 ## What this code is supposed to do
-{mission_desc}
+${mission_desc}
 
 ## Your hunt focus for this session
-{focus_description}
+${focus_description}
 
 ## FINDINGS FILE — write every finding here immediately when found
-{findings_file}
+${findings_file}
 
 ## Instructions
 
@@ -256,7 +206,7 @@ You just find everything that is wrong and write it down immediately.
 
 2. **Run existing tests** to see what already fails:
    ```
-   cd {workspace_dir} && python3 -m pytest tests/ -v 2>&1 | head -100
+   cd ${shell_workspace_dir} && python3 -m pytest tests/ -v 2>&1 | head -100
    ```
    Or the appropriate test command for the language/framework.
 
@@ -275,12 +225,12 @@ You just find everything that is wrong and write it down immediately.
 4. **WRITE EACH FINDING IMMEDIATELY** when you find it — before moving to the
    next file or the next issue. Do NOT accumulate findings in memory.
 
-   **For a confirmed bug, write to {findings_file} using EXACTLY this format:**
+   **For a confirmed bug, write to ${findings_file} using EXACTLY this format:**
 
    If the file is empty or does not exist yet, use the Write tool to create it:
 
    ```
-   # Red Team Findings — {agent_id}
+   # Red Team Findings — ${agent_id}
 
    ---BUG---
    File: path/to/file.py
@@ -329,13 +279,13 @@ You just find everything that is wrong and write it down immediately.
 - Cover as many files as possible. Breadth over depth.
 
 Also write a legacy JSON results file for backward compatibility:
-{results_file}
+${results_file}
 
 Use this EXACT JSON structure:
 ```json
-{{
+{
     "findings": [
-        {{
+        {
             "category": "boundary",
             "severity": "high",
             "title": "Short descriptive title",
@@ -344,14 +294,14 @@ Use this EXACT JSON structure:
             "affected_code": "filename.py:linenum or function_name",
             "suggested_fix": "What should be done to fix this",
             "confidence": 0.85
-        }}
+        }
     ],
     "attack_vectors_tried": [
         "empty input to function X",
         "None passed to Y",
         "..."
     ]
-}}
+}
 ```
 
 Begin your hunt now. Find bugs. Write them down immediately. Move on.
@@ -381,22 +331,48 @@ class BlindAgentRedTeam:
             timeout: Per-agent timeout in seconds (default 15 min)
             n_agents: Number of parallel agents to launch (1-4)
         """
+        # Iter 3 Fix M9: validate timeout parameter
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise TypeError(f"timeout must be a positive number, got {type(timeout).__name__}: {timeout!r}")
+        if timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {timeout}")
+        # Iter 4 Fix C1: reject inf/nan timeout
+        import math as _math
+        if not _math.isfinite(timeout):
+            raise ValueError(f"timeout must be finite, got {timeout!r}")
         self.timeout = timeout
-        self.n_agents = min(max(1, n_agents), len(_ATTACK_PROFILES))
+        # Iter 4 Fix B4: validate n_agents parameter
+        if isinstance(n_agents, bool) or not isinstance(n_agents, int):
+            raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
+        if n_agents <= 0:
+            raise ValueError(f"n_agents must be positive, got {n_agents}")
+        _max_profiles = len(_ATTACK_PROFILES)
+        if n_agents > _max_profiles:
+            logger.warning(
+                "n_agents=%d exceeds maximum profile count %d; capping to %d",
+                n_agents, _max_profiles, _max_profiles,
+            )
+        self.n_agents = min(max(1, n_agents), _max_profiles)
 
     # ------------------------------------------------------------------
     # Fix 3 — Path Traversal Guard
     # ------------------------------------------------------------------
     def _validate_workspace_dir(self, path: Path) -> None:
-        """Raise ValueError if path is not within any allowed workspace root."""
+        """Raise ValueError if path is not within any allowed workspace root.
+
+        Uses Path.resolve() to canonicalize symlinks and '..' components,
+        then Path.relative_to() for a safe containment check (no string
+        prefix matching).
+        """
+        resolved = path.resolve()
         for allowed_root in _ALLOWED_WORKSPACE_ROOTS:
             try:
-                path.relative_to(allowed_root)
+                resolved.relative_to(allowed_root)
                 return  # within an allowed root — OK
             except ValueError:
                 continue
         raise ValueError(
-            f"workspace_dir {path!r} is not within any allowed root: "
+            f"workspace_dir {resolved!r} is not within any allowed root: "
             f"{[str(r) for r in _ALLOWED_WORKSPACE_ROOTS]}"
         )
 
@@ -412,7 +388,9 @@ class BlindAgentRedTeam:
                 if file_count < threshold:
                     return t
             return 900
-        except Exception:
+        except Exception as e:
+            logger.warning("_estimate_timeout failed (%s: %s); using configured default %ds",
+                           type(e).__name__, e, self.timeout)
             return self.timeout  # fall back to configured default
 
     def launch_parallel_team(
@@ -438,8 +416,24 @@ class BlindAgentRedTeam:
         # Fix 3 — path traversal guard
         self._validate_workspace_dir(workspace_dir)
 
+        # Cycle 3 Fix P3a: validate override params (matching __init__ checks)
+        if n_agents is not None:
+            if isinstance(n_agents, bool) or not isinstance(n_agents, int):
+                raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
+            if n_agents <= 0:
+                raise ValueError(f"n_agents must be positive, got {n_agents}")
+        if timeout is not None:
+            import math as _math
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+                raise TypeError(f"timeout must be a positive number, got {type(timeout).__name__}: {timeout!r}")
+            if timeout <= 0:
+                raise ValueError(f"timeout must be positive, got {timeout}")
+            if not _math.isfinite(timeout):
+                raise ValueError(f"timeout must be finite, got {timeout!r}")
         n = n_agents if n_agents is not None else self.n_agents
-        n = min(max(1, n), len(_ATTACK_PROFILES))
+        # BAR-5: cap without re-emitting warning (warning already emitted in __init__)
+        _max_profiles = len(_ATTACK_PROFILES)
+        n = min(max(1, n), _max_profiles)
         # Fix 7 — adaptive timeout
         if timeout is not None:
             t = timeout
@@ -449,11 +443,26 @@ class BlindAgentRedTeam:
 
         profiles = _ATTACK_PROFILES[:n]
         session_id = f"brt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        results_dir = workspace_dir / "tests"
+        # Cycle 3 Fix (#13): resolve symlinks and verify paths stay within workspace_dir
+        # to prevent symlink escape attacks (e.g., workspace_dir/tests -> /etc).
+        # RT-02/RT-03 Fix: append os.sep so "/tmp/workspace" doesn't falsely match "/tmp/workspace2/evil".
+        _workspace_real = str(workspace_dir.resolve())
+        _workspace_real_prefix = _workspace_real + os.sep
+        results_dir = (workspace_dir / "tests").resolve()
+        if not (str(results_dir) == _workspace_real or str(results_dir).startswith(_workspace_real_prefix)):
+            raise ValueError(
+                f"Resolved results_dir {results_dir!r} is outside workspace_dir "
+                f"{workspace_dir!r} (possible symlink escape)"
+            )
         results_dir.mkdir(parents=True, exist_ok=True)
 
         # Create Red_Team directory for incremental markdown findings files
-        red_team_dir = results_dir / "Red_Team"
+        red_team_dir = (results_dir / "Red_Team").resolve()
+        if not (str(red_team_dir) == _workspace_real or str(red_team_dir).startswith(_workspace_real_prefix)):
+            raise ValueError(
+                f"Resolved red_team_dir {red_team_dir!r} is outside workspace_dir "
+                f"{workspace_dir!r} (possible symlink escape)"
+            )
         red_team_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(
@@ -466,15 +475,27 @@ class BlindAgentRedTeam:
         agent_results: List[Dict] = []
         _suite_start = time.time()  # wall-clock start for accurate duration_ms
 
-        with ThreadPoolExecutor(max_workers=n) as executor:
+        # Fix #10 (as_completed timeout unreachable): do NOT use 'with ThreadPoolExecutor' here.
+        # ThreadPoolExecutor.__exit__ calls shutdown(wait=True) unconditionally, blocking until
+        # ALL futures finish — making the TimeoutError handler unreachable in practice.
+        # Explicit executor management lets shutdown(wait=False) on timeout actually work.
+        import concurrent.futures as _cf
+        executor = ThreadPoolExecutor(max_workers=n)
+        try:
             for profile in profiles:
                 results_file = results_dir / f"red_team_agent_{profile.index}.json"
                 findings_file = red_team_dir / f"agent{profile.index}_findings.md"
-                # Fix 1 — TOCTOU: delete any stale results/findings files before spawning
-                results_file.unlink(missing_ok=True)
-                findings_file.unlink(missing_ok=True)
-                # Pre-create empty findings file so agent can append immediately
-                findings_file.touch()
+                # Fix TOCTOU symlink race: use O_NOFOLLOW so open() itself
+                # refuses to follow symlinks — no gap between check and open.
+                _oflags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+                for _p in (results_file, findings_file):
+                    try:
+                        _fd = os.open(str(_p), _oflags, 0o644)
+                        os.close(_fd)
+                    except OSError as _e:
+                        raise RuntimeError(
+                            f"Cannot safely create {_p} (symlink or permission issue): {_e}"
+                        ) from _e
                 future = executor.submit(
                     self._spawn_single_agent,
                     profile=profile,
@@ -488,10 +509,9 @@ class BlindAgentRedTeam:
                 futures_map[future] = profile
                 logger.info(f"Submitted agent {profile.index}: {profile.label}")
 
-            # Fix 5 — zombie agents: catch outer TimeoutError, collect partial results
-            import concurrent.futures as _cf
             try:
-                for future in as_completed(futures_map, timeout=t + 30):
+                _grace = max(10, min(30, int(t * 0.10)))
+                for future in as_completed(futures_map, timeout=t + _grace):
                     profile = futures_map[future]
                     try:
                         agent_result = future.result()
@@ -503,14 +523,19 @@ class BlindAgentRedTeam:
                         )
                     except Exception as e:
                         logger.error(f"Agent {profile.index} raised exception: {e}")
+                        _err_findings_file = red_team_dir / f"agent{profile.index}_findings.md"
                         agent_results.append({
                             "success": False,
                             "error": str(e),
                             "findings": [],
                             "attack_vectors_tried": [],
                             "profile_index": profile.index,
+                            "findings_file": str(_err_findings_file),
                         })
+                # Normal completion path — clean shutdown
+                executor.shutdown(wait=True)
             except _cf.TimeoutError:
+                # Fix #10: this branch IS now reachable — no 'with' __exit__ blocks here.
                 logger.warning("as_completed timed out — collecting partial results from completed futures")
                 for future, profile in futures_map.items():
                     if future.done():
@@ -534,6 +559,14 @@ class BlindAgentRedTeam:
                             "attack_vectors_tried": [],
                             "profile_index": profile.index,
                         })
+                # B3: non-blocking shutdown — cancel_futures stops pending work
+                executor.shutdown(wait=False, cancel_futures=True)
+        finally:
+            # Ensure executor is released on unexpected exceptions
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except Exception as exc:
+                logger.warning("executor.shutdown failed during cleanup: %s", exc)
 
         _suite_elapsed = time.time() - _suite_start
         return self._aggregate_results(
@@ -561,15 +594,23 @@ class BlindAgentRedTeam:
 
         agent_id = f"{session_id}_agent{profile.index}"
         start_time = time.time()
+        elapsed = 0.0
 
-        # Build prompt — escape braces in mission_desc and focus_description to prevent
-        # format string KeyError when either contains literal { or } chars (Bug 5 fix).
-        safe_mission_desc = mission_desc.replace('{', '{{').replace('}', '}}')
-        safe_focus = profile.focus_description.replace('{', '{{').replace('}', '}}')
-        prompt = _RED_TEAM_HUNT_PROMPT.format(
+        # Build prompt — use string.Template.safe_substitute() to prevent attribute
+        # traversal attacks via {var.__class__} syntax that str.format_map() allows.
+        # Cycle 3 Fix (#12): sanitize mission_desc — strip newlines/CR to prevent
+        # prompt injection via embedded instruction lines in the description.
+        # Cycle 5 Fix: apply same sanitization to focus_description (Template injection).
+        # BAR-NEW-1: extend to Unicode line separators U+2028, U+2029, U+0085, and null bytes.
+        # C2-5a: include \t (tab) in the sanitization pattern so tab-containing strings
+        # cannot inject extra columns into TSV log output or corrupt template expansion.
+        _safe_mission_desc = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]', ' ', mission_desc).strip()
+        _safe_focus_desc = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]', ' ', profile.focus_description).strip()
+        prompt = string.Template(_RED_TEAM_HUNT_PROMPT).safe_substitute(
             workspace_dir=str(workspace_dir),
-            mission_desc=safe_mission_desc,
-            focus_description=safe_focus,
+            shell_workspace_dir=shlex.quote(str(workspace_dir)),
+            mission_desc=_safe_mission_desc,
+            focus_description=_safe_focus_desc,
             results_file=str(results_file),
             findings_file=str(findings_file),
             agent_id=agent_id,
@@ -588,16 +629,22 @@ class BlindAgentRedTeam:
                 stream_file = None
                 streaming_enabled = False
 
-        # Build CLI command
+        # Build CLI command — Bug 14: resolve 'claude' via shutil.which to prevent PATH injection
+        import shutil as _shutil
+        _claude_bin = _shutil.which("claude")
+        if _claude_bin is None:
+            raise FileNotFoundError("'claude' binary not found in PATH")
         command = [
-            "claude", "-p",
+            _claude_bin, "-p",
             "--dangerously-skip-permissions",
             "--output-format", "stream-json",
             "--verbose",
         ]
 
-        # Clear CLAUDECODE to avoid nested-session error
-        env = os.environ.copy()
+        # Cycle 5 Fix: explicit allowlist instead of prefix-based matching
+        env = {k: v for k, v in os.environ.items()
+               if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
+        # Ensure CLAUDECODE is not present to avoid nested-session error
         env.pop("CLAUDECODE", None)
 
         proc = None
@@ -619,8 +666,8 @@ class BlindAgentRedTeam:
             if streaming_enabled and stream_file:
                 try:
                     _asm_update_pid(agent_id, proc.pid)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("ASM update_pid failed: %s", e)
 
             # Start streaming thread (initialized to None before outer try for leak-safe except)
             if streaming_enabled and stream_file:
@@ -631,28 +678,6 @@ class BlindAgentRedTeam:
                     name=f"brt-stream-{agent_id}",
                 )
                 stream_thread.start()
-
-            # Send prompt via stdin — Fix 6: abort agent on stdin write failure
-            try:
-                proc.stdin.write(prompt)
-                proc.stdin.close()
-            except Exception as e:
-                logger.error(f"Failed to write prompt to agent {agent_id}: {e} — aborting agent")
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=5)
-                except Exception:
-                    pass
-                if stream_thread is not None:
-                    stream_thread.join(timeout=2)
-                return {
-                    "success": False,
-                    "error": f"stdin write failed: {e}",
-                    "findings": [],
-                    "attack_vectors_tried": [],
-                    "profile_index": profile.index,
-                    "elapsed_seconds": time.time() - start_time,
-                }
 
             # Wait for process
             # Drain stderr in background thread ONLY on the proc.wait() path (streaming=True).
@@ -665,10 +690,13 @@ class BlindAgentRedTeam:
                     for chunk in iter(lambda: pipe.read(4096), ''):
                         if chunk:
                             _stderr_chunks.append(chunk)
-                except Exception:
-                    pass
+                except (IOError, OSError, ValueError) as _drain_err:
+                    logger.debug("stderr drain thread error for agent %s: %s", agent_id, _drain_err)
 
             _use_drain_thread = bool(streaming_enabled and stream_file)
+            # Bug 12: initialize before conditional block to prevent NameError
+            # if an exception occurs between _use_drain_thread=True and Thread creation
+            _stderr_thread = None
             if _use_drain_thread:
                 _stderr_thread = threading.Thread(
                     target=_drain_stderr_bg, args=(proc.stderr,), daemon=True,
@@ -679,17 +707,40 @@ class BlindAgentRedTeam:
             stdout_text = ""
             try:
                 if streaming_enabled and stream_file:
+                    # Streaming path: feed stdin manually because communicate() is not used.
+                    try:
+                        proc.stdin.write(prompt)
+                        proc.stdin.close()
+                    except Exception as e:
+                        logger.error(f"Failed to write prompt to agent {agent_id}: {e} — aborting agent")
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=5)
+                        except Exception as _term_err:
+                            logger.debug("Failed to terminate agent %s after stdin error: %s", agent_id, _term_err)
+                        if stream_thread is not None:
+                            stream_thread.join(timeout=2)
+                        return {
+                            "success": False,
+                            "error": f"stdin write failed: {e}",
+                            "findings": [],
+                            "attack_vectors_tried": [],
+                            "profile_index": profile.index,
+                            "elapsed_seconds": time.time() - start_time,
+                        }
                     proc.wait(timeout=timeout)
                     # C3-6: join stream_thread before draining stdout — prevents concurrent readers
                     if stream_thread is not None:
                         stream_thread.join(timeout=5)
-                    # Drain residual buffered stdout so pipe never fills and deadlocks
+                    # B2: drain residual stdout with 1MB cap to prevent hang/OOM.
+                    # Cycle 3 Fix (#14): capture into stdout_text so it is available
+                    # for downstream logging/parsing (was silently discarded before).
                     try:
-                        proc.stdout.read()
-                    except Exception:
-                        pass
+                        stdout_text = proc.stdout.read(1024 * 1024)
+                    except (IOError, OSError) as _read_err:
+                        logger.debug("stdout read error for agent %s: %s", agent_id, _read_err)
                 else:
-                    stdout_text, _ = proc.communicate(timeout=timeout)
+                    stdout_text, _ = proc.communicate(input=prompt, timeout=timeout)
             except subprocess.TimeoutExpired:
                 logger.warning(f"Agent {agent_id} timed out after {timeout}s, killing")
                 try:
@@ -703,30 +754,42 @@ class BlindAgentRedTeam:
                         proc.wait(timeout=5)
                     except (ProcessLookupError, OSError):
                         pass
+                # Join stream_thread on timeout to prevent concurrent stdout reads
+                if stream_thread is not None:
+                    stream_thread.join(timeout=5)
                 # On timeout: read whatever was written to findings_file
                 _md_content = ""
                 try:
                     if findings_file.exists():
                         _md_content = findings_file.read_text(encoding="utf-8")
-                except Exception:
-                    pass
+                except Exception as _md_err:
+                    logger.debug("Failed to read findings file on timeout for agent %s: %s", agent_id, _md_err)
                 _md_count = len(self._parse_markdown_findings(_md_content)) if _md_content.strip() else 0
                 if _md_count > 0:
                     logger.info(f"Agent {agent_id} timed out — {_md_count} findings captured from markdown file")
 
-            # Join stderr drain thread only if it was started (streaming path only)
-            if _use_drain_thread:
+            # Join stderr drain thread only if it was actually started (Bug 12)
+            if _use_drain_thread and _stderr_thread is not None:
                 _stderr_thread.join(timeout=5)
+                # TD-1: surface stderr from failed/timed-out agents so root-causes are visible
+                if _stderr_chunks:
+                    _stderr_text = "".join(_stderr_chunks)[:2000]
+                    _rc = proc.returncode if proc is not None else None
+                    if _rc not in (0, None):
+                        logger.warning("Agent %s stderr (rc=%s): %s", agent_id, _rc, _stderr_text)
+                    else:
+                        logger.debug("Agent %s stderr: %s", agent_id, _stderr_text)
 
             elapsed = time.time() - start_time
 
             # Mark complete in dashboard
             if streaming_enabled and stream_file:
                 try:
-                    time.sleep(0.3)  # Let streaming thread flush
+                    if stream_thread is not None:
+                        stream_thread.join(timeout=2.0)
                     _asm_complete(agent_id, error=None)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("ASM complete failed: %s", e)
 
         except Exception as e:
             elapsed = time.time() - start_time
@@ -734,13 +797,13 @@ class BlindAgentRedTeam:
             # Join any threads that may have been started before the exception
             if stream_thread is not None:
                 stream_thread.join(timeout=5)
-            if _use_drain_thread:
+            if _use_drain_thread and _stderr_thread is not None:
                 _stderr_thread.join(timeout=5)
             if streaming_enabled and stream_file:
                 try:
                     _asm_complete(agent_id, error=str(e))
-                except Exception:
-                    pass
+                except Exception as e2:
+                    logger.debug("ASM complete (error path) failed: %s", e2)
             return {
                 "success": False,
                 "error": str(e),
@@ -755,12 +818,13 @@ class BlindAgentRedTeam:
                 try:
                     proc.terminate()
                     proc.wait(timeout=5)
-                except Exception:
+                except Exception as _term_err:
+                    logger.debug(f"Agent {agent_id}: terminate failed ({_term_err}), attempting kill")
                     try:
                         proc.kill()
                         proc.wait(timeout=3)
-                    except Exception:
-                        pass
+                    except Exception as _kill_err:
+                        logger.debug(f"Agent {agent_id}: kill also failed: {_kill_err}")
 
         # Read markdown findings file (primary — written incrementally)
         markdown_findings: List[dict] = []
@@ -779,14 +843,27 @@ class BlindAgentRedTeam:
         attack_vectors_tried = []
         parse_error = None
 
-        if results_file.exists():
-            try:
-                data = json.loads(results_file.read_text())
-                findings_raw = data.get("findings", [])
-                attack_vectors_tried = data.get("attack_vectors_tried", [])
-            except Exception as e:
-                parse_error = f"Failed to parse {results_file}: {e}"
+        try:
+            _results_stat = results_file.stat()
+            _results_exists = True
+        except FileNotFoundError:
+            _results_stat = None
+            _results_exists = False
+
+        if _results_exists:
+            # C2-5b: detect empty/partial writes — a zero-byte file means the agent
+            # crashed after creating the file but before writing any content.
+            if _results_stat.st_size == 0:
+                parse_error = f"Agent {agent_id} wrote empty results file (possible partial write or crash)"
                 logger.warning(parse_error)
+            else:
+                try:
+                    data = json.loads(results_file.read_text(encoding='utf-8'))
+                    findings_raw = data.get("findings", [])
+                    attack_vectors_tried = data.get("attack_vectors_tried", [])
+                except Exception as e:
+                    parse_error = f"Failed to parse {results_file}: {e}"
+                    logger.warning(parse_error)
         else:
             parse_error = f"Agent {agent_id} did not write results to {results_file}"
             logger.warning(parse_error)
@@ -794,16 +871,19 @@ class BlindAgentRedTeam:
         # Merge: markdown findings take priority; JSON findings fill in if markdown empty
         combined_findings = markdown_findings if markdown_findings else findings_raw
         partial_success = len(markdown_findings) > 0
-        # BA-H10: empty findings [] must not be counted as agent success.
-        # Success requires either partial_success (markdown findings present) OR
-        # the JSON results file parsed cleanly AND contained at least one finding.
-        json_reported_findings = parse_error is None and len(findings_raw) > 0
-        success = partial_success or json_reported_findings
+        # Success = agent ran correctly and results parsed cleanly.
+        # Findings can legitimately be empty on bug-free code — that is not failure.
+        # parse_error is None means the agent completed and its output was parseable.
+        success = parse_error is None
 
+        # Cycle 2 Fix (JSON parse silencing): preserve parse_error even when
+        # partial_success=True so callers can distinguish clean partial success
+        # (markdown found, JSON also parsed) from corrupt partial success
+        # (markdown found but JSON parse failed). Previously error=None hid failures.
         return {
             "success": success,
             "partial_success": partial_success,
-            "error": parse_error if not partial_success else None,
+            "error": parse_error,
             "findings": combined_findings,
             "attack_vectors_tried": attack_vectors_tried,
             "profile_index": profile.index,
@@ -835,27 +915,30 @@ class BlindAgentRedTeam:
 
         for agent_data in agent_results:
             if not agent_data.get("success") and not agent_data.get("partial_success"):
-                any_error = agent_data.get("error", "agent failed")
+                # Accumulate errors — don't overwrite earlier agent errors
+                any_error = any_error or agent_data.get("error", "agent failed")
 
             all_vectors.extend(agent_data.get("attack_vectors_tried", []))
 
-            # Always read findings_file to capture incremental markdown findings,
-            # regardless of whether the agent completed or timed out (Bug 1 fix).
+            # BAR-3: prefer JSON findings cache; only read markdown from disk when cache is empty.
+            # This prevents double-parsing when findings are already captured in JSON.
+            json_findings = agent_data.get("findings", [])
             extra_md_findings: List[dict] = []
-            findings_file_path = agent_data.get("findings_file")
-            if findings_file_path:
-                try:
-                    fpath = Path(findings_file_path)
-                    if fpath.exists():
-                        content = fpath.read_text(encoding="utf-8")
-                        if content.strip():
-                            extra_md_findings = self._parse_markdown_findings(content)
-                except Exception:
-                    pass
+            if not json_findings:
+                # Only read markdown findings file when JSON cache is empty (incremental/timeout case)
+                findings_file_path = agent_data.get("findings_file")
+                if findings_file_path:
+                    try:
+                        fpath = Path(findings_file_path)
+                        if fpath.exists():
+                            content = fpath.read_text(encoding="utf-8")
+                            if content.strip():
+                                extra_md_findings = self._parse_markdown_findings(content)
+                    except Exception as e:
+                        logger.warning("Failed to read findings file %s: %s", findings_file_path, e)
 
             # Merge JSON findings + markdown findings; deduplicate by (title, affected_code)
-            # so findings present in both sources are not double-counted (Bug 3 fix).
-            json_findings = agent_data.get("findings", [])
+            # so findings present in both sources are not double-counted.
             seen: set = set()
             source_findings: List[dict] = []
             for fd in list(extra_md_findings) + list(json_findings):
@@ -932,6 +1015,8 @@ class BlindAgentRedTeam:
         Returns list of dicts compatible with RedTeamFinding construction.
         Malformed blocks are skipped with a warning log.
         """
+        if content is None:
+            return []
         import re
 
         _SEV_MAP = {
@@ -947,22 +1032,42 @@ class BlindAgentRedTeam:
             "type_confusion": "type_confusion", "off_by_one": "boundary",
         }
 
+        _FIELD_HEADER = re.compile(
+            r'^(?:File|Line|Severity|Type|Description|Reproduction|Confidence):\s'
+        )
         def _field(name: str, text: str) -> str:
-            # Bug 2 fix: use [\s\S]+? with lookahead that only stops at field-name patterns
-            # (e.g. "File:", "Severity:") — not at every newline+word-char.
-            m = re.search(rf'^{name}:\s*([\s\S]+?)(?=\n[A-Za-z][\w]*:|\Z)', text, re.MULTILINE)
-            return m.group(1).strip() if m else ""
+            # Line-splitting parser: collects lines belonging to a field by scanning
+            # for the field header, then accumulating continuation lines until the
+            # next known field header is encountered. This avoids the regex lookahead
+            # bug where embedded field-name keywords mid-value caused silent truncation.
+            lines = text.splitlines()
+            collecting = False
+            result_lines = []
+            _header_prefix = f'{name}: '
+            for line in lines:
+                if line.startswith(_header_prefix):
+                    collecting = True
+                    result_lines.append(line[len(_header_prefix):].lstrip())
+                elif collecting:
+                    if _FIELD_HEADER.match(line):
+                        break
+                    result_lines.append(line)
+            return '\n'.join(result_lines).strip()
 
         results: List[dict] = []
 
         for raw in re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL):
             try:
-                file_val = _field("File", raw)
-                line_val = _field("Line", raw)
+                file_val = _field("File", raw).strip()
+                line_val = _field("Line", raw).strip()
+                desc_val = _field("Description", raw).strip()
+                # Cycle 2 Fix 5: skip blocks with no description (garbled/empty)
+                if not desc_val:
+                    logger.warning("Skipping ---BUG--- block with empty Description")
+                    continue
                 sev_raw = (_field("Severity", raw).upper().split() or ["HIGH"])[0]
-                type_val = _field("Type", raw) or "logic_error"
-                desc_val = _field("Description", raw)
-                repro_val = _field("Reproduction", raw)
+                type_val = _field("Type", raw).strip() or "logic_error"
+                repro_val = _field("Reproduction", raw).strip()
                 severity = _SEV_MAP.get(sev_raw, "medium")
                 affected = f"{file_val}:{line_val}" if file_val else "unknown"
                 results.append({
@@ -979,11 +1084,50 @@ class BlindAgentRedTeam:
             except Exception as e:
                 logger.warning(f"Skipping malformed ---BUG--- block: {e}")
 
+        # BAR-C3-1: Parse incomplete ---BUG--- blocks (agent timed out mid-output)
+        # Collect already-parsed complete blocks to avoid duplicates
+        _parsed_complete = set()
+        for raw in re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL):
+            _parsed_complete.add(raw.strip())
+        # Find all ---BUG--- blocks (including incomplete ones without ---END BUG---)
+        for partial_match in re.finditer(r'---BUG---\s*(.*?)(?=^---BUG---|^---SUSPECTED---|\Z)', content, re.DOTALL | re.MULTILINE):
+            partial = partial_match.group(1).strip()
+            if not partial or partial in _parsed_complete:
+                continue  # Skip empty or already-parsed complete blocks
+            # Also skip if it ends with ---END BUG--- (already parsed above)
+            if '---END BUG---' in partial_match.group(0):
+                continue
+            try:
+                file_val = _field("File", partial)
+                desc_val = _field("Description", partial)
+                if desc_val:  # At minimum need a description
+                    type_val = _field("Type", partial) or "logic_error"
+                    sev_raw = (_field("Severity", partial).upper().split() or ["HIGH"])[0] if _field("Severity", partial) else "HIGH"
+                    line_val = _field("Line", partial)
+                    severity = _SEV_MAP.get(sev_raw, "medium")
+                    affected = f"{file_val}:{line_val}" if file_val else "unknown"
+                    results.append({
+                        "category": _TYPE_TO_CAT.get(type_val.lower(), "logic"),
+                        "severity": severity,
+                        "title": f"[PARTIAL] {desc_val[:70]}" if desc_val else f"[PARTIAL] Bug at {affected}",
+                        "description": f"[PARTIAL - agent timed out] {desc_val}",
+                        "reproduction_steps": [],
+                        "affected_code": affected,
+                        "suggested_fix": "",
+                        "confidence": 0.4,
+                        "_markdown_type": type_val,
+                    })
+            except Exception as e:
+                logger.warning("Skipping unparseable partial ---BUG--- block: %s", e)
+
         for raw in re.findall(r'---SUSPECTED---\s*(.*?)\s*---END SUSPECTED---', content, re.DOTALL):
             try:
                 file_val = _field("File", raw)
                 line_val = _field("Line", raw)
                 desc_val = _field("Description", raw)
+                if not desc_val:
+                    logger.warning("Skipping ---SUSPECTED--- block with empty Description")
+                    continue
                 affected = f"{file_val}:{line_val}" if file_val else "unknown"
                 results.append({
                     "category": "logic",
@@ -1119,19 +1263,29 @@ def _build_agent_prompt(
     workspace_dir: Path,
     mission_desc: str,
     results_file: Path,
+    findings_file: Optional[Path] = None,
+    agent_id: str = "",
 ) -> str:
     """
     Shared prompt builder used by both BlindAgentRedTeam and RedTeamOrchestrator.
 
-    Escaped format-string injection in mission_desc is handled here.
+    Uses string.Template.safe_substitute() to prevent attribute traversal attacks
+    via {var.__class__} syntax that str.format_map() allows. Unknown $vars are
+    left as-is with no error.
     """
-    safe_mission_desc = mission_desc.replace('{', '{{').replace('}', '}}')
-    safe_focus = profile.focus_description.replace('{', '{{').replace('}', '}}')
-    return _BLIND_AGENT_PROMPT.format(
+    # BAR-4 / BAR-NEW-1: strip tabs, newlines, CR, and Unicode line separators from
+    # mission_desc and focus_description to prevent prompt injection via multi-line
+    # strings, tab characters, or Unicode line separator characters.
+    _safe_desc = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]+', ' ', mission_desc).strip()
+    _safe_focus = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]+', ' ', profile.focus_description).strip()
+    return string.Template(_RED_TEAM_HUNT_PROMPT).safe_substitute(
         workspace_dir=str(workspace_dir),
-        mission_desc=safe_mission_desc,
-        focus_description=safe_focus,
+        shell_workspace_dir=shlex.quote(str(workspace_dir)),
+        mission_desc=_safe_desc,
+        focus_description=_safe_focus,
         results_file=str(results_file),
+        findings_file=str(findings_file) if findings_file else str(results_file),
+        agent_id=agent_id or f"agent_{profile.index}",
     )
 
 
@@ -1168,19 +1322,43 @@ class RedTeamOrchestrator:
             timeout: Per-agent timeout in seconds (default 15 min)
             n_agents: Number of parallel attack agents (1-6)
         """
+        # Iter 4 Fix B5: validate timeout + n_agents (mirror BlindAgentRedTeam pattern)
+        import math as _math
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise TypeError(f"timeout must be a positive number, got {type(timeout).__name__}: {timeout!r}")
+        if timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {timeout}")
+        if not _math.isfinite(timeout):
+            raise ValueError(f"timeout must be finite, got {timeout!r}")
+        if isinstance(n_agents, bool) or not isinstance(n_agents, int):
+            raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
+        if n_agents <= 0:
+            raise ValueError(f"n_agents must be positive, got {n_agents}")
         self.timeout = timeout
-        self.n_agents = min(max(1, n_agents), len(_EXTENDED_ATTACK_PROFILES))
+        _max_ext = len(_EXTENDED_ATTACK_PROFILES)
+        if n_agents > _max_ext:
+            logger.warning(
+                "n_agents=%d exceeds maximum profile count %d; capping to %d",
+                n_agents, _max_ext, _max_ext,
+            )
+        self.n_agents = min(max(1, n_agents), _max_ext)
 
     def _validate_workspace_dir(self, path: Path) -> None:
-        """Raise ValueError if path is not within any allowed workspace root."""
+        """Raise ValueError if path is not within any allowed workspace root.
+
+        Uses Path.resolve() to canonicalize symlinks and '..' components,
+        then Path.relative_to() for a safe containment check (no string
+        prefix matching).
+        """
+        resolved = path.resolve()
         for allowed_root in _ALLOWED_WORKSPACE_ROOTS:
             try:
-                path.relative_to(allowed_root)
+                resolved.relative_to(allowed_root)
                 return
             except ValueError:
                 continue
         raise ValueError(
-            f"workspace_dir {path!r} is not within any allowed root: "
+            f"workspace_dir {resolved!r} is not within any allowed root: "
             f"{[str(r) for r in _ALLOWED_WORKSPACE_ROOTS]}"
         )
 
@@ -1208,17 +1386,23 @@ class RedTeamOrchestrator:
         for profile in profiles:
             results_file = results_dir / f"red_team_agent_{profile.index}.json"
             findings_file = red_team_dir / f"agent{profile.index}_findings.md"
-            results_file.unlink(missing_ok=True)   # TOCTOU: clear stale JSON
-            findings_file.unlink(missing_ok=True)  # TOCTOU: clear stale markdown
-            findings_file.touch()                  # pre-create so agent can append
+            with open(results_file, 'w'):
+                pass   # atomic truncate/create, no race window
+            with open(findings_file, 'w'):
+                pass   # atomic truncate/create, no race window
 
             agent_id = f"rto_agent{profile.index}"
-            safe_mission_desc = mission_desc.replace('{', '{{').replace('}', '}}')
-            safe_focus = profile.focus_description.replace('{', '{{').replace('}', '}}')
-            prompt = _RED_TEAM_HUNT_PROMPT.format(
+            # Use string.Template.safe_substitute() to prevent attribute traversal
+            # attacks via {var.__class__} syntax that str.format_map() allows.
+            # Cycle 5/6: sanitize focus_description and mission_desc — strip tabs, newlines,
+            # CR, and Unicode line separators to prevent TSV injection and prompt injection.
+            _safe_focus = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]+', ' ', profile.focus_description).strip()
+            _safe_mission = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]+', ' ', mission_desc).strip()
+            prompt = string.Template(_RED_TEAM_HUNT_PROMPT).safe_substitute(
                 workspace_dir=str(workspace_dir),
-                mission_desc=safe_mission_desc,
-                focus_description=safe_focus,
+                shell_workspace_dir=shlex.quote(str(workspace_dir)),
+                mission_desc=_safe_mission,
+                focus_description=_safe_focus,
                 results_file=str(results_file),
                 findings_file=str(findings_file),
                 agent_id=agent_id,
@@ -1264,13 +1448,34 @@ class RedTeamOrchestrator:
         workspace_dir = Path(workspace_dir).resolve()
         self._validate_workspace_dir(workspace_dir)
 
+        # Cycle 3 Fix P3b: validate override params (matching __init__ checks)
+        if n_agents is not None:
+            if isinstance(n_agents, bool) or not isinstance(n_agents, int):
+                raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
+            if n_agents <= 0:
+                raise ValueError(f"n_agents must be positive, got {n_agents}")
+        if timeout is not None:
+            import math as _math
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+                raise TypeError(f"timeout must be a positive number, got {type(timeout).__name__}: {timeout!r}")
+            if timeout <= 0:
+                raise ValueError(f"timeout must be positive, got {timeout}")
+            if not _math.isfinite(timeout):
+                raise ValueError(f"timeout must be finite, got {timeout!r}")
         n = min(max(1, n_agents if n_agents is not None else self.n_agents),
                 len(_EXTENDED_ATTACK_PROFILES))
         t = timeout if timeout is not None else self.timeout
 
         profiles = _EXTENDED_ATTACK_PROFILES[:n]
         session_id = f"rto_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        results_dir = workspace_dir / "tests"
+        _workspace_real = str(workspace_dir.resolve())
+        _workspace_real_prefix = _workspace_real + os.sep
+        results_dir = (workspace_dir / "tests").resolve()
+        if not (str(results_dir) == _workspace_real or str(results_dir).startswith(_workspace_real_prefix)):
+            raise ValueError(
+                f"Resolved results_dir {results_dir!r} is outside workspace_dir "
+                f"{workspace_dir!r} (possible symlink escape)"
+            )
         results_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(
@@ -1382,13 +1587,28 @@ class RedTeamOrchestrator:
             # Match agent_id back to profile index
             agent_id = getattr(agent_result, 'agent_id', '')
             profile_index = None
+            # BA-M2: use exact string match on known work-unit ID format, not regex.
+            # Old regex r'(?<!\d)1(?!\d)' incorrectly matched 'agent1' in 'agent_11'.
             for prof in profiles:
-                # BA-M2: use exact word-boundary match, not substring.
-                # Substring "1" in "agent10" would incorrectly match profile 1.
-                import re as _re
-                if _re.search(r'(?<!\d)' + str(prof.index) + r'(?!\d)', agent_id):
+                _suffix = f"_agent{prof.index}"
+                # Guard against suffix collision: "_agent1" matching "_agent11" etc.
+                # Check that the character immediately before the suffix (if any) is not a digit.
+                if agent_id == f"red_team_agent_{prof.index}":
                     profile_index = prof.index
                     break
+                elif agent_id.endswith(_suffix):
+                    _pre = agent_id[:-len(_suffix)]
+                    if not _pre or not _pre[-1].isdigit():
+                        profile_index = prof.index
+                        break
+            # Fallback: anchored-end regex to extract trailing integer
+            if profile_index is None:
+                import re as _re
+                m = _re.search(r'_agent_?(\d+)$', agent_id)
+                if m:
+                    idx = int(m.group(1))
+                    if any(p.index == idx for p in profiles):
+                        profile_index = idx
 
             findings_raw: List[dict] = []
             vectors_raw: List[str] = []
@@ -1415,7 +1635,7 @@ class RedTeamOrchestrator:
                 results_file = results_dir / f"red_team_agent_{profile_index}.json"
                 if results_file.exists():
                     try:
-                        data = json.loads(results_file.read_text())
+                        data = json.loads(results_file.read_text(encoding='utf-8'))
                         findings_raw = data.get("findings", [])
                         vectors_raw = data.get("attack_vectors_tried", [])
                         found = True
@@ -1438,7 +1658,8 @@ class RedTeamOrchestrator:
                     )
 
             status = getattr(agent_result, 'status', 'unknown')
-            if (status == 'completed' or found) and findings_raw:
+            # Bug 13: a completed agent that found no bugs is still a successful run
+            if status == 'completed' or (found and findings_raw):
                 any_success = True
             elif status in ('failed', 'timeout') and not found:
                 err = getattr(agent_result, 'error', None) or f"agent {agent_id} {status}"
@@ -1509,7 +1730,7 @@ class RedTeamOrchestrator:
         except (json.JSONDecodeError, ValueError):
             pass
 
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text, re.DOTALL)
         if json_match:
             try:
                 return json.loads(json_match.group(1))

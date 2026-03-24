@@ -30,7 +30,11 @@ export async function loadMissionLogsTabData() {
             missionLogsData.forEach(log => {
                 const date = log.completed_at ? new Date(log.completed_at).toLocaleDateString() : 'Unknown';
                 const cycles = log.total_cycles ? ` (${log.total_cycles} cycles)` : '';
-                select.innerHTML += `<option value="${log.mission_id}">${log.mission_id}${cycles} - ${date}</option>`;
+                // Use DOM API — avoids mission_id XSS via innerHTML injection
+                const opt = document.createElement('option');
+                opt.value = log.mission_id;
+                opt.textContent = `${log.mission_id}${cycles} - ${date}`;
+                select.appendChild(opt);
             });
         }
 
@@ -77,17 +81,23 @@ function renderMissionLogsList(logs) {
         const cycles = log.total_cycles || 0;
         const missionPreview = (log.original_mission || 'Unknown mission').substring(0, 80);
 
+        const isSelected = log.mission_id === selectedMissionLogId ? ' selected' : '';
         return `
-            <div class="glassbox-agent-item ${log.mission_id === selectedMissionLogId ? 'selected' : ''}"
-                 onclick="selectMissionLog('${log.mission_id}')">
-                <div class="glassbox-agent-id">${log.mission_id}</div>
-                <div class="glassbox-agent-meta">${missionPreview}${missionPreview.length >= 80 ? '...' : ''}</div>
+            <div class="glassbox-agent-item${isSelected}"
+                 data-mission-id="${escapeHtml(log.mission_id)}">
+                <div class="glassbox-agent-id">${escapeHtml(log.mission_id)}</div>
+                <div class="glassbox-agent-meta">${escapeHtml(missionPreview)}${missionPreview.length >= 80 ? '...' : ''}</div>
                 <div class="glassbox-agent-meta">${cycles} cycle(s) | ${date}</div>
             </div>
         `;
     }).join('');
 
     container.innerHTML = html;
+    // Delegated click — avoids inline onclick with unescaped mission_id
+    container.addEventListener('click', function _logClickHandler(e) {
+        const item = e.target.closest('[data-mission-id]');
+        if (item) selectMissionLog(item.dataset.missionId);
+    }, { once: true });
 }
 
 export async function selectMissionLog(missionId) {
@@ -210,15 +220,22 @@ function renderMissionLogDetails(data) {
         `;
     }
 
-    // Actions
-    html += `
-        <div style="display: flex; gap: 10px;">
-            <button class="btn" onclick="exportMissionLog('${data.mission_id}')">Export JSON</button>
-            <button class="btn" onclick="viewMissionLogRaw('${data.mission_id}')">View Raw</button>
-        </div>
-    `;
-
     container.innerHTML = html;
+
+    // Actions — use DOM API to avoid mission_id inline onclick injection
+    const actionsDiv = document.createElement('div');
+    actionsDiv.style.cssText = 'display: flex; gap: 10px;';
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn';
+    exportBtn.textContent = 'Export JSON';
+    exportBtn.addEventListener('click', () => exportMissionLog(data.mission_id));
+    const rawBtn = document.createElement('button');
+    rawBtn.className = 'btn';
+    rawBtn.textContent = 'View Raw';
+    rawBtn.addEventListener('click', () => viewMissionLogRaw(data.mission_id));
+    actionsDiv.appendChild(exportBtn);
+    actionsDiv.appendChild(rawBtn);
+    container.appendChild(actionsDiv);
 }
 
 export async function exportMissionLog(missionId) {

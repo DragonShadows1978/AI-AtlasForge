@@ -32,18 +32,25 @@ def serve_mission_artifact(mission_id, filename):
     Supports both shared workspaces (project_workspace) and legacy per-mission workspaces.
     """
     try:
-        # Security: prevent directory traversal
-        if '..' in mission_id or '..' in filename:
-            abort(400, "Invalid path")
-
-        # Use centralized workspace resolver for correct path
+        # Security: prevent directory traversal via resolve+startswith
         from .workspace_resolver import resolve_mission_workspace
         workspace = resolve_mission_workspace(mission_id, MISSIONS_DIR, WORKSPACE_DIR, io_utils)
-        artifact_path = workspace / "artifacts" / filename
+        artifact_path = (workspace / "artifacts" / filename).resolve()
+        missions_base = MISSIONS_DIR.resolve()
+        workspace_base = WORKSPACE_DIR.resolve()
+
+        # Ensure resolved path stays within allowed directories
+        artifact_str = str(artifact_path)
+        if not (artifact_str.startswith(str(missions_base) + '/') or
+                artifact_str.startswith(str(workspace_base) + '/')):
+            abort(400, "Invalid path")
 
         if not artifact_path.exists():
             # Try without workspace subfolder (fallback for legacy direct artifacts)
-            artifact_path = MISSIONS_DIR / mission_id / "artifacts" / filename
+            artifact_path = (MISSIONS_DIR / mission_id / "artifacts" / filename).resolve()
+            artifact_str = str(artifact_path)
+            if not artifact_str.startswith(str(missions_base) + '/'):
+                abort(400, "Invalid path")
 
         if not artifact_path.exists():
             abort(404, f"Artifact not found: {filename}")
@@ -60,18 +67,19 @@ def serve_mission_artifact(mission_id, filename):
         )
     except Exception as e:
         logger.error(f"Error serving artifact: {e}")
-        abort(500, str(e))
+        abort(500, "Internal server error")
 
 
 @url_handlers_bp.route('/investigations/<investigation_id>/report')
 def serve_investigation_report(investigation_id):
     """Serve investigation report."""
     try:
-        # Security: prevent directory traversal
-        if '..' in investigation_id:
+        # Security: prevent directory traversal via resolve+startswith
+        inv_dir = (INVESTIGATIONS_DIR / investigation_id).resolve()
+        inv_base = INVESTIGATIONS_DIR.resolve()
+        if not str(inv_dir).startswith(str(inv_base) + '/'):
             abort(400, "Invalid investigation ID")
 
-        inv_dir = INVESTIGATIONS_DIR / investigation_id
         if not inv_dir.exists():
             abort(404, f"Investigation not found: {investigation_id}")
 
@@ -84,13 +92,16 @@ def serve_investigation_report(investigation_id):
         ]
 
         for report_path in report_formats:
-            if report_path.exists():
-                content_type, _ = mimetypes.guess_type(str(report_path))
+            resolved_report = report_path.resolve()
+            if not str(resolved_report).startswith(str(inv_base) + '/'):
+                continue
+            if resolved_report.exists():
+                content_type, _ = mimetypes.guess_type(str(resolved_report))
                 if content_type is None:
                     content_type = 'text/plain'
 
                 return send_file(
-                    report_path,
+                    resolved_report,
                     mimetype=content_type,
                     as_attachment=False
                 )
@@ -98,18 +109,18 @@ def serve_investigation_report(investigation_id):
         abort(404, "Investigation report not found")
     except Exception as e:
         logger.error(f"Error serving investigation report: {e}")
-        abort(500, str(e))
+        abort(500, "Internal server error")
 
 
 @url_handlers_bp.route('/workspace/artifacts/<path:filename>')
 def serve_workspace_artifact(filename):
     """Serve workspace artifacts."""
     try:
-        # Security: prevent directory traversal
-        if '..' in filename:
+        # Security: prevent directory traversal via resolve+startswith
+        artifact_path = (WORKSPACE_DIR / "artifacts" / filename).resolve()
+        workspace_base = WORKSPACE_DIR.resolve()
+        if not str(artifact_path).startswith(str(workspace_base) + '/'):
             abort(400, "Invalid path")
-
-        artifact_path = WORKSPACE_DIR / "artifacts" / filename
 
         if not artifact_path.exists():
             abort(404, f"Workspace artifact not found: {filename}")
@@ -125,4 +136,4 @@ def serve_workspace_artifact(filename):
         )
     except Exception as e:
         logger.error(f"Error serving workspace artifact: {e}")
-        abort(500, str(e))
+        abort(500, "Internal server error serving artifact")

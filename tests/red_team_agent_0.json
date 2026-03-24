@@ -1,0 +1,150 @@
+{
+    "findings": [
+        {
+            "category": "crash",
+            "severity": "critical",
+            "title": "NameError: response undefined when claude provider loses stream file",
+            "description": "In atlasforge_conductor.py invoke_llm(), when provider='claude' and _stream_file is falsy (stream registration failed), neither the if-branch (claude+stream_file) nor the elif (codex) nor the else branch is taken. The variable `response` is never assigned before line 808 uses response[:200]. This causes an unhandled NameError that crashes the LLM invocation path.",
+            "reproduction_steps": [
+                "Set LLM provider to 'claude'",
+                "Trigger a condition where agent_stream_manager.register_agent() raises an exception (e.g., import error or socket error), causing _stream_file=None",
+                "The subprocess exits with returncode 0",
+                "Line 808: logger.info(f'...{response[:200]}...') raises NameError: name 'response' is not defined"
+            ],
+            "affected_code": "atlasforge_conductor.py:808",
+            "suggested_fix": "Initialize response='' before the if/elif/else block at line 780, or add an else branch for the (claude, no stream_file) case that reads stdout",
+            "confidence": 0.92
+        },
+        {
+            "category": "boundary",
+            "severity": "high",
+            "title": "AttributeError on None evaluator_reasoning in MissionDriftResult.from_dict",
+            "description": "MissionDriftResult.evaluator_reasoning is typed as str but from_dict() does not guard against non-string values. If a serialized result has evaluator_reasoning=null (None), from_dict() passes it through, and _update_tracking_state() calls result.evaluator_reasoning.startswith() which raises AttributeError on None. This bypasses the error-suppression logic, causing the drift validator to crash instead of treating it as an inconclusive result.",
+            "reproduction_steps": [
+                "Create JSON dict: {'evaluator_reasoning': None, 'drift_detected': False, 'drift_severity': 'none', 'semantic_similarity': 0.5, ...}",
+                "Call MissionDriftResult.from_dict(that_dict)",
+                "Call _update_tracking_state(tracking_state, result, 1)",
+                "AttributeError raised at line 568 on result.evaluator_reasoning.startswith()"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:568",
+            "suggested_fix": "In from_dict(), add a guard: if not isinstance(data.get('evaluator_reasoning'), str): data['evaluator_reasoning'] = ''",
+            "confidence": 0.95
+        },
+        {
+            "category": "boundary",
+            "severity": "high",
+            "title": "CSS selector injection via localStorage healthFilter in modals.js",
+            "description": "loadRecSortState() reads currentHealthFilter from localStorage and directly interpolates it into a CSS selector string at line 85: document.querySelector('.rec-health-stat.${currentHealthFilter.replace('_', '-')}') without sanitization. An attacker who can write to localStorage (XSS, browser extension, malicious page in same origin) can inject arbitrary CSS selector syntax, causing DOMException crashes or unintended element selection.",
+            "reproduction_steps": [
+                "Open browser developer console on the dashboard",
+                "Run: localStorage.setItem('rec_sort_filter_state', JSON.stringify({version:2, healthFilter:'] .evil', sortField:'priority_score', sortDirection:'desc', tagFilter:''}))",
+                "Reload the page",
+                "loadRecSortState() interpolates the string, calling document.querySelector('.rec-health-stat.] .evil') which throws a DOMException SyntaxError"
+            ],
+            "affected_code": "dashboard_static/src/modals.js:85",
+            "suggested_fix": "Validate healthFilter against a fixed allowlist of known health status values before using it in querySelector, or use CSS.escape()",
+            "confidence": 0.90
+        },
+        {
+            "category": "boundary",
+            "severity": "high",
+            "title": "CSS selector injection in filterByHealth() via same unvalidated currentHealthFilter",
+            "description": "filterByHealth() at line 1132 has the identical CSS selector injection vulnerability as line 85: the status parameter (set from currentHealthFilter loaded from localStorage) is interpolated into document.querySelector without sanitization.",
+            "reproduction_steps": [
+                "Same localStorage manipulation as the previous finding",
+                "Trigger filterByHealth() with a malicious currentHealthFilter value",
+                "DOMException thrown from querySelector"
+            ],
+            "affected_code": "dashboard_static/src/modals.js:1132",
+            "suggested_fix": "Validate status against a fixed allowlist: const VALID_HEALTH = new Set(['healthy','stale','orphaned','needs_review','hot']); if (!VALID_HEALTH.has(status)) return;",
+            "confidence": 0.90
+        },
+        {
+            "category": "boundary",
+            "severity": "moderate",
+            "title": "Negative integer env vars accepted by _safe_int_env without clamping",
+            "description": "_safe_int_env() in context_watcher.py catches ValueError but allows negative integers through. TIME_BASED_HANDOFF_MINUTES=-1, STAGE_TIMEOUT_MINUTES=-999, etc. are silently accepted. Negative handoff minutes cause immediate spurious handoffs; negative inactivity thresholds trigger constant inactivity detection; negative max absolute timeout disables the safety bound.",
+            "reproduction_steps": [
+                "export TIME_BASED_HANDOFF_MINUTES=-1 before starting ContextWatcher",
+                "TIME_BASED_HANDOFF_MINUTES is set to -1",
+                "The time-based handoff logic fires immediately on every check since elapsed_minutes > -1 is always True"
+            ],
+            "affected_code": "context_watcher/context_watcher.py:102-107",
+            "suggested_fix": "Add lower-bound clamping in _safe_int_env or at each call site: e.g., TIME_BASED_HANDOFF_MINUTES = max(1, _safe_int_env('TIME_BASED_HANDOFF_MINUTES', 55))",
+            "confidence": 0.88
+        },
+        {
+            "category": "boundary",
+            "severity": "moderate",
+            "title": "AttributeError when mission created_at is None in archive_mission_transcripts fallback",
+            "description": "In af_engine/core/archival.py archive_mission_transcripts(), when mission_id is empty/None, the fallback at line 522-524 calls mission.get('created_at', datetime.now().isoformat()). If created_at is explicitly stored as None in the mission dict (not missing, but null), .get() returns None (not the default), and then None.replace() at line 523 raises AttributeError inside the outer try block, returning a failure dict with no errors listed.",
+            "reproduction_steps": [
+                "Call archive_mission_transcripts({'mission_id': None, 'created_at': None, 'last_updated': None})",
+                "mission.get('created_at', ...) returns None (explicit null)",
+                "None.replace(':', '-') raises AttributeError at line 523",
+                "Outer except catches it but result['errors'] remains [] — silent failure"
+            ],
+            "affected_code": "af_engine/core/archival.py:521-524",
+            "suggested_fix": "Add: created_at = mission.get('created_at') or datetime.now().isoformat() to handle both None and missing values",
+            "confidence": 0.93
+        },
+        {
+            "category": "boundary",
+            "severity": "moderate",
+            "title": "extract_insights passes None response to _extract_json, causing silent failure",
+            "description": "web_researcher.py extract_insights() calls invoke_fresh_llm() and passes the result directly to _extract_json() without checking for None. When invoke_fresh_llm returns (None, error_string), _extract_json(None) is called: json.loads(None) raises TypeError, which is caught and logged only at DEBUG level. The function returns {} silently with no indication to callers that the LLM call failed.",
+            "reproduction_steps": [
+                "Configure WebResearcher with timeout_seconds=0 or an unreachable endpoint",
+                "Call extract_insights('topic', [some_results])",
+                "invoke_fresh_llm returns (None, 'timeout:0s')",
+                "_extract_json(None) raises TypeError at json.loads(None)",
+                "Caught at line 506; returns {} with only a DEBUG log"
+            ],
+            "affected_code": "research_agent/web_researcher.py:498-509",
+            "suggested_fix": "Check: if response is None: return {}  before calling _extract_json",
+            "confidence": 0.88
+        },
+        {
+            "category": "boundary",
+            "severity": "moderate",
+            "title": "api_add_recommendation accepts unbounded suggested_cycles with no validation",
+            "description": "In dashboard_modules/core.py api_add_recommendation(), suggested_cycles is taken from user JSON input with no bounds check (data.get('suggested_cycles', 3)), stored directly. The update endpoint validates 1-10, but the add endpoint does not, allowing values like -1, 0, or 999999 to be stored and later used to configure mission cycle budgets.",
+            "reproduction_steps": [
+                "POST /api/recommendations with body: {\"mission_title\": \"test\", \"suggested_cycles\": -1}",
+                "Stored recommendation has suggested_cycles=-1",
+                "When mission is launched from this recommendation, cycle budget is -1"
+            ],
+            "affected_code": "dashboard_modules/core.py:748",
+            "suggested_fix": "Add validation: cycles = max(1, min(int(data.get('suggested_cycles', 3)), 10)) with a try/except around the int() conversion",
+            "confidence": 0.85
+        },
+        {
+            "category": "boundary",
+            "severity": "light",
+            "title": "extract_insights called with empty results list wastes an LLM call",
+            "description": "extract_insights() does not guard against an empty results list. When called directly with [], results_text is an empty string and a full LLM call is made asking it to analyze zero results. While the outer research_topic() guards this at line 566, direct callers of extract_insights have no protection.",
+            "reproduction_steps": [
+                "researcher = WebResearcher()",
+                "researcher.extract_insights('topic', [])",
+                "LLM is invoked with a prompt containing no results; returns hallucinated/empty insights"
+            ],
+            "affected_code": "research_agent/web_researcher.py:487-490",
+            "suggested_fix": "Add guard at start of extract_insights: if not results: return {}",
+            "confidence": 0.82
+        }
+    ],
+    "attack_vectors_tried": [
+        "provider='claude' with _stream_file=None (stream registration failure) to trigger uninitialized response variable",
+        "MissionDriftResult.from_dict() with evaluator_reasoning=null to trigger AttributeError on .startswith()",
+        "localStorage manipulation to inject CSS selector syntax into currentHealthFilter",
+        "Negative integer values for TIME_BASED_HANDOFF_MINUTES and STAGE_TIMEOUT env vars",
+        "mission dict with created_at=None (explicit null, not missing) to trigger AttributeError in fallback mission_id generation",
+        "invoke_fresh_llm returning (None, error) to test extract_insights null-response handling",
+        "POST /api/recommendations with suggested_cycles=-1 to bypass add-endpoint validation",
+        "Empty results list passed to extract_insights() directly",
+        "Symlink at results_file/findings_file path (TOCTOU between is_symlink check and open)",
+        "mode parameter injection via non-allowlisted mode value (SECURE: _ALLOWED_MODES check is correct)",
+        "mission_id with path traversal characters (SECURE: .relative_to() check prevents escape)",
+        "AF_DELIVERABLES newline injection via deliverable string containing newlines"
+    ]
+}

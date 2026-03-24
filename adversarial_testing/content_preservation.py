@@ -243,6 +243,10 @@ class ContentPreservationTester:
             min_semantic_similarity: Minimum acceptable semantic similarity
             custom_placeholders: Additional placeholder patterns to detect
         """
+        if not (0.0 <= min_term_preservation <= 1.0):
+            raise ValueError(f"min_term_preservation must be in [0.0, 1.0], got {min_term_preservation}")
+        if not (0.0 <= min_semantic_similarity <= 1.0):
+            raise ValueError(f"min_semantic_similarity must be in [0.0, 1.0], got {min_semantic_similarity}")
         self.min_term_preservation = min_term_preservation
         self.min_semantic_similarity = min_semantic_similarity
 
@@ -250,7 +254,13 @@ class ContentPreservationTester:
         self.placeholder_patterns = list(_COMPILED_PLACEHOLDER_PATTERNS)
         if custom_placeholders:
             for pattern in custom_placeholders:
-                self.placeholder_patterns.append(re.compile(pattern, re.IGNORECASE))
+                try:
+                    self.placeholder_patterns.append(re.compile(pattern, re.IGNORECASE))
+                except re.error as e:
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        f"content_preservation: skipping invalid custom_placeholder regex {pattern!r}: {e}"
+                    )
 
     def hash_content(self, content: str) -> str:
         """
@@ -356,8 +366,10 @@ class ContentPreservationTester:
 
         This is a lightweight alternative to embedding-based similarity.
         """
-        if not input_text or not output_text:
-            return 0.0 if not output_text else 1.0
+        if not input_text:
+            return 0.0
+        if not output_text:
+            return 0.0
 
         # Build term frequency vectors
         input_terms = Counter(self.extract_key_terms(input_text))

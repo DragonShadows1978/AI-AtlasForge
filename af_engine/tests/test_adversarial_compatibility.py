@@ -57,10 +57,12 @@ class TestCriticalIssues:
 
         with patch.object(StageOrchestrator, '__init__', lambda x, **kwargs: None):
             orch = StageOrchestrator()
+            orch.root = Path(__file__).parent.parent.parent  # AtlasForge root for drift validation imports
             orch.state = Mock()
             orch.state.current_stage = "CYCLE_END"
             orch.state.increment_iteration = Mock()
             orch.state.get_field = Mock(return_value="Test mission")
+            orch.state.mission_dir = None  # No mission_dir → drift validation skipped gracefully
             orch.mission = {"current_cycle": 1, "cycle_budget": 3}
 
             # Mock cycles manager - required for should_continue_cycle()
@@ -138,7 +140,7 @@ class TestHighSeverityIssues:
 
             result = orch.update_stage("INVALID_STAGE")
 
-            assert result is None
+            assert result is False
             orch.state.update_stage.assert_not_called()
 
     @pytest.mark.regression

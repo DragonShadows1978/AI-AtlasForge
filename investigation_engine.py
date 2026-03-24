@@ -14,6 +14,7 @@ no mission.json modifications, no iterative cycles.
 
 import json
 import os
+import re
 import subprocess
 import time
 import logging
@@ -57,6 +58,9 @@ def _next_investigation_agent_id() -> tuple:
 # Shared provider routing (dashboard toggle)
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
+
+# Model name allowlist regex — prevents shell-injection via env-supplied model names
+_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,127}$')
 
 
 def _env_flag_enabled(name: str, default: bool = False) -> bool:
@@ -148,6 +152,10 @@ class InvestigationConfig:
     validation_filter_mode: str = "balanced"  # "strict", "annotated", or "balanced"
 
     def __post_init__(self):
+        if self.timeout_minutes < 1:
+            self.timeout_minutes = 1
+        if self.max_subagents < 1:
+            self.max_subagents = 1
         if self.workspace_dir is None:
             self.workspace_dir = BASE_DIR / "investigations" / self.investigation_id
         elif isinstance(self.workspace_dir, str):
@@ -383,11 +391,16 @@ def load_investigation_ground_rules() -> str:
 # =============================================================================
 
 def load_investigation_state() -> dict:
-    """Load current investigation state from file."""
+    """Load current investigation state from file with shared file locking."""
+    import fcntl
     try:
         if INVESTIGATION_STATE_PATH.exists():
             with open(INVESTIGATION_STATE_PATH, 'r') as f:
-                return json.load(f)
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    return json.load(f)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except Exception as e:
         logger.warning(f"Failed to load investigation state: {e}")
     return {
@@ -397,24 +410,48 @@ def load_investigation_state() -> dict:
 
 
 def save_investigation_state(state: dict):
-    """Save investigation state to file."""
+    """Save investigation state to file with atomic write."""
+    import fcntl
+    import tempfile
     try:
         STATE_DIR.mkdir(exist_ok=True)
-        with open(INVESTIGATION_STATE_PATH, 'w') as f:
-            json.dump(state, f, indent=2)
+        # Write to temp file first, then atomically rename to prevent truncation races
+        fd, tmp_path = tempfile.mkstemp(dir=str(STATE_DIR), suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp_path, str(INVESTIGATION_STATE_PATH))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     except Exception as e:
         logger.error(f"Failed to save investigation state: {e}")
 
 
+ALLOWED_STATUS_EXTRA_KEYS = {"progress", "error", "report_path", "workspace_dir", "provider", "model", "findings_count", "lead_agent_id", "subagent_count", "stage"}
+
+
 def update_investigation_status(investigation_id: str, status: InvestigationStatus, extra: dict = None):
-    """Update the status of an investigation."""
-    state = load_investigation_state()
-    if state.get("current") and state["current"].get("investigation_id") == investigation_id:
-        state["current"]["status"] = status.value
-        state["current"]["last_updated"] = datetime.now().isoformat()
-        if extra:
-            state["current"].update(extra)
-        save_investigation_state(state)
+    """Update the status of an investigation with exclusive file lock."""
+    import fcntl
+    STATE_DIR.mkdir(exist_ok=True)
+    lock_path = STATE_DIR / ".investigation_state.lock"
+    with open(lock_path, 'w') as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            state = load_investigation_state()
+            if state.get("current") and state["current"].get("investigation_id") == investigation_id:
+                state["current"]["status"] = status.value
+                state["current"]["last_updated"] = datetime.now().isoformat()
+                if extra:
+                    filtered = {k: v for k, v in extra.items() if k in ALLOWED_STATUS_EXTRA_KEYS}
+                    state["current"].update(filtered)
+                save_investigation_state(state)
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def archive_current_investigation():
@@ -423,31 +460,47 @@ def archive_current_investigation():
 
     This ensures completed investigations persist in history rather than
     being overwritten when a new investigation starts.
+    Uses exclusive file lock across the full read-modify-write cycle.
     """
-    state = load_investigation_state()
-    current = state.get("current")
+    import fcntl
+    STATE_DIR.mkdir(exist_ok=True)
+    lock_path = STATE_DIR / ".investigation_state.lock"
+    with open(lock_path, 'w') as lock_f:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        try:
+            state = load_investigation_state()
+            current = state.get("current")
 
-    if not current:
-        return False
+            if not current:
+                return False
 
-    # Only archive if the investigation is in a terminal state
-    terminal_states = [InvestigationStatus.COMPLETED.value, InvestigationStatus.FAILED.value]
-    if current.get("status") not in terminal_states:
-        return False
+            # Only archive if the investigation is in a terminal state
+            terminal_states = [InvestigationStatus.COMPLETED.value, InvestigationStatus.FAILED.value]
+            if current.get("status") not in terminal_states:
+                return False
 
-    # Move current to history
-    if "history" not in state:
-        state["history"] = []
+            # Move current to history
+            if "history" not in state:
+                state["history"] = []
 
-    # Add to history (most recent first)
-    state["history"].insert(0, current)
+            # Guard against double-archive: skip if this investigation_id is already in history
+            current_id = current.get("investigation_id")
+            if any(h.get("investigation_id") == current_id for h in state["history"]):
+                state["current"] = None
+                save_investigation_state(state)
+                return False
 
-    # Clear current
-    state["current"] = None
+            # Add to history (most recent first)
+            state["history"].insert(0, current)
 
-    save_investigation_state(state)
-    logger.info(f"Archived investigation {current.get('investigation_id')} to history")
-    return True
+            # Clear current
+            state["current"] = None
+
+            save_investigation_state(state)
+            logger.info(f"Archived investigation {current.get('investigation_id')} to history")
+            return True
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def delete_investigation(investigation_id: str, delete_files: bool = False) -> dict:
@@ -507,16 +560,21 @@ def delete_investigation(investigation_id: str, delete_files: bool = False) -> d
     if delete_files and workspace_dir:
         try:
             import shutil
-            workspace_path = Path(workspace_dir)
-            if workspace_path.exists():
+            workspace_path = Path(workspace_dir).resolve()
+            allowed_base = (BASE_DIR / "investigations").resolve()
+            if not str(workspace_path).startswith(str(allowed_base) + os.sep):
+                result["files_deleted"] = False
+                result["file_error"] = "Path validation failed: workspace outside investigations directory"
+                logger.warning(f"Path traversal blocked in delete_investigation: {workspace_dir}")
+            elif workspace_path.exists():
                 shutil.rmtree(workspace_path)
                 result["files_deleted"] = True
                 result["message"] += f" (workspace deleted: {workspace_dir})"
                 logger.info(f"Deleted workspace directory: {workspace_dir}")
         except Exception as e:
             result["files_deleted"] = False
-            result["file_error"] = str(e)
-            logger.warning(f"Failed to delete workspace {workspace_dir}: {e}")
+            result["file_error"] = "Failed to delete workspace files"
+            logger.exception(f"Failed to delete workspace {workspace_dir}: {e}")
 
     return result
 
@@ -532,10 +590,17 @@ def delete_investigations_bulk(investigation_ids: list, delete_files: bool = Fal
     Returns:
         dict with 'success', 'deleted_count', 'failed', 'message'
     """
+    if not isinstance(investigation_ids, (list, tuple)):
+        return {"success": False, "deleted_count": 0, "deleted": [], "failed": [],
+                "message": "investigation_ids must be a list"}
+
     deleted = []
     failed = []
 
     for inv_id in investigation_ids:
+        if not isinstance(inv_id, str):
+            failed.append({"id": str(inv_id), "reason": "ID must be a string"})
+            continue
         result = delete_investigation(inv_id, delete_files=delete_files)
         if result["success"]:
             deleted.append(inv_id)
@@ -591,7 +656,7 @@ def invoke_claude(
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         # Optional explicit model override for Codex provider.
         codex_model = os.environ.get("ATLASFORGE_CODEX_MODEL", "").strip()
-        if codex_model:
+        if codex_model and _MODEL_NAME_RE.match(codex_model):
             cmd.extend(["--model", codex_model])
         cmd.append("-")
 
@@ -605,7 +670,7 @@ def invoke_claude(
                 f"{prompt}"
             )
     elif provider == "gemini":
-        cmd = ["gemini", "-p", ""]
+        cmd = ["gemini"]
         if _gemini_autonomous_enabled():
             cmd.append("--yolo")
         cmd.extend(["--output-format", "json"])
@@ -621,7 +686,7 @@ def invoke_claude(
             else:  # CLAUDE_SONNET or default
                 gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED", "").strip()
 
-        if gemini_model:
+        if gemini_model and _MODEL_NAME_RE.match(gemini_model):
             cmd.extend(["-m", gemini_model])
 
         full_prompt = prompt
@@ -646,7 +711,7 @@ def invoke_claude(
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
         # Add stream-json for real-time agent activity visibility
-        cmd.extend(["--output-format", "stream-json"])
+        cmd.extend(["--output-format", "stream-json", "--verbose"])
         full_prompt = prompt
 
     # Claude provider: use streaming Popen for real-time agent activity
@@ -663,10 +728,11 @@ def invoke_claude(
                 stream_stdout_to_file as _stream_fn,
                 reconstruct_text_from_stream_file as _recon_fn,
             )
-            _stream_file = _reg('investigation', _agent_id, _agent_label, pid=0)
+            _stream_file = _reg('investigation', _agent_id, _agent_label, pid=None)
             _comp = _comp_fn
             _recon = _recon_fn
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Stream registration failed: {e}")
             _agent_id = None
             _stream_file = None
 
@@ -694,21 +760,27 @@ def invoke_claude(
                     name=f"stream-{_agent_id}"
                 )
                 t.start()
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Streaming thread setup failed: {e}")
                 _stream_file = None
                 _agent_id = None
 
+        _prompt_delivered = True
         try:
             proc.stdin.write(full_prompt)
             proc.stdin.close()
+        except BrokenPipeError:
+            logger.warning("BrokenPipeError writing to subprocess stdin", exc_info=True)
+            _prompt_delivered = False
         except Exception:
-            pass
+            logger.warning("Error writing to subprocess stdin", exc_info=True)
+            _prompt_delivered = False
 
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             try: proc.kill(); proc.wait(timeout=5)
-            except Exception: pass
+            except Exception as e: logger.warning(f"Failed to kill subprocess: {e}")
             if _agent_id and _comp:
                 try: _comp(_agent_id, error='timeout')
                 except Exception: pass
@@ -721,10 +793,18 @@ def invoke_claude(
             stderr_text = ""
 
         if proc.returncode == 0:
+            if not _prompt_delivered:
+                # Prompt was not fully delivered; output is unreliable
+                logger.warning("Subprocess exited 0 but prompt delivery was partial — discarding output")
+                return "ERROR: Partial prompt delivery", elapsed
             if _stream_file and _recon:
-                response = _recon(_stream_file, provider='claude')
+                response = _recon(_stream_file, provider='claude') or ""
             else:
-                response = ""
+                # Fallback: read stdout directly when stream wasn't available
+                try:
+                    response = proc.stdout.read() if proc.stdout else ""
+                except Exception:
+                    response = ""
             if _agent_id and _comp:
                 try: _comp(_agent_id)
                 except Exception: pass
@@ -1005,8 +1085,8 @@ def build_synthesis_prompt(query: str, subagent_results: List[SubagentResult], d
     if deliverable_format:
         format_lower = deliverable_format.lower()
         if "html" in format_lower:
-            # Truncate query for title (escape HTML special chars)
-            title_query = query[:50].replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+            # Truncate query for title (escape HTML special chars — & first to avoid double-escape)
+            title_query = query[:50].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
             format_instruction = f"""
 === CRITICAL: OUTPUT FORMAT REQUIREMENT ===
 
@@ -1224,7 +1304,7 @@ Do NOT include disputed claims in your synthesis.
     if deliverable_format:
         format_lower = deliverable_format.lower()
         if "html" in format_lower:
-            title_query = query[:50].replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+            title_query = query[:50].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
             format_instruction = f"""
 === CRITICAL: OUTPUT FORMAT REQUIREMENT ===
 
@@ -1362,62 +1442,159 @@ def markdown_to_html(markdown_text: str, query: str) -> str:
 
     content = markdown_text
 
+    # HTML-escape helper for markdown content
+    def _esc(s):
+        return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#x27;')
+
     # Remove code fences first (may wrap entire response)
     content = regex_module.sub(r'^```html\s*\n?', '', content, flags=regex_module.MULTILINE)
     content = regex_module.sub(r'^```\w*\s*\n?', '', content, flags=regex_module.MULTILINE)
     content = regex_module.sub(r'\n?```$', '', content, flags=regex_module.MULTILINE)
 
-    # Convert headers (order matters - do h3 before h2 before h1)
-    content = regex_module.sub(r'^### (.+)$', r'<h3>\1</h3>', content, flags=regex_module.MULTILINE)
-    content = regex_module.sub(r'^## (.+)$', r'<h2>\1</h2>', content, flags=regex_module.MULTILINE)
-    content = regex_module.sub(r'^# (.+)$', r'<h1>\1</h1>', content, flags=regex_module.MULTILINE)
+    # Extract markdown links and bare URLs BEFORE escaping so we can process them safely
+    # Placeholder map: replace links with tokens, escape everything else, restore links as safe HTML
+    _link_placeholders = {}
+    _placeholder_counter = [0]
 
-    # Convert bold and italic
-    content = regex_module.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', content)
-    content = regex_module.sub(r'\*(.+?)\*', r'<em>\1</em>', content)
+    def _extract_md_link(match):
+        text = _esc(match.group(1))
+        url = match.group(2).strip()
+        # Decode percent-encoded chars for scheme check (blocks %6Aavascript: etc.)
+        try:
+            from urllib.parse import unquote
+            url_decoded = unquote(url)
+        except Exception:
+            url_decoded = url
+        # Strip ASCII control chars that browsers ignore but could bypass scheme checks
+        url_clean = re.sub(r'[\x00-\x1f]', '', url_decoded)
+        url_lower = url_clean.lower().lstrip()
+        # Only allow safe URL schemes
+        if url_lower.startswith(('javascript:', 'data:', 'vbscript:', 'file:')):
+            safe_html = f'<a href="#">{text}</a>'
+        else:
+            safe_url = _esc(url)
+            safe_html = f'<a href="{safe_url}">{text}</a>'
+        token = f'\x00LINK{_placeholder_counter[0]}\x00'
+        _link_placeholders[token] = safe_html
+        _placeholder_counter[0] += 1
+        return token
 
-    # Convert markdown links [text](url) to HTML anchors
+    def _extract_bare_url(match):
+        raw_url = match.group(1)
+        safe_url = _esc(raw_url)
+        safe_html = f'<a href="{safe_url}">{safe_url}</a>'
+        token = f'\x00LINK{_placeholder_counter[0]}\x00'
+        _link_placeholders[token] = safe_html
+        _placeholder_counter[0] += 1
+        return token
+
+    # Extract links into placeholders (before escaping)
     content = regex_module.sub(
         r'\[([^\]]+)\]\(([^)]+)\)',
-        r'<a href="\2">\1</a>',
+        _extract_md_link,
         content
     )
-
-    # Convert bare URLs to clickable links (http:// or https://)
-    # Only match URLs that are not already inside an href
     content = regex_module.sub(
-        r'(?<!href=")(?<!">)(https?://[^\s<>\[\]()]+)',
-        r'<a href="\1">\1</a>',
+        r'(?<!\()(https?://[^\s<>\[\]()]+)',
+        _extract_bare_url,
         content
     )
 
-    # Convert bullet points to list items
+    # Process markdown elements BEFORE HTML-escaping (so # and * are still intact),
+    # but escape captured content inside each element to prevent XSS.
+    def _header_replace(m, tag):
+        return f'<{tag}>{_esc(m.group(1))}</{tag}>'
+
+    content = regex_module.sub(r'^### (.+)$', lambda m: _header_replace(m, 'h3'), content, flags=regex_module.MULTILINE)
+    content = regex_module.sub(r'^## (.+)$', lambda m: _header_replace(m, 'h2'), content, flags=regex_module.MULTILINE)
+    content = regex_module.sub(r'^# (.+)$', lambda m: _header_replace(m, 'h1'), content, flags=regex_module.MULTILINE)
+
+    # Bold and italic before escape (markdown * chars get escaped otherwise)
+    content = regex_module.sub(r'\*\*(.+?)\*\*', lambda m: f'<strong>{_esc(m.group(1))}</strong>', content)
+    content = regex_module.sub(r'\*(.+?)\*', lambda m: f'<em>{_esc(m.group(1))}</em>', content)
+
+    # Process bullet points before escape (- and * prefixes get escaped otherwise)
     lines = content.split('\n')
     in_list = False
     converted_lines = []
     for line in lines:
-        stripped = line.strip()
-        if stripped.startswith('- ') or stripped.startswith('* '):
+        stripped_line = line.strip()
+        if stripped_line.startswith('- ') or stripped_line.startswith('* '):
             if not in_list:
                 converted_lines.append('<ul>')
                 in_list = True
-            item = stripped[2:]
-            converted_lines.append(f'<li>{item}</li>')
+            # Don't re-escape: bullet content may already contain safe HTML tags
+            # (<strong>, <em>) from bold/italic processing above
+            bullet_text = stripped_line[2:]
+            # Only escape if no pre-processed HTML tags present
+            if '<strong>' not in bullet_text and '<em>' not in bullet_text:
+                bullet_text = _esc(bullet_text)
+            converted_lines.append(f'<li>{bullet_text}</li>')
         else:
             if in_list:
                 converted_lines.append('</ul>')
                 in_list = False
-            # Wrap non-empty, non-tag lines in paragraphs
-            if stripped and not stripped.startswith('<'):
-                converted_lines.append(f'<p>{line}</p>')
-            else:
-                converted_lines.append(line)
+            converted_lines.append(line)
     if in_list:
         converted_lines.append('</ul>')
     content = '\n'.join(converted_lines)
 
-    # Escape query for title
-    title_query = query[:50].replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+    # Now HTML-escape all remaining content (safe because links are placeholders,
+    # and markdown elements have already been converted to HTML tags)
+    # We need to escape only non-tag content
+    _SAFE_TAG_RE = regex_module.compile(r'^<(h[1-6]|strong|em|ul|li|a|p)([ >])')
+    _SAFE_CLOSE_RE = regex_module.compile(r'^</(h[1-6]|strong|em|ul|li|a|p)>$')
+
+    def _escape_non_tags(text):
+        """Escape HTML in text but preserve already-created HTML tags and their pre-escaped content."""
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i] == '<':
+                end = text.find('>', i)
+                if end != -1:
+                    tag_content = text[i:end + 1]
+                    open_m = _SAFE_TAG_RE.match(tag_content)
+                    close_m = _SAFE_CLOSE_RE.match(tag_content)
+                    if open_m or close_m:
+                        if open_m:
+                            tag_name = open_m.group(1)
+                            # For inline/block tags with content already escaped,
+                            # find the matching close tag and pass through verbatim
+                            close_tag = f'</{tag_name}>'
+                            close_pos = text.find(close_tag, end + 1)
+                            if close_pos != -1:
+                                # Emit: open tag + inner content (already escaped) + close tag
+                                result.append(text[i:close_pos + len(close_tag)])
+                                i = close_pos + len(close_tag)
+                                continue
+                        # Standalone close tag or open with no close — just pass it through
+                        result.append(tag_content)
+                        i = end + 1
+                        continue
+            result.append(_esc(text[i]))
+            i += 1
+        return ''.join(result)
+
+    content = _escape_non_tags(content)
+
+    # Restore link placeholders
+    for token, safe_html in _link_placeholders.items():
+        content = content.replace(token, safe_html)
+
+    # Wrap non-empty, non-tag lines in paragraphs
+    lines = content.split('\n')
+    final_lines = []
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line and not stripped_line.startswith('<'):
+            final_lines.append(f'<p>{line}</p>')
+        else:
+            final_lines.append(line)
+    content = '\n'.join(final_lines)
+
+    # Escape query for title (& must be escaped first to avoid double-escape)
+    title_query = query[:50].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
 
     # Wrap in HTML template
     return f'''<!DOCTYPE html>
@@ -1878,15 +2055,15 @@ class InvestigationRunner:
                 validation_stats=validated_findings.to_dict() if validated_findings else None
             )
 
-        except Exception as e:
-            logger.error(f"Investigation failed: {e}")
+        except Exception:
+            logger.exception("Investigation failed")
             elapsed = time.time() - start_time
 
             if not self.config.skip_global_state:
                 update_investigation_status(
                     self.config.investigation_id,
                     InvestigationStatus.FAILED,
-                    {"error": str(e)}
+                    {"error": "Investigation failed due to an internal error"}
                 )
                 # Archive failed investigation to history (for persistence)
                 archive_current_investigation()
@@ -1901,7 +2078,7 @@ class InvestigationRunner:
                 started_at=self.started_at,
                 completed_at=datetime.now().isoformat(),
                 elapsed_seconds=elapsed,
-                error=str(e)
+                error="An internal error occurred during investigation"
             )
 
     def _log(self, message: str):
@@ -1933,7 +2110,7 @@ class InvestigationRunner:
                 else:
                     prompt = f"{prompt}\n\n{metadata_section}"
 
-        timeout = int(self.config.timeout_minutes * 60 * 0.3)  # 30% of budget
+        timeout = max(60, int(self.config.timeout_minutes * 60 * 0.25))  # 25% of budget for lead
 
         response, elapsed = invoke_claude(
             prompt=prompt,
@@ -1953,15 +2130,25 @@ class InvestigationRunner:
 
             # Try to extract JSON from response
             import re
-            json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+            json_match = re.search(r'```json\s*(.*?)\s*```', stripped, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group(1))
             else:
-                # Try parsing entire response
-                start = response.find('{')
-                end = response.rfind('}') + 1
-                if start >= 0 and end > start:
-                    data = json.loads(response[start:end])
+                # Try parsing entire response — use balanced brace matching
+                start = stripped.find('{')
+                if start >= 0:
+                    depth = 0
+                    data = None
+                    for i in range(start, len(stripped)):
+                        if stripped[i] == '{':
+                            depth += 1
+                        elif stripped[i] == '}':
+                            depth -= 1
+                            if depth == 0:
+                                data = json.loads(stripped[start:i + 1])
+                                break
+                    if data is None:
+                        raise ValueError("No JSON found in response")
                 else:
                     raise ValueError("No JSON found in response")
             directions = data.get("research_directions", []) if isinstance(data, dict) else []
@@ -1999,8 +2186,8 @@ class InvestigationRunner:
         # Since subagents run in PARALLEL, each agent gets the full time budget
         # (not divided by agent count). We use 50% of total budget for subagent work,
         # leaving 50% for lead agent coordination and synthesis.
-        timeout_per_agent = int(self.config.timeout_minutes * 60 * 0.5)
-        # Cap at 5 minutes to prevent runaway agents, but no artificial floor
+        timeout_per_agent = max(60, int(self.config.timeout_minutes * 60 * 0.45))  # 45% of budget for subagents
+        # Cap at 5 minutes to prevent runaway agents
         timeout_per_agent = min(timeout_per_agent, 300)
 
         requested = len(research_directions)
@@ -2126,7 +2313,7 @@ class InvestigationRunner:
 
         elapsed = time.time() - start_time
 
-        if response.startswith("ERROR:"):
+        if response and response.startswith("ERROR:"):
             return SubagentResult(
                 subagent_id=subagent_id,
                 focus_area=focus_area,
@@ -2259,7 +2446,7 @@ Previous attempt errors: {previous_issues}
 
             # Increase timeout for synthesis - needs more time for complex HTML output
             # Use 40% of budget instead of 20%, minimum 120 seconds
-            timeout = max(120, int(self.config.timeout_minutes * 60 * 0.40))
+            timeout = max(60, int(self.config.timeout_minutes * 60 * 0.30))  # 30% of budget for synthesis
 
             response, elapsed = invoke_claude(
                 prompt=prompt,
@@ -2270,7 +2457,7 @@ Previous attempt errors: {previous_issues}
 
             self._log(f"Synthesis attempt {attempt + 1} completed in {elapsed:.1f}s")
 
-            if response.startswith("ERROR:"):
+            if response and response.startswith("ERROR:"):
                 # API error or timeout
                 self._log(f"Synthesis error: {response}")
                 if "html" in (self.config.deliverable_format or "").lower():

@@ -22,6 +22,9 @@ from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, asdict
 from enum import Enum
 import hashlib
+import re
+
+_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,127}$')
 
 
 # ============================================================================
@@ -86,7 +89,11 @@ def _get_active_llm_provider() -> str:
         with open(LLM_PROVIDER_PATH, 'r') as f:
             data = json.load(f)
         return _normalize_provider(data.get("provider"))
-    except Exception:
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Failed to read LLM provider state from %s: %s", LLM_PROVIDER_PATH, e
+        )
         return DEFAULT_LLM_PROVIDER
 
 
@@ -255,7 +262,8 @@ def invoke_fresh_llm(
     model: ModelType = ModelType.BALANCED,
     system_prompt: Optional[str] = None,
     timeout: int = 120,
-    cwd: Optional[Path] = None
+    cwd: Optional[Path] = None,
+    allowed_tools: Optional[List[str]] = None
 ) -> tuple[str, float]:
     """
     Invoke a fresh LLM instance with no prior context.
@@ -283,11 +291,23 @@ def invoke_fresh_llm(
         provider = _get_active_llm_provider()
         resolved_model = _resolve_model_for_provider(model, provider)
         if provider == "codex":
+            if allowed_tools:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "invoke_fresh_llm: allowed_tools=%r requested but provider='codex' does not support tool grants; ignoring",
+                    allowed_tools
+                )
             response = _invoke_codex_cli(prompt, resolved_model, system_prompt, timeout, cwd)
         elif provider == "gemini":
+            if allowed_tools:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "invoke_fresh_llm: allowed_tools=%r requested but provider='gemini' does not support tool grants; ignoring",
+                    allowed_tools
+                )
             response = _invoke_gemini_cli(prompt, resolved_model, system_prompt, timeout, cwd)
         else:
-            response = _invoke_claude_cli(prompt, resolved_model, system_prompt, timeout, cwd)
+            response = _invoke_claude_cli(prompt, resolved_model, system_prompt, timeout, cwd, allowed_tools=allowed_tools)
 
     elapsed_ms = (time.time() - start_time) * 1000
     return response, elapsed_ms
@@ -319,19 +339,32 @@ def _invoke_claude_cli(
     model: Optional[str],
     system_prompt: Optional[str],
     timeout: int,
-    cwd: Path
+    cwd: Path,
+    allowed_tools: Optional[List[str]] = None
 ) -> str:
     """Invoke Claude via CLI."""
     cmd = ["claude", "-p", "--dangerously-skip-permissions"]
 
     if model:
+        if not _MODEL_NAME_RE.match(model):
+            raise ValueError(f"Unsafe model identifier: {model!r}")
         cmd.extend(["--model", model])
 
     if system_prompt:
+        if '\x00' in system_prompt:
+            raise ValueError("system_prompt must not contain null bytes")
         cmd.extend(["--system-prompt", system_prompt])
+
+    if allowed_tools:
+        import re as _re
+        for tool in allowed_tools:
+            if not _re.match(r'^[a-zA-Z0-9_\-]+$', tool):
+                raise ValueError(f"Unsafe tool name: {tool!r}")
+        cmd.extend(["--allowedTools", ",".join(allowed_tools)])
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # Also prevent nested session via entrypoint
 
     try:
         result = subprocess.run(
@@ -350,7 +383,11 @@ def _invoke_claude_cli(
         else:
             return f"ERROR: {result.stderr}"
     except subprocess.TimeoutExpired:
+        # subprocess.run() already kills the child process internally before
+        # re-raising TimeoutExpired; no additional cleanup needed here.
         return "ERROR: Timeout"
+    except MemoryError:
+        raise
     except Exception as e:
         return f"ERROR: {str(e)}"
 
@@ -379,6 +416,8 @@ def _invoke_codex_cli(
     if not codex_model:
         codex_model = os.environ.get("ATLASFORGE_CODEX_MODEL", "").strip()
     if codex_model:
+        if not _MODEL_NAME_RE.match(codex_model):
+            raise ValueError(f"Invalid codex model name: {codex_model!r}")
         cmd.extend(["--model", codex_model])
     cmd.append("-")
 
@@ -394,6 +433,7 @@ def _invoke_codex_cli(
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # Also prevent nested session via entrypoint
 
     try:
         result = subprocess.run(
@@ -412,7 +452,11 @@ def _invoke_codex_cli(
         else:
             return f"ERROR: {result.stderr}"
     except subprocess.TimeoutExpired:
+        # subprocess.run() already kills the child process internally before
+        # re-raising TimeoutExpired; no additional cleanup needed here.
         return "ERROR: Timeout"
+    except MemoryError:
+        raise
     except Exception as e:
         return f"ERROR: {str(e)}"
 
@@ -433,7 +477,7 @@ def _invoke_gemini_cli(
     gemini_model = (model or "").strip()
     if not gemini_model:
         gemini_model = os.environ.get("ATLASFORGE_GEMINI_MODEL", "").strip()
-    if gemini_model:
+    if gemini_model and _MODEL_NAME_RE.match(gemini_model):
         cmd.extend(["-m", gemini_model])
 
     full_prompt = prompt
@@ -447,6 +491,7 @@ def _invoke_gemini_cli(
 
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)  # Prevent nested-session error when called from Claude Code
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)  # Also prevent nested session via entrypoint
 
     try:
         result = subprocess.run(
@@ -472,7 +517,11 @@ def _invoke_gemini_cli(
             return response
         return f"ERROR: {result.stderr}"
     except subprocess.TimeoutExpired:
+        # subprocess.run() already kills the child process internally before
+        # re-raising TimeoutExpired; no additional cleanup needed here.
         return "ERROR: Timeout"
+    except MemoryError:
+        raise
     except Exception as e:
         return f"ERROR: {str(e)}"
 
@@ -482,10 +531,18 @@ def _invoke_ollama(
     model: str,
     timeout: int
 ) -> str:
-    """Invoke local model via Ollama."""
+    """Invoke local model via Ollama.
+
+    Bug 8 fix: pass prompt via stdin instead of as a positional CLI argument
+    to prevent argument injection when prompt contains shell metacharacters.
+    """
+    # Validate model name to prevent command injection via model parameter
+    if not _MODEL_NAME_RE.match(model):
+        return f"ERROR: Invalid model name: {model!r}"
     try:
         result = subprocess.run(
-            ["ollama", "run", model, prompt],
+            ["ollama", "run", model],
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -497,7 +554,11 @@ def _invoke_ollama(
         else:
             return f"ERROR: {result.stderr}"
     except subprocess.TimeoutExpired:
+        # subprocess.run() already kills the child process internally before
+        # re-raising TimeoutExpired; no additional cleanup needed here.
         return "ERROR: Timeout"
+    except MemoryError:
+        raise
     except Exception as e:
         return f"ERROR: {str(e)}"
 
@@ -544,6 +605,16 @@ class Experiment:
         self.started_at = datetime.now().isoformat()
         self.trials = []
 
+        # Cycle 2: conditions list must not be empty
+        if not self.config.conditions:
+            raise ValueError("config.conditions must not be empty")
+
+        # Cycle 5: trials_per_condition must be >= 1
+        if self.config.trials_per_condition < 1:
+            raise ValueError(
+                f"trials_per_condition must be >= 1, got {self.config.trials_per_condition}"
+            )
+
         total_trials = len(self.config.conditions) * self.config.trials_per_condition
         trial_num = 0
 
@@ -560,6 +631,8 @@ class Experiment:
                     progress_callback(f"Running trial {trial_num}/{total_trials}: {condition}")
 
                 prompt = prompt_gen()
+                if prompt is None:
+                    raise ValueError(f"prompt_gen for condition '{condition}' returned None")
                 response, response_time = invoke_fresh_llm(
                     prompt=prompt,
                     model=self.config.model,
@@ -607,7 +680,7 @@ class Experiment:
 
             if condition_trials:
                 response_times = [t.response_time_ms for t in condition_trials]
-                errors = [t for t in condition_trials if t.response.startswith("ERROR")]
+                errors = [t for t in condition_trials if t.response and t.response.startswith("ERROR")]
 
                 summary["by_condition"][condition] = {
                     "trials": len(condition_trials),
@@ -779,6 +852,8 @@ def score_response(
     Returns:
         Tuple of (is_correct, confidence_score)
     """
+    response = response or ""
+    expected = expected or ""
     response_lower = response.lower()
     expected_lower = expected.lower()
 
@@ -795,8 +870,12 @@ def score_response(
         expected_words = set(expected_lower.split())
         response_words = set(response_lower.split())
         overlap = len(expected_words & response_words)
-        confidence = overlap / len(expected_words) if expected_words else 0.0
-        is_correct = confidence >= 0.5
+        if not expected_words:
+            confidence = 0.0
+            is_correct = False
+        else:
+            confidence = overlap / len(expected_words)
+            is_correct = confidence >= 0.5
 
     else:
         raise ValueError(f"Unknown scoring_type: {scoring_type}")

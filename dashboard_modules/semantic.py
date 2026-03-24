@@ -11,6 +11,8 @@ Note: This module does NOT import mission workspace code directly.
 Instead, it proxies requests to the semantic API and adds caching/alerting.
 """
 
+import math
+import os
 import time
 import threading
 import hashlib
@@ -61,7 +63,10 @@ class TTLCache:
 
     def _make_key(self, key_type: str, params: dict) -> str:
         """Create cache key from type and params."""
-        param_str = json.dumps(params, sort_keys=True)
+        try:
+            param_str = json.dumps(params, sort_keys=True)
+        except (TypeError, ValueError):
+            param_str = str(sorted(params.items())) if isinstance(params, dict) else str(params)
         param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
         return f"{key_type}:{param_hash}"
 
@@ -129,11 +134,22 @@ class RateLimiter:
         self.window_seconds = window_seconds
         self._requests = {}  # ip -> list of timestamps
         self._lock = threading.Lock()
+        self._last_sweep = 0.0
 
     def is_allowed(self, client_id: str) -> bool:
         """Check if request is allowed."""
         now = time.time()
         with self._lock:
+            # Periodic sweep every 60 seconds — prevents unbounded memory growth
+            # from unique IPs that make a single request and never return
+            if now - self._last_sweep > 60:
+                cutoff = now - self.window_seconds
+                stale = [k for k, v in self._requests.items()
+                         if not v or max(v) < cutoff]
+                for k in stale:
+                    del self._requests[k]
+                self._last_sweep = now
+
             if client_id not in self._requests:
                 self._requests[client_id] = []
 
@@ -196,13 +212,12 @@ class BackgroundReembedder:
             self.running = True
             self.progress = 0
             self.total = len(entry_ids)
-
-        self._thread = threading.Thread(
-            target=self._run_reembed,
-            args=(entry_ids,),
-            daemon=True
-        )
-        self._thread.start()
+            self._thread = threading.Thread(
+                target=self._run_reembed,
+                args=(entry_ids,),
+                daemon=True
+            )
+            self._thread.start()
 
         return {
             'status': 'started',
@@ -288,10 +303,14 @@ class SnapshotScheduler:
             if self._state_file.exists():
                 with open(self._state_file) as f:
                     state = json.load(f)
-                self.interval_hours = state.get('interval_hours', self.interval_hours)
-                self._capture_count = state.get('capture_count', 0)
+                loaded_interval = state.get('interval_hours', self.interval_hours)
+                if isinstance(loaded_interval, (int, float)) and loaded_interval > 0:
+                    self.interval_hours = float(loaded_interval)
+                loaded_count = state.get('capture_count', 0)
+                if isinstance(loaded_count, int) and loaded_count >= 0:
+                    self._capture_count = loaded_count
                 last_ts = state.get('last_capture')
-                if last_ts:
+                if isinstance(last_ts, str) and last_ts:
                     self._last_capture = last_ts
                 return True
         except Exception as e:
@@ -299,16 +318,32 @@ class SnapshotScheduler:
         return False
 
     def _save_state(self):
-        """Save scheduler state to disk."""
+        """Save scheduler state to disk (atomic write via tempfile + os.replace)."""
         try:
+            import tempfile
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._state_file, 'w') as f:
-                json.dump({
-                    'interval_hours': self.interval_hours,
-                    'capture_count': self._capture_count,
-                    'last_capture': self._last_capture,
-                    'enabled': self.running
-                }, f)
+            data = json.dumps({
+                'interval_hours': self.interval_hours,
+                'capture_count': self._capture_count,
+                'last_capture': self._last_capture,
+                'enabled': self.running
+            })
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._state_file.parent), suffix='.tmp'
+            )
+            try:
+                os.write(fd, data.encode())
+                os.close(fd)
+                fd = -1
+                os.replace(tmp_path, str(self._state_file))
+            except BaseException:
+                if fd >= 0:
+                    os.close(fd)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.debug(f"Could not save scheduler state: {e}")
 
@@ -319,15 +354,24 @@ class SnapshotScheduler:
                 return {'status': 'already_running', 'interval_hours': self.interval_hours}
 
             if interval_hours is not None:
+                try:
+                    interval_hours = float(interval_hours)
+                except (TypeError, ValueError, OverflowError):
+                    return {'status': 'error', 'message': 'interval_hours must be numeric'}
+                if not math.isfinite(interval_hours):
+                    return {'status': 'error', 'message': 'interval_hours must be a finite number'}
                 self.interval_hours = max(0.1, min(168, interval_hours))  # 6 min to 1 week
 
+            # Save user-provided interval before loading state so it's not overwritten
+            user_interval = self.interval_hours
             self._load_state()
+            self.interval_hours = user_interval
             self.running = True
             self._stop_event.clear()
             self._next_capture = time.time() + (self.interval_hours * 3600)
 
-        self._thread = threading.Thread(target=self._run_scheduler, daemon=True)
-        self._thread.start()
+            self._thread = threading.Thread(target=self._run_scheduler, daemon=True)
+            self._thread.start()
 
         self._save_state()
         logger.info(f"Snapshot scheduler started, interval: {self.interval_hours}h")
@@ -354,8 +398,9 @@ class SnapshotScheduler:
     def _run_scheduler(self):
         """Background scheduler loop."""
         while not self._stop_event.is_set():
-            # Wait for interval or stop event
-            wait_time = self.interval_hours * 3600
+            # Wait for interval or stop event (read under lock for thread safety)
+            with self._lock:
+                wait_time = self.interval_hours * 3600
             if self._stop_event.wait(timeout=wait_time):
                 break  # Stop event received
 
@@ -383,9 +428,10 @@ class SnapshotScheduler:
             return
 
         snapshot_id = engine.drift_monitor.capture_snapshot(embeddings)
-        self._last_capture = time.time()
-        self._capture_count += 1
-        self._next_capture = time.time() + (self.interval_hours * 3600)
+        with self._lock:
+            self._last_capture = time.time()
+            self._capture_count += 1
+            self._next_capture = time.time() + (self.interval_hours * 3600)
 
         self._save_state()
 
@@ -416,6 +462,12 @@ class SnapshotScheduler:
 
     def set_interval(self, interval_hours: float) -> dict:
         """Update capture interval."""
+        try:
+            interval_hours = float(interval_hours)
+        except (TypeError, ValueError, OverflowError):
+            return {'status': 'error', 'message': 'interval_hours must be numeric'}
+        if not math.isfinite(interval_hours):
+            return {'status': 'error', 'message': 'interval_hours must be a finite number'}
         with self._lock:
             self.interval_hours = max(0.1, min(168, interval_hours))
             if self.running:
@@ -552,6 +604,9 @@ def _generate_demo_embeddings(n_embeddings=50, n_clusters=3, dim=384):
     import numpy as np
     np.random.seed(42)
 
+    if n_clusters <= 0:
+        raise ValueError(f"n_clusters must be >= 1, got {n_clusters}")
+
     embeddings = []
     entry_ids = []
     names = []
@@ -626,7 +681,7 @@ def api_semantic_status():
         return jsonify(status)
     except Exception as e:
         logger.exception("Error getting semantic status")
-        return jsonify({'error': str(e), 'available': False}), 500
+        return jsonify({'error': 'Internal error', 'available': False}), 500
 
 
 # =============================================================================
@@ -638,7 +693,7 @@ def api_semantic_status():
 def api_embedding_quality():
     """Get embedding quality statistics (cached)."""
     # Check cache first
-    cached = _cache.get('quality_stats')
+    cached = _cache.get('quality_stats', {})
     if cached is not None:
         cached['cached'] = True
         return jsonify(cached)
@@ -663,9 +718,12 @@ def api_embedding_quality():
             result['total_count'] = len(embeddings)
 
             # Check for quality warning
-            if result.get('stats', {}).get('anomaly_rate', 0) > 0.1:
+            anomaly_rate = result.get('stats', {}).get('anomaly_rate', 0)
+            if not isinstance(anomaly_rate, (int, float)) or not math.isfinite(anomaly_rate):
+                anomaly_rate = 0
+            if anomaly_rate > 0.1:
                 emit_quality_warning({
-                    'message': f"High anomaly rate: {result['stats']['anomaly_rate']:.1%}",
+                    'message': f"High anomaly rate: {anomaly_rate:.1%}",
                     'anomaly_count': len(result.get('anomalous_entries', [])),
                     'total_count': len(embeddings)
                 })
@@ -675,7 +733,7 @@ def api_embedding_quality():
         return jsonify(result)
     except Exception as e:
         logger.exception("Error getting embedding quality")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/embeddings/anomalies')
@@ -710,7 +768,7 @@ def api_embedding_anomalies():
         return jsonify({'anomalies': anomalies, 'count': len(anomalies)})
     except Exception as e:
         logger.exception("Error getting anomalies")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/embeddings/revalidate', methods=['POST'])
@@ -746,7 +804,7 @@ def api_revalidate_embeddings():
         return jsonify(result)
     except Exception as e:
         logger.exception("Error starting revalidation")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/embeddings/revalidate/status')
@@ -821,7 +879,7 @@ def api_get_clusters():
         return jsonify(response)
     except Exception as e:
         logger.exception("Error getting clusters")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/clusters/<int:cluster_id>')
@@ -873,7 +931,7 @@ def api_get_cluster_detail(cluster_id):
         })
     except Exception as e:
         logger.exception(f"Error getting cluster {cluster_id}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 # =============================================================================
@@ -887,8 +945,16 @@ def api_find_similar_code():
     try:
         data = request.get_json() or {}
         code = data.get('code', '')
-        top_k = min(data.get('top_k', 10), 100)
-        min_similarity = max(0.0, min(1.0, data.get('min_similarity', 0.5)))
+        try:
+            top_k = max(1, min(int(data.get('top_k', 10)), 100))
+        except (ValueError, TypeError):
+            top_k = 10
+        try:
+            min_similarity = max(0.0, min(1.0, float(data.get('min_similarity', 0.5))))
+        except (ValueError, TypeError):
+            min_similarity = 0.5
+        if not math.isfinite(min_similarity):
+            min_similarity = 0.5
 
         if not code.strip():
             return jsonify({'error': 'Code snippet required', 'results': []}), 400
@@ -923,7 +989,7 @@ def api_find_similar_code():
         return jsonify({'results': enriched, 'count': len(enriched)})
     except Exception as e:
         logger.exception("Error finding similar code")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 # =============================================================================
@@ -972,14 +1038,14 @@ def api_drift_status():
         })
     except Exception as e:
         logger.exception("Error checking drift")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/drift/history')
 @rate_limited
 def api_drift_history():
     """Get drift history over time (cached)."""
-    days = min(request.args.get('days', 30, type=int), 365)
+    days = max(1, min(request.args.get('days', 30, type=int), 365))
 
     # Check cache
     cached = _cache.get('drift_history', {'days': days})
@@ -1000,7 +1066,7 @@ def api_drift_history():
         return jsonify(response)
     except Exception as e:
         logger.exception("Error getting drift history")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/drift/snapshot', methods=['POST'])
@@ -1029,7 +1095,7 @@ def api_capture_snapshot():
         })
     except Exception as e:
         logger.exception("Error capturing snapshot")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 # =============================================================================
@@ -1068,7 +1134,7 @@ def api_submit_feedback():
         })
     except Exception as e:
         logger.exception("Error submitting feedback")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/feedback/stats')
@@ -1092,7 +1158,7 @@ def api_feedback_stats():
         return jsonify(stats)
     except Exception as e:
         logger.exception("Error getting feedback stats")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 # =============================================================================
@@ -1106,6 +1172,8 @@ def api_visualization():
     dimensions = min(max(request.args.get('dimensions', 2, type=int), 2), 3)
     include_clusters = request.args.get('include_clusters', 'true').lower() == 'true'
     method = request.args.get('method', 'umap').lower()
+    if method not in ('umap', 'tsne'):
+        method = 'umap'
 
     params = {
         'dimensions': dimensions,
@@ -1158,7 +1226,7 @@ def api_visualization():
         return jsonify(result)
     except Exception as e:
         logger.exception("Error generating visualization")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 @semantic_bp.route('/visualization/invalidate-cache', methods=['POST'])
@@ -1179,8 +1247,16 @@ def api_search():
     try:
         data = request.get_json() or {}
         query = data.get('query') or ''  # Handle None explicitly
-        top_k = min(data.get('top_k', 10), 100)
-        min_similarity = max(0.0, min(1.0, data.get('min_similarity', 0.3)))
+        try:
+            top_k = max(1, min(int(data.get('top_k', 10)), 100))
+        except (ValueError, TypeError):
+            top_k = 10
+        try:
+            min_similarity = max(0.0, min(1.0, float(data.get('min_similarity', 0.3))))
+        except (ValueError, TypeError):
+            min_similarity = 0.3
+        if not math.isfinite(min_similarity):
+            min_similarity = 0.3
         use_feedback = data.get('use_feedback', True)
 
         if not isinstance(query, str) or not query.strip():
@@ -1234,7 +1310,7 @@ def api_search():
         })
     except Exception as e:
         logger.exception("Error in search")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal error'}), 500
 
 
 # =============================================================================
@@ -1273,6 +1349,13 @@ def api_scheduler_start():
     """
     data = request.get_json() or {}
     interval_hours = data.get('interval_hours')
+    if interval_hours is not None:
+        try:
+            interval_hours = max(0.1, min(168.0, float(interval_hours)))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'interval_hours must be a number between 0.1 and 168'}), 400
+        if not math.isfinite(interval_hours):
+            return jsonify({'error': 'interval_hours must be a finite number'}), 400
     result = _snapshot_scheduler.start(interval_hours=interval_hours)
     return jsonify(result)
 
@@ -1295,6 +1378,12 @@ def api_scheduler_set_interval():
     interval_hours = data.get('interval_hours')
     if interval_hours is None:
         return jsonify({'error': 'interval_hours required'}), 400
+    try:
+        interval_hours = max(0.1, min(168.0, float(interval_hours)))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'interval_hours must be a number between 0.1 and 168'}), 400
+    if not math.isfinite(interval_hours):
+        return jsonify({'error': 'interval_hours must be a finite number'}), 400
     result = _snapshot_scheduler.set_interval(interval_hours)
     return jsonify(result)
 
@@ -1312,8 +1401,14 @@ def api_generate_demo_data():
     global _demo_data
 
     data = request.get_json() or {}
-    n_embeddings = min(data.get('n_embeddings', 50), 500)
-    n_clusters = min(data.get('n_clusters', 3), 10)
+    try:
+        n_embeddings = max(1, min(int(data.get('n_embeddings', 50)), 500))
+    except (ValueError, TypeError):
+        n_embeddings = 50
+    try:
+        n_clusters = max(1, min(int(data.get('n_clusters', 3)), 10))
+    except (ValueError, TypeError):
+        n_clusters = 3
 
     embeddings, entry_ids, names, texts = _generate_demo_embeddings(
         n_embeddings=n_embeddings,

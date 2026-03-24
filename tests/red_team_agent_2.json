@@ -1,0 +1,142 @@
+{
+    "findings": [
+        {
+            "category": "logic_error",
+            "severity": "high",
+            "title": "Recommendation click handler fires only once due to { once: true }",
+            "description": "In modals.js renderRecommendations(), the delegated click event listener is registered with { once: true } on line 273. This causes the listener to self-remove after the very first click, making all subsequent clicks on recommendation items silently do nothing. The modal can only be opened once per renderRecommendations() call.",
+            "reproduction_steps": [
+                "Load the recommendations panel with multiple items",
+                "Click any recommendation item — modal opens correctly",
+                "Close the modal",
+                "Click any other (or the same) recommendation item",
+                "Nothing happens — the event listener was removed after step 2"
+            ],
+            "affected_code": "dashboard_static/src/modals.js:273",
+            "suggested_fix": "Remove { once: true } from the addEventListener call so the delegated handler persists",
+            "confidence": 0.99
+        },
+        {
+            "category": "null_check",
+            "severity": "high",
+            "title": "evaluator_reasoning can be None when LLM returns null, causing AttributeError on .startswith()",
+            "description": "In mission_drift_validator.py, parsed.get('reasoning', '') returns None (not '') when the LLM JSON contains \"reasoning\": null. The None value is stored in result.evaluator_reasoning. At line 568, result.evaluator_reasoning.startswith() is called unconditionally, raising AttributeError and crashing the drift validation loop for the entire mission cycle.",
+            "reproduction_steps": [
+                "Configure the drift validator with a mock LLM that returns: {\"reasoning\": null, \"drift_detected\": false, \"drift_severity\": \"none\", \"semantic_similarity\": 0.9, \"requirement_coverage\": {}, \"added_scope\": [], \"lost_focus\": [], \"confidence\": 0.8}",
+                "Call validate_mission_drift() on any mission",
+                "_update_tracking_state() raises AttributeError at line 568"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:487 and 568",
+            "suggested_fix": "Change parsed.get('reasoning', '') to parsed.get('reasoning') or '' to safely handle null values",
+            "confidence": 0.97
+        },
+        {
+            "category": "type_confusion",
+            "severity": "high",
+            "title": "added_scope and lost_focus not validated as lists; string values corrupt warning messages",
+            "description": "parsed.get('added_scope', []) and parsed.get('lost_focus', []) in mission_drift_validator.py accept whatever type the LLM JSON returns. If the LLM returns a string instead of a list, result.added_scope[:5] returns a 5-character substring, and chr(10).join(f'  - {s}' for s in result.added_scope[:5]) iterates over individual characters in the warning message.",
+            "reproduction_steps": [
+                "Return LLM JSON where added_scope is a string: {\"added_scope\": \"feature creep\", ...}",
+                "The generate_warning_message() call produces a message like '- f\\n  - e\\n  - a\\n  - t\\n  - u' instead of meaningful scope items"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:484-486",
+            "suggested_fix": "Validate type after get: added_scope = parsed.get('added_scope', []) if isinstance(parsed.get('added_scope'), list) else []",
+            "confidence": 0.95
+        },
+        {
+            "category": "security",
+            "severity": "moderate",
+            "title": "Workspace root allowlist permits entire repo root, enabling agent access to state/DB directories",
+            "description": "_ALLOWED_WORKSPACE_ROOTS in blind_agent_runner.py includes the full AI-AtlasForge repo root (line 66). Any subdirectory of the repo passes path validation, including state/ (SQLite DB), adversarial_testing/ (red team code itself), and af_engine/. A caller can point the adversarial agents at these sensitive directories.",
+            "reproduction_steps": [
+                "Call BlindAgentRedTeam().launch_parallel_team(workspace_dir=Path('/home/vader/AI-AtlasForge/state'), mission_desc='test', n_agents=1, timeout=60)",
+                "The workspace validation check passes — path is a subdirectory of the allowed root",
+                "Adversarial agent receives the state/ directory as its workspace and can read/write mission DB"
+            ],
+            "affected_code": "adversarial_testing/blind_agent_runner.py:64-67",
+            "suggested_fix": "Remove the bare repo root from _ALLOWED_WORKSPACE_ROOTS, keeping only the workspace/ subdirectory",
+            "confidence": 0.92
+        },
+        {
+            "category": "null_check",
+            "severity": "moderate",
+            "title": "response.startswith() at line 448 not protected against non-string, non-None types",
+            "description": "In _parse_validation_response(), the check 'if response is None or response.startswith(\"ERROR:\")' assumes response is either None or a string. If invoke_fresh_llm returns any other type, startswith() raises AttributeError. The None short-circuit does not protect against lists, ints, or other unexpected return types.",
+            "reproduction_steps": [
+                "Patch invoke_fresh_llm to return [] or 0",
+                "Call validate_mission_drift() — AttributeError raised at line 448"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:448",
+            "suggested_fix": "Change to: if not isinstance(response, str) or response.startswith('ERROR:')",
+            "confidence": 0.88
+        },
+        {
+            "category": "logic_error",
+            "severity": "moderate",
+            "title": "average_similarity initialized to 1.0 creates ghost reading in serialized state",
+            "description": "DriftTrackingState.average_similarity is initialized to 1.0 (line 125). While the incremental average formula correctly excludes this value once the first real validation occurs, any serialized state read before the first call shows average_similarity=1.0, which could mislead monitoring dashboards or external consumers into thinking similarity has been measured at 100%.",
+            "reproduction_steps": [
+                "Create DriftTrackingState() and serialize it to dict via to_dict()",
+                "average_similarity is 1.0 even though no validation has occurred",
+                "A dashboard reading this state before the first validation cycle shows 100% similarity"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:125",
+            "suggested_fix": "Initialize average_similarity to None or add a has_data: bool flag to distinguish uninitialized from measured state",
+            "confidence": 0.80
+        },
+        {
+            "category": "incorrect_behavior",
+            "severity": "light",
+            "title": "Stream reconstruction failure returns empty string indistinguishable from success",
+            "description": "In atlasforge_conductor.py, when stream reconstruction fails at line 785-787, response is set to '' and the function continues to return as if proc.returncode == 0. Callers receive ('', None) which is identical to a successful empty LLM output. Higher-level retry/fallback logic cannot distinguish reconstruction failure from empty content.",
+            "reproduction_steps": [
+                "Corrupt a JSONL stream file or mock reconstruct_text_from_stream_file to raise",
+                "invoke_llm returns ('', None) with no signal of failure beyond a log line",
+                "The caller's post-processing treats this as a valid empty response"
+            ],
+            "affected_code": "atlasforge_conductor.py:785-787",
+            "suggested_fix": "Return (None, 'stream_reconstruction_failed') instead of ('', None) so callers can detect and handle the failure",
+            "confidence": 0.85
+        },
+        {
+            "category": "exception_handling",
+            "severity": "light",
+            "title": "Overly broad ValueError catch in archival.py may swallow unrelated errors",
+            "description": "The except clause at archival.py line 443 catches ValueError alongside OSError and UnicodeDecodeError. A ValueError raised by any sub-call within the try block that is unrelated to transcript parsing would be silently swallowed and logged only as a transcript parse error.",
+            "reproduction_steps": [
+                "Introduce a ValueError-raising call inside the try block (e.g., a helper function that validates data)",
+                "The error is swallowed and logged as 'Error parsing transcript' masking the real cause"
+            ],
+            "affected_code": "af_engine/core/archival.py:443",
+            "suggested_fix": "Narrow the except to only the specific ValueError subclass from json parsing (json.JSONDecodeError inherits from ValueError) or use json.JSONDecodeError directly",
+            "confidence": 0.75
+        },
+        {
+            "category": "logic_error",
+            "severity": "nonblocking",
+            "title": "Module-level feature flag constants defined before _safe_int_env helper",
+            "description": "In context_watcher.py, CONTEXT_WATCHER_ENABLED and TIME_BASED_HANDOFF_ENABLED are defined at lines 93-101 before the _safe_int_env helper function at line 102. This creates a fragile ordering that will cause import-time crashes if any future developer adds an int() conversion in that region.",
+            "reproduction_steps": [
+                "Add any int(os.environ.get(...)) call between lines 93 and 101",
+                "Import of context_watcher fails with NameError: _safe_int_env is not defined"
+            ],
+            "affected_code": "context_watcher/context_watcher.py:93-107",
+            "suggested_fix": "Move _safe_int_env definition to before the first module-level constant that uses it",
+            "confidence": 0.70
+        }
+    ],
+    "attack_vectors_tried": [
+        "LLM returns null for evaluator_reasoning field in drift validator JSON",
+        "LLM returns string instead of list for added_scope/lost_focus fields",
+        "LLM returns non-string type from invoke_fresh_llm",
+        "Passing workspace_dir=repo_root/state to BlindAgentRedTeam",
+        "Clicking multiple recommendation items after first click",
+        "Serializing DriftTrackingState before any validation occurs",
+        "Corrupting JSONL stream file to trigger reconstruction failure",
+        "Triggering ValueError from non-JSON path inside archival try block",
+        "Calling executor.shutdown() twice in blind_agent_runner",
+        "Deliverable strings containing newline characters in post_mission_hooks",
+        "LLM error messages not matching the three hardcoded prefix patterns",
+        "rec.source_type or rec.mission_type containing quote or space characters"
+    ]
+}

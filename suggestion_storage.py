@@ -27,11 +27,13 @@ Usage:
 import json
 import logging
 import math
+import re
 import sqlite3
+import threading
 import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Generator
 
@@ -57,6 +59,12 @@ ALLOWED_COLUMNS = frozenset({
     'original_mission_description', 'original_rationale', 'original_suggested_cycles',
     'mission_type', 'bug_references', 'scope_context',
 })
+
+# C2-2: defense-in-depth identifier safety. Column names must consist solely of
+# alphanumerics and underscores — even after the ALLOWED_COLUMNS whitelist check.
+# This prevents injection if ALLOWED_COLUMNS is ever expanded with an unsafe name,
+# or if SQLite backtick-quoting semantics change in a future version.
+_SAFE_COL_RE = re.compile(r'^[A-Za-z0-9_]+$')
 
 
 class SuggestionStorageBackend(ABC):
@@ -96,8 +104,12 @@ class SuggestionStorageBackend(ABC):
 class SQLiteSuggestionStorage(SuggestionStorageBackend):
     """SQLite-based storage backend for mission suggestions."""
 
+    _COMPACT_EVERY_N_WRITES = 100
+
     def __init__(self, db_path: Path = None):
         self.db_path = db_path or DB_PATH
+        self._write_count = 0
+        self._wc_lock = threading.Lock()  # C3-A fix: protect _write_count from concurrent increments
         self._ensure_schema()
 
     @contextmanager
@@ -112,8 +124,11 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             conn.execute("PRAGMA foreign_keys=ON")
             yield conn
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception as rollback_err:
+                raise RuntimeError(f"Rollback also failed: {rollback_err}") from e
             raise
         finally:
             conn.close()
@@ -209,7 +224,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             "UPDATE mission_suggestions SET mission_type = 'EXPANSION' WHERE source_type = 'successful_completion' AND mission_type IS NULL"
         )
 
-    def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
+    def _row_to_dict(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         """Convert a database row to a suggestion dict."""
         if row is None:
             return None
@@ -226,8 +241,8 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             elif json_col in ('auto_tags', 'bug_references'):
                 result[json_col] = []
 
-        # Remove None values for cleaner output
-        return {k: v for k, v in result.items() if v is not None}
+        # Preserve all keys including None values for faithful round-tripping
+        return result
 
     def _dict_to_row(self, suggestion: Dict[str, Any]) -> Dict[str, Any]:
         """Convert a suggestion dict to row values with JSON serialization."""
@@ -236,13 +251,20 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         # Serialize JSON columns
         for json_col in ['auto_tags', 'merged_from', 'merged_source_descriptions', 'drift_context', 'bug_references']:
             if json_col in row and row[json_col] is not None:
+                if isinstance(row[json_col], tuple):
+                    row[json_col] = list(row[json_col])
                 if isinstance(row[json_col], (list, dict)):
                     row[json_col] = json.dumps(row[json_col])
 
-        # Allowlist: reject any column not in the schema to prevent SQL injection
+        # Allowlist: reject any column not in the schema to prevent SQL injection.
+        # Also apply _SAFE_COL_RE as defense-in-depth (guards if ALLOWED_COLUMNS is
+        # ever expanded with a malformed entry).
         unknown = set(row.keys()) - ALLOWED_COLUMNS
         if unknown:
             raise ValueError(f"Unknown column(s) not allowed: {unknown}")
+        for col in row.keys():
+            if col in ALLOWED_COLUMNS and not _SAFE_COL_RE.match(col):
+                raise ValueError(f"Column name contains unsafe characters: {col!r}")
         return {k: v for k, v in row.items() if k in ALLOWED_COLUMNS}
 
     # =========================================================================
@@ -313,15 +335,22 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     f"Must be one of: {', '.join(valid_mission_types)}"
                 )
 
-        # priority_score: numeric, no NaN/inf
-        priority_score = suggestion.get('priority_score', 50.0)
-        if priority_score is not None:
-            try:
-                ps = float(priority_score)
-            except (TypeError, ValueError):
-                raise ValueError(f"priority_score must be numeric, got: {priority_score!r}")
-            if math.isnan(ps) or math.isinf(ps):
-                raise ValueError(f"priority_score must be a finite number, got: {priority_score!r}")
+        # priority_score: numeric, no NaN/inf, bounded range
+        if 'priority_score' in suggestion or not partial:
+            priority_score = suggestion.get('priority_score', 50.0)
+            if priority_score is None and not partial:
+                raise ValueError("priority_score cannot be None for full rows; provide a numeric value")
+            if priority_score is not None:
+                try:
+                    ps = float(priority_score)
+                except (TypeError, ValueError):
+                    raise ValueError(f"priority_score must be numeric, got: {priority_score!r}")
+                if math.isnan(ps) or math.isinf(ps):
+                    raise ValueError(f"priority_score must be a finite number, got: {priority_score!r}")
+                if ps < -1000 or ps > 10000:
+                    raise ValueError(
+                        f"priority_score must be between -1000 and 10000, got: {ps}"
+                    )
 
     # =========================================================================
     # CRUD Operations
@@ -362,12 +391,17 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         # Validate all fields via shared helper (also used by upsert)
         self._validate_row(suggestion)
 
+        # Reject unknown keys before rebuilding (otherwise silently dropped)
+        unknown = set(suggestion.keys()) - ALLOWED_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown column(s) not allowed: {unknown}")
+
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
         mission_type = suggestion.get('mission_type', 'EXPANSION')
 
         # Build normalized suggestion dict
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         suggestion = {
             'id': suggestion_id,
             'mission_title': suggestion.get('mission_title', 'Untitled Mission'),
@@ -398,8 +432,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
         row = self._dict_to_row(suggestion)
 
+        # S1: belt-and-suspenders allowlist check before SQL interpolation
+        for col in row.keys():
+            if col not in ALLOWED_COLUMNS:
+                raise ValueError(f"Column '{col}' not in allowlist")
+            # C2-2a: identifier format safety — reject any name with chars outside [A-Za-z0-9_]
+            if not _SAFE_COL_RE.match(col):
+                raise ValueError(f"Column '{col}' contains unsafe characters")
+
         with self._get_connection() as conn:
-            columns = ', '.join(row.keys())
+            columns = ', '.join(f'`{col}`' for col in row.keys())
             placeholders = ', '.join(['?' for _ in row])
             conn.execute(
                 f"INSERT INTO mission_suggestions ({columns}) VALUES ({placeholders})",
@@ -407,6 +449,14 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             )
             logger.debug(f"Added suggestion: {suggestion_id}")
 
+        with self._wc_lock:
+            self._write_count += 1
+            should_compact = (self._write_count % self._COMPACT_EVERY_N_WRITES == 0)
+        if should_compact:
+            try:
+                self.compact()
+            except Exception as _compact_err:
+                logger.warning("compact() failed (WAL may grow): %s", _compact_err)
         return suggestion_id
 
     def update(self, suggestion_id: str, updates: Dict[str, Any]) -> bool:
@@ -421,8 +471,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         self._validate_row(updates, partial=True)
         row_updates = self._dict_to_row(updates)
 
+        # S2: belt-and-suspenders allowlist check before SQL interpolation
+        for col in row_updates.keys():
+            if col not in ALLOWED_COLUMNS:
+                raise ValueError(f"Column '{col}' not in allowlist")
+            # C2-2b: identifier format safety — same defense as INSERT path
+            if not _SAFE_COL_RE.match(col):
+                raise ValueError(f"Column '{col}' contains unsafe characters")
+
         with self._get_connection() as conn:
-            set_clause = ', '.join([f"{k} = ?" for k in row_updates.keys()])
+            set_clause = ', '.join([f'`{k}` = ?' for k in row_updates.keys()])
             cursor = conn.execute(
                 f"UPDATE mission_suggestions SET {set_clause} WHERE id = ?",
                 list(row_updates.values()) + [suggestion_id]
@@ -430,7 +488,15 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             updated = cursor.rowcount > 0
             if updated:
                 logger.debug(f"Updated suggestion: {suggestion_id}")
-            return updated
+                with self._wc_lock:
+                    self._write_count += 1
+                    should_compact = (self._write_count % self._COMPACT_EVERY_N_WRITES == 0)
+                if should_compact:
+                    try:
+                        self.compact()
+                    except Exception as _compact_err:
+                        logger.warning("compact() failed after update (WAL may grow): %s", _compact_err)
+        return updated
 
     def delete(self, suggestion_id: str) -> bool:
         """Delete a suggestion. Returns True if found and deleted."""
@@ -442,7 +508,15 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             deleted = cursor.rowcount > 0
             if deleted:
                 logger.debug(f"Deleted suggestion: {suggestion_id}")
-            return deleted
+                with self._wc_lock:
+                    self._write_count += 1
+                    should_compact = (self._write_count % self._COMPACT_EVERY_N_WRITES == 0)
+                if should_compact:
+                    try:
+                        self.compact()
+                    except Exception as _compact_err:
+                        logger.warning("compact() failed after delete (WAL may grow): %s", _compact_err)
+        return deleted
 
     def delete_multiple(self, suggestion_ids: List[str]) -> int:
         """Delete multiple suggestions. Returns count of deleted items."""
@@ -457,7 +531,26 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             )
             count = cursor.rowcount
             logger.debug(f"Deleted {count} suggestions")
-            return count
+        # Red team fix: delete_multiple also triggers compaction.
+        # C3-iter2 Fix: increment by actual count (not 1) to match upsert_batch() behavior.
+        if count > 0:
+            with self._wc_lock:
+                old = self._write_count
+                self._write_count += count
+                new = self._write_count
+                n = self._COMPACT_EVERY_N_WRITES
+                should_compact = (new // n) > (old // n)
+            if should_compact:
+                try:
+                    self.compact()
+                except Exception as _compact_err:
+                    logger.warning("compact() failed after delete_multiple (WAL may grow): %s", _compact_err)
+        return count
+
+    def compact(self) -> None:
+        """Truncate WAL file to prevent unbounded growth (best-effort)."""
+        with self._get_connection() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # =========================================================================
     # Filtered Queries
@@ -472,15 +565,20 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         limit: int = None,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
-        """Get suggestions with optional filters."""
+        """Get suggestions with optional filters.
+
+        limit: maximum rows to return. 0 returns empty list; None returns all rows.
+            Negative values raise ValueError.
+        offset: number of rows to skip (default 0).
+        """
         conditions = []
         params = []
 
-        if source_type:
+        if source_type is not None:
             conditions.append("source_type = ?")
             params.append(source_type)
 
-        if health_status:
+        if health_status is not None:
             conditions.append("health_status = ?")
             params.append(health_status)
 
@@ -492,6 +590,11 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             conditions.append("priority_score <= ?")
             params.append(max_priority)
 
+        # Bug 20: reject non-int limit/offset (float, string, etc.)
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int)):
+            raise ValueError(f"limit must be an integer or None, got: {type(limit).__name__}")
+        if isinstance(offset, bool) or not isinstance(offset, int):
+            raise ValueError(f"offset must be an integer, got: {type(offset).__name__}")
         # HIGH-1: reject negative limit/offset
         if limit is not None and limit < 0:
             raise ValueError(f"limit must be non-negative, got: {limit}")
@@ -508,7 +611,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY priority_score DESC"
 
-        if limit is not None and limit != 0:
+        if limit == 0:
+            return []
+
+        if limit is not None:
             query += " LIMIT ? OFFSET ?"
             params.extend([int(limit), int(offset)])
         elif offset:
@@ -524,11 +630,11 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         conditions = []
         params = []
 
-        if health_status:
+        if health_status is not None:
             conditions.append("health_status = ?")
             params.append(health_status)
 
-        if source_type:
+        if source_type is not None:
             conditions.append("source_type = ?")
             params.append(source_type)
 
@@ -589,7 +695,9 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 'total': total,
                 'stale_items': stale_items,
                 'orphaned_items': orphaned_items,
-                'needs_analysis': len({'healthy', 'stale', 'orphaned', 'needs_review', 'hot'} - set(counts.keys())) > 0 and total > 0
+                'needs_analysis': total > 0 and conn.execute(
+                    "SELECT COUNT(*) FROM mission_suggestions WHERE last_analyzed_at IS NULL"
+                ).fetchone()[0] > 0
             }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -622,7 +730,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             avg_priority = conn.execute(
                 "SELECT AVG(priority_score) FROM mission_suggestions"
             ).fetchone()[0]
-            stats['avg_priority'] = round(avg_priority, 2) if avg_priority else 0
+            stats['avg_priority'] = round(avg_priority, 2) if avg_priority is not None else 0
 
             # Recent items (last 7 days)
             cursor = conn.execute("""
@@ -646,32 +754,57 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
         Uses INSERT OR REPLACE to avoid race conditions.
         Returns the suggestion ID.
+
+        WARNING: INSERT OR REPLACE deletes the old row and inserts a new one,
+        so any columns not included in `suggestion` will revert to their
+        DEFAULT values (not the previously stored values). Callers must pass
+        all columns they want preserved. For partial updates, use update()
+        instead.
         """
         suggestion = dict(suggestion)  # don't mutate caller's dict
+
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
         suggestion['id'] = suggestion_id
 
-        # Ensure required fields have defaults
-        now = datetime.now().isoformat()
+        # Ensure required fields have defaults (only when key is absent — not when explicitly None)
+        now = datetime.now(timezone.utc).isoformat()
         if 'created_at' not in suggestion:
             suggestion['created_at'] = now
         if 'mission_title' not in suggestion:
             suggestion['mission_title'] = 'Untitled'
 
-        # HIGH-3: validate via shared helper (same rules as add())
+        # HIGH-3: validate via shared helper (same rules as add()) AFTER injecting absent-key defaults
+        # but BEFORE SQL construction — catches mission_title=None (explicit null) which was previously
+        # silently overwritten to 'Untitled' by the old default-injection block.
         self._validate_row(suggestion)
 
         row = self._dict_to_row(suggestion)
 
+        # S-upsert: belt-and-suspenders allowlist check before SQL interpolation
+        for col in row.keys():
+            if col not in ALLOWED_COLUMNS:
+                raise ValueError(f"Column '{col}' not in allowlist")
+            if not _SAFE_COL_RE.match(col):
+                raise ValueError(f"Column '{col}' contains unsafe characters")
+
         with self._get_connection() as conn:
-            columns = ', '.join(row.keys())
+            columns = ', '.join(f'`{col}`' for col in row.keys())
             placeholders = ', '.join(['?' for _ in row])
             conn.execute(
                 f"INSERT OR REPLACE INTO mission_suggestions ({columns}) VALUES ({placeholders})",
                 list(row.values())
             )
 
+        # Red team fix: upsert also triggers compaction
+        with self._wc_lock:
+            self._write_count += 1
+            should_compact = (self._write_count % self._COMPACT_EVERY_N_WRITES == 0)
+        if should_compact:
+            try:
+                self.compact()
+            except Exception as _compact_err:
+                logger.warning("compact() failed (WAL may grow): %s", _compact_err)
         return suggestion_id
 
     def upsert_batch(self, suggestions: List[Dict[str, Any]]) -> int:
@@ -682,30 +815,57 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         Returns count of upserted records.
         """
         count = 0
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         with self._get_connection() as conn:
-            for orig in suggestions:
-                suggestion = dict(orig)  # don't mutate caller's list items
-                if 'id' not in suggestion:
-                    suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
-                if 'created_at' not in suggestion:
-                    suggestion['created_at'] = now
-                if 'mission_title' not in suggestion:
-                    suggestion['mission_title'] = 'Untitled'
+            for i, orig in enumerate(suggestions):
+                try:
+                    suggestion = dict(orig)  # don't mutate caller's list items
 
-                self._validate_row(suggestion)  # enforce validation (Bug 2 fix)
+                    if 'id' not in suggestion:
+                        suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
+                    if 'created_at' not in suggestion:
+                        suggestion['created_at'] = now
+                    if 'mission_title' not in suggestion:
+                        suggestion['mission_title'] = 'Untitled'
 
-                row = self._dict_to_row(suggestion)
-                columns = ', '.join(row.keys())
-                placeholders = ', '.join(['?' for _ in row])
-                conn.execute(
-                    f"INSERT OR REPLACE INTO mission_suggestions ({columns}) VALUES ({placeholders})",
-                    list(row.values())
-                )
-                count += 1
+                    # Validate AFTER absent-key defaults but BEFORE SQL construction — catches
+                    # mission_title=None (explicit null) which was previously silently overwritten.
+                    self._validate_row(suggestion)
+
+                    row = self._dict_to_row(suggestion)
+
+                    # S-upsert-batch: belt-and-suspenders allowlist check before SQL interpolation
+                    for col in row.keys():
+                        if col not in ALLOWED_COLUMNS:
+                            raise ValueError(f"Column '{col}' not in allowlist")
+                        if not _SAFE_COL_RE.match(col):
+                            raise ValueError(f"Column '{col}' contains unsafe characters")
+
+                    columns = ', '.join(f'`{col}`' for col in row.keys())
+                    placeholders = ', '.join(['?' for _ in row])
+                    conn.execute(
+                        f"INSERT OR REPLACE INTO mission_suggestions ({columns}) VALUES ({placeholders})",
+                        list(row.values())
+                    )
+                    count += 1
+                except (ValueError, TypeError) as _batch_err:
+                    raise ValueError(f"Item {i}: {_batch_err}") from _batch_err
 
         logger.info(f"Upserted {count} suggestions (safe batch)")
+        # Red team fix: upsert_batch triggers compaction proportional to batch size
+        if count > 0:
+            with self._wc_lock:
+                old = self._write_count
+                self._write_count += count
+                new = self._write_count
+                n = self._COMPACT_EVERY_N_WRITES
+                should_compact = (new // n) > (old // n)
+            if should_compact:
+                try:
+                    self.compact()
+                except Exception as _compact_err:
+                    logger.warning("compact() failed after upsert_batch (WAL may grow): %s", _compact_err)
         return count
 
     def update_all(self, suggestions: List[Dict[str, Any]]) -> int:
@@ -721,8 +881,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             DeprecationWarning,
             stacklevel=2
         )
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
+            # Disable sqlite3 implicit transaction management so we can issue
+            # BEGIN IMMEDIATE explicitly, making the delete+insert atomic.
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
             # Clear existing
             conn.execute("DELETE FROM mission_suggestions")
 
@@ -740,7 +904,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 self._validate_row(suggestion)  # enforce validation (Bug 3 fix)
 
                 row = self._dict_to_row(suggestion)
-                columns = ', '.join(row.keys())
+                for col in row.keys():
+                    if not _SAFE_COL_RE.match(col):
+                        raise ValueError(f"update_all: invalid column name '{col}'")
+                columns = ', '.join(f'`{col}`' for col in row.keys())
                 placeholders = ', '.join(['?' for _ in row])
                 conn.execute(
                     f"INSERT INTO mission_suggestions ({columns}) VALUES ({placeholders})",
@@ -762,7 +929,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
                 self._validate_row(update, partial=True)
                 row_updates = self._dict_to_row(update)
-                set_clause = ', '.join([f"{k} = ?" for k in row_updates.keys()])
+                for col in row_updates.keys():
+                    if not _SAFE_COL_RE.match(col):
+                        raise ValueError(f"update_batch: invalid column name '{col}'")
+                set_clause = ', '.join([f'`{k}` = ?' for k in row_updates.keys()])
                 cursor = conn.execute(
                     f"UPDATE mission_suggestions SET {set_clause} WHERE id = ?",
                     list(row_updates.values()) + [suggestion_id]
@@ -770,6 +940,23 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 updated += cursor.rowcount
 
         logger.info(f"Batch updated {updated} suggestions")
+
+        # C3-iter2 Fix: update_batch was the only write method that never triggered
+        # WAL compaction. Add proportional _write_count increment to match all other
+        # write methods (add, update, delete, delete_multiple, upsert, upsert_batch).
+        if updated > 0:
+            with self._wc_lock:
+                old = self._write_count
+                self._write_count += updated
+                new = self._write_count
+                n = self._COMPACT_EVERY_N_WRITES
+                should_compact = (new // n) > (old // n)
+            if should_compact:
+                try:
+                    self.compact()
+                except Exception as _compact_err:
+                    logger.warning("compact() failed after update_batch (WAL may grow): %s", _compact_err)
+
         return updated
 
     # =========================================================================
@@ -810,6 +997,18 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             }
 
         items = data.get('items', [])
+        if items is None:
+            return {
+                'success': False,
+                'error': 'items field is None',
+                'imported': 0
+            }
+        if not isinstance(items, list):
+            return {
+                'success': False,
+                'error': f'items must be a list, got {type(items).__name__}',
+                'imported': 0
+            }
         if not items:
             return {
                 'success': True,
@@ -850,7 +1049,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                         'source_mission_id': item.get('source_mission_id'),
                         'source_mission_summary': item.get('source_mission_summary', ''),
                         'rationale': item.get('rationale', ''),
-                        'created_at': item.get('created_at', datetime.now().isoformat()),
+                        'created_at': item.get('created_at', datetime.now(timezone.utc).isoformat()),
                         'source_type': item.get('source_type', 'manual'),
                         'priority_score': item.get('priority_score', 50.0),
                         'health_status': item.get('health_status', 'healthy'),
@@ -866,8 +1065,11 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                         'original_suggested_cycles': item.get('original_suggested_cycles')
                     }
 
+                    # S3: validate field values before insertion
+                    self._validate_row(suggestion)
+
                     row = self._dict_to_row(suggestion)
-                    columns = ', '.join(row.keys())
+                    columns = ', '.join(f'`{col}`' for col in row.keys())
                     placeholders = ', '.join(['?' for _ in row])
                     conn.execute(
                         f"INSERT INTO mission_suggestions ({columns}) VALUES ({placeholders})",
@@ -913,7 +1115,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
         export_data = {
             'items': suggestions,
-            'exported_at': datetime.now().isoformat(),
+            'exported_at': datetime.now(timezone.utc).isoformat(),
             'count': len(suggestions)
         }
 
@@ -930,20 +1132,24 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 # =============================================================================
 
 _storage_instance: Optional[SQLiteSuggestionStorage] = None
+_storage_lock = threading.Lock()
 
 
 def get_storage() -> SQLiteSuggestionStorage:
-    """Get or create the global storage instance."""
+    """Get or create the global storage instance (thread-safe)."""
     global _storage_instance
     if _storage_instance is None:
-        _storage_instance = SQLiteSuggestionStorage()
+        with _storage_lock:
+            if _storage_instance is None:
+                _storage_instance = SQLiteSuggestionStorage()
     return _storage_instance
 
 
 def reset_storage() -> None:
     """Reset the global storage instance (useful for testing)."""
     global _storage_instance
-    _storage_instance = None
+    with _storage_lock:
+        _storage_instance = None
 
 
 # =============================================================================

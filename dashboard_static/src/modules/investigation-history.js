@@ -76,9 +76,44 @@ function getTagColor(tag) {
 function renderColoredTag(tag, showRemove = false, onRemove = null) {
     const color = getTagColor(tag);
     const removeSpan = showRemove
-        ? `<span class="remove" onclick="event.stopPropagation(); ${onRemove}">&times;</span>`
+        ? `<span class="remove" data-tag-remove="${escapeHtml(tag)}">&times;</span>`
         : '';
     return `<span class="inv-tag" style="background: ${color.bg}; border-color: ${color.border}; color: ${color.text}">${escapeHtml(tag)}${removeSpan}</span>`;
+}
+
+/**
+ * Attach click handlers to tag remove buttons rendered by renderColoredTag.
+ * Call this after inserting renderColoredTag HTML into the DOM.
+ * @param {HTMLElement} container - The container element holding the tags
+ * @param {function(string)} removeFn - Callback receiving the tag name to remove
+ */
+function attachTagRemoveHandlers(container, removeFn) {
+    if (!container) return;
+    container.querySelectorAll('[data-tag-remove]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tagName = btn.getAttribute('data-tag-remove');
+            if (removeFn) removeFn(tagName);
+        });
+    });
+}
+
+/**
+ * Attach delegated click handlers for tag add/remove actions in tag containers.
+ * Reads data-action ("add-tag" | "remove-tag") and data-tag attributes.
+ */
+function attachTagActionHandlers(container) {
+    if (!container) return;
+    container.querySelectorAll('[data-action]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = el.getAttribute('data-action');
+            const tag = el.getAttribute('data-tag');
+            if (!tag) return;
+            if (action === 'add-tag') addTagToInvestigation(tag);
+            else if (action === 'remove-tag') removeTagFromInvestigation(tag);
+        });
+    });
 }
 
 /**
@@ -321,15 +356,23 @@ function renderTagsBar() {
         const activeStyle = isActive
             ? `background: ${color.border}; color: var(--bg); border-color: ${color.border};`
             : `background: ${color.bg}; border-color: ${color.border}; color: ${color.text};`;
+        const safeCount = parseInt(t.count, 10) || 0;
         return `
             <span class="inv-filter-tag ${isActive ? 'active' : ''}"
                   style="${activeStyle}"
-                  onclick="toggleTagFilter('${escapeHtml(t.tag)}')"
-                  title="${t.count} investigations">
-                ${escapeHtml(t.tag)} (${t.count})
+                  data-action="toggle-tag-filter" data-tag="${escapeHtml(t.tag)}"
+                  title="${safeCount} investigations">
+                ${escapeHtml(t.tag)} (${safeCount})
             </span>
         `;
     }).join('');
+    // Attach click handlers for tag filter toggling
+    container.querySelectorAll('[data-action="toggle-tag-filter"]').forEach(el => {
+        el.addEventListener('click', () => {
+            const tag = el.getAttribute('data-tag');
+            if (tag) toggleTagFilter(tag);
+        });
+    });
 }
 
 /**
@@ -344,15 +387,74 @@ function renderInvestigationCards() {
             <div class="inv-empty-state">
                 <div class="icon">🔍</div>
                 <p>No investigations found</p>
-                <button class="btn primary" onclick="switchTab('atlasforge'); document.getElementById('investigation-mode-checkbox').checked = true; toggleInvestigationMode();">
+                <button class="btn primary" data-action="start-investigation">
                     Start an Investigation
                 </button>
             </div>
         `;
+        attachCardEventDelegation(grid);
         return;
     }
 
     grid.innerHTML = investigations.map(inv => renderCard(inv)).join('');
+    attachCardEventDelegation(grid);
+}
+
+/**
+ * Attach delegated click handlers to card grid, replacing inline onclick attributes.
+ * Uses a marker to prevent stacking duplicate listeners on re-render.
+ */
+function attachCardEventDelegation(container) {
+    if (!container) return;
+    if (container._cardDelegationAttached) return;
+    container._cardDelegationAttached = true;
+    container.addEventListener('click', (e) => {
+        const actionEl = e.target.closest('[data-action]');
+        if (!actionEl) return;
+        const action = actionEl.dataset.action;
+
+        // Handle actions that don't require a card/investigation ID
+        switch (action) {
+            case 'start-investigation':
+                if (typeof window.switchTab === 'function') window.switchTab('atlasforge');
+                { const cb = document.getElementById('investigation-mode-checkbox');
+                  if (cb && !cb.checked) { cb.checked = true; if (typeof window.toggleInvestigationMode === 'function') window.toggleInvestigationMode(); } }
+                return;
+            case 'retry-refresh':
+                refreshInvestigationHistory();
+                return;
+            case 'toggle-diff':
+                toggleDiffView();
+                return;
+        }
+
+        const cardEl = actionEl.closest('[data-investigation-id]');
+        const id = cardEl ? cardEl.dataset.investigationId : null;
+        if (!id) return;
+
+        switch (action) {
+            case 'card-click':
+                if (selectionModeActive) toggleInvestigationSelection(id, e);
+                else showInvestigationDetail(id);
+                break;
+            case 'toggle-selection':
+                e.stopPropagation();
+                toggleInvestigationSelection(id, e);
+                break;
+            case 'open-tag-modal':
+                e.stopPropagation();
+                openTagModal(id);
+                break;
+            case 'rerun':
+                e.stopPropagation();
+                rerunInvestigation(id);
+                break;
+            case 'delete':
+                e.stopPropagation();
+                deleteInvestigation(id);
+                break;
+        }
+    });
 }
 
 /**
@@ -379,52 +481,54 @@ function renderCard(inv) {
     const selectedStyle = isSelected ? 'border-color: var(--accent); background: rgba(88, 166, 255, 0.1);' : '';
 
     // Selection checkbox (only show in selection mode)
+    const safeId = escapeHtml(inv.investigation_id);
     const checkbox = selectionModeActive ? `
-        <div class="inv-card-checkbox" onclick="toggleInvestigationSelection('${inv.investigation_id}', event)">
+        <div class="inv-card-checkbox" data-action="toggle-selection">
             <input type="checkbox" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
         </div>
     ` : '';
 
     // Attachment indicator
+    const safeAttachCount = escapeHtml(String(inv.attachment_count || 0));
     const attachmentBadge = inv.has_attachments ? `
-        <span class="inv-attachment-badge" title="${inv.attachment_count} file(s) attached">
+        <span class="inv-attachment-badge" title="${safeAttachCount} file(s) attached">
             <span class="icon">📎</span>
-            <span>${inv.attachment_count}</span>
+            <span>${safeAttachCount}</span>
         </span>
     ` : '';
 
     return `
         <div class="inv-card ${selectedClass}" style="${selectedStyle}"
-             onclick="${selectionModeActive ? `toggleInvestigationSelection('${inv.investigation_id}', event)` : `showInvestigationDetail('${inv.investigation_id}')`}"
-             data-investigation-id="${inv.investigation_id}">
+             data-action="card-click"
+             data-investigation-id="${safeId}">
             ${checkbox}
-            <div class="inv-card-actions" onclick="event.stopPropagation()">
-                <button class="btn" onclick="openTagModal('${inv.investigation_id}')" title="Edit tags">🏷</button>
-                <button class="btn primary" onclick="rerunInvestigation('${inv.investigation_id}')" title="Re-run">↻</button>
-                <button class="btn danger" onclick="deleteInvestigation('${inv.investigation_id}')" title="Delete">🗑</button>
+            <div class="inv-card-actions">
+                <button class="btn" data-action="open-tag-modal" title="Edit tags">🏷</button>
+                <button class="btn primary" data-action="rerun" title="Re-run">↻</button>
+                <button class="btn danger" data-action="delete" title="Delete">🗑</button>
             </div>
             <div class="inv-card-header">
-                <span class="inv-card-status ${statusClass}">${statusLabel}</span>
+                <span class="inv-card-status ${statusClass}">${escapeHtml(statusLabel)}</span>
                 ${attachmentBadge}
-                <span class="inv-card-id">${inv.investigation_id}</span>
+                <span class="inv-card-id">${safeId}</span>
             </div>
             <div class="inv-card-query">${queryDisplay}</div>
             <div class="inv-card-meta">
                 <div class="inv-card-meta-item">
                     <span class="icon">📅</span>
-                    <span>${inv.timestamp_relative || inv.timestamp_display || '-'}</span>
+                    <span>${escapeHtml(inv.timestamp_relative || inv.timestamp_display || '-')}</span>
                 </div>
                 <div class="inv-card-meta-item">
                     <span class="icon">⏱</span>
-                    <span>${inv.elapsed_display || '-'}</span>
+                    <span>${escapeHtml(String(inv.elapsed_display || '-'))}</span>
                 </div>
                 <div class="inv-card-meta-item">
                     <span class="icon">🤖</span>
-                    <span>${inv.subagent_count || 0} agents</span>
+                    <span>${Number(inv.subagent_count) || 0} agents</span>
                 </div>
                 <div class="inv-card-meta-item">
                     <span class="icon">📍</span>
-                    <span>${inv.timestamp_display || '-'}</span>
+                    <span>${escapeHtml(inv.timestamp_display || '-')}</span>
                 </div>
             </div>
             ${tags.length > 0 ? `
@@ -532,9 +636,10 @@ function showError(message) {
             <div class="inv-empty-state">
                 <div class="icon">⚠️</div>
                 <p style="color: var(--red);">${escapeHtml(message)}</p>
-                <button class="btn" onclick="refreshInvestigationHistory()">Retry</button>
+                <button class="btn" data-action="retry-refresh">Retry</button>
             </div>
         `;
+        attachCardEventDelegation(grid);
     }
 }
 
@@ -621,8 +726,9 @@ window.showInvestigationDetail = async function(investigationId) {
 
     try {
         // Load investigation status
-        const status = await api(`/api/investigation/status/${investigationId}`);
-        if (status.error) {
+        const status = await api(`/api/investigation/status/${encodeURIComponent(investigationId)}`);
+        // Only block on true API errors (no status field), not historical error fields from failed investigations
+        if (status.error && !status.status) {
             body.innerHTML = `<div style="color: var(--red);">Error: ${escapeHtml(status.error)}</div>`;
             return;
         }
@@ -631,7 +737,7 @@ window.showInvestigationDetail = async function(investigationId) {
         let reportContent = '';
         if (status.status === 'completed' && status.report_path) {
             try {
-                const reportData = await api(`/api/investigation/report/${investigationId}`);
+                const reportData = await api(`/api/investigation/report/${encodeURIComponent(investigationId)}`);
                 if (reportData.report_content) {
                     reportContent = reportData.report_content;
                 }
@@ -641,14 +747,14 @@ window.showInvestigationDetail = async function(investigationId) {
         }
 
         // Load tags
-        const tagsData = await api(`/api/investigation/${investigationId}/tags`);
+        const tagsData = await api(`/api/investigation/${encodeURIComponent(investigationId)}/tags`);
         const tags = tagsData.tags || [];
 
         // Render detail view
         body.innerHTML = `
             <div class="inv-detail-meta">
                 <div class="inv-detail-meta-item">
-                    <div class="value">${status.status || '-'}</div>
+                    <div class="value">${escapeHtml(status.status || '-')}</div>
                     <div class="label">Status</div>
                 </div>
                 <div class="inv-detail-meta-item">
@@ -675,7 +781,7 @@ window.showInvestigationDetail = async function(investigationId) {
             <div class="inv-detail-tags">
                 <span style="color: var(--text-dim); font-size: 0.85em; margin-right: 10px;">Tags:</span>
                 ${tags.length > 0 ? tags.map(t => `<span class="inv-tag">${escapeHtml(t)}</span>`).join('') : '<span style="color: var(--text-dim);">No tags</span>'}
-                <button class="btn" style="padding: 3px 8px; font-size: 0.75em; margin-left: 10px;" onclick="openTagModal('${investigationId}')">Edit Tags</button>
+                <button class="btn" style="padding: 3px 8px; font-size: 0.75em; margin-left: 10px;" data-action="open-tag-modal" data-investigation-id="${escapeHtml(investigationId)}">Edit Tags</button>
             </div>
 
             ${status.error ? `
@@ -688,14 +794,14 @@ window.showInvestigationDetail = async function(investigationId) {
             ${status.has_attachments ? `
             <div style="background: rgba(88, 166, 255, 0.1); border: 1px solid rgba(88, 166, 255, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 15px;">
                 <label style="color: var(--accent); font-size: 0.85em; display: block; margin-bottom: 8px;">
-                    <span style="margin-right: 5px;">📎</span>Attachments (${status.attachment_count}):
+                    <span style="margin-right: 5px;">📎</span>Attachments (${escapeHtml(String(status.attachment_count || 0))}):
                 </label>
                 <div style="display: flex; flex-direction: column; gap: 6px;">
                     ${(status.attachments || []).map(att => `
                         <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg); padding: 8px 10px; border-radius: 4px;">
                             <span style="font-family: monospace; font-size: 0.85em;">${escapeHtml(att.filename)}</span>
                             <span style="font-size: 0.75em; color: ${att.has_text ? 'var(--green)' : 'var(--text-dim)'};">
-                                ${att.has_text ? 'Extracted' : (att.extraction_error || 'Binary')}
+                                ${att.has_text ? 'Extracted' : escapeHtml(att.extraction_error || 'Binary')}
                             </span>
                         </div>
                     `).join('')}
@@ -716,6 +822,15 @@ window.showInvestigationDetail = async function(investigationId) {
             </div>
             `}
         `;
+
+        // Attach delegated handler for the Edit Tags button in detail view
+        const editTagBtn = body.querySelector('[data-action="open-tag-modal"]');
+        if (editTagBtn) {
+            editTagBtn.addEventListener('click', () => {
+                const id = editTagBtn.getAttribute('data-investigation-id');
+                if (id) openTagModal(id);
+            });
+        }
     } catch (e) {
         body.innerHTML = `<div style="color: var(--red);">Error loading investigation: ${escapeHtml(e.message)}</div>`;
     }
@@ -738,56 +853,7 @@ window.closeInvestigationDetailModal = function() {
 
 let currentTagModalInvestigationId = null;
 
-/**
- * Open tag edit modal
- */
-window.openTagModal = async function(investigationId) {
-    currentTagModalInvestigationId = investigationId;
-
-    const modal = document.getElementById('inv-tag-modal');
-    const tagsContainer = document.getElementById('inv-tag-modal-tags');
-    const suggestionsContainer = document.getElementById('inv-tag-suggestions');
-    const input = document.getElementById('inv-tag-modal-input');
-
-    if (!modal) return;
-
-    modal.style.display = 'flex';
-    if (input) input.value = '';
-
-    // Load current tags
-    try {
-        const data = await api(`/api/investigation/${investigationId}/tags`);
-        const tags = data.tags || [];
-
-        if (tagsContainer) {
-            tagsContainer.innerHTML = tags.length > 0
-                ? tags.map(t => `
-                    <span class="inv-tag">
-                        ${escapeHtml(t)}
-                        <span class="remove" onclick="removeTagFromInvestigation('${escapeHtml(t)}')">&times;</span>
-                    </span>
-                `).join('')
-                : '<span style="color: var(--text-dim);">No tags</span>';
-        }
-
-        // Show tag suggestions
-        if (suggestionsContainer) {
-            const existingTags = new Set(tags.map(t => t.toLowerCase()));
-            const suggestions = allTags
-                .filter(t => !existingTags.has(t.tag.toLowerCase()))
-                .slice(0, 6);
-
-            suggestionsContainer.innerHTML = suggestions.length > 0
-                ? '<label style="font-size: 0.8em; color: var(--text-dim); margin-bottom: 5px; display: block;">Suggestions:</label>' +
-                  suggestions.map(t => `
-                    <span class="inv-tag-suggestion" onclick="addTagToInvestigation('${escapeHtml(t.tag)}')">${escapeHtml(t.tag)}</span>
-                  `).join('')
-                : '';
-        }
-    } catch (e) {
-        console.error('Error loading tags for modal:', e);
-    }
-};
+// First openTagModal definition removed — superseded by enhanced version below
 
 /**
  * Close tag modal
@@ -821,7 +887,7 @@ window.addTagToInvestigation = async function(tag) {
     if (!currentTagModalInvestigationId) return;
 
     try {
-        const result = await api(`/api/investigation/${currentTagModalInvestigationId}/tags`, {
+        const result = await api(`/api/investigation/${encodeURIComponent(currentTagModalInvestigationId)}/tags`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tag: tag })
@@ -846,7 +912,7 @@ window.removeTagFromInvestigation = async function(tag) {
     if (!currentTagModalInvestigationId) return;
 
     try {
-        const result = await api(`/api/investigation/${currentTagModalInvestigationId}/tags/${encodeURIComponent(tag)}`, {
+        const result = await api(`/api/investigation/${encodeURIComponent(currentTagModalInvestigationId)}/tags/${encodeURIComponent(tag)}`, {
             method: 'DELETE'
         });
 
@@ -933,6 +999,7 @@ function updateBulkActionBar() {
     const bar = document.getElementById('inv-bulk-action-bar');
     const count = document.getElementById('inv-selection-count');
 
+    if (!bar || !count) return;
     if (selectedInvestigations.size > 0) {
         bar.style.display = 'flex';
         count.textContent = `${selectedInvestigations.size} selected`;
@@ -1028,7 +1095,7 @@ window.deleteInvestigation = async function(investigationId, deleteFiles = false
 
     try {
         const params = deleteFiles ? '?delete_files=true' : '';
-        const result = await api(`/api/investigation/${investigationId}${params}`, {
+        const result = await api(`/api/investigation/${encodeURIComponent(investigationId)}${params}`, {
             method: 'DELETE'
         });
 
@@ -1093,34 +1160,7 @@ window.bulkDeleteInvestigations = async function() {
 // Comparison Functions
 // ============================================================================
 
-/**
- * Compare two selected investigations
- */
-window.compareSelectedInvestigations = async function() {
-    if (selectedInvestigations.size !== 2) {
-        showToast('Select exactly 2 investigations to compare');
-        return;
-    }
-
-    const ids = Array.from(selectedInvestigations);
-
-    try {
-        // Fetch both investigations
-        const [inv1, inv2] = await Promise.all([
-            api(`/api/investigation/status/${ids[0]}`),
-            api(`/api/investigation/status/${ids[1]}`)
-        ]);
-
-        if (inv1.error || inv2.error) {
-            showToast('Failed to load investigation details');
-            return;
-        }
-
-        renderComparisonModal(inv1, inv2);
-    } catch (e) {
-        showToast('Failed to compare: ' + e.message);
-    }
-};
+// First compareSelectedInvestigations definition removed — superseded by enhanced version below
 
 /**
  * Render the comparison modal with two investigations
@@ -1135,15 +1175,13 @@ function renderComparisonModal(inv1, inv2) {
     const elapsed1 = inv1.elapsed_seconds || 0;
     const elapsed2 = inv2.elapsed_seconds || 0;
     const durationDiff = elapsed1 - elapsed2;
-    const durationDiffText = durationDiff > 0 ? `+${formatDuration(durationDiff)}` : formatDuration(Math.abs(durationDiff));
-
     const subagents1 = inv1.subagent_count || 0;
     const subagents2 = inv2.subagent_count || 0;
     const subagentDiff = subagents1 - subagents2;
 
     body.innerHTML = `
         <div class="compare-column" style="background: var(--bg); padding: 15px; border-radius: 8px;">
-            <h4 style="color: var(--accent); margin-bottom: 15px;">${inv1.investigation_id}</h4>
+            <h4 style="color: var(--accent); margin-bottom: 15px;">${escapeHtml(inv1.investigation_id)}</h4>
             <div style="margin-bottom: 15px;">
                 <label style="color: var(--text-dim); font-size: 0.8em;">Query:</label>
                 <div style="margin-top: 5px; padding: 10px; background: var(--panel); border-radius: 4px; font-size: 0.9em;">
@@ -1153,7 +1191,7 @@ function renderComparisonModal(inv1, inv2) {
             <div class="compare-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div>
                     <span style="color: var(--text-dim); font-size: 0.8em;">Status</span>
-                    <div style="font-weight: 500;">${inv1.status}</div>
+                    <div style="font-weight: 500;">${escapeHtml(inv1.status)}</div>
                 </div>
                 <div>
                     <span style="color: var(--text-dim); font-size: 0.8em;">Duration</span>
@@ -1170,7 +1208,7 @@ function renderComparisonModal(inv1, inv2) {
             </div>
         </div>
         <div class="compare-column" style="background: var(--bg); padding: 15px; border-radius: 8px;">
-            <h4 style="color: var(--accent); margin-bottom: 15px;">${inv2.investigation_id}</h4>
+            <h4 style="color: var(--accent); margin-bottom: 15px;">${escapeHtml(inv2.investigation_id)}</h4>
             <div style="margin-bottom: 15px;">
                 <label style="color: var(--text-dim); font-size: 0.8em;">Query:</label>
                 <div style="margin-top: 5px; padding: 10px; background: var(--panel); border-radius: 4px; font-size: 0.9em;">
@@ -1180,7 +1218,7 @@ function renderComparisonModal(inv1, inv2) {
             <div class="compare-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div>
                     <span style="color: var(--text-dim); font-size: 0.8em;">Status</span>
-                    <div style="font-weight: 500;">${inv2.status}</div>
+                    <div style="font-weight: 500;">${escapeHtml(inv2.status)}</div>
                 </div>
                 <div>
                     <span style="color: var(--text-dim); font-size: 0.8em;">Duration</span>
@@ -1202,7 +1240,7 @@ function renderComparisonModal(inv1, inv2) {
                 <div>
                     <span style="color: var(--text-dim); font-size: 0.8em;">Duration Diff:</span>
                     <span style="margin-left: 5px; color: ${durationDiff > 0 ? 'var(--red)' : 'var(--green)'}; font-weight: 500;">
-                        ${durationDiff > 0 ? '+' : ''}${formatDuration(durationDiff)}
+                        ${durationDiff > 0 ? '+' : '-'}${formatDuration(Math.abs(durationDiff))}
                     </span>
                 </div>
                 <div>
@@ -1246,7 +1284,7 @@ window.exportCurrentInvestigation = async function(format) {
 
     try {
         // Open in new tab for download
-        window.open(`/api/investigation/${currentInvestigationId}/export?format=${format}&download=true`, '_blank');
+        window.open(`/api/investigation/${encodeURIComponent(currentInvestigationId)}/export?format=${encodeURIComponent(format)}&download=true`, '_blank');
         showToast(`Exporting as ${format.toUpperCase()}...`);
     } catch (e) {
         showToast('Export failed: ' + e.message);
@@ -1271,8 +1309,9 @@ window.rerunCurrentInvestigation = function() {
 window.rerunInvestigation = async function(investigationId) {
     try {
         // Get the investigation details first
-        const status = await api(`/api/investigation/status/${investigationId}`);
-        if (status.error) {
+        const status = await api(`/api/investigation/status/${encodeURIComponent(investigationId)}`);
+        // Only block on true API errors (no status field), not historical error fields from failed investigations
+        if (status.error && !status.status) {
             showToast('Cannot re-run: ' + status.error);
             return;
         }
@@ -1724,7 +1763,7 @@ window.deleteSavedSearch = async function(searchId) {
     if (!confirm('Delete this saved search?')) return;
 
     try {
-        const result = await api(`/api/investigation/saved-searches/${searchId}`, {
+        const result = await api(`/api/investigation/saved-searches/${encodeURIComponent(searchId)}`, {
             method: 'DELETE'
         });
 
@@ -1742,9 +1781,6 @@ window.deleteSavedSearch = async function(searchId) {
 // ============================================================================
 // Enhanced Tag Modal with Query Suggestions
 // ============================================================================
-
-// Store original openTagModal and enhance it
-const originalOpenTagModal = window.openTagModal;
 
 window.openTagModal = async function(investigationId) {
     currentTagModalInvestigationId = investigationId;
@@ -1774,19 +1810,20 @@ window.openTagModal = async function(investigationId) {
 
     try {
         // Load current tags
-        const data = await api(`/api/investigation/${investigationId}/tags`);
+        const data = await api(`/api/investigation/${encodeURIComponent(investigationId)}/tags`);
         const tags = data.tags || [];
 
         if (tagsContainer) {
             tagsContainer.innerHTML = tags.length > 0
-                ? tags.map(t => renderColoredTag(t, true, `removeTagFromInvestigation('${escapeHtml(t)}')`)).join('')
+                ? tags.map(t => renderColoredTag(t, true)).join('')
                 : '<span style="color: var(--text-dim);">No tags</span>';
+            attachTagRemoveHandlers(tagsContainer, (tagName) => removeTagFromInvestigation(tagName));
         }
 
         // Get query-based suggestions
         if (query && querySuggestionsContainer) {
             try {
-                const suggestResp = await api(`/api/investigation/tags/suggest?query=${encodeURIComponent(query)}&exclude=${tags.join(',')}`);
+                const suggestResp = await api(`/api/investigation/tags/suggest?query=${encodeURIComponent(query)}&exclude=${encodeURIComponent(tags.join(','))}`);
                 const querySuggestions = suggestResp.suggestions || [];
 
                 if (querySuggestions.length > 0) {
@@ -1795,7 +1832,7 @@ window.openTagModal = async function(investigationId) {
                         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                             ${querySuggestions.map(t => {
                                 const color = getTagColor(t);
-                                return `<span class="inv-tag-suggestion" onclick="addTagToInvestigation('${escapeHtml(t)}')"
+                                return `<span class="inv-tag-suggestion" data-action="add-tag" data-tag="${escapeHtml(t)}"
                                     style="padding: 4px 10px; border-radius: 12px; cursor: pointer; font-size: 0.85em;
                                            background: ${color.bg}; border: 1px dashed ${color.border}; color: ${color.text};">
                                     ${escapeHtml(t)}
@@ -1803,6 +1840,7 @@ window.openTagModal = async function(investigationId) {
                             }).join('')}
                         </div>
                     `;
+                    attachTagActionHandlers(querySuggestionsContainer);
                     querySuggestionsContainer.style.display = 'block';
                 } else {
                     querySuggestionsContainer.style.display = 'none';
@@ -1825,13 +1863,14 @@ window.openTagModal = async function(investigationId) {
                   '<div style="display: flex; gap: 6px; flex-wrap: wrap;">' +
                   suggestions.map(t => {
                       const color = getTagColor(t.tag);
-                      return `<span class="inv-tag-suggestion" onclick="addTagToInvestigation('${escapeHtml(t.tag)}')"
+                      return `<span class="inv-tag-suggestion" data-action="add-tag" data-tag="${escapeHtml(t.tag)}"
                           style="padding: 4px 10px; border-radius: 12px; cursor: pointer; font-size: 0.85em;
                                  background: ${color.bg}; border: 1px solid ${color.border}; color: ${color.text};">
                           ${escapeHtml(t.tag)}
                       </span>`;
                   }).join('') + '</div>'
                 : '';
+            attachTagActionHandlers(suggestionsContainer);
         }
     } catch (e) {
         console.error('Error loading tags for modal:', e);
@@ -1886,12 +1925,6 @@ window.toggleDiffView = function() {
     }
 };
 
-// Enhanced comparison modal that adds report diff
-const originalRenderComparisonModal = typeof renderComparisonModal === 'function' ? renderComparisonModal : null;
-
-// Override compareSelectedInvestigations to add diff functionality
-const originalCompareSelected = window.compareSelectedInvestigations;
-
 window.compareSelectedInvestigations = async function() {
     if (selectedInvestigations.size !== 2) {
         showToast('Select exactly 2 investigations to compare');
@@ -1903,11 +1936,12 @@ window.compareSelectedInvestigations = async function() {
     try {
         // Fetch both investigations and their reports
         const [inv1, inv2] = await Promise.all([
-            api(`/api/investigation/status/${ids[0]}`),
-            api(`/api/investigation/status/${ids[1]}`)
+            api(`/api/investigation/status/${encodeURIComponent(ids[0])}`),
+            api(`/api/investigation/status/${encodeURIComponent(ids[1])}`)
         ]);
 
-        if (inv1.error || inv2.error) {
+        // Only block on true API errors (no status field), not historical error fields from failed investigations
+        if ((inv1.error && !inv1.status) || (inv2.error && !inv2.status)) {
             showToast('Failed to load investigation details');
             return;
         }
@@ -1933,8 +1967,8 @@ window.compareSelectedInvestigations = async function() {
         if (inv1.status === 'completed' && inv2.status === 'completed') {
             try {
                 const [report1, report2] = await Promise.all([
-                    api(`/api/investigation/report/${ids[0]}`),
-                    api(`/api/investigation/report/${ids[1]}`)
+                    api(`/api/investigation/report/${encodeURIComponent(ids[0])}`),
+                    api(`/api/investigation/report/${encodeURIComponent(ids[1])}`)
                 ]);
 
                 if (report1.report_content && report2.report_content) {
@@ -1947,7 +1981,7 @@ window.compareSelectedInvestigations = async function() {
                                 <span style="color: var(--green);">+${diff.added} lines added</span>
                                 <span style="color: var(--red);">-${diff.removed} lines removed</span>
                             </div>
-                            <button class="btn" onclick="toggleDiffView()" style="margin-bottom: 10px;">Show Full Diff</button>
+                            <button class="btn" data-action="toggle-diff" style="margin-bottom: 10px;">Show Full Diff</button>
                             <div id="inv-diff-content" style="display: none; max-height: 300px; overflow-y: auto; background: var(--bg); padding: 10px; border-radius: 4px;">
                                 ${renderDiffLines(diff.lines)}
                             </div>
@@ -1961,7 +1995,7 @@ window.compareSelectedInvestigations = async function() {
 
         body.innerHTML = `
             <div class="compare-column" style="background: var(--bg); padding: 15px; border-radius: 8px;">
-                <h4 style="color: var(--accent); margin-bottom: 15px;">${inv1.investigation_id}</h4>
+                <h4 style="color: var(--accent); margin-bottom: 15px;">${escapeHtml(inv1.investigation_id)}</h4>
                 <div style="margin-bottom: 15px;">
                     <label style="color: var(--text-dim); font-size: 0.8em;">Query:</label>
                     <div style="margin-top: 5px; padding: 10px; background: var(--panel); border-radius: 4px; font-size: 0.9em;">
@@ -1971,7 +2005,7 @@ window.compareSelectedInvestigations = async function() {
                 <div class="compare-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
                         <span style="color: var(--text-dim); font-size: 0.8em;">Status</span>
-                        <div style="font-weight: 500;">${inv1.status}</div>
+                        <div style="font-weight: 500;">${escapeHtml(inv1.status)}</div>
                     </div>
                     <div>
                         <span style="color: var(--text-dim); font-size: 0.8em;">Duration</span>
@@ -1988,7 +2022,7 @@ window.compareSelectedInvestigations = async function() {
                 </div>
             </div>
             <div class="compare-column" style="background: var(--bg); padding: 15px; border-radius: 8px;">
-                <h4 style="color: var(--accent); margin-bottom: 15px;">${inv2.investigation_id}</h4>
+                <h4 style="color: var(--accent); margin-bottom: 15px;">${escapeHtml(inv2.investigation_id)}</h4>
                 <div style="margin-bottom: 15px;">
                     <label style="color: var(--text-dim); font-size: 0.8em;">Query:</label>
                     <div style="margin-top: 5px; padding: 10px; background: var(--panel); border-radius: 4px; font-size: 0.9em;">
@@ -1998,7 +2032,7 @@ window.compareSelectedInvestigations = async function() {
                 <div class="compare-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
                         <span style="color: var(--text-dim); font-size: 0.8em;">Status</span>
-                        <div style="font-weight: 500;">${inv2.status}</div>
+                        <div style="font-weight: 500;">${escapeHtml(inv2.status)}</div>
                     </div>
                     <div>
                         <span style="color: var(--text-dim); font-size: 0.8em;">Duration</span>
@@ -2020,7 +2054,7 @@ window.compareSelectedInvestigations = async function() {
                     <div>
                         <span style="color: var(--text-dim); font-size: 0.8em;">Duration Diff:</span>
                         <span style="margin-left: 5px; color: ${durationDiff > 0 ? 'var(--red)' : 'var(--green)'}; font-weight: 500;">
-                            ${durationDiff > 0 ? '+' : ''}${formatDuration(durationDiff)}
+                            ${durationDiff > 0 ? '+' : '-'}${formatDuration(Math.abs(durationDiff))}
                         </span>
                     </div>
                     <div>

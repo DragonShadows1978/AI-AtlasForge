@@ -126,10 +126,12 @@ window.closeRepoLogModal = modals.closeRepoLogModal;
 window.toggleEditMode = modals.toggleEditMode;
 window.saveRecChanges = modals.saveRecChanges;
 window.cancelEditMode = modals.cancelEditMode;
-// Similarity audit functions
-window.openSimilarityAudit = modals.openSimilarityAudit;
-window.closeSimilarityModal = modals.closeSimilarityModal;
-window.selectGroupForMerge = modals.selectGroupForMerge;
+// Merge picker functions
+window.openMergePicker = modals.openMergePicker;
+window.closeMergePicker = modals.closeMergePicker;
+window.selectAllForMerge = modals.selectAllForMerge;
+window.deselectAllForMerge = modals.deselectAllForMerge;
+window.filterMergeCandidates = modals.filterMergeCandidates;
 window.toggleMergeSelection = modals.toggleMergeSelection;
 // Merge functions
 window.openMergeModal = modals.openMergeModal;
@@ -473,7 +475,10 @@ async function populateAtlasForgeSidebarGlassbox() {
             sidebarSelect.innerHTML = '<option value="">Select archived mission...</option>';
             missions.forEach(m => {
                 const tokens = core.formatNumber(m.total_tokens || 0);
-                sidebarSelect.innerHTML += `<option value="${m.mission_id}">${m.mission_id} (${tokens} tokens)</option>`;
+                const opt = document.createElement('option');
+                opt.value = core.escapeHtml(m.mission_id);
+                opt.textContent = `${core.escapeHtml(m.mission_id)} (${tokens} tokens)`;
+                sidebarSelect.appendChild(opt);
             });
         }
 
@@ -584,6 +589,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize conductor status widget
     conductorStatus.initConductorStatus();
 
+    // Register mission/investigation agent handlers BEFORE initAgentActivity() so the
+    // handlers are in place when the WebSocket fires initial_data on subscription ack.
+    // Previously these lived in setupWebSocketHandlers() which runs after DOMContentLoaded
+    // completes — causing the initial_state payload to be dropped when no handler existed yet.
+    registerHandler('mission_agents', (data) => {
+        agentActivity.handleMissionAgentEvent(data);
+    });
+    registerHandler('investigation_agents', (data) => {
+        agentActivity.handleInvestigationAgentEvent(data);
+    });
+
     // Initialize agent activity widget (real-time subagent streaming)
     agentActivity.initAgentActivity();
 
@@ -603,6 +619,9 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Register service worker
     registerServiceWorker();
+
+    // Relocate bulky top header into a swipe column on mobile
+    initMobileHeaderColumn();
 
     // Initialize mobile scroll dots
     initMobileScrollDots();
@@ -721,6 +740,32 @@ function initKeyboardShortcuts() {
 // MOBILE SCROLL DOTS
 // =============================================================================
 
+function initMobileHeaderColumn() {
+    const header = document.querySelector('body > header');
+    const row1 = header ? header.querySelector('.header-row-1') : null;
+    const row2 = header ? header.querySelector('.header-row-2') : null;
+    const shell = document.getElementById('mobile-header-shell');
+
+    if (!header || !row1 || !row2 || !shell) return;
+
+    function relocateHeader() {
+        const isMobile = window.innerWidth <= 600;
+
+        if (isMobile) {
+            if (row1.parentElement !== shell) shell.appendChild(row1);
+            if (row2.parentElement !== shell) shell.appendChild(row2);
+            header.classList.add('mobile-header-relocated');
+        } else {
+            if (row1.parentElement !== header) header.appendChild(row1);
+            if (row2.parentElement !== header) header.appendChild(row2);
+            header.classList.remove('mobile-header-relocated');
+        }
+    }
+
+    relocateHeader();
+    window.addEventListener('resize', relocateHeader);
+}
+
 /**
  * Initialize mobile scroll indicator dots
  * Shows which column is currently in view and allows tapping to navigate
@@ -768,7 +813,7 @@ function initMobileScrollDots() {
         const activeIndex = Math.round(scrollLeft / columnWidth);
 
         dots.forEach((dot, index) => {
-            const isActive = index === Math.min(activeIndex, 2);
+            const isActive = index === Math.min(activeIndex, 3);
             dot.classList.toggle('active', isActive);
             // Update ARIA attributes for accessibility
             dot.setAttribute('aria-selected', isActive ? 'true' : 'false');
@@ -884,14 +929,9 @@ function setupWebSocketHandlers() {
         widgets.updateMissionParamsWidget(data);
     });
 
-    // Agent activity widget real-time updates
-    registerHandler('mission_agents', (data) => {
-        agentActivity.handleMissionAgentEvent(data);
-    });
-
-    registerHandler('investigation_agents', (data) => {
-        agentActivity.handleInvestigationAgentEvent(data);
-    });
+    // Note: mission_agents and investigation_agents handlers are registered early
+    // in DOMContentLoaded (before initAgentActivity) to avoid a race where
+    // initial_state payloads arrive before setupWebSocketHandlers() runs.
 
     // Subagent pool widget real-time updates
     registerHandler('pool_status', (data) => {

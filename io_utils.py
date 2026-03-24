@@ -8,6 +8,7 @@ in the file-based message bus.
 import json
 import fcntl
 import os
+import tempfile
 import time
 import logging
 from pathlib import Path
@@ -85,47 +86,47 @@ def atomic_write_json(path: Union[str, Path], data: Any, max_retries: int = 5) -
     # Strategy: Open main file with 'a+' (append/read) to get handle, lock it, 
     # then truncate and write.
     
+    target_dir = file_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     for attempt in range(max_retries):
+        tmp_fd = None
+        tmp_path = None
         try:
-            # Open for update (read+write) to preserve file if lock fails
-            # Using 'w' truncates immediately, which is bad if we can't get lock.
-            # So we use 'a+' or 'r+' if exists, 'w' if not.
-            
-            mode = 'r+' if file_path.exists() else 'w+'
-            
-            with open(file_path, mode) as f:
-                try:
-                    # Acquire exclusive lock (blocking with timeout simulation)
-                    # We use non-blocking and retry loop to avoid deadlocks
-                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    
-                    # Lock acquired!
+            # Write to an unpredictable temp file in the same directory so
+            # os.replace() is atomic (same filesystem). NamedTemporaryFile
+            # gives an unguessable name, eliminating the TOCTOU window that
+            # existed when we wrote to a predictable temp path.
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=target_dir, suffix='.tmp')
+            try:
+                with os.fdopen(tmp_fd, 'w') as f:
+                    tmp_fd = None  # fdopen takes ownership; don't close twice
+                    json.dump(data, f, indent=2, default=str)
+                    f.flush()
+                    os.fsync(f.fileno())
+                # Atomic replace — visible to other processes only after this point
+                os.replace(tmp_path, file_path)
+                tmp_path = None
+                return True
+            except Exception:
+                if tmp_fd is not None:
                     try:
-                        f.seek(0)
-                        f.truncate()
-                        json.dump(data, f, indent=2, default=str)
-                        f.flush()
-                        os.fsync(f.fileno()) # Ensure write to disk
-                        return True
-                    finally:
-                        fcntl.flock(f, fcntl.LOCK_UN)
-                        
-                except BlockingIOError:
-                    # Locked by someone else
-                    if attempt < max_retries - 1:
-                        time.sleep(0.1 * (attempt + 1))
-                        continue
-                    else:
-                        logger.error(f"Could not acquire write lock on {file_path}")
-                        return False
-                        
+                        os.close(tmp_fd)
+                    except OSError:
+                        pass
+                raise
         except Exception as e:
             logger.error(f"Error writing {file_path}: {e}")
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             if attempt < max_retries - 1:
                 time.sleep(0.1)
                 continue
             return False
-            
+
     return False
 
 def atomic_update_json(path: Union[str, Path], update_fn: Callable[[Any], Any], default: Any = None, max_retries: int = 5) -> Any:
@@ -187,8 +188,8 @@ def atomic_update_json(path: Union[str, Path], update_fn: Callable[[Any], Any], 
                     # Always try to unlock, even if inner logic failed (but file was opened)
                     try:
                         fcntl.flock(f, fcntl.LOCK_UN)
-                    except:
-                        pass
+                    except OSError as e:
+                        logger.warning("Failed to unlock file: %s", e)
                         
         except Exception as e:
             logger.error(f"Error updating {file_path}: {e}")

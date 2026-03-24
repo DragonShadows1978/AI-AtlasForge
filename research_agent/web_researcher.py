@@ -14,11 +14,14 @@ to gather current best practices and techniques.
 import sys
 import json
 import re
+import logging
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -41,7 +44,7 @@ class SearchQuery:
     """A search query with metadata."""
     query: str
     strategy: SearchStrategy
-    year: int = 2025
+    year: int = 2026
     domain_filter: Optional[List[str]] = None
     exclude_domains: Optional[List[str]] = None
 
@@ -83,7 +86,7 @@ class WebResearchResult:
                 {
                     "title": r.title,
                     "url": r.url,
-                    "snippet": r.snippet[:200],
+                    "snippet": (r.snippet or "")[:200],
                     "source": r.source,
                     "relevance": r.relevance_score,
                     "is_primary": r.is_primary_source
@@ -125,7 +128,7 @@ Year: {year}
 Generate 3-5 search queries that will find:
 1. Official documentation and primary sources
 2. Best practices and recommendations
-3. Recent developments (2024-2025)
+3. Recent developments (2024-2026)
 4. Comparisons and alternatives
 5. Practical tutorials and examples
 
@@ -147,10 +150,10 @@ Respond in JSON:
 """
 
     # Prompt for insight extraction
-    INSIGHT_EXTRACTION_PROMPT = """Extract key insights from these search results about: {topic}
+    INSIGHT_EXTRACTION_PROMPT = """Extract key insights from these search results about: $topic
 
 Search Results:
-{results}
+$results
 
 Extract:
 1. Key findings relevant to the topic
@@ -189,7 +192,8 @@ Respond in JSON:
         self,
         model: ModelType = ModelType.BALANCED,
         max_results_per_query: int = 5,
-        timeout_seconds: int = 60
+        timeout_seconds: int = 60,
+        use_web_search: bool = False
     ):
         """
         Initialize web researcher.
@@ -198,16 +202,18 @@ Respond in JSON:
             model: Model for query generation and insight extraction
             max_results_per_query: Maximum results to keep per query
             timeout_seconds: Timeout for each operation
+            use_web_search: If True, invoke Claude with --allowedTools WebSearch for real results
         """
         self.model = model
         self.max_results_per_query = max_results_per_query
         self.timeout_seconds = timeout_seconds
+        self.use_web_search = use_web_search
 
     def generate_queries(
         self,
         topic: str,
         context: str = "",
-        year: int = 2025
+        year: int = 2026
     ) -> List[SearchQuery]:
         """
         Generate search queries for a topic.
@@ -220,11 +226,12 @@ Respond in JSON:
         Returns:
             List of SearchQuery objects
         """
-        prompt = self.QUERY_GENERATION_PROMPT.format(
-            topic=topic,
-            context=context or "General research",
-            year=year
-        )
+        # Use string replacement instead of .format() to avoid KeyError when
+        # topic/context contain literal {} characters (S1 fix)
+        prompt = (self.QUERY_GENERATION_PROMPT
+                  .replace("{topic}", str(topic))
+                  .replace("{context}", str(context or "General research"))
+                  .replace("{year}", str(year)))
 
         response, _ = invoke_fresh_llm(
             prompt=prompt,
@@ -249,7 +256,9 @@ Respond in JSON:
                         year=year,
                         domain_filter=q.get("domains")
                     ))
-        except Exception:
+        except Exception as e:
+            # E1 fix: log at WARNING so failures are visible without DEBUG mode
+            logger.warning("[WebResearcher] generate_queries failed: %s", e, exc_info=True)
             # Fallback to basic query
             queries.append(SearchQuery(
                 query=f"{topic} {year}",
@@ -267,8 +276,8 @@ Respond in JSON:
         """
         Execute a search query.
 
-        In the AtlasForge context, this would use WebSearch directly.
-        For testing, we can simulate or use the experiment framework.
+        Uses real web search via --allowedTools WebSearch when self.use_web_search is True.
+        Falls back to LLM-prompted search otherwise.
 
         Args:
             query: The search query to execute
@@ -280,12 +289,15 @@ Respond in JSON:
         if simulate:
             return self._simulate_search(query)
 
-        # Build search prompt that asks the active model to use web search
+        if self.use_web_search:
+            return self._invoke_claude_with_websearch(query)
+
+        # Fallback: prompt LLM to reason about results (no real search)
         search_prompt = f"""Use web search to find information about: {query.query}
 
 Look for:
 - Official documentation
-- Recent articles (2024-2025)
+- Recent articles (2024-2026)
 - Technical guides
 - Best practices
 
@@ -302,8 +314,6 @@ After searching, provide results in this JSON format:
 }}
 """
 
-        # Note: AtlasForge must route this to a provider/model with web access.
-        # This module provides the structure around search and extraction.
         response, _ = invoke_fresh_llm(
             prompt=search_prompt,
             model=self.model,
@@ -312,6 +322,99 @@ After searching, provide results in this JSON format:
         )
 
         return self._parse_search_results(response)
+
+    def _invoke_claude_with_websearch(self, query: SearchQuery) -> List[SearchResult]:
+        """
+        Invoke Claude CLI with --allowedTools WebSearch to perform real web search.
+
+        Builds a focused search prompt, passes WebSearch as an allowed tool,
+        then parses the response for structured results. Falls back to empty list
+        on failure so callers are never broken.
+
+        Args:
+            query: The search query to execute
+
+        Returns:
+            List of SearchResult objects from real web search
+        """
+        import subprocess
+        import os
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Sanitize query: strip control characters, zero-width unicode, and
+        # injection-relevant characters. Limit length to prevent overflow.
+        safe_query = re.sub(r'[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202f\ufeff]', '', query.query)
+        safe_query = re.sub(r'[`<>{}\[\]\\|]', '', safe_query)
+        safe_query = safe_query.strip()[:500]
+        if not safe_query:
+            logger.warning("[WebSearch] Query became empty after sanitization; skipping")
+            return []
+
+        search_prompt = f"""Search the web for: {safe_query}
+
+Find the most authoritative and recent sources (2024-2026).
+Focus on:
+- Official documentation and primary sources
+- GitHub repositories with real code
+- Research papers or technical blogs
+- Best practices and comparisons
+
+After searching, respond ONLY with JSON in this exact format:
+{{
+    "results": [
+        {{
+            "title": "Exact page title",
+            "url": "https://actual-url.com/page",
+            "snippet": "Key information from this source",
+            "source": "domain.com"
+        }}
+    ]
+}}
+"""
+
+        try:
+            from atlasforge_config import BASE_DIR
+            cmd = [
+                "claude", "-p",
+                "--allowedTools", "WebSearch",
+            ]
+
+            _safe_keys = {"HOME", "PATH", "TERM", "LANG", "LC_ALL", "USER",
+                          "ANTHROPIC_API_KEY", "TMPDIR", "TMP", "TEMP"}
+            env = {k: v for k, v in os.environ.items() if k in _safe_keys}
+            env.pop("CLAUDECODE", None)
+
+            result = subprocess.run(
+                cmd,
+                input=search_prompt,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_seconds,
+                cwd=str(BASE_DIR),
+                env=env,
+                start_new_session=True
+            )
+
+            if result.returncode == 0:
+                response = result.stdout.strip()
+                parsed = self._parse_search_results(response)
+                if parsed:
+                    return parsed
+                # M6 fix: warn when web search returned parseable-but-empty results
+                logger.warning("[WebSearch] Response parsed but returned no results (len=%d); check Claude WebSearch output", len(response))
+            else:
+                logger.warning("[WebSearch] Claude CLI returned non-zero: %s", result.stderr[:200])
+
+        except subprocess.TimeoutExpired:
+            logger.warning("[WebSearch] Timed out after %ds for query: %s", self.timeout_seconds, query.query[:60])
+        except FileNotFoundError:
+            logger.warning("[WebSearch] claude CLI not found; falling back to LLM search")
+        except Exception as exc:
+            logger.warning("[WebSearch] Unexpected error: %s", exc)
+
+        return []
 
     def _simulate_search(self, query: SearchQuery) -> List[SearchResult]:
         """Simulate search results for testing."""
@@ -361,8 +464,9 @@ After searching, provide results in this JSON format:
                         relevance_score=r.get("relevance", 0.5),
                         is_primary_source=is_primary
                     ))
-        except Exception:
-            pass
+        except Exception as e:
+            # E2 fix: log at DEBUG so parse failures are diagnosable
+            logger.debug("[WebResearcher] _parse_search_results parse error: %s", e)
 
         return results
 
@@ -381,12 +485,16 @@ After searching, provide results in this JSON format:
         Returns:
             Dict with key findings, best practices, etc.
         """
+        if not results:
+            return {}
+
         results_text = "\n\n".join([
             f"Title: {r.title}\nURL: {r.url}\nSnippet: {r.snippet}"
             for r in results[:10]  # Limit to top 10
         ])
 
-        prompt = self.INSIGHT_EXTRACTION_PROMPT.format(
+        import string as _string
+        prompt = _string.Template(self.INSIGHT_EXTRACTION_PROMPT).safe_substitute(
             topic=topic,
             results=results_text
         )
@@ -397,9 +505,14 @@ After searching, provide results in this JSON format:
             timeout=self.timeout_seconds
         )
 
+        if response is None:
+            return {}
+
         try:
             return self._extract_json(response) or {}
-        except Exception:
+        except Exception as e:
+            # E3 fix: log at DEBUG so parse failures are diagnosable
+            logger.debug("[WebResearcher] extract_insights parse error: %s", e)
             return {}
 
     def research_topic(
@@ -451,7 +564,9 @@ After searching, provide results in this JSON format:
             reverse=True
         )
 
-        result.results = unique_results[:self.max_results_per_query * len(queries)]
+        # M1 fix: guard against empty queries list to prevent [:0] truncating all results
+        _max_keep = self.max_results_per_query * len(queries) if queries else len(unique_results)
+        result.results = unique_results[:_max_keep]
         result.total_results = len(result.results)
 
         # Extract insights
@@ -478,13 +593,20 @@ After searching, provide results in this JSON format:
             except json.JSONDecodeError:
                 pass
 
-        # Try to find raw JSON object
-        json_match = re.search(r'\{[^{}]*(?:"queries"|"results"|"key_findings").*?\}', text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
+        # Balanced-brace scan handles nested JSON objects (M2+M3 fix).
+        start = text.find('{')
+        if start != -1:
+            depth = 0
+            for i, ch in enumerate(text[start:], start):
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            break
 
         return None
 

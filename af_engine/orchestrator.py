@@ -135,13 +135,23 @@ class StageOrchestrator:
         """Load all default integration handlers."""
         try:
             self.integrations.load_default_integrations()
-            stats = self.integrations.get_stats()
-            logger.info(
-                f"Loaded {stats['handlers_registered']} integrations "
-                f"({stats['handlers_available']} available)"
+        except (ImportError, AttributeError, TypeError, ValueError) as e:
+            # Narrow to expected failure modes — unexpected exceptions propagate.
+            # ImportError: module not found; AttributeError: missing attr on integration class;
+            # TypeError: wrong argument types; ValueError: invalid configuration.
+            logger.error("load_default_integrations() failed: %s", e)
+        stats = self.integrations.get_stats()
+        n = stats['handlers_registered']
+        if n == 0:
+            logger.error(
+                "No integrations loaded — all handlers failed or DEFAULT_INTEGRATIONS is empty. "
+                "Post-mission hooks and other integrations will not fire."
             )
-        except Exception as e:
-            logger.warning(f"Failed to load some integrations: {e}")
+        else:
+            logger.info(
+                "Loaded %d integrations (%d available)",
+                n, stats['handlers_available']
+            )
 
     # =========================================================================
     # Backward-compatible properties (matching legacy RDMissionController)
@@ -176,7 +186,7 @@ class StageOrchestrator:
     # Core workflow methods
     # =========================================================================
 
-    def update_stage(self, new_stage: str) -> None:
+    def update_stage(self, new_stage: str) -> bool:
         """
         Update the mission stage.
 
@@ -188,10 +198,14 @@ class StageOrchestrator:
         Args:
             new_stage: The new stage to transition to
         """
+        if not isinstance(new_stage, str):
+            logger.error(f"Invalid stage type: {type(new_stage).__name__} (expected str)")
+            return False
+
         new_stage = new_stage.upper()
         if new_stage not in self.STAGES:
             logger.error(f"Invalid stage: {new_stage}")
-            return
+            return False
 
         old_stage = self.current_stage
 
@@ -232,6 +246,8 @@ class StageOrchestrator:
 
             # Process mission queue - start next queued mission
             self._process_mission_queue()
+
+        return True
 
     def _validate_mission_completed_data(self, data: Dict[str, Any]) -> None:
         """
@@ -338,8 +354,8 @@ class StageOrchestrator:
         Returns:
             The next stage to transition to
         """
-        # Guard against None response
-        if response is None:
+        # Guard against non-dict response
+        if not isinstance(response, dict):
             response = {}
 
         stage = self.current_stage
@@ -351,6 +367,36 @@ class StageOrchestrator:
 
         # Process response through handler
         result: StageResult = handler.process_response(response, stage_context)
+
+        # Validate transition before accepting it
+        if result.next_stage and result.next_stage != stage:
+            original_target = result.next_stage
+            try:
+                target_handler = self.registry.get_handler(result.next_stage)
+            except KeyError:
+                target_handler = None
+            if target_handler is None:
+                logger.warning(
+                    f"Unregistered stage '{original_target}' rejected. Staying in {stage}."
+                )
+                result = StageResult(
+                    success=False,
+                    next_stage=stage,
+                    status="unregistered_stage",
+                    message=f"Stage '{original_target}' is not registered"
+                )
+            elif hasattr(target_handler, 'validate_transition'):
+                if not target_handler.validate_transition(stage, stage_context):
+                    logger.warning(
+                        f"Invalid transition {stage} -> {original_target} rejected. "
+                        f"Staying in {stage}."
+                    )
+                    result = StageResult(
+                        success=False,
+                        next_stage=stage,
+                        status="invalid_transition",
+                        message=f"Transition from {stage} to {original_target} not allowed"
+                    )
 
         # Emit events from result
         for event in result.events_to_emit:
@@ -383,11 +429,29 @@ class StageOrchestrator:
                     continuation_prompt = self._generate_default_continuation()
                     logger.warning(f"No continuation_prompt provided, using default for cycle {self.cycles.current_cycle + 1}")
 
+                # === DRIFT VALIDATION ===
+                # Validate continuation prompt against original mission before advancing.
+                # Fails open: any error returns (prompt, False) to preserve current behavior.
+                validated_prompt, should_halt = self._validate_continuation_drift(
+                    continuation_prompt, self.cycles.current_cycle + 1
+                )
+                if should_halt:
+                    logger.warning(
+                        f"Mission halted at cycle {self.cycles.current_cycle} due to drift — "
+                        "transitioning to COMPLETE"
+                    )
+                    self.update_stage("COMPLETE")
+                    return "COMPLETE"
+
                 logger.info(f"Advancing cycle from {self.cycles.current_cycle} to next cycle")
-                self.advance_to_next_cycle(continuation_prompt)
+                self.advance_to_next_cycle(validated_prompt)
                 # Note: advance_to_next_cycle already calls update_stage("PLANNING")
                 # so we return the current stage to prevent double-transition
                 return self.current_stage
+            else:
+                logger.info("Cycle continuation declined by should_continue_cycle(), transitioning to COMPLETE")
+                self.update_stage("COMPLETE")
+                return "COMPLETE"
 
         return result.next_stage
 
@@ -401,6 +465,132 @@ class StageOrchestrator:
         if recovery_handler and hasattr(recovery_handler, 'get_recovery_info'):
             return recovery_handler.get_recovery_info()
         return None
+
+    def _validate_continuation_drift(
+        self,
+        continuation_prompt: str,
+        cycle_number: int
+    ) -> tuple:
+        """
+        Validate continuation prompt against original mission for drift.
+
+        Uses LLM-as-judge evaluation via MissionDriftValidator with graduated
+        intervention: log → warn → inject warning → halt.
+
+        Returns:
+            (validated_prompt, should_halt): If should_halt=True, caller must
+            transition to COMPLETE. If a warning was injected, validated_prompt
+            has the warning prepended. Fails open on any error.
+        """
+        try:
+            import sys as _sys
+            root_str = str(self.root)
+            if not _sys.path or _sys.path[0] != root_str:
+                _sys.path.insert(0, root_str)
+            from adversarial_testing.mission_drift_validator import (
+                MissionDriftValidator,
+                DriftTrackingState,
+                DriftDecision,
+                load_tracking_state,
+                save_tracking_state,
+                save_validation_result,
+            )
+        except ImportError as e:
+            logger.debug(f"Drift validation not available (import failed: {e}) - skipping")
+            return continuation_prompt, False
+
+        original_mission = (
+            self.state.get_field("original_problem_statement") or
+            self.state.get_field("problem_statement", "")
+        )
+        if not original_mission:
+            logger.warning("No original mission statement found in state - skipping drift validation")
+            return continuation_prompt, False
+
+        mission_dir = self.state.mission_dir
+        if not mission_dir:
+            logger.warning("No mission_dir in state - skipping drift validation")
+            return continuation_prompt, False
+
+        drift_dir = Path(mission_dir) / "drift_validation"
+        drift_dir.mkdir(parents=True, exist_ok=True)
+
+        tracking_state = load_tracking_state(drift_dir) or DriftTrackingState()
+
+        try:
+            validator = MissionDriftValidator(timeout_seconds=120)
+            result, updated_state = validator.validate_continuation(
+                original_mission=original_mission,
+                continuation_prompt=continuation_prompt,
+                cycle_number=cycle_number,
+                tracking_state=tracking_state,
+            )
+
+            save_validation_result(result, drift_dir)
+            save_tracking_state(updated_state, drift_dir)
+
+            # Persist drift metadata for dashboard visibility
+            self.state.set_field("drift_validation", {
+                "failure_count": updated_state.failure_count,
+                "average_similarity": updated_state.average_similarity,
+                "last_validation_cycle": cycle_number,
+                "warning_issued": updated_state.warning_issued,
+                "last_decision": result.decision.value,
+                "last_severity": result.drift_severity.value,
+                "last_similarity": result.semantic_similarity,
+            })
+
+            logger.info(
+                f"Drift validation cycle {cycle_number}: "
+                f"drift={result.drift_detected}, severity={result.drift_severity.value}, "
+                f"similarity={result.semantic_similarity:.1%}, decision={result.decision.value}"
+            )
+
+            if result.decision == DriftDecision.HALT:
+                import json as _json
+                recap = validator.generate_drift_recap(
+                    tracking_state=updated_state,
+                    original_mission=original_mission,
+                    mission_id=self.state.mission_id,
+                )
+                (drift_dir / "drift_recap.json").write_text(_json.dumps(recap, indent=2))
+                logger.error(
+                    f"Mission HALTED due to drift at cycle {cycle_number} — "
+                    f"failure_count={updated_state.failure_count}, "
+                    f"similarity={result.semantic_similarity:.1%}"
+                )
+                self.state.set_field("halted_due_to_drift", True)
+                self.state.set_field("halted_at_cycle", cycle_number)
+                return continuation_prompt, True
+
+            elif result.decision == DriftDecision.INJECT_WARNING:
+                warning = validator.generate_warning_message(
+                    result=result,
+                    tracking_state=updated_state,
+                    original_mission=original_mission,
+                )
+                logger.warning(
+                    f"Drift warning injected at cycle {cycle_number} "
+                    f"(failure {updated_state.failure_count}/{validator.failure_threshold_halt})"
+                )
+                return warning + continuation_prompt, False
+
+            elif result.decision == DriftDecision.LOG_WARNING:
+                logger.warning(
+                    f"Drift detected at cycle {cycle_number} — logging only "
+                    f"(severity={result.drift_severity.value}, "
+                    f"similarity={result.semantic_similarity:.1%})"
+                )
+                return continuation_prompt, False
+
+            else:  # ALLOW
+                return continuation_prompt, False
+
+        except Exception as e:
+            logger.error(f"Drift validation error at cycle {cycle_number}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return continuation_prompt, False  # Fail open
 
     def _run_pre_planning_research(self, stage_context) -> Optional[str]:
         """
@@ -447,10 +637,16 @@ class StageOrchestrator:
                     prior_findings_path, exc,
                 )
 
+        # S3 fix: only enable real subprocess web search when explicitly allowed via
+        # env var. When running inside a Claude Code session (CLAUDECODE is set),
+        # unconditional use_web_search=True risks recursive subprocess spawning.
+        # Set ATLASFORGE_ENABLE_WEB_SEARCH=1 in production deployments to enable.
+        _web_search_enabled = os.environ.get("ATLASFORGE_ENABLE_WEB_SEARCH", "0").lower() in ("1", "true", "yes", "on")
         config = ResearchConfig(
             max_topics=5,
             max_queries_per_topic=3,
             timeout_seconds=120,
+            use_web_search=_web_search_enabled,
         )
         orchestrator = ResearchOrchestrator(config=config)
 
@@ -474,6 +670,48 @@ class StageOrchestrator:
         # cancel_event: signals the daemon thread to skip disk writes if caller timed out
         cancel_event = threading.Event()
 
+        # Register Researcher Agent for Mission Activity panel visibility
+        import uuid as _uuid
+        _research_agent_id = f"researcher_{_uuid.uuid4().hex[:8]}"
+        _stream_file = None
+        _complete_fn = None
+        try:
+            import sys as _sys2
+            _root_str2 = str(self.root)
+            if not _sys2.path or _sys2.path[0] != _root_str2:
+                _sys2.path.insert(0, _root_str2)
+            from agent_stream_manager import register_agent as _reg, complete_agent as _cmp
+            _stream_file = _reg(context='mission', agent_id=_research_agent_id,
+                                label='Researcher Agent', pid=0)
+            _complete_fn = _cmp
+        except Exception as _e:
+            logger.debug("[Planning] agent_stream_manager unavailable: %s", _e)
+
+        def _stream_write(msg: str) -> None:
+            if not _stream_file:
+                return
+            try:
+                with open(_stream_file, 'a', encoding='utf-8') as _f:
+                    _f.write(msg.rstrip('\n') + '\n')
+            except Exception:
+                pass
+
+        try:
+            from websocket_events import emit_research_event as _emit_research_event
+        except Exception:
+            _emit_research_event = None
+
+        def _progress_callback(msg: str) -> None:
+            logger.info("[Research] %s", msg)
+            _stream_write(msg)
+            if _emit_research_event is not None:
+                try:
+                    _emit_research_event(agent_id=_research_agent_id,
+                                        label='Researcher Agent',
+                                        status='running', message=msg)
+                except Exception:
+                    pass
+
         logger.info(
             "[Planning] Research phase started: up to %d topics, mission='%.60s...'",
             config.max_topics,
@@ -487,6 +725,7 @@ class StageOrchestrator:
                     mission=mission_description,
                     topics=None,  # auto-extract from mission
                     context=research_context_str,
+                    progress_callback=_progress_callback,
                 )
                 # Skip save and result assignment if caller already timed out
                 if not cancel_event.is_set():
@@ -506,6 +745,11 @@ class StageOrchestrator:
         # Signal cancellation on timeout — daemon thread checks cancel_event before writing
         if thread.is_alive():
             cancel_event.set()
+            if _complete_fn:
+                try:
+                    _complete_fn(_research_agent_id, error='timeout')
+                except Exception:
+                    pass
             logger.warning(
                 "[Planning] Research phase timed out after 120s — "
                 "planning will proceed without pre-computed research findings."
@@ -513,6 +757,11 @@ class StageOrchestrator:
             return None
 
         if error_holder[0]:
+            if _complete_fn:
+                try:
+                    _complete_fn(_research_agent_id, error=str(error_holder[0])[:200])
+                except Exception:
+                    pass
             logger.warning(
                 "[Planning] Research phase failed (%s) — continuing without research context",
                 type(error_holder[0]).__name__,
@@ -521,6 +770,11 @@ class StageOrchestrator:
 
         findings = result_holder[0]
         if not findings:
+            if _complete_fn:
+                try:
+                    _complete_fn(_research_agent_id, error='no_findings')
+                except Exception:
+                    pass
             return None
 
         _elapsed = time.time() - _research_start
@@ -529,6 +783,11 @@ class StageOrchestrator:
             _elapsed,
             findings.total_sources or 0,
         )
+        if _complete_fn:
+            try:
+                _complete_fn(_research_agent_id, error=None)
+            except Exception:
+                pass
 
         # Wrap: _format_research_context may raise if synthesis fields are unexpected types
         try:

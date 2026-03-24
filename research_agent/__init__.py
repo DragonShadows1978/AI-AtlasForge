@@ -37,7 +37,8 @@ from .web_researcher import (
 from .knowledge_synthesizer import (
     KnowledgeSynthesizer,
     SynthesisResult,
-    Recommendation
+    Recommendation,
+    ConfidenceLevel
 )
 
 __all__ = [
@@ -49,5 +50,6 @@ __all__ = [
     'SearchQuery',
     'KnowledgeSynthesizer',
     'SynthesisResult',
-    'Recommendation'
+    'Recommendation',
+    'ConfidenceLevel'
 ]

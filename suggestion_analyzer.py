@@ -16,14 +16,25 @@ Usage:
 """
 
 import json
+import math
 import re
 import logging
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple, Set
 from dataclasses import dataclass, field, asdict
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_str(val):
+    """Coerce any value to string safely. None → '', non-string → str(val)."""
+    if val is None:
+        return ''
+    if isinstance(val, str):
+        return val
+    return str(val)
+
 
 # Import paths from centralized config
 from atlasforge_config import BASE_DIR, STATE_DIR, MISSIONS_DIR
@@ -120,9 +131,12 @@ class AutoTagger:
         Returns:
             List of matching tag names, sorted by match count
         """
-        if not text:
+        if text is None:
             return []
 
+        text = _safe_str(text)
+        if not text:
+            return []
         tag_scores = {}
         for tag, pattern in self._compiled.items():
             matches = pattern.findall(text)
@@ -145,9 +159,9 @@ class AutoTagger:
         """
         # Build text corpus from title + description + rationale
         text = ' '.join([
-            suggestion.get('mission_title', ''),
-            suggestion.get('mission_description', ''),
-            suggestion.get('rationale', '')
+            _safe_str(suggestion.get('mission_title')),
+            _safe_str(suggestion.get('mission_description')),
+            _safe_str(suggestion.get('rationale'))
         ])
 
         suggestion['auto_tags'] = self.classify(text)
@@ -188,11 +202,16 @@ class Prioritizer:
             return 10  # Default middle score
 
         try:
-            created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            age_days = (datetime.now(created.tzinfo) - created).days if created.tzinfo else \
-                       (datetime.now() - created).days
-        except (ValueError, TypeError):
+            created = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).days
+        except (ValueError, TypeError, AttributeError):
             return 10
+
+        # Future timestamps should not get highest priority
+        if age_days < 0:
+            return 0
 
         if age_days <= 7:
             return self.weights['age']  # Full points for fresh items
@@ -220,7 +239,14 @@ class Prioritizer:
 
         # Cycle count factor (0-10 points)
         # 1 cycle = 2pts, 2 = 4pts, 3 = 6pts, 5+ = 10pts
-        cycle_score = min(10, cycles * 2)
+        try:
+            cycle_val = float(cycles) if cycles is not None else 0
+            if not math.isfinite(cycle_val):
+                cycle_score = 0
+            else:
+                cycle_score = min(10, max(0, int(cycle_val)) * 2)
+        except (TypeError, ValueError, OverflowError):
+            cycle_score = 0
         score += cycle_score
 
         # Scope indicators (0-10 points)
@@ -228,6 +254,7 @@ class Prioritizer:
             'comprehensive', 'complete', 'system-wide', 'full', 'entire',
             'production', 'critical', 'essential', 'core', 'primary'
         ]
+        text = _safe_str(text) if not isinstance(text, str) else text
         text_lower = text.lower()
         scope_matches = sum(1 for kw in scope_keywords if kw in text_lower)
         score += min(10, scope_matches * 2)
@@ -263,6 +290,7 @@ class Prioritizer:
             return max_score / 2  # Default to middle score if no recent missions
 
         # Extract keywords from suggestion
+        text = _safe_str(text) if not isinstance(text, str) else text
         suggestion_words = set(text.lower().split())
 
         # Extract keywords from recent missions
@@ -302,13 +330,16 @@ class Prioritizer:
             return max_score / 2
 
         try:
-            modified = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
-            days_since = (datetime.now(modified.tzinfo) - modified).days if modified.tzinfo else \
-                         (datetime.now() - modified).days
-        except (ValueError, TypeError):
+            modified = datetime.fromisoformat(str(last_modified).replace('Z', '+00:00'))
+            if modified.tzinfo is None:
+                modified = modified.replace(tzinfo=timezone.utc)
+            days_since = (datetime.now(timezone.utc) - modified).days
+        except (ValueError, TypeError, AttributeError):
             return max_score / 2
 
         # Recent modifications get full score, decays over 30 days
+        if days_since < 0:
+            return 0  # Future timestamps get no freshness credit
         if days_since <= 1:
             return max_score
         elif days_since <= 7:
@@ -336,9 +367,9 @@ class Prioritizer:
             Priority score from 0 to 100
         """
         text = ' '.join([
-            suggestion.get('mission_title', ''),
-            suggestion.get('mission_description', ''),
-            suggestion.get('rationale', '')
+            _safe_str(suggestion.get('mission_title')),
+            _safe_str(suggestion.get('mission_description')),
+            _safe_str(suggestion.get('rationale'))
         ])
         cycles = suggestion.get('suggested_cycles', 3)
 
@@ -376,15 +407,16 @@ class HealthAnalyzer:
             return False
 
         try:
-            created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-            age_days = (datetime.now(created.tzinfo) - created).days if created.tzinfo else \
-                       (datetime.now() - created).days
-        except (ValueError, TypeError):
+            created = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - created).days
+        except (ValueError, TypeError, AttributeError):
             return False
 
         # Stale if old AND never edited
         is_old = age_days >= self.stale_threshold_days
-        never_edited = last_edited is None
+        never_edited = not last_edited  # None, '', 0 all count as "never edited"
 
         return is_old and never_edited
 
@@ -404,8 +436,8 @@ class HealthAnalyzer:
             return False
 
         suggestion_text = ' '.join([
-            suggestion.get('mission_title', ''),
-            suggestion.get('mission_description', '')
+            _safe_str(suggestion.get('mission_title')),
+            _safe_str(suggestion.get('mission_description'))
         ]).lower()
 
         suggestion_words = set(suggestion_text.split())
@@ -413,7 +445,7 @@ class HealthAnalyzer:
         for mission in archived_missions:
             mission_text = ' '.join([
                 str(mission.get('original_mission') or ''),
-                str(mission.get('problem_statement', ''))
+                str(mission.get('problem_statement') or '')
             ]).lower()
             mission_words = set(mission_text.split())
 
@@ -444,23 +476,25 @@ class HealthAnalyzer:
         candidates = []
 
         suggestion_id = suggestion.get('id')
+        if suggestion_id is None:
+            return []  # Cannot find merge candidates without an ID
         suggestion_text = ' '.join([
-            suggestion.get('mission_title', ''),
-            suggestion.get('mission_description', '')
+            _safe_str(suggestion.get('mission_title')),
+            _safe_str(suggestion.get('mission_description'))
         ]).lower()
-        suggestion_words = set(suggestion_text.split())
+        suggestion_words = {w for w in suggestion_text.split() if w}
 
         for other in all_suggestions:
             if other.get('id') == suggestion_id:
                 continue
 
             other_text = ' '.join([
-                other.get('mission_title', ''),
-                other.get('mission_description', '')
+                _safe_str(other.get('mission_title')),
+                _safe_str(other.get('mission_description'))
             ]).lower()
-            other_words = set(other_text.split())
+            other_words = {w for w in other_text.split() if w}
 
-            if not suggestion_words or not other_words:
+            if len(suggestion_words) < 3 or len(other_words) < 3:
                 continue
 
             intersection = len(suggestion_words & other_words)
@@ -468,7 +502,9 @@ class HealthAnalyzer:
             similarity = intersection / union if union > 0 else 0
 
             if similarity >= threshold:
-                candidates.append(other.get('id'))
+                candidate_id = other.get('id')
+                if candidate_id is not None:
+                    candidates.append(candidate_id)
 
         return candidates
 
@@ -495,20 +531,22 @@ class HealthAnalyzer:
         is_hot = False
         if created_at:
             try:
-                created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                days_old = (datetime.now(created.tzinfo) - created).days if created.tzinfo else \
-                           (datetime.now() - created).days
-                is_hot = days_old <= 3
-            except (ValueError, TypeError):
+                created = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                days_old = (datetime.now(timezone.utc) - created).days
+                is_hot = 0 <= days_old <= 3
+            except (ValueError, TypeError, AttributeError):
                 pass
 
         if last_edited:
             try:
-                edited = datetime.fromisoformat(last_edited.replace('Z', '+00:00'))
-                days_since_edit = (datetime.now(edited.tzinfo) - edited).days if edited.tzinfo else \
-                                  (datetime.now() - edited).days
-                is_hot = is_hot or days_since_edit <= 3
-            except (ValueError, TypeError):
+                edited = datetime.fromisoformat(str(last_edited).replace('Z', '+00:00'))
+                if edited.tzinfo is None:
+                    edited = edited.replace(tzinfo=timezone.utc)
+                days_since_edit = (datetime.now(timezone.utc) - edited).days
+                is_hot = is_hot or (0 <= days_since_edit <= 3)
+            except (ValueError, TypeError, AttributeError):
                 pass
 
         if is_hot:
@@ -649,7 +687,7 @@ class SuggestionAnalyzer:
             )
 
             # Track last analysis time
-            suggestion['last_analyzed_at'] = datetime.now().isoformat()
+            suggestion['last_analyzed_at'] = datetime.now(timezone.utc).isoformat()
 
         # Sort by priority descending
         suggestions.sort(key=lambda x: x.get('priority_score', 0), reverse=True)
@@ -710,7 +748,9 @@ class SuggestionAnalyzer:
         similar_ids = self.health_analyzer.get_merge_candidates(
             suggestion, all_suggestions, threshold=0.4  # Lower threshold for new items
         )
-        suggestion['similar_to'] = similar_ids
+        # similar_to is computed for merge detection but not stored — it is not in
+        # ALLOWED_COLUMNS and would cause storage.add() to fail if left in the dict.
+        # Callers that need merge info should call get_merge_candidates() directly.
 
         # Set initial health status
         suggestion['health_status'] = 'hot'  # New items are always "hot"

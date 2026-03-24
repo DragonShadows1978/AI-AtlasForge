@@ -26,8 +26,10 @@
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-7DAUWKVF.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-BZJUU22D.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-CTRDWDOF.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-YPPGGVOR.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/missionlogs-FBABQXGZ.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/investigation-history-2QMOMZX6.js" as="script">
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->
@@ -122,8 +124,8 @@
         .container{display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr) minmax(300px,1.2fr);gap:15px;padding:15px;height:calc(100vh - 140px);overflow:hidden}
         .widget-column-1,.widget-column-2{overflow-y:auto;height:100%;padding-right:5px;scrollbar-gutter:stable}
         .left-panel{overflow-y:auto;max-height:calc(100vh - 140px)}
-        /* Mobile: horizontal scroll layout with fixed header/tabs */
-        @media(max-width:600px){:root{--mobile-header-height:100px;--mobile-tabs-height:44px}html,body{width:100vw;overflow-x:hidden;background:var(--bg)}header{position:sticky;top:0;z-index:100;width:100vw;background:var(--panel)}.main-tabs{position:sticky;top:var(--mobile-header-height);z-index:99;width:100vw;background:var(--panel)}#atlasforge-tab{width:100vw;overflow:visible;background:var(--bg)}.mobile-scroll-wrapper{width:100vw;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain}.header-row-2{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;white-space:nowrap}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:300vw;min-width:300vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 60px);background:var(--bg)}.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - var(--mobile-header-height) - var(--mobile-tabs-height) - 80px)}}
+        /* Mobile: horizontal scroll layout with a dedicated header column */
+        @media(max-width:600px){:root{--mobile-tabs-height:44px}html,body{width:100vw;overflow-x:hidden;background:var(--bg)}header,header.mobile-header-relocated{display:none}.main-tabs{position:sticky;top:0;z-index:99;width:100vw;background:var(--panel)}#atlasforge-tab{width:100vw;overflow:visible;background:var(--bg)}.mobile-scroll-wrapper{width:100vw;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain}.header-row-2{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;white-space:nowrap}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:400vw;min-width:400vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - var(--mobile-tabs-height) - 24px);background:var(--bg)}.mobile-header-column,.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - var(--mobile-tabs-height) - 36px);overflow-y:auto}.mobile-header-column{display:block}.mobile-header-shell{display:flex;flex-direction:column;gap:14px;min-height:100%}.mobile-header-shell .header-row-1,.mobile-header-shell .header-row-2{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;box-sizing:border-box}.mobile-header-shell .header-row-1{align-items:flex-start;gap:14px}.mobile-header-shell .header-row-1>div:last-child{width:100%;flex-wrap:wrap;justify-content:flex-start;gap:10px}.mobile-header-shell .version-indicators{margin-left:0!important;padding-left:0!important;border-left:none!important;flex-wrap:wrap;gap:8px!important}.mobile-header-shell .header-row-2{overflow:visible;flex-wrap:wrap;white-space:normal;align-items:stretch;gap:12px}.mobile-header-shell .status-group,.mobile-header-shell .controls-group,.mobile-header-shell .layout-toolbar{width:100%}.mobile-header-shell .layout-toolbar{flex-wrap:wrap;justify-content:flex-start;row-gap:8px}}
         .mobile-scroll-dots{display:none}
         @media(max-width:600px){.mobile-scroll-dots{display:flex;justify-content:center;gap:6px;position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(22,27,34,0.95);border-radius:20px;padding:6px 12px;border:1px solid var(--border);box-shadow:0 2px 8px rgba(0,0,0,0.3)}.column-nav-btn{display:flex;align-items:center;gap:4px;padding:10px 14px;border-radius:20px;background:transparent;border:1px solid var(--border);color:var(--text-dim);cursor:pointer;font-size:0.75em;transition:all 0.3s ease;white-space:nowrap;outline:none;font-family:inherit}.column-nav-btn .column-nav-num{font-weight:700;font-size:1.1em}.column-nav-btn .column-nav-label{font-size:0.85em}.column-nav-btn.active{background:var(--accent);border-color:var(--accent);color:var(--bg);box-shadow:0 0 8px var(--accent)}.column-nav-btn:hover{border-color:var(--accent);color:var(--accent)}}
         .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:15px}
@@ -599,7 +601,7 @@
             <div class="card" id="mission-suggestions-card">
                 <div class="card-header" onclick="toggleCard('mission-suggestions')">
                     <h3>Mission Suggestions <span id="rec-count" class="badge">0</span>
-                        <button class="btn btn-small similarity-audit-btn" onclick="event.stopPropagation();openSimilarityAudit()" title="Find and merge similar suggestions">Audit Similarities</button>
+                        <button class="btn btn-small merge-picker-btn" onclick="event.stopPropagation();openMergePicker()" title="Select suggestions to merge into a single mission">Merge Suggestions</button>
                         <button class="btn btn-small" onclick="event.stopPropagation();refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
                     </h3>
                     <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
@@ -1550,6 +1552,16 @@
             </div>
             <!-- Mission Activity panel -->
             <div id="mission-activity-panel" class="activity-panel" style="display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0;">
+                <!-- Research Activity Widget -->
+                <div id="research-progress-widget" style="display:none;border-bottom:1px solid #30363d;padding:8px 10px;background:#0d1117;font-size:12px;flex-shrink:0;">
+                    <div class="research-header" style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                        <span class="research-title" style="font-weight:600;color:#c9d1d9;">&#x1F50D; Research Agent</span>
+                        <span id="research-status-badge" class="research-badge running" style="font-size:10px;padding:1px 6px;border-radius:10px;background:#1f6feb;color:#fff;">running</span>
+                        <span id="research-sources" style="margin-left:auto;color:#8b949e;font-size:11px;">0 sources</span>
+                    </div>
+                    <div id="research-message" style="color:#8b949e;font-size:11px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                    <div id="research-topics-list" style="display:flex;flex-wrap:wrap;gap:4px;"></div>
+                </div>
                 <div id="mission-agent-tabs" class="agent-tab-grid"></div>
                 <div id="mission-stream-header" class="agent-stream-header"></div>
                 <div id="mission-agent-stream" class="agent-stream-pane">
@@ -1564,6 +1576,9 @@
                     <div class="idle-message">No active investigations.</div>
                 </div>
             </div>
+        </div>
+        <div class="mobile-header-column">
+            <div id="mobile-header-shell" class="mobile-header-shell"></div>
         </div>
     </div><!-- End container -->
     </div><!-- End mobile-scroll-wrapper -->
@@ -2321,6 +2336,11 @@
             <span class="column-nav-num">3</span>
             <span class="column-nav-label">Activity</span>
         </button>
+        <button class="column-nav-btn" data-column="3" onclick="scrollToColumn(3)"
+                role="tab" aria-selected="false" title="Header and layout controls" type="button">
+            <span class="column-nav-num">4</span>
+            <span class="column-nav-label">Header</span>
+        </button>
     </nav>
 
     <!-- Create Session Modal -->
@@ -2951,26 +2971,20 @@
         </div>
     </div>
 
-    <!-- Similarity Audit Modal -->
-    <div id="similarity-modal" class="modal" style="display: none;">
+    <!-- Merge Picker Modal -->
+    <div id="merge-picker-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 900px;">
             <div class="modal-header">
-                <h3>Similarity Audit</h3>
-                <button class="modal-close" onclick="closeSimilarityModal()">&times;</button>
+                <h3>Merge Suggestions</h3>
+                <button class="modal-close" onclick="closeMergePicker()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="threshold-control">
-                    <label>Similarity Threshold:</label>
-                    <input type="range" id="similarity-threshold" min="0.1" max="0.8" step="0.05" value="0.3" onchange="document.getElementById('threshold-display').textContent = (this.value * 100).toFixed(0) + '%'">
-                    <span id="threshold-display" class="threshold-value">30%</span>
-                    <button class="btn btn-small" onclick="openSimilarityAudit()">Re-analyze</button>
-                </div>
-                <div id="similarity-modal-body">
-                    <div class="loading-spinner">Click Re-analyze to start...</div>
+                <div id="merge-picker-body">
+                    <div class="loading-spinner">Loading suggestions...</div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="closeSimilarityModal()">Close</button>
+                <button class="btn" onclick="closeMergePicker()">Close</button>
             </div>
         </div>
     </div>

@@ -1,0 +1,154 @@
+{
+    "findings": [
+        {
+            "category": "error_handling",
+            "severity": "high",
+            "title": "Unguarded int() conversion on user-supplied cycle_budget in fallback mission creation path",
+            "description": "In dashboard_modules/core.py line 581, the fallback branch (when af_engine.mission_config is not importable) calls int(data.get('cycle_budget', 3)) with no try/except. A non-numeric value in the user-controlled JSON body raises an unhandled ValueError that results in a 500 Internal Server Error instead of a proper 400 Bad Request.",
+            "reproduction_steps": [
+                "Ensure af_engine.mission_config is not importable (e.g., remove the module or simulate ImportError)",
+                "POST /api/mission with body: {\"problem_statement\": \"test\", \"cycle_budget\": \"not-a-number\"}",
+                "Observe unhandled ValueError traceback and 500 response"
+            ],
+            "affected_code": "dashboard_modules/core.py:581",
+            "suggested_fix": "Wrap the int() call in a try/except (ValueError, TypeError) and return a 400 response with a descriptive error message",
+            "confidence": 0.95
+        },
+        {
+            "category": "missing_validation",
+            "severity": "moderate",
+            "title": "source_type query parameter not validated against allowlist before forwarding to storage",
+            "description": "In dashboard_modules/core.py line 721-725, the source_type query parameter from request.args is passed directly to storage.get_filtered() without route-level allowlist validation. The storage layer uses parameterized queries so SQL injection is blocked, but passing unknown enum values through to the DB layer silently returns empty results rather than a clear 400 error, and any future storage change could introduce a vulnerability.",
+            "reproduction_steps": [
+                "GET /api/recommendations?source_type=arbitrary_unknown_value",
+                "Observe the request succeeds with 200 and empty items instead of a 400 validation error"
+            ],
+            "affected_code": "dashboard_modules/core.py:721-725",
+            "suggested_fix": "Validate source_type_filter against a frozenset of allowed values ('drift_halt', 'successful_completion', 'merged', 'manual') before calling storage.get_filtered()",
+            "confidence": 0.85
+        },
+        {
+            "category": "security",
+            "severity": "moderate",
+            "title": "Hardcoded user-specific allowed workspace roots make path validation non-portable",
+            "description": "_ALLOWED_WORKSPACE_ROOTS in blind_agent_runner.py is hardcoded to /home/vader/AI-AtlasForge paths. When deployed under any other user or directory, every call to launch_parallel_team() raises ValueError because no allowed root matches, making the entire red-team runner non-functional without modifying source code.",
+            "reproduction_steps": [
+                "Deploy the application under a different username or to a different root directory",
+                "Call BlindAgentRedTeam().launch_parallel_team(workspace_dir=Path('/home/other/project').resolve(), ...)",
+                "Observe ValueError: workspace_dir is not within any allowed root"
+            ],
+            "affected_code": "adversarial_testing/blind_agent_runner.py:64-67",
+            "suggested_fix": "Derive allowed roots from configuration or from the application's detected installation directory at runtime rather than hardcoding /home/vader paths",
+            "confidence": 0.92
+        },
+        {
+            "category": "security",
+            "severity": "moderate",
+            "title": "TOCTOU race between symlink check and file creation in parallel agent launch",
+            "description": "In blind_agent_runner.py lines 474-481, is_symlink() is called on results_file and findings_file, then open(..., 'w') is called to create them. These are not atomic: an attacker with filesystem access can insert a symlink between the check and the open, causing the open() to follow the symlink and truncate an arbitrary target file.",
+            "reproduction_steps": [
+                "Run BlindAgentRedTeam.launch_parallel_team() against a workspace",
+                "Between the is_symlink() check (line 474) and open() call (line 478), create a symlink at the results_file path pointing to an arbitrary target (e.g., /etc/passwd)",
+                "Observe that open(..., 'w') truncates the symlink target"
+            ],
+            "affected_code": "adversarial_testing/blind_agent_runner.py:474-481",
+            "suggested_fix": "Use os.open() with O_CREAT|O_EXCL|O_NOFOLLOW flags (atomic creation that fails if the path exists or is a symlink) instead of the two-step check-then-open pattern",
+            "confidence": 0.88
+        },
+        {
+            "category": "logic_error",
+            "severity": "moderate",
+            "title": "Hardcoded error string prefixes for drift evaluator error detection miss non-standard error formats",
+            "description": "mission_drift_validator.py lines 568-570 detect evaluator errors only by checking three hardcoded string patterns. Any evaluator error string that does not match these exact prefixes (e.g., 'Error: network timeout', 'LLM error:', 'Timeout:') will set is_evaluation_error=False, causing the result to be counted as real drift and incrementing failure_count, potentially triggering a false HALT.",
+            "reproduction_steps": [
+                "Configure the drift evaluator to return a response with evaluator_reasoning='Error: network timeout' and drift_detected=True with severity=HIGH",
+                "Observe that is_evaluation_error is False and failure_count is incremented as if real drift occurred",
+                "With enough such errors, consecutive_failures and failure_count thresholds can be falsely triggered"
+            ],
+            "affected_code": "adversarial_testing/mission_drift_validator.py:568-570",
+            "suggested_fix": "Use a broader error detection approach such as checking for common error prefixes with a tuple, or use a more flexible pattern like checking if evaluator_reasoning starts with any of several error-indicating keywords",
+            "confidence": 0.9
+        },
+        {
+            "category": "exception_handling",
+            "severity": "light",
+            "title": "Bare except Exception in archival copy loop catches all exception types",
+            "description": "af_engine/core/archival.py line 558 catches bare Exception in the per-transcript copy loop, treating programming errors (TypeError, AttributeError) the same as expected I/O errors (OSError, shutil.Error), making debugging harder and potentially masking bugs.",
+            "reproduction_steps": [
+                "Pass a non-Path object as a transcript to _parse_transcript_usage",
+                "Observe that the TypeError is caught and logged as a copy failure rather than propagating as a programming error"
+            ],
+            "affected_code": "af_engine/core/archival.py:558",
+            "suggested_fix": "Narrow the except clause to (OSError, shutil.Error) so that programming errors propagate as expected",
+            "confidence": 0.85
+        },
+        {
+            "category": "exception_handling",
+            "severity": "light",
+            "title": "Silent except pass in stderr drain background thread",
+            "description": "In blind_agent_runner.py line 676, the _drain_stderr_bg inner function uses except Exception: pass, silently swallowing all errors from the background stderr drain thread. OSError or IOError on pipe read failures are discarded with no logging.",
+            "reproduction_steps": [
+                "Close the subprocess stderr pipe while _drain_stderr_bg is reading",
+                "Observe that the resulting OSError is silently discarded with no log entry"
+            ],
+            "affected_code": "adversarial_testing/blind_agent_runner.py:676",
+            "suggested_fix": "Replace the bare pass with at minimum a logger.debug() call to log the exception type and message",
+            "confidence": 0.9
+        },
+        {
+            "category": "exception_handling",
+            "severity": "light",
+            "title": "Silent except pass on stdout read in non-streaming agent path",
+            "description": "In blind_agent_runner.py lines 722-724, proc.stdout.read() on the non-streaming path uses except Exception: pass, so stdout read failures silently leave stdout_text as empty string with no log message, causing the agent to return no results with no indication of failure.",
+            "reproduction_steps": [
+                "Close proc.stdout prematurely on the non-streaming code path",
+                "Observe the OSError is swallowed and the agent silently returns empty results"
+            ],
+            "affected_code": "adversarial_testing/blind_agent_runner.py:722-724",
+            "suggested_fix": "Replace the bare pass with at minimum a logger.warning() and set an error flag so the caller knows output was incomplete",
+            "confidence": 0.9
+        },
+        {
+            "category": "logic_error",
+            "severity": "light",
+            "title": "Duplicate independent allowlists for Claude start mode in core.py and dashboard_v2.py",
+            "description": "The mode allowlist for starting Claude appears independently in both dashboard_modules/core.py (line 281, inline set literal) and dashboard_v2.py (line 424, _ALLOWED_MODES). These are not linked, so updating one without the other silently creates inconsistency — a mode accepted by start_claude() could be rejected by the API route or vice versa.",
+            "reproduction_steps": [
+                "Add a new mode 'experimental' to _ALLOWED_MODES in dashboard_v2.py",
+                "POST /api/start/experimental — the route rejects it with 400 because the inline check in core.py still only contains {\"rd\", \"free\"}"
+            ],
+            "affected_code": "dashboard_modules/core.py:281, dashboard_v2.py:424",
+            "suggested_fix": "Import and reference the single _ALLOWED_MODES constant from dashboard_v2.py in the core.py route instead of duplicating it",
+            "confidence": 0.88
+        },
+        {
+            "category": "exception_handling",
+            "severity": "light",
+            "title": "Rollback error not chained onto re-raised original exception in _get_connection",
+            "description": "In suggestion_storage.py lines 128-132, when rollback fails during exception handling, the rollback error is logged but not chained onto the re-raised exception. This means the exception traceback does not contain information about the rollback failure, making simultaneous DB-error + rollback-error scenarios hard to diagnose.",
+            "reproduction_steps": [
+                "Trigger a DB operation error and then make conn.rollback() also fail",
+                "Observe that the exception chain only shows the original DB error, not the rollback error"
+            ],
+            "affected_code": "suggestion_storage.py:127-132",
+            "suggested_fix": "Use `raise` after logging or use ExceptionGroup / chained exception for Python 3.11+ to preserve both errors in the traceback",
+            "confidence": 0.8
+        }
+    ],
+    "attack_vectors_tried": [
+        "Non-numeric cycle_budget in POST /api/mission when fallback branch is active",
+        "Arbitrary string passed as source_type query parameter to /api/recommendations",
+        "workspace_dir outside _ALLOWED_WORKSPACE_ROOTS in BlindAgentRedTeam.launch_parallel_team()",
+        "Symlink replacement between is_symlink() check and open() in agent file creation",
+        "Custom evaluator_reasoning error string not matching hardcoded prefix patterns in drift validator",
+        "TypeError inside per-transcript copy loop in archive_mission_transcripts",
+        "Premature subprocess stderr pipe close during _drain_stderr_bg",
+        "Premature proc.stdout close on non-streaming agent path",
+        "New mode added to _ALLOWED_MODES but not to core.py inline allowlist",
+        "Simultaneous DB error and rollback failure in _get_connection context manager",
+        "safe_substitute with malformed template variables in red team prompt builder",
+        "mission_id containing path traversal sequences (../) in archive_mission_transcripts",
+        "story_title with Unicode homoglyphs bypassing control-character strip in narrative mission endpoint",
+        "bare except Exception pass blocks in api_health() masking uninitialized globals"
+    ]
+}

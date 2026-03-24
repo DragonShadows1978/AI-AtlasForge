@@ -40,16 +40,17 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None when Claude times out."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.Popen') as mock_popen:
-            mock_proc = MagicMock()
-            mock_proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=5)
-            mock_proc.pid = 12345
-            mock_popen.return_value = mock_proc
+        with patch('atlasforge_conductor.get_llm_provider', return_value='codex'):
+            with patch('subprocess.Popen') as mock_popen:
+                mock_proc = MagicMock()
+                mock_proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="codex", timeout=5)
+                mock_proc.pid = 12345
+                mock_popen.return_value = mock_proc
 
-            result, error = conductor.invoke_llm("test prompt", timeout=5)
+                result, error = conductor.invoke_llm("test prompt", timeout=5)
 
-            assert result is None
-            assert "timeout" in error
+                assert result is None
+                assert "timeout" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -57,13 +58,14 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None on subprocess error."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.Popen') as mock_popen:
-            mock_popen.side_effect = Exception("Subprocess failed")
+        with patch('atlasforge_conductor.get_llm_provider', return_value='codex'):
+            with patch('subprocess.Popen') as mock_popen:
+                mock_popen.side_effect = Exception("Subprocess failed")
 
-            result, error = conductor.invoke_llm("test prompt", timeout=5)
+                result, error = conductor.invoke_llm("test prompt", timeout=5)
 
-            assert result is None
-            assert "exception" in error
+                assert result is None
+                assert "exception" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -71,16 +73,17 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns None when subprocess returns non-zero."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.Popen') as mock_popen:
-            mock_proc = MagicMock()
-            mock_proc.returncode = 1
-            mock_proc.communicate.return_value = ("", "Error from Claude CLI")
-            mock_popen.return_value = mock_proc
+        with patch('atlasforge_conductor.get_llm_provider', return_value='codex'):
+            with patch('subprocess.Popen') as mock_popen:
+                mock_proc = MagicMock()
+                mock_proc.returncode = 1
+                mock_proc.communicate.return_value = ("", "Error from Codex CLI")
+                mock_popen.return_value = mock_proc
 
-            result, error = conductor.invoke_llm("test prompt", timeout=5)
+                result, error = conductor.invoke_llm("test prompt", timeout=5)
 
-            assert result is None
-            assert "cli_error" in error
+                assert result is None
+                assert "cli_error" in error
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
@@ -88,16 +91,17 @@ class TestInvokeLlmTimeout:
         """Verify invoke_llm returns response text on success."""
         import atlasforge_conductor as conductor
 
-        with patch('subprocess.Popen') as mock_popen:
-            mock_proc = MagicMock()
-            mock_proc.returncode = 0
-            mock_proc.communicate.return_value = ('{"status": "success"}', "")
-            mock_popen.return_value = mock_proc
+        with patch('atlasforge_conductor.get_llm_provider', return_value='codex'):
+            with patch('subprocess.Popen') as mock_popen:
+                mock_proc = MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate.return_value = ('{"status": "success"}', "")
+                mock_popen.return_value = mock_proc
 
-            result, error = conductor.invoke_llm("test prompt", timeout=5)
+                result, error = conductor.invoke_llm("test prompt", timeout=5)
 
-            assert result == '{"status": "success"}'
-            assert error is None
+                assert result == '{"status": "success"}'
+                assert error is None
 
 
 # ===========================================================================

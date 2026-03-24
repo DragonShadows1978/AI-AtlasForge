@@ -235,16 +235,11 @@ class StreamingRateLimiter:
     """
 
     def __init__(self, max_events_per_second: int = 10):
+        import threading
         self.max_events = max_events_per_second
         self.window_seconds = 1.0
         self.event_times = []
-        self._lock = None  # Lazy init for thread safety
-
-    def _get_lock(self):
-        import threading
-        if self._lock is None:
-            self._lock = threading.Lock()
-        return self._lock
+        self._lock = threading.Lock()  # Eager init — safe for concurrent use
 
     def allow_event(self) -> bool:
         """
@@ -254,7 +249,7 @@ class StreamingRateLimiter:
         """
         import time
 
-        with self._get_lock():
+        with self._lock:
             now = time.time()
             cutoff = now - self.window_seconds
 
@@ -269,7 +264,7 @@ class StreamingRateLimiter:
 
     def reset(self):
         """Reset the rate limiter."""
-        with self._get_lock():
+        with self._lock:
             self.event_times = []
 
 
@@ -1361,7 +1356,7 @@ def populate_from_transcript(transcript_path: Path, mission_id: str = None) -> D
                     if "timestamp" in record:
                         try:
                             timestamp = datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00"))
-                        except:
+                        except (ValueError, TypeError, AttributeError):
                             pass
 
                     for block in content:

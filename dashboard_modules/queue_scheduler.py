@@ -15,6 +15,8 @@ from flask import Blueprint, jsonify, request
 from pathlib import Path
 import json
 import logging
+import re
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import threading
@@ -30,7 +32,35 @@ from atlasforge_config import MISSION_QUEUE_PATH, STATE_DIR, BASE_DIR
 # Queue lock for thread safety
 _queue_lock = threading.Lock()
 
+
+def _safe_priority_key(x):
+    """Sort key that safely handles mixed int/str priority values."""
+    priority_weights = {"critical": 100, "high": 50, "normal": 0, "low": -50}
+    p = x.get("priority", 0)
+    if isinstance(p, str):
+        return -priority_weights.get(p.lower(), 0)
+    try:
+        return -int(p)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 # SocketIO instance (set by init function)
+
+def _sanitize_project_name(name: str) -> Optional[str]:
+    """Sanitize project name to prevent path traversal."""
+    if not name or not isinstance(name, str):
+        return None
+    # Reject outright if original contains path separators or traversal sequences
+    if '/' in name or '\\' in name or '..' in name:
+        return None
+    sanitized = re.sub(r'[^a-zA-Z0-9_\-.]', '_', name)
+    sanitized = sanitized.lstrip('.')
+    if not sanitized or sanitized in ('..', '.'):
+        return None
+    return sanitized[:100]
+
+
 _socketio = None
 
 
@@ -77,6 +107,10 @@ def _load_queue() -> Dict[str, Any]:
                     data["missions"] = data["queue"]
                 if "missions" not in data:
                     data["missions"] = []
+                # Re-sort on load to ensure consistency after manual edits or version changes
+                data["missions"].sort(
+                    key=lambda x: (_safe_priority_key(x), x.get("scheduled_start") or "9999", x.get("added_at", ""))
+                )
                 if "settings" not in data:
                     data["settings"] = {
                         "auto_start": data.get("enabled", False),
@@ -106,8 +140,13 @@ def _load_queue() -> Dict[str, Any]:
 
 
 def _save_queue(queue: Dict[str, Any]) -> bool:
-    """Save the mission queue to disk."""
+    """Save the mission queue to disk atomically.
+
+    Logs a warning with stack context on failure so callers don't need
+    individual return-value checks — the failure is always auditable.
+    """
     try:
+        from io_utils import atomic_write_json
         queue["last_updated"] = datetime.now().isoformat()
         # Keep both 'queue' and 'missions' keys in sync for compatibility
         if "missions" in queue:
@@ -118,11 +157,12 @@ def _save_queue(queue: Dict[str, Any]) -> bool:
             queue["paused"] = queue["settings"].get("paused", False)
             queue["paused_at"] = queue["settings"].get("paused_at")
             queue["pause_reason"] = queue["settings"].get("pause_reason")
-        with open(MISSION_QUEUE_PATH, 'w') as f:
-            json.dump(queue, f, indent=2)
-        return True
+        result = atomic_write_json(MISSION_QUEUE_PATH, queue)
+        if not result:
+            logger.warning("_save_queue: atomic_write_json returned False", stack_info=True)
+        return result
     except Exception as e:
-        logger.error(f"Error saving queue: {e}")
+        logger.error(f"Error saving queue: {e}", stack_info=True)
         return False
 
 
@@ -182,7 +222,8 @@ def queue_status():
             "next_up": next_up
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error getting queue status: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/lock-status')
@@ -197,7 +238,7 @@ def get_lock_status():
             try:
                 locked_at = datetime.fromisoformat(lock_info["locked_at"])
                 lock_info["age_seconds"] = (datetime.now() - locked_at).total_seconds()
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 lock_info["age_seconds"] = None
 
         return jsonify({
@@ -213,7 +254,8 @@ def get_lock_status():
             "timestamp": datetime.now().isoformat()
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error getting lock status: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/lock-metrics')
@@ -236,7 +278,8 @@ def get_lock_metrics():
             "timestamp": datetime.now().isoformat()
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error getting lock metrics: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/lock-release', methods=['POST'])
@@ -264,7 +307,8 @@ def force_release_lock():
             "error": "Lock module not available"
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error releasing lock: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/add', methods=['POST'])
@@ -279,32 +323,40 @@ def add_to_queue():
         if not problem_statement:
             return jsonify({"error": "Missing problem_statement or mission"}), 400
 
-        # Create queue entry
-        entry = {
-            "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(_load_queue().get('missions', []))}",
-            "problem_statement": problem_statement,
-            "cycle_budget": data.get("cycle_budget", 3),
-            "max_iterations": data.get("max_iterations", 10),
-            "priority": data.get("priority", 0),  # 0 = normal, higher = more urgent
-            "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
-            "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
-            "project_name": data.get("project_name"),  # Optional project name for workspace
-            "added_at": datetime.now().isoformat(),
-            "status": "pending"
-        }
-
         with _queue_lock:
+            # Entry dict construction (including UUID generation) is inside the lock
+            # so that ID generation + queue append are atomic, preventing ID collisions
+            # under concurrent /api/queue/add requests.
+            try:
+                cycle_budget = max(1, min(10, int(data.get("cycle_budget", 3))))
+            except (ValueError, TypeError, OverflowError):
+                cycle_budget = 3
+            try:
+                max_iterations = max(1, min(100, int(data.get("max_iterations", 10))))
+            except (ValueError, TypeError, OverflowError):
+                max_iterations = 10
+            try:
+                priority = max(0, min(100, int(data.get("priority", 0))))
+            except (ValueError, TypeError, OverflowError):
+                priority = 0
+            entry = {
+                "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+                "problem_statement": problem_statement,
+                "cycle_budget": cycle_budget,
+                "max_iterations": max_iterations,
+                "priority": priority,  # clamped to [0, 100]
+                "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
+                "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
+                "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
+                "added_at": datetime.now().isoformat(),
+                "status": "pending"
+            }
             queue = _load_queue()
             queue["missions"].append(entry)
-            # Sort by priority (higher first), then by added_at
+            # Sort by priority (higher first), then by scheduled_start, then by added_at
             # Handle both numeric (legacy) and string priorities
-            priority_weights = {"critical": 100, "high": 50, "normal": 0, "low": -50}
-            def get_priority_weight(p):
-                if isinstance(p, int):
-                    return p
-                return priority_weights.get(str(p).lower(), 0)
             queue["missions"].sort(
-                key=lambda x: (-get_priority_weight(x.get("priority", 0)), x.get("added_at", ""))
+                key=lambda x: (_safe_priority_key(x), x.get("scheduled_start") or "9999", x.get("added_at", ""))
             )
             _save_queue(queue)
 
@@ -317,7 +369,8 @@ def add_to_queue():
             "queue_length": len(queue["missions"])
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error adding to queue: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/remove/<queue_id>', methods=['DELETE'])
@@ -343,7 +396,8 @@ def remove_from_queue(queue_id):
             "queue_length": len(queue["missions"])
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error removing from queue: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/clear', methods=['POST'])
@@ -364,7 +418,8 @@ def clear_queue():
             "cleared_count": cleared_count
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error clearing queue: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/reorder', methods=['POST'])
@@ -383,7 +438,7 @@ def reorder_queue():
             queue = _load_queue()
 
             # Create lookup by id
-            missions_by_id = {m["id"]: m for m in queue["missions"]}
+            missions_by_id = {m.get("id", ""): m for m in queue["missions"] if m.get("id")}
 
             # Reorder based on provided order
             new_missions = []
@@ -405,7 +460,8 @@ def reorder_queue():
             "queue_length": len(queue["missions"])
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error reordering queue: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/next', methods=['POST'])
@@ -458,8 +514,8 @@ def start_next_mission():
 
         mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
-        # Determine workspace based on project_name
-        project_name = next_mission.get("project_name")
+        # Determine workspace based on project_name (sanitized at add-time, but re-sanitize for defense-in-depth)
+        project_name = _sanitize_project_name(next_mission.get("project_name"))
         if project_name:
             # Use project-specific workspace in the main workspace directory
             mission_workspace = str(BASE_DIR / "workspace" / project_name)
@@ -469,8 +525,8 @@ def start_next_mission():
 
         new_mission = {
             "mission_id": mission_id,
-            "problem_statement": next_mission["problem_statement"],
-            "original_problem_statement": next_mission["problem_statement"],
+            "problem_statement": next_mission.get("problem_statement", ""),
+            "original_problem_statement": next_mission.get("problem_statement", ""),
             "preferences": {},
             "success_criteria": [],
             "current_stage": "PLANNING",
@@ -508,7 +564,8 @@ def start_next_mission():
 
         # Write auto-start signal so dashboard's queue_auto_start_watcher starts Claude
         signal_path = STATE_DIR / "queue_auto_start_signal.json"
-        mission_title = (next_mission["problem_statement"][:80] + '...') if len(next_mission["problem_statement"]) > 80 else next_mission["problem_statement"]
+        _ps = next_mission.get("problem_statement", "")
+        mission_title = (_ps[:80] + '...') if len(_ps) > 80 else _ps
         atomic_write_json(signal_path, {
             "action": "start_rd",
             "mission_id": mission_id,
@@ -529,18 +586,18 @@ def start_next_mission():
         except ImportError:
             pass  # websocket_events not available
 
-        # Emit WebSocket update
-        _emit_queue_update(_load_queue())
+        # Emit WebSocket update (use queue loaded inside lock, not a re-load)
+        _emit_queue_update(queue)
 
         return jsonify({
             "status": "started",
             "mission_id": mission_id,
-            "problem_statement": next_mission["problem_statement"][:100] + "...",
+            "problem_statement": (_ps[:100] + "...") if len(_ps) > 100 else _ps,
             "remaining_in_queue": len(queue["missions"])
         })
     except Exception as e:
         logger.error(f"Error starting next mission: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
     finally:
         # Release queue processing lock
         if lock_acquired:
@@ -548,7 +605,7 @@ def start_next_mission():
                 from queue_processing_lock import release_queue_lock
                 release_queue_lock()
             except ImportError:
-                pass
+                logger.debug("queue_processing_lock not available; skipping release")
 
 
 @queue_scheduler_bp.route('/settings', methods=['GET'])
@@ -558,7 +615,8 @@ def get_settings():
         queue = _load_queue()
         return jsonify(queue.get("settings", {}))
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error getting settings: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/settings', methods=['PUT'])
@@ -572,11 +630,22 @@ def update_settings():
         with _queue_lock:
             queue = _load_queue()
 
-            # Update allowed settings
-            allowed = ["auto_start", "max_concurrent", "default_cycle_budget"]
-            for key in allowed:
+            # Update allowed settings with type validation
+            settings_validators = {
+                "auto_start": lambda v: bool(v) if isinstance(v, (bool, int)) else None,
+                "max_concurrent": lambda v: max(1, min(10, int(v))) if isinstance(v, (int, float, str)) and not isinstance(v, bool) else None,
+                "default_cycle_budget": lambda v: max(1, min(10, int(v))) if isinstance(v, (int, float, str)) and not isinstance(v, bool) else None,
+            }
+            for key, validator in settings_validators.items():
                 if key in data:
-                    queue["settings"][key] = data[key]
+                    try:
+                        validated = validator(data[key])
+                    except (TypeError, ValueError, OverflowError):
+                        validated = None
+                    if validated is not None:
+                        queue["settings"][key] = validated
+                    else:
+                        logger.warning(f"Invalid type for setting '{key}': {type(data[key]).__name__}")
 
             _save_queue(queue)
 
@@ -585,7 +654,8 @@ def update_settings():
             "settings": queue["settings"]
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error updating settings: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/from-kb-recommendation', methods=['POST'])
@@ -610,8 +680,8 @@ def add_from_kb_recommendation():
             # The KB stores recommendations in its internal structures
             recs = kb._recommendations if hasattr(kb, '_recommendations') else {}
             rec = recs.get(recommendation_id)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("KB _recommendations lookup failed for %s: %s", recommendation_id, _e)
 
         # Fallback: Try the recommendations engine
         if not rec:
@@ -619,8 +689,8 @@ def add_from_kb_recommendation():
                 from mission_recommendations import get_recommendation_engine
                 engine = get_recommendation_engine()
                 rec = engine.get_recommendation(recommendation_id)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("recommendation_engine lookup failed for %s: %s", recommendation_id, _e)
 
         # Final fallback: Load directly from recommendations.json
         if not rec:
@@ -631,24 +701,34 @@ def add_from_kb_recommendation():
                     if r.get("recommendation_id") == recommendation_id:
                         rec = r
                         break
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("kb_recommendations.json fallback failed for %s: %s", recommendation_id, _e)
 
         if not rec:
             return jsonify({"error": "Recommendation not found"}), 404
 
         # Extract problem statement from the recommendation
         problem_statement = rec.get("problem_statement") or rec.get("title") or "Untitled Mission"
-        cycle_budget = data.get("cycle_budget") or rec.get("complexity_budget") or rec.get("estimated_cycles") or 3
+        cycle_budget_raw = data.get("cycle_budget") or rec.get("complexity_budget") or rec.get("estimated_cycles") or 3
+        try:
+            cycle_budget = max(1, min(10, int(cycle_budget_raw)))
+        except (TypeError, ValueError, OverflowError):
+            cycle_budget = 3
+
+        # Validate priority with type conversion and fallback
+        try:
+            priority_val = max(0, min(10, int(data.get("priority", 1))))
+        except (TypeError, ValueError, OverflowError):
+            priority_val = 1
 
         # Add to queue
         entry = {
-            "id": f"queue_kbrec_{recommendation_id[:8]}_{datetime.now().strftime('%H%M%S')}",
+            "id": f"queue_kbrec_{str(recommendation_id)[:8]}_{datetime.now().strftime('%H%M%S')}",
             "problem_statement": problem_statement,
             "mission_title": rec.get("title", problem_statement[:80]),
             "mission_description": problem_statement,
             "cycle_budget": cycle_budget,
-            "priority": data.get("priority", 1),  # KB recommendations get priority 1 by default
+            "priority": priority_val,
             "source": "kb_recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -659,7 +739,7 @@ def add_from_kb_recommendation():
             queue = _load_queue()
             queue["missions"].append(entry)
             queue["missions"].sort(
-                key=lambda x: (-x.get("priority", 0), x.get("added_at", ""))
+                key=lambda x: (_safe_priority_key(x), x.get("added_at", ""))
             )
             _save_queue(queue)
 
@@ -673,7 +753,7 @@ def add_from_kb_recommendation():
         })
     except Exception as e:
         logger.error(f"Error adding KB recommendation to queue: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/from-recommendation', methods=['POST'])
@@ -697,18 +777,28 @@ def add_from_recommendation():
             return jsonify({"error": "Recommendation not found"}), 404
 
         # Convert to mission and add to queue
-        cycle_budget = data.get("cycle_budget", rec.get("complexity_budget", 3))
+        cycle_budget_raw = data.get("cycle_budget", rec.get("complexity_budget", 3))
+        try:
+            cycle_budget = max(1, min(10, int(cycle_budget_raw)))
+        except (TypeError, ValueError, OverflowError):
+            cycle_budget = 3
         mission_data = engine.convert_to_mission(recommendation_id, cycle_budget=cycle_budget)
 
         if not mission_data:
             return jsonify({"error": "Failed to convert recommendation"}), 500
 
+        # Validate priority with type conversion and fallback
+        try:
+            priority_val = max(0, min(10, int(data.get("priority", 1))))
+        except (TypeError, ValueError, OverflowError):
+            priority_val = 1
+
         # Add to queue
         entry = {
-            "id": f"queue_rec_{recommendation_id}",
+            "id": f"queue_rec_{recommendation_id}_{uuid.uuid4().hex[:8]}",
             "problem_statement": mission_data["problem_statement"],
             "cycle_budget": cycle_budget,
-            "priority": data.get("priority", 1),  # Recommendations get priority 1 by default
+            "priority": priority_val,
             "source": "recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -719,7 +809,7 @@ def add_from_recommendation():
             queue = _load_queue()
             queue["missions"].append(entry)
             queue["missions"].sort(
-                key=lambda x: (-x.get("priority", 0), x.get("added_at", ""))
+                key=lambda x: (_safe_priority_key(x), x.get("added_at", ""))
             )
             _save_queue(queue)
 
@@ -732,7 +822,8 @@ def add_from_recommendation():
             "queue_length": len(queue["missions"])
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error adding recommendation to queue: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -769,7 +860,7 @@ def pause_queue():
         })
     except Exception as e:
         logger.error(f"Error pausing queue: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/resume', methods=['POST'])
@@ -799,7 +890,7 @@ def resume_queue():
         })
     except Exception as e:
         logger.error(f"Error resuming queue: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/pause-state')
@@ -810,7 +901,8 @@ def get_pause_state():
         scheduler = get_scheduler()
         return jsonify(scheduler.get_pause_state())
     except Exception as e:
-        return jsonify({"error": str(e)})
+        logger.error(f"Error getting pause state: {e}")
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -831,7 +923,7 @@ def get_timeline():
         })
     except Exception as e:
         logger.error(f"Error getting timeline: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/estimate/<queue_id>')
@@ -867,7 +959,7 @@ def get_duration_estimate(queue_id):
         })
     except Exception as e:
         logger.error(f"Error getting estimate: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -897,7 +989,7 @@ def get_suggestions():
         })
     except Exception as e:
         logger.error(f"Error getting suggestions: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/suggestions/apply', methods=['POST'])
@@ -929,7 +1021,7 @@ def apply_suggestion():
             })
     except Exception as e:
         logger.error(f"Error applying suggestion: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -955,15 +1047,20 @@ def add_to_queue_enhanced():
             priority_map = {0: "normal", 1: "high", 2: "critical"}
             priority_str = priority_map.get(priority_str, "normal")
 
+        # Validate cycle_budget
+        try:
+            cycle_budget = max(1, min(10, int(data.get("cycle_budget", 3))))
+        except (ValueError, TypeError, OverflowError):
+            cycle_budget = 3
+
         # Get duration estimate
         from mission_queue_scheduler import get_scheduler
         scheduler = get_scheduler()
-        cycle_budget = data.get("cycle_budget", 3)
         estimated_minutes = scheduler.estimate_duration_from_history(problem_statement, cycle_budget)
 
         # Create enhanced queue entry
         entry = {
-            "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(_load_queue().get('missions', []))}",
+            "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
             "problem_statement": problem_statement,
             "mission_title": (problem_statement[:80] + "...") if len(problem_statement) > 80 else problem_statement,
             "mission_description": problem_statement,
@@ -975,10 +1072,10 @@ def add_to_queue_enhanced():
             "estimated_minutes": estimated_minutes,
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),
-            "project_name": data.get("project_name"),  # Optional project name for workspace
+            "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
             "added_at": datetime.now().isoformat(),
             "status": "pending",
-            "tags": data.get("tags", [])
+            "tags": [t for t in data.get("tags", []) if isinstance(t, str)][:20] if isinstance(data.get("tags"), list) else []
         }
 
         # Priority weight for sorting
@@ -990,13 +1087,9 @@ def add_to_queue_enhanced():
             queue["missions"].append(entry)
 
             # Sort by priority weight (higher first), then by scheduled start, then by added_at
-            def sort_key(x):
-                p_weight = priority_weights.get(x.get("priority", "normal"), 0)
-                scheduled = x.get("scheduled_start") or "9999"  # None goes to end
-                added = x.get("added_at", "")
-                return (-p_weight, scheduled, added)
-
-            queue["missions"].sort(key=sort_key)
+            queue["missions"].sort(
+                key=lambda x: (_safe_priority_key(x), x.get("scheduled_start") or "9999", x.get("added_at", ""))
+            )
             _save_queue(queue)
 
         # Emit WebSocket update
@@ -1004,7 +1097,7 @@ def add_to_queue_enhanced():
 
         # Find position in queue
         position = next(
-            (i + 1 for i, m in enumerate(queue["missions"]) if m["id"] == entry["id"]),
+            (i + 1 for i, m in enumerate(queue["missions"]) if m.get("id") == entry.get("id")),
             len(queue["missions"])
         )
 
@@ -1017,7 +1110,7 @@ def add_to_queue_enhanced():
         })
     except Exception as e:
         logger.error(f"Error adding to queue (enhanced): {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/update/<queue_id>', methods=['PUT'])
@@ -1047,29 +1140,49 @@ def update_queue_item(queue_id):
                 "depends_on", "cycle_budget", "tags", "problem_statement",
                 "project_name"
             ]
+            priority_weights = {"critical": 100, "high": 50, "normal": 0, "low": -50}
             for field in allowed_fields:
                 if field in data:
-                    item[field] = data[field]
+                    value = data[field]
+                    # Sanitize project_name to prevent path traversal
+                    if field == "project_name":
+                        value = _sanitize_project_name(value)
+                    # Validate cycle_budget bounds
+                    elif field == "cycle_budget":
+                        try:
+                            value = max(1, min(10, int(value)))
+                        except (ValueError, TypeError, OverflowError):
+                            continue
+                    # Validate priority type
+                    elif field == "priority":
+                        if isinstance(value, str):
+                            if value.lower() not in priority_weights:
+                                continue
+                            value = value.lower()
+                        elif isinstance(value, (int, float)):
+                            value = max(0, min(100, int(value)))
+                        else:
+                            continue
+                    # Validate tags as list of strings
+                    elif field == "tags":
+                        if not isinstance(value, list):
+                            continue
+                        value = [t for t in value if isinstance(t, str)][:20]
+                    item[field] = value
 
-            # Re-estimate duration if cycle_budget changed
-            if "cycle_budget" in data:
+            # Re-estimate duration if cycle_budget changed (use validated value from item)
+            if "cycle_budget" in data and "cycle_budget" in item:
                 from mission_queue_scheduler import get_scheduler
                 scheduler = get_scheduler()
                 item["estimated_minutes"] = scheduler.estimate_duration_from_history(
                     item.get("problem_statement", ""),
-                    data["cycle_budget"]
+                    item["cycle_budget"]
                 )
 
-            # Re-sort queue
-            priority_weights = {"critical": 100, "high": 50, "normal": 0, "low": -50}
-
-            def sort_key(x):
-                p_weight = priority_weights.get(x.get("priority", "normal"), 0)
-                scheduled = x.get("scheduled_start") or "9999"
-                added = x.get("added_at", "")
-                return (-p_weight, scheduled, added)
-
-            queue["missions"].sort(key=sort_key)
+            # Re-sort queue using unified sort key
+            queue["missions"].sort(
+                key=lambda x: (_safe_priority_key(x), x.get("scheduled_start") or "9999", x.get("added_at", ""))
+            )
             _save_queue(queue)
 
         # Emit WebSocket update
@@ -1081,7 +1194,7 @@ def update_queue_item(queue_id):
         })
     except Exception as e:
         logger.error(f"Error updating queue item: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/statistics')
@@ -1095,7 +1208,7 @@ def get_queue_statistics():
         return jsonify(stats)
     except Exception as e:
         logger.error(f"Error getting statistics: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -1177,13 +1290,13 @@ def get_queue_analytics():
     except Exception as e:
         logger.error(f"Error getting queue analytics: {e}")
         return jsonify({
-            "error": str(e),
+            "error": "Internal error",
             "throughput_daily": 0,
             "avg_duration_minutes": 0,
             "success_rate_percent": 0,
             "missions_7d": 0,
             "missions_30d": 0
-        })
+        }), 500
 
 
 # =============================================================================
@@ -1212,7 +1325,7 @@ def get_queue_health():
         conflicts = []
 
         # Build mission lookup for dependency checking
-        mission_ids = {m['id'] for m in missions}
+        mission_ids = {m.get('id') for m in missions if m.get('id')}
 
         for m in missions:
             # Check if blocked by dependency
@@ -1236,19 +1349,19 @@ def get_queue_health():
                                         dep_found = True
                                         dep_status = log_data.get("status", "unknown")
                                         break
-                                except:
-                                    pass
+                                except Exception as e:
+                                    logger.warning("Dependency resolution error for mission: %s", e)
 
                             if dep_found and dep_status not in ["COMPLETE", "completed"]:
                                 blocked.append({
-                                    'id': m['id'],
-                                    'reason': f"Dependency {dep_id[:12]}... failed/incomplete (status: {dep_status})"
+                                    'id': m.get('id', 'unknown'),
+                                    'reason': f"Dependency {str(dep_id)[:12]}... failed/incomplete (status: {dep_status})"
                                 })
                             elif not dep_found:
                                 # Dependency not found anywhere - might be invalid
                                 blocked.append({
-                                    'id': m['id'],
-                                    'reason': f"Dependency {dep_id[:12]}... not found"
+                                    'id': m.get('id', 'unknown'),
+                                    'reason': f"Dependency {str(dep_id)[:12]}... not found"
                                 })
                     except Exception as e:
                         logger.debug(f"Error checking dependency status: {e}")
@@ -1256,25 +1369,40 @@ def get_queue_health():
             # Check if stale
             if m.get('added_at'):
                 try:
-                    added = datetime.fromisoformat(m['added_at'].replace('Z', '+00:00').replace('+00:00', ''))
+                    ts = m['added_at']
+                    for suffix in ('+00:00', 'Z'):
+                        if ts.endswith(suffix):
+                            ts = ts[:-len(suffix)]
+                            break
+                    added = datetime.fromisoformat(ts)
                     hours_queued = (now - added).total_seconds() / 3600
                     if hours_queued > stale_threshold_hours:
                         stale.append({
-                            'id': m['id'],
+                            'id': m.get('id', 'unknown'),
                             'hours_queued': round(hours_queued, 1)
                         })
                 except Exception as e:
                     logger.debug(f"Error parsing added_at: {e}")
 
         # Check for scheduling conflicts (overlapping scheduled_start times)
-        scheduled = [(m['id'], m['scheduled_start']) for m in missions if m.get('scheduled_start')]
+        scheduled = [(m.get('id', ''), m['scheduled_start']) for m in missions if m.get('scheduled_start')]
         scheduled.sort(key=lambda x: x[1])
 
         # Detect overlaps (within 30 min window)
         for i in range(len(scheduled) - 1):
             try:
-                t1 = datetime.fromisoformat(scheduled[i][1].replace('Z', '+00:00').replace('+00:00', ''))
-                t2 = datetime.fromisoformat(scheduled[i+1][1].replace('Z', '+00:00').replace('+00:00', ''))
+                ts1 = scheduled[i][1]
+                for suffix in ('+00:00', 'Z'):
+                    if ts1.endswith(suffix):
+                        ts1 = ts1[:-len(suffix)]
+                        break
+                t1 = datetime.fromisoformat(ts1)
+                ts2 = scheduled[i+1][1]
+                for suffix in ('+00:00', 'Z'):
+                    if ts2.endswith(suffix):
+                        ts2 = ts2[:-len(suffix)]
+                        break
+                t2 = datetime.fromisoformat(ts2)
                 diff_minutes = abs((t2 - t1).total_seconds() / 60)
                 if diff_minutes < 30:
                     conflicts.append({
@@ -1300,13 +1428,13 @@ def get_queue_health():
     except Exception as e:
         logger.error(f"Error getting queue health: {e}")
         return jsonify({
-            'error': str(e),
+            'error': 'Internal error',
             'blocked': [],
             'stale': [],
             'conflicts': [],
             'total_issues': 0,
             'health_score': 100
-        })
+        }), 500
 
 
 # =============================================================================
@@ -1329,14 +1457,14 @@ def get_dependency_tree():
             status = 'ready'
             if m.get('depends_on'):
                 # Check if dependency is in queue
-                dep_in_queue = any(other['id'] == m['depends_on'] for other in missions)
+                dep_in_queue = any(other.get('id') == m['depends_on'] for other in missions)
                 if dep_in_queue:
                     status = 'waiting'
                 else:
                     status = 'blocked'  # Dependency not in queue
 
             nodes.append({
-                'id': m['id'],
+                'id': m.get('id'),
                 'title': (m.get('mission_title') or m.get('problem_statement', ''))[:40],
                 'priority': m.get('priority', 'normal'),
                 'status': status,
@@ -1346,7 +1474,7 @@ def get_dependency_tree():
             if m.get('depends_on'):
                 edges.append({
                     'from': m['depends_on'],
-                    'to': m['id']
+                    'to': m.get('id')
                 })
 
         return jsonify({
@@ -1357,10 +1485,10 @@ def get_dependency_tree():
     except Exception as e:
         logger.error(f"Error getting dependency tree: {e}")
         return jsonify({
-            'error': str(e),
+            'error': 'Internal error',
             'nodes': [],
             'edges': []
-        })
+        }), 500
 
 
 
@@ -1383,7 +1511,7 @@ def list_workspace_projects():
         return jsonify({"projects": projects})
     except Exception as e:
         logger.error(f"Error listing workspace projects: {e}")
-        return jsonify({"projects": [], "error": str(e)})
+        return jsonify({"projects": [], "error": "Internal error"})
 
 
 @queue_scheduler_bp.route('/create-project', methods=['POST'])
@@ -1415,7 +1543,7 @@ def create_workspace_project():
         return jsonify({"status": "created", "name": name, "path": str(workspace_dir)})
     except Exception as e:
         logger.error(f"Error creating workspace project: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal error"}), 500
 
 
 # =============================================================================
@@ -1430,7 +1558,10 @@ def bulk_update_priority():
         if not data:
             return jsonify({"error": "Missing request body"}), 400
 
-        queue_ids = set(data.get('queue_ids', []))
+        raw_ids = data.get('queue_ids', [])
+        if not isinstance(raw_ids, list):
+            return jsonify({"error": "queue_ids must be a list"}), 400
+        queue_ids = {str(qid) for qid in raw_ids if qid is not None}
         priority = data.get('priority', 'normal')
 
         if not queue_ids:
@@ -1445,7 +1576,7 @@ def bulk_update_priority():
         with _queue_lock:
             queue = _load_queue()
             for m in queue.get("missions", []):
-                if m['id'] in queue_ids:
+                if m.get('id') in queue_ids:
                     m['priority'] = priority
                     updated += 1
 
@@ -1471,7 +1602,7 @@ def bulk_update_priority():
         })
     except Exception as e:
         logger.error(f"Error in bulk priority update: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/bulk/delete', methods=['POST'])
@@ -1482,7 +1613,10 @@ def bulk_delete():
         if not data:
             return jsonify({"error": "Missing request body"}), 400
 
-        queue_ids = set(data.get('queue_ids', []))
+        queue_ids_raw = data.get('queue_ids', [])
+        if not isinstance(queue_ids_raw, list):
+            return jsonify({"error": "queue_ids must be a list"}), 400
+        queue_ids = {str(qid) for qid in queue_ids_raw if qid is not None}
         if not queue_ids:
             return jsonify({"error": "No queue_ids provided"}), 400
 
@@ -1490,7 +1624,7 @@ def bulk_delete():
         with _queue_lock:
             queue = _load_queue()
             original = len(queue["missions"])
-            queue["missions"] = [m for m in queue["missions"] if m['id'] not in queue_ids]
+            queue["missions"] = [m for m in queue["missions"] if m.get('id') not in queue_ids]
             deleted = original - len(queue["missions"])
             _save_queue(queue)
 
@@ -1503,7 +1637,7 @@ def bulk_delete():
         })
     except Exception as e:
         logger.error(f"Error in bulk delete: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500
 
 
 @queue_scheduler_bp.route('/bulk/dependency', methods=['POST'])
@@ -1514,7 +1648,10 @@ def bulk_add_dependency():
         if not data:
             return jsonify({"error": "Missing request body"}), 400
 
-        queue_ids = set(data.get('queue_ids', []))
+        queue_ids_raw = data.get('queue_ids', [])
+        if not isinstance(queue_ids_raw, list):
+            return jsonify({"error": "queue_ids must be a list"}), 400
+        queue_ids = {str(qid) for qid in queue_ids_raw if qid is not None}
         depends_on = data.get('depends_on')
 
         if not queue_ids:
@@ -1524,7 +1661,7 @@ def bulk_add_dependency():
         with _queue_lock:
             queue = _load_queue()
             for m in queue.get("missions", []):
-                if m['id'] in queue_ids and m['id'] != depends_on:
+                if m.get('id') in queue_ids and m.get('id') != depends_on:
                     m['depends_on'] = depends_on if depends_on else None
                     updated += 1
             _save_queue(queue)
@@ -1539,4 +1676,4 @@ def bulk_add_dependency():
         })
     except Exception as e:
         logger.error(f"Error in bulk add dependency: {e}")
-        return jsonify({"error": str(e)})
+        return jsonify({"error": "Internal error"}), 500

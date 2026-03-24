@@ -5,7 +5,7 @@ Functional Tests for ContextWatcher
 These tests validate the ContextWatcher against real JSONL data from
 Claude sessions, ensuring threshold detection works correctly.
 
-Run with: python3 -m workspace.ContextWatcher.tests.test_context_watcher
+Run with: python3 -m pytest context_watcher/tests/test_context_watcher.py
 """
 
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from workspace.ContextWatcher.context_watcher import (
+from context_watcher.context_watcher import (
     ContextWatcher,
     TokenState,
     SessionMonitor,

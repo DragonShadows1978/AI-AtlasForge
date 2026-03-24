@@ -11,10 +11,12 @@ gi.require_version('AppIndicator3', '0.1')
 from gi.repository import Gtk, AppIndicator3, GLib
 import subprocess
 import urllib.request
+import ssl
 import json
 import os
 
-DASHBOARD_URL = "http://localhost:5010"
+DASHBOARD_URL = "https://localhost:5010"
+DASHBOARD_SERVICE = "atlasforge"
 CHECK_INTERVAL = 10000  # 10 seconds
 
 class AtlasForgeTrayIndicator:
@@ -78,7 +80,8 @@ class AtlasForgeTrayIndicator:
     def update_status(self):
         try:
             req = urllib.request.Request(f"{DASHBOARD_URL}/api/status", timeout=3)
-            with urllib.request.urlopen(req, timeout=3) as response:
+            ssl_ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=3, context=ssl_ctx) as response:
                 data = json.loads(response.read())
                 stage = data.get("rd_stage", data.get("stage", "Unknown"))
                 mode = data.get("mode", "Unknown")
@@ -103,11 +106,11 @@ class AtlasForgeTrayIndicator:
         subprocess.Popen(["xdg-open", "http://localhost:5002"])
 
     def restart_dashboard(self, _):
-        subprocess.run(["systemctl", "--user", "restart", "atlasforge-dashboard"])
+        subprocess.run(["systemctl", "--user", "restart", DASHBOARD_SERVICE])
         self.status_item.set_label("Status: Restarting...")
 
     def stop_dashboard(self, _):
-        subprocess.run(["systemctl", "--user", "stop", "atlasforge-dashboard"])
+        subprocess.run(["systemctl", "--user", "stop", DASHBOARD_SERVICE])
         self.status_item.set_label("Status: Stopped")
 
     def quit(self, _):

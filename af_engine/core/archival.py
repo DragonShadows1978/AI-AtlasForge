@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -165,7 +165,7 @@ def _get_all_transcript_dirs_for_mission(mission: Dict) -> List[Path]:
 
 
 def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) -> bool:
-    """Return True if candidate workspace matches the expected workspace."""
+    """Return True if candidate workspace is the same as or inside expected workspace."""
     expected = (expected_workspace or "").strip()
     candidate = (candidate_workspace or "").strip()
     if not expected or not candidate:
@@ -177,14 +177,28 @@ def _workspace_paths_match(expected_workspace: str, candidate_workspace: str) ->
         return (
             candidate_path == expected_path
             or expected_path in candidate_path.parents
-            or candidate_path in expected_path.parents
         )
     except OSError:
         return (
             candidate == expected
             or candidate.startswith(expected + os.sep)
-            or expected.startswith(candidate + os.sep)
         )
+
+
+def _is_codex_exec_session_payload(payload: Dict[str, Any]) -> bool:
+    """Return True only for Codex exec/headless session metadata."""
+    if not isinstance(payload, dict):
+        return False
+
+    originator = str(payload.get("originator") or "").strip().lower()
+    source = str(payload.get("source") or "").strip().lower()
+
+    if source and source != "exec":
+        return False
+    if originator and originator != "codex_exec":
+        return False
+
+    return source == "exec" or originator == "codex_exec"
 
 
 def _codex_transcript_matches_workspace(transcript_path: Path, workspace_path: str) -> bool:
@@ -210,6 +224,8 @@ def _codex_transcript_matches_workspace(transcript_path: Path, workspace_path: s
                 payload = record.get("payload", {})
                 if not isinstance(payload, dict):
                     continue
+                if not _is_codex_exec_session_payload(payload):
+                    return False
                 cwd = payload.get("cwd")
                 return _workspace_paths_match(workspace_path, cwd)
     except (OSError, IOError, UnicodeDecodeError):
@@ -330,7 +346,7 @@ def _find_transcripts_in_window(
             matching_files.append(jsonl_file)
             seen_files.add(file_key)
     elif provider in {"codex", "gemini"} and not matching_files:
-        fallback_dirs = transcript_dirs or _get_all_transcript_dirs_for_mission(mission or {})
+        fallback_dirs = _get_all_transcript_dirs_for_mission(mission or {}) if transcript_dirs is None else transcript_dirs
         for transcript_dir in fallback_dirs:
             if not transcript_dir.exists():
                 continue
@@ -424,8 +440,8 @@ def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
                         usage["cache_read_input_tokens"] += _to_int(last_usage.get("cached_input_tokens", 0))
                 except json.JSONDecodeError:
                     continue
-    except Exception as e:
-        logger.warning(f"Error parsing transcript {transcript_path}: {e}")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.error(f"Error parsing transcript {transcript_path}: {e}", exc_info=True)
 
     usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
     return usage
@@ -437,7 +453,7 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
     """Generate manifest.json for the archive."""
     manifest = {
         "mission_id": mission_id,
-        "archived_at": datetime.now().isoformat(),
+        "archived_at": datetime.now(timezone.utc).isoformat(),
         "time_window": {
             "start": start_dt.isoformat(),
             "end": end_dt.isoformat()
@@ -456,11 +472,12 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
 
     for transcript, usage in zip(transcripts, usage_data):
         try:
-            size = transcript.stat().st_size
-            mtime = datetime.fromtimestamp(os.path.getmtime(transcript))
+            archived_path = archive_dir / transcript.name
+            size = archived_path.stat().st_size
+            mtime = datetime.fromtimestamp(os.path.getmtime(archived_path), tz=timezone.utc)
         except OSError:
             size = 0
-            mtime = datetime.now()
+            mtime = datetime.now(timezone.utc)
 
         manifest["transcripts"].append({
             "filename": transcript.name,
@@ -500,27 +517,53 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
         "errors": []
     }
 
+    if not isinstance(mission, dict):
+        result["errors"].append(f"Invalid mission argument: expected dict, got {type(mission).__name__}")
+        return result
+
     try:
         mission_id = mission.get("mission_id")
         if not mission_id:
-            created_at = mission.get("created_at", datetime.now().isoformat())
-            timestamp_clean = created_at.replace(":", "-").replace(".", "-")[:19]
+            created_at = mission.get("created_at")
+            if created_at and isinstance(created_at, str):
+                timestamp_clean = created_at.replace(":", "-").replace(".", "-")[:19]
+            else:
+                timestamp_clean = datetime.now(timezone.utc).isoformat().replace(":", "-").replace(".", "-")[:19]
             mission_id = f"mission_{timestamp_clean}"
+        else:
+            mission_id = str(mission_id)  # Coerce to str for safe Path operations
 
-        try:
-            start_dt = datetime.fromisoformat(mission.get("created_at", datetime.now().isoformat()))
-        except (ValueError, TypeError):
-            logger.warning("Invalid created_at, using epoch")
-            start_dt = datetime(1970, 1, 1)
+        raw_created = mission.get("created_at")
+        if not isinstance(raw_created, str) or not raw_created.strip():
+            result["errors"].append(f"Invalid or missing created_at: {raw_created!r}, using current time")
+            start_dt = datetime.now(timezone.utc)
+        else:
+            try:
+                start_dt = datetime.fromisoformat(raw_created)
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                result["errors"].append(f"Unparseable created_at: {raw_created!r}, using current time")
+                start_dt = datetime.now(timezone.utc)
 
-        try:
-            end_dt = datetime.fromisoformat(mission.get("last_updated", datetime.now().isoformat()))
-        except (ValueError, TypeError):
-            end_dt = datetime.now()
+        raw_updated = mission.get("last_updated")
+        if not isinstance(raw_updated, str) or not raw_updated.strip():
+            end_dt = datetime.now(timezone.utc)
+        else:
+            try:
+                end_dt = datetime.fromisoformat(raw_updated)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                end_dt = datetime.now(timezone.utc)
 
         transcripts = _find_transcripts_in_window(start_dt, end_dt, mission=mission)
 
-        archive_dir = TRANSCRIPTS_ARCHIVE_DIR / mission_id
+        archive_dir = (TRANSCRIPTS_ARCHIVE_DIR / mission_id).resolve()
+        try:
+            archive_dir.relative_to(TRANSCRIPTS_ARCHIVE_DIR.resolve())
+        except ValueError:
+            raise ValueError(f"Invalid mission_id rejected to prevent path traversal: {mission_id!r}")
         archive_dir.mkdir(parents=True, exist_ok=True)
         result["archive_path"] = str(archive_dir)
 
@@ -531,8 +574,9 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
             try:
                 dest_path = archive_dir / transcript.name
                 shutil.copy2(transcript, dest_path)
-                copied_files.append(transcript)
                 usage = _parse_transcript_usage(transcript)
+                # Append both atomically after both operations succeed
+                copied_files.append(transcript)
                 usage_data.append(usage)
                 logger.info(f"Archived transcript: {transcript.name}")
             except Exception as e:
@@ -544,10 +588,15 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
             mission_id, archive_dir, copied_files, usage_data, start_dt, end_dt
         )
         manifest_path = archive_dir / "manifest.json"
-        with open(manifest_path, 'w') as f:
-            json.dump(manifest, f, indent=2)
+        try:
+            with open(manifest_path, 'w') as f:
+                json.dump(manifest, f, indent=2, default=str)
+        except (OSError, TypeError) as e:
+            error_msg = f"Failed to write manifest: {e}"
+            logger.error(error_msg)
+            result["errors"].append(error_msg)
 
-        result["success"] = True
+        result["success"] = len(result["errors"]) == 0
         result["transcripts_archived"] = len(copied_files)
         result["manifest"] = manifest
 
@@ -602,11 +651,8 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
         return result
 
     transcript_files = sorted(archive_dir.glob("*.jsonl"))
-    if not transcript_files:
-        result["success"] = True
-        return result
 
-    mission_data = mission or {}
+    mission_data = mission if isinstance(mission, dict) else {}
     workspace_path = mission_data.get("mission_workspace")
     workspace_resolved: Optional[Path] = None
     if workspace_path:
@@ -617,7 +663,11 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
     mission_started_at: Optional[datetime] = None
     if mission_data.get("created_at"):
         try:
-            mission_started_at = datetime.fromisoformat(mission_data.get("created_at"))
+            parsed_dt = datetime.fromisoformat(mission_data.get("created_at"))
+            # Ensure timezone-aware for safe comparison with other aware datetimes
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+            mission_started_at = parsed_dt
         except (TypeError, ValueError):
             mission_started_at = None
 
@@ -643,7 +693,7 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
                         if change_path != workspace_resolved and workspace_resolved not in change_path.parents:
                             continue
                     except OSError:
-                        pass
+                        continue  # Reject changes with unresolvable paths
 
                 if not code_filter.is_code(change.file_path, change.new_code):
                     continue
@@ -666,12 +716,20 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
         # when transcript extraction yields nothing.
         if result["stored_entries"] == 0 and workspace_resolved and workspace_resolved.exists():
             for file_path in workspace_resolved.rglob("*"):
+                if file_path.is_symlink():
+                    continue
                 if not file_path.is_file():
+                    continue
+                # Containment check: resolved path must stay inside workspace
+                try:
+                    resolved = file_path.resolve()
+                    resolved.relative_to(workspace_resolved)
+                except Exception:
                     continue
 
                 try:
                     if mission_started_at is not None:
-                        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+                        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
                         if file_mtime < mission_started_at:
                             continue
                 except OSError:
@@ -682,7 +740,7 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
                 except (OSError, UnicodeDecodeError):
                     continue
 
-                rel_path = str(file_path)
+                rel_path = str(file_path.relative_to(workspace_resolved))
                 if not code_filter.is_code(rel_path, content):
                     continue
 
@@ -693,7 +751,7 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
                         old_code=None,
                         context="mission_workspace_fallback",
                         session_id=mission_data.get("mission_id"),
-                        timestamp=datetime.now().isoformat(),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                     )
                     result["stored_entries"] += 1
                     result["code_changes"] += 1
@@ -705,7 +763,7 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
         except Exception:
             pass
 
-    result["success"] = True
+    result["success"] = len(result["errors"]) == 0
     return result
 
 
@@ -721,8 +779,16 @@ def rearchive_mission(mission_id: str) -> Dict:
     Returns:
         Dict with archival results
     """
-    mission_log_path = MISSION_LOGS_DIR / f"{mission_id}_report.json"
-    archive_manifest_path = TRANSCRIPTS_ARCHIVE_DIR / mission_id / "manifest.json"
+    mission_log_path = (MISSION_LOGS_DIR / f"{mission_id}_report.json").resolve()
+    try:
+        mission_log_path.relative_to(MISSION_LOGS_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Invalid mission_id rejected to prevent path traversal: {mission_id!r}")
+    archive_manifest_path = (TRANSCRIPTS_ARCHIVE_DIR / mission_id / "manifest.json").resolve()
+    try:
+        archive_manifest_path.relative_to(TRANSCRIPTS_ARCHIVE_DIR.resolve())
+    except ValueError:
+        raise ValueError(f"Invalid mission_id rejected to prevent path traversal: {mission_id!r}")
 
     mission = None
 

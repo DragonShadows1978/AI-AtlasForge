@@ -469,22 +469,20 @@ class HierarchicalExperiment:
                 )
                 stream_thread.start()
 
-            # Write prompt to stdin
-            try:
-                proc.stdin.write(prompt)
-                proc.stdin.close()
-            except Exception:
-                pass
-
             # Wait for process
             stdout_text = ""
             try:
                 if streaming_enabled and stream_file:
+                    try:
+                        proc.stdin.write(prompt)
+                        proc.stdin.close()
+                    except Exception:
+                        pass
                     # Streaming thread handles stdout; just wait for process
                     proc.wait(timeout=timeout)
                     proc.stderr.read() if proc.stderr else ""
                 else:
-                    stdout_text, _ = proc.communicate(timeout=timeout)
+                    stdout_text, _ = proc.communicate(input=prompt, timeout=timeout)
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -910,18 +908,17 @@ class SubagentSpawner:
                 except Exception:
                     pass
 
-            try:
-                proc.stdin.write(prompt)
-                proc.stdin.close()
-            except Exception:
-                pass
-
             stdout_text = ""
             try:
                 if stream_file:
+                    try:
+                        proc.stdin.write(prompt)
+                        proc.stdin.close()
+                    except Exception:
+                        pass
                     proc.wait(timeout=self.timeout_per_subagent)
                 else:
-                    stdout_text, _ = proc.communicate(timeout=self.timeout_per_subagent)
+                    stdout_text, _ = proc.communicate(input=prompt, timeout=self.timeout_per_subagent)
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)

@@ -1,66 +1,266 @@
-# Red Team Report — brt_20260303_181240
-Date: 2026-03-03 18:17:41
+# Red Team Report — brt_20260313_042929
+Date: 2026-03-13 04:39:34
 Agents: 3
-Total Findings: 12
-  Confirmed: 9
-  Suspected: 3
+Total Findings: 63
+  Confirmed: 58
+  Suspected: 5
 
-## CRITICAL (0)
-_None_
+## CRITICAL (4)
+- **`request.get_json()` on POST /api/recommendations returns None when Content-Type**
+  - Code: `dashboard_modules/core.py:725`
+  - `request.get_json()` on POST /api/recommendations returns None when Content-Type is not application/json or body is empty, causing `data.get()` to raise AttributeError (crash 500).
+  - Repro: Send POST /api/recommendations with empty body or Content-Type: text/plain — `data` is None, `data.get("mission_title")` crashes.
+- **`request.get_json()` on POST /api/recommendations/merge returns None when Conten**
+  - Code: `dashboard_modules/core.py:802`
+  - `request.get_json()` on POST /api/recommendations/merge returns None when Content-Type is wrong or body is empty, causing `data.get("source_ids")` to raise AttributeError (crash 500).
+  - Repro: Send POST /api/recommendations/merge with empty body or non-JSON Content-Type.
+- **`on_new_suggestion()` adds `similar_to` key to the recommendation dict (suggesti**
+  - Code: `dashboard_modules/core.py:745-752`
+  - `on_new_suggestion()` adds `similar_to` key to the recommendation dict (suggestion_analyzer.py:713). Then `storage.add(recommendation)` is called with this dict. But `similar_to` is NOT in `ALLOWED_COLUMNS` (suggestion_storage.py:53-61), so `_dict_to_row()` raises `ValueError("Unknown column(s) not allowed: {'similar_to'}")`. This crashes every POST /api/recommendations when the analyzer finds similar items.
+  - Repro: POST /api/recommendations with a title similar to an existing suggestion — auto-tagging adds `similar_to` field, then storage.add() crashes with ValueError, returning 500.
+- **Delete-then-add in merge endpoint is not atomic. If `storage.add(new_rec)` fails**
+  - Code: `dashboard_modules/core.py:834-837`
+  - Delete-then-add in merge endpoint is not atomic. If `storage.add(new_rec)` fails after `storage.delete_multiple(source_ids)` succeeds, the source suggestions are permanently deleted with no merged replacement created. Data loss with no rollback.
+  - Repro: Trigger a merge where `storage.add()` raises an exception (e.g., pass a non-serializable field in `merged_data`). The sources are deleted but nothing replaces them.
 
-## HIGH (3)
-- **The stream thread `_stdout_thread` is started but never joined before `_recon` r**
-  - Code: `/home/vader/AI-AtlasForge/atlasforge_conductor.py:702-764`
-  - The stream thread `_stdout_thread` is started but never joined before `_recon` reads from the same stream file at line 764, creating a time-of-check/time-of-use race where reconstruction may read a partially-written stream file and return an empty or truncated response.
-  - Repro: 1. Enable Claude streaming mode (provider="claude", _stream_file set). 2. Run invoke_llm() with a fast-completing Claude process under CPU load. 3. _recon at line 764 reads _stream_file while _stdout_thread is still writing. blind_agent_runner.py correctly calls stream_thread.join(timeout=5) at line 681 but atlasforge_conductor.py::invoke_llm has no join() call.
-- **The stream_thread started at line 464-470 for HierarchicalFramework worker agent**
-  - Code: `/home/vader/AI-AtlasForge/hierarchical_framework.py:464-526`
-  - The stream_thread started at line 464-470 for HierarchicalFramework worker agents is never joined. The code uses a fixed 0.5-second sleep at line 525 as a heuristic before calling _asm_reconstruct. Under CPU load or slow I/O, the thread may not have flushed all JSONL chunks, causing _asm_reconstruct to return truncated or empty response and silently fail.
-  - Repro: Run hierarchical_framework.py worker agent spawn under CPU load. The 0.5s sleep is insufficient and stream_thread.join() is absent, unlike blind_agent_runner.py which correctly joins.
-- **In invoke_claude with provider="claude", streaming thread t is started at line 6**
-  - Code: `/home/vader/AI-AtlasForge/investigation_engine.py:690-725`
-  - In invoke_claude with provider="claude", streaming thread t is started at line 696 but never joined before _recon reads the stream file at line 725. After proc.wait() returns, the thread may still be writing the final chunks. No join() call exists anywhere in this code path.
-  - Repro: Call invoke_claude(prompt, model=ModelType.CLAUDE_SONNET) with any prompt under load. The stream thread may not have completed by the time _recon reconstructs the response, producing an empty or truncated result.
+## HIGH (21)
+- **`request.get_json()` on PUT /api/recommendations/<id> returns None when Content-**
+  - Code: `dashboard_modules/core.py:940`
+  - `request.get_json()` on PUT /api/recommendations/<id> returns None when Content-Type is wrong, causing `"suggested_cycles" in data` to raise TypeError since `in` operator doesn't work on None.
+  - Repro: Send PUT /api/recommendations/rec_abc with Content-Type: text/plain.
+- **`int(merged_data.get("suggested_cycles", 3))` will raise ValueError if "suggeste**
+  - Code: `dashboard_modules/core.py:826`
+  - `int(merged_data.get("suggested_cycles", 3))` will raise ValueError if "suggested_cycles" is a non-numeric string like "abc". No try/except around this int() conversion in the merge endpoint, unlike the PUT endpoint which has validation.
+  - Repro: POST /api/recommendations/merge with `{"source_ids": ["a","b"], "merged_data": {"mission_title": "test", "suggested_cycles": "abc"}}` — uncaught ValueError from int().
+- **`Math.max(...selectedRecs.map(r => r.suggested_cycles || 3))` returns -Infinity **
+  - Code: `dashboard_static/src/modals.js:682`
+  - `Math.max(...selectedRecs.map(r => r.suggested_cycles || 3))` returns -Infinity when `selectedRecs` is empty (which happens when selectedForMerge has IDs not in the `recommendations` array). This causes NaN propagation in the cycle select.
+  - Repro: 1) Select items in merge picker, 2) The `recommendations` array hasn't been refreshed and doesn't contain those IDs, 3) openMergeModal() produces empty selectedRecs, Math.max() on empty spread returns -Infinity.
+- **`openMergeModal()` filters `recommendations` (the global rec list) by selectedFo**
+  - Code: `dashboard_static/src/modals.js:677`
+  - `openMergeModal()` filters `recommendations` (the global rec list) by selectedForMerge IDs, but the merge picker loads candidates from a separate API call. The `recommendations` array is loaded by `loadRecommendations()` and may be stale or filtered differently (different fields). If IDs don't match, `selectedRecs` is empty and the modal shows "Merging 0 suggestions" with empty fields and -Infinity cycles.
+  - Repro: Open merge picker, select items, then open merge modal without having called loadRecommendations() recently — selectedRecs will be empty.
+- **`int(data.get("cycle_budget", 3))` in the run-recommendation-as-mission endpoint**
+  - Code: `dashboard_modules/core.py:1007`
+  - `int(data.get("cycle_budget", 3))` in the run-recommendation-as-mission endpoint has no try/except. If `cycle_budget` is a non-numeric string like "abc", this raises an uncaught ValueError crashing with 500.
+  - Repro: POST /api/recommendations/<id>/run with `{"cycle_budget": "abc"}` — uncaught ValueError from int().
+- **`calculate_importance_score` receives `cycles` from `suggestion.get('suggested_c**
+  - Code: `suggestion_analyzer.py:223`
+  - `calculate_importance_score` receives `cycles` from `suggestion.get('suggested_cycles', 3)` (line 343). If `suggested_cycles` is stored as a string (e.g., "3"), then `cycles * 2` produces string `"33"`, and `min(10, "33")` raises `TypeError: '<' not supported between instances of 'str' and 'int'` in Python 3. This crashes the entire `on_new_suggestion` and `analyze_all` flow.
+  - Repro: Store a suggestion with `suggested_cycles` as a string via direct JSON API, then call GET /api/recommendations/analyze — prioritizer crashes on string multiplication.
+- **The `find_process` function constructs a pgrep regex pattern using unescaped `sc**
+  - Code: `dashboard_v2.py:231-234`
+  - The `find_process` function constructs a pgrep regex pattern using unescaped `script_name` input: `f"python3.*{script_name}"`. If `script_name` contains regex metacharacters (e.g., `.*`, `(`, `)`, `|`), it becomes a regex injection into the pgrep command, potentially matching unintended processes.
+  - Repro: Call `find_process("conductor|bash")` — the `|bash` part makes pgrep match any bash process, returning wrong PIDs. While `script_name` is currently a hardcoded string, the function's API accepts arbitrary input.
+- **File handle leak: `open(log_file, 'a')` is passed directly to `subprocess.Popen(**
+  - Code: `dashboard_v2.py:447`
+  - File handle leak: `open(log_file, 'a')` is passed directly to `subprocess.Popen(stdout=...)` without being assigned to a variable or wrapped in a context manager. The file descriptor is never explicitly closed in the parent process and leaks until garbage collection (non-deterministic).
+  - Repro: Call `start_claude()` multiple times — each call leaks one file descriptor. Eventually hits system fd limit.
+- **In `api_merge_recommendations`, `int(merged_data.get("suggested_cycles", 3))` ca**
+  - Code: `dashboard_modules/core.py:826`
+  - In `api_merge_recommendations`, `int(merged_data.get("suggested_cycles", 3))` can throw `ValueError` if the user sends a non-numeric string (e.g., `"abc"`). This uncaught exception will produce a 500 error with a stack trace, potentially leaking server internals.
+  - Repro: POST to `/api/recommendations/merge` with `{"source_ids": ["a","b"], "merged_data": {"suggested_cycles": "abc"}}`.
+- **In `api_set_mission_from_recommendation`, `int(data.get("cycle_budget", 3))` can**
+  - Code: `dashboard_modules/core.py:1007`
+  - In `api_set_mission_from_recommendation`, `int(data.get("cycle_budget", 3))` can throw `ValueError` if the user sends a non-numeric string. This is outside any try/except block, so it would produce a raw 500 error with stack trace.
+  - Repro: POST to `/api/recommendations/<rec_id>/set-mission` with `{"cycle_budget": "not_a_number"}`.
+- **In `api_narrative_mission`, `story_title` from user JSON input is used to constr**
+  - Code: `dashboard_modules/core.py:378`
+  - In `api_narrative_mission`, `story_title` from user JSON input is used to construct a filesystem path via `story_title.replace(" ", "_").replace("/", "-")[:50]`. The sanitization is incomplete — it does not strip `..`, null bytes, or other path-traversal characters like `\`. A crafted `story_title` could create directories outside the intended base path.
+  - Repro: POST to `/api/narrative-autonomous/mission` with `{"story_number": 1, "story_title": "..\\\\..\\\\..\\\\tmp\\\\evil"}` — on systems where `\\` is part of a valid path component this could traverse directories.
+- **XSS via tag injection. Auto-tags from server are interpolated into HTML without **
+  - Code: `dashboard_static/src/modals.js:226-228`
+  - XSS via tag injection. Auto-tags from server are interpolated into HTML without escapeHtml: ``<span class="rec-tag-badge ${tag}">${tag}</span>``. If an auto_tag contains HTML/JS (e.g., `"><img src=x onerror=alert(1)>`), it will execute in the user's browser. The tag value is used both as a CSS class and as inner text without escaping.
+  - Repro: Create a recommendation with auto_tags containing `"><script>alert('xss')</script>` — the tag content is rendered unescaped in the recommendation list.
+- **XSS via rec.id injection. The onclick handler uses `window.openRecModal('${rec.i**
+  - Code: `dashboard_static/src/modals.js:244`
+  - XSS via rec.id injection. The onclick handler uses `window.openRecModal('${rec.id}')` with the recommendation ID directly interpolated into the HTML string. If rec.id contains a single quote (e.g., `'); alert('xss'); //`), it breaks out of the string literal and executes arbitrary JavaScript.
+  - Repro: If a recommendation ID somehow contains `'); alert(document.cookie); //`, clicking any recommendation triggers XSS.
+- **XSS via item.id injection in merge candidate checkboxes. `data-rec-id="${item.id**
+  - Code: `dashboard_static/src/modals.js:581`
+  - XSS via item.id injection in merge candidate checkboxes. `data-rec-id="${item.id}"` and `window.toggleMergeSelection('${item.id}')` interpolate the item ID directly into HTML attributes and onclick handlers without escaping. A crafted ID with quotes could inject attributes or script.
+  - Repro: If item.id contains `' onmouseover='alert(1)' data-x='`, the checkbox attribute injection executes JavaScript.
+- **`request.get_json()` returns `None` when the request body is missing or has wron**
+  - Code: `dashboard_modules/core.py:802`
+  - `request.get_json()` returns `None` when the request body is missing or has wrong Content-Type, causing `AttributeError: 'NoneType' object has no attribute 'get'` on line 803.
+  - Repro: Send POST to `/api/recommendations/merge` with no body or with Content-Type: text/plain.
+- **`openMergeModal` looks up selected IDs in the module-level `recommendations` arr**
+  - Code: `dashboard_static/src/modals.js:677`
+  - `openMergeModal` looks up selected IDs in the module-level `recommendations` array, but `recommendations` can be a filtered subset (line 1122 reassigns `recommendations = filtered`). If a user has an active tag/health filter, candidates selected in the merge picker (which shows ALL suggestions) won't be found in the filtered `recommendations`, making `selectedRecs` empty or incomplete. This causes empty merge previews, empty `combinedTitle`, and `Math.max(...[])` returning `-Infinity`.
+  - Repro: Apply a tag filter so `recommendations` is a subset. Open merge picker (which loads all candidates), select items not in the filtered set, click "Merge Selected".
+- **`request.get_json()` in `api_add_recommendation` returns `None` when Content-Typ**
+  - Code: `dashboard_modules/core.py:725`
+  - `request.get_json()` in `api_add_recommendation` returns `None` when Content-Type is not application/json or body is empty. Line 730 then calls `data.get(...)` on `None`, raising `AttributeError`.
+  - Repro: Send POST to `/api/recommendations` with no JSON body or wrong Content-Type header.
+- **`escapeHtml()` uses `textContent`→`innerHTML` which does NOT escape double quote**
+  - Code: `dashboard_static/src/modals.js:694`
+  - `escapeHtml()` uses `textContent`→`innerHTML` which does NOT escape double quotes. The `combinedTitle` (derived from user-editable `mission_title` values) is injected into `value="${escapeHtml(combinedTitle)}"`. A title containing a double quote breaks out of the attribute, enabling HTML attribute injection / stored XSS. Same issue affects lines 698 (textarea), 703 (textarea), and the `data-title` attribute on line 579.
+  - Repro: Create two suggestions with titles like `Test" onmouseover="alert(1)`. Select both for merge. The merge modal renders with broken HTML attribute allowing script execution.
+- **`executeMerge()` does not disable the "Merge & Create" button or guard against d**
+  - Code: `dashboard_static/src/modals.js:735-771`
+  - `executeMerge()` does not disable the "Merge & Create" button or guard against double-submission while the async API call is in-flight. Rapid double-click sends two identical merge requests. The first deletes sources and creates a merged record. The second creates a DUPLICATE merged record (sources already deleted, `delete_multiple` returns 0 but doesn't error).
+  - Repro: Select suggestions, click "Merge & Create" button rapidly twice. Observe two merged records created in the database.
+- **`source_ids` from client JSON has no type validation — if the client sends a str**
+  - Code: `dashboard_modules/core.py:803-807`
+  - `source_ids` from client JSON has no type validation — if the client sends a string instead of a list, `len()` returns the string length (possibly >= 2), and the `for source_id in source_ids` loop iterates over individual characters, querying `storage.get_by_id()` with single characters. Also, duplicate IDs in the list are not deduplicated, allowing a user to "merge" a suggestion with itself.
+  - Repro: Send POST to `/api/recommendations/merge` with `{"source_ids": "abcdef", "merged_data": {}}`. Or send `{"source_ids": ["rec_abc", "rec_abc"], ...}` to merge an item with itself.
+- **`request.get_json()` in `api_update_recommendation` (PUT endpoint) returns `None**
+  - Code: `dashboard_modules/core.py:940`
+  - `request.get_json()` in `api_update_recommendation` (PUT endpoint) returns `None` when Content-Type is wrong or body is empty. Line 943 then does `if "suggested_cycles" in data` on `None`, raising `TypeError: argument of type 'NoneType' is not iterable`.
+  - Repro: Send PUT to `/api/recommendations/<rec_id>` with no JSON body or wrong Content-Type header.
 
-## MODERATE (6)
-- **_safe_filename only strips CR and LF characters but does not strip semicolons, d**
-  - Code: `/home/vader/AI-AtlasForge/dashboard_modules/investigation.py:431-433`
-  - _safe_filename only strips CR and LF characters but does not strip semicolons, double quotes, or other characters that allow Content-Disposition parameter injection. A filename like 'foo; type=text/html' passes through unchanged, allowing injection of extra parameters into the Content-Disposition header.
-  - Repro: Access /api/investigation/<id>/export?format=pdf with investigation_id value containing '; type=text/html'. The resulting header becomes: Content-Disposition: attachment; filename=investigation_foo; type=text/html.pdf which some HTTP clients parse as setting Content-Type.
-- **MutationTester.__init__ does not validate that max_mutants is positive. Passing **
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/mutation_testing.py:317-333`
-  - MutationTester.__init__ does not validate that max_mutants is positive. Passing max_mutants=0 causes the generate_mutants() condition at line 357 to always be True (any non-empty list > 0), then k = min(0, len) = 0, and random.sample(indexed_mutations, 0) returns an empty list, silently producing zero mutants with no error. Passing max_mutants=-5 avoids the branch entirely because no list len > -5 is False — meaning all mutations are used, silently overriding the intended limit.
-  - Repro: MutationTester(max_mutants=0).generate_mutants("x = 1 + 2") returns [] with no warning. MutationTester(max_mutants=-1).generate_mutants(valid_code) returns ALL mutations instead of respecting the limit.
-- **MutationTester.__init__ does not validate that sample_ratio is in the range (0, **
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/mutation_testing.py:317-333`
-  - MutationTester.__init__ does not validate that sample_ratio is in the range (0, 1]. Passing sample_ratio=0.0 triggers the < 1.0 branch (line 513), computes sample_size = max(1, int(len * 0.0)) = 1, and silently samples exactly 1 mutant. Passing sample_ratio=-0.5 also triggers the branch and also samples exactly 1 mutant due to the max(1,...) guard. Callers expecting a "no sample" behavior from sample_ratio=0.0 get unexpected results.
-  - Repro: MutationTester(sample_ratio=0.0) with 100 mutants samples exactly 1 instead of 0 or raising an error.
-- **subprocess.TimeoutExpired causes mutant.killed = True with no error flag set. Ti**
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/mutation_testing.py:449-450`
-  - subprocess.TimeoutExpired causes mutant.killed = True with no error flag set. Timed-out mutants are counted as "killed" in the mutation score (line 525: killed = sum(m.killed and not m.error)), inflating the score. A timeout means the test suite hung — not that the tests detected the mutation. The mutation score is therefore overestimated when timeout occurs.
-  - Repro: Create a mutant that causes the test suite to hang. test_mutant() times out, sets killed=True, and the score calculation at line 531 counts it as a genuine kill, inflating mutation_score.
-- **InputGenerator.dicts() does not have a count <= 0 guard, unlike integers(), stri**
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/property_testing.py:307-329`
-  - InputGenerator.dicts() does not have a count <= 0 guard, unlike integers(), strings(), lists(), and floats() which all guard against zero/negative count. Calling dicts(count=0) or dicts(count=-1) still returns the 6 hard-coded edge cases instead of an empty list, violating the consistent API contract. Code that calls dicts() with count=0 expecting an empty list receives 6 items.
-  - Repro: InputGenerator().dicts(count=0) returns a non-empty list of 6 GeneratedInput items instead of [].
-- **In test_property, count_per_type = max(1, self.max_inputs // len(input_types)). **
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/property_testing.py:440-449`
-  - In test_property, count_per_type = max(1, self.max_inputs // len(input_types)). If input_types is an empty list [], the early return at line 444 guards against the division. However if input_types contains unknown types (not "int", "str", "float", "list") the type-dispatch loop at lines 451-458 silently adds zero inputs for those types. total_inputs in run_property_testing (line 614) still adds self.max_inputs for each property even when zero inputs were generated, causing total_inputs_generated to be inflated and inaccurate.
-  - Repro: Call test_property with property_spec containing input_types=["dict"] (not in dispatch list). inputs remains empty, no violations found, but total_inputs_generated counts self.max_inputs anyway.
+## MODERATE (30)
+- **`parseInt(document.getElementById('merge-cycles').value)` returns NaN if the use**
+  - Code: `dashboard_static/src/modals.js:741`
+  - `parseInt(document.getElementById('merge-cycles').value)` returns NaN if the user somehow clears the select or the DOM is manipulated. This NaN is sent to the backend as `suggested_cycles: NaN`, which JSON serializes to `null`, causing the backend `int()` call to raise TypeError.
+  - Repro: Manipulate the merge-cycles select value to empty string via devtools, then click Merge — NaN is sent to server.
+- **POST /api/recommendations accepts `suggested_cycles` directly from user input wi**
+  - Code: `dashboard_modules/core.py:732`
+  - POST /api/recommendations accepts `suggested_cycles` directly from user input with no validation — it passes raw value from `data.get("suggested_cycles", 3)` to the recommendation dict. If client sends `suggested_cycles: -1` or `suggested_cycles: 999999`, it is stored. While SQLite has a CHECK constraint (1-10), the JSON fallback path (line 774) has no such constraint.
+  - Repro: POST /api/recommendations with `{"mission_title": "test", "suggested_cycles": -1}` — SQLite rejects but JSON fallback would accept.
+- **The merge endpoint accepts `source_ids` and `delete_sources` from user input wit**
+  - Code: `dashboard_modules/core.py:803-805`
+  - The merge endpoint accepts `source_ids` and `delete_sources` from user input without type validation. If `source_ids` is a string instead of a list, `len(source_ids) < 2` passes for any string of length >= 2, then `delete_multiple` receives a string which gets iterated character by character as placeholders.
+  - Repro: POST /api/recommendations/merge with `{"source_ids": "abcdef", "merged_data": {"mission_title": "test"}}` — len("abcdef") is 6, passes the >= 2 check, then delete_multiple iterates over individual characters.
+- **In `renderMergeCandidates`, the checkbox `onchange` handler injects `item.id` di**
+  - Code: `dashboard_static/src/modals.js:581`
+  - In `renderMergeCandidates`, the checkbox `onchange` handler injects `item.id` directly into an inline JS string: `onchange="window.toggleMergeSelection('${item.id}')"`. If `item.id` contains a single quote (e.g., `rec_'); alert('xss`), it breaks out of the string literal enabling XSS.
+  - Repro: Create a suggestion with crafted id containing single quote (requires direct DB manipulation or API exploit), then open merge picker — JS injection executes.
+- **`document.getElementById('merge-candidates-modal').style.display = 'flex'` in `s**
+  - Code: `dashboard_static/src/modals.js:990`
+  - `document.getElementById('merge-candidates-modal').style.display = 'flex'` in `showMergeCandidatesPrompt` does not null-check the element. If the DOM element is missing (template not loaded), this throws a TypeError crashing the function silently after the suggestion was already added.
+  - Repro: Call showMergeCandidatesPrompt when merge-candidates-modal element doesn't exist in DOM (e.g., in a trimmed/mobile template).
+- **In api_narrative_chat (POST), `request.get_json()` is called without `or {}` fal**
+  - Code: `dashboard_modules/core.py:348-349`
+  - In api_narrative_chat (POST), `request.get_json()` is called without `or {}` fallback (line 348). If the request body is not valid JSON, `data` is None and `data.get('message', '')` crashes with AttributeError.
+  - Repro: POST /api/narrative-autonomous/chat with non-JSON body.
+- **In the narrative mission POST handler, `request.get_json()` is called without `o**
+  - Code: `dashboard_modules/core.py:368`
+  - In the narrative mission POST handler, `request.get_json()` is called without `or {}` fallback. If body is not valid JSON, `data` is None and all subsequent `data.get()` calls crash.
+  - Repro: POST /api/narrative-autonomous/mission with Content-Type: text/plain.
+- **In `get_merge_candidates`, if a suggestion has both `mission_title` and `mission**
+  - Code: `suggestion_analyzer.py:447-451`
+  - In `get_merge_candidates`, if a suggestion has both `mission_title` and `mission_description` as empty strings, `suggestion_words` becomes `set([''])` (a set with one empty string element). This phantom empty-string token creates false positive matches with any other suggestion that also has empty fields, since `set(['']) & set([''])` has intersection 1.
+  - Repro: Create two suggestions with empty title and empty description — they will always be flagged as merge candidates despite having no meaningful content.
+- **The `api_mission_log_detail` route uses user-supplied `mission_id` directly in a**
+  - Code: `dashboard_modules/core.py:1165`
+  - The `api_mission_log_detail` route uses user-supplied `mission_id` directly in a glob pattern (`f"{mission_id}*.json"`) without sanitization. A malicious mission_id containing glob metacharacters (e.g., `*`, `?`, `[`, `]`) or path traversal sequences (`../`) could match unintended files outside the mission_logs directory.
+  - Repro: Send GET request to `/api/mission-logs/../../../etc/passwd` — the glob pattern becomes `../../../etc/passwd*.json`. While the `*.json` suffix limits exploitation, path traversal with crafted names can still leak directory contents.
+- **Bare `except:` clause (no exception type) at line 225 catches all exceptions inc**
+  - Code: `dashboard_v2.py:225`
+  - Bare `except:` clause (no exception type) at line 225 catches all exceptions including KeyboardInterrupt and SystemExit. This swallows critical exceptions and makes debugging impossible.
+  - Repro: Any non-standard exception in the /proc cmdline read path is silently swallowed.
+- **Second bare `except:` clause at line 241 in the pgrep fallback catches all excep**
+  - Code: `dashboard_v2.py:241`
+  - Second bare `except:` clause at line 241 in the pgrep fallback catches all exceptions including KeyboardInterrupt and SystemExit, silently returning None.
+  - Repro: If subprocess.run raises a non-Exception error, it is silently swallowed.
+- **In `api_merge_candidates`, the `except Exception` at line 771 silently swallows **
+  - Code: `dashboard_modules/core.py:771`
+  - In `api_merge_candidates`, the `except Exception` at line 771 silently swallows all storage errors and returns an empty list, making it impossible for callers to know whether the result is genuinely empty or an error occurred. No error is logged either.
+  - Repro: If the SQLite database is corrupted or locked, the endpoint returns `{"candidates": [], "total": 0}` with HTTP 200, indistinguishable from an empty database.
+- **In `api_narrative_mission`, `story_number` from user JSON is used in an f-string**
+  - Code: `dashboard_modules/core.py:369-380`
+  - In `api_narrative_mission`, `story_number` from user JSON is used in an f-string `f"{story_number:03d}"` with `:03d` format spec, which requires an integer. If a string like `"abc"` is passed, this raises `ValueError`. If a very large number is passed, `story_number:03d` produces unbounded string. No type validation is performed.
+  - Repro: POST to `/api/narrative-autonomous/mission` with `{"story_number": "abc", "story_title": "test"}`.
+- **In `api_add_recommendation`, `request.get_json()` is called without `silent=True**
+  - Code: `dashboard_modules/core.py:725`
+  - In `api_add_recommendation`, `request.get_json()` is called without `silent=True` and without checking for None return. If the request has invalid JSON or missing Content-Type header, `data` will be None and subsequent `data.get(...)` calls will raise `AttributeError`.
+  - Repro: POST to `/api/recommendations` with body `not-valid-json` and Content-Type `application/json`.
+- **Multiple API endpoints return `str(e)` in JSON error responses. This can leak in**
+  - Code: `dashboard_modules/core.py:638, 715, 761, 842, 861, 878, 896, 914, 930, 993, 1015`
+  - Multiple API endpoints return `str(e)` in JSON error responses. This can leak internal server paths, database schemas, module names, and stack trace details to the client. In production, exceptions should be logged server-side with a generic error returned to the client.
+  - Repro: Trigger any error in the recommendation endpoints (e.g., corrupted database) — the full Python exception message is returned to the frontend.
+- **XSS via mission_id injection in GlassBox sidebar. `m.mission_id` is interpolated**
+  - Code: `dashboard_static/src/main.js:478`
+  - XSS via mission_id injection in GlassBox sidebar. `m.mission_id` is interpolated directly into HTML via innerHTML without escaping: `<option value="${m.mission_id}">${m.mission_id}...`. If a mission_id contains HTML metacharacters, it would be rendered as HTML in the select dropdown.
+  - Repro: Archive a mission with an ID containing `<img src=x onerror=alert(1)>` — the innerHTML injection renders the tag.
+- **In `api_merge_recommendations`, `request.get_json()` is called without `silent=T**
+  - Code: `dashboard_modules/core.py:802`
+  - In `api_merge_recommendations`, `request.get_json()` is called without `silent=True` and without null check. If the request has invalid JSON, Flask raises a 400 error by default, but if Content-Type is wrong, `get_json()` returns None and `data.get("source_ids", [])` raises `AttributeError: 'NoneType' object has no attribute 'get'`, producing an unhandled 500.
+  - Repro: POST to `/api/recommendations/merge` with Content-Type `text/plain` and any body.
+- **Two nested bare `except:` clauses in `get_recent_journal` (lines 416 and 418) sw**
+  - Code: `dashboard_v2.py:416-418`
+  - Two nested bare `except:` clauses in `get_recent_journal` (lines 416 and 418) swallow all exceptions including KeyboardInterrupt and SystemExit. Any error parsing journal entries is silently ignored, making it impossible to debug data corruption.
+  - Repro: Corrupt a journal JSON entry — the error is silently swallowed and the entry disappears from the UI with no logging.
+- **Bare `except:` clause in the chat polling loop initialization at line 1869 swall**
+  - Code: `dashboard_v2.py:1869`
+  - Bare `except:` clause in the chat polling loop initialization at line 1869 swallows all exceptions including SystemExit and KeyboardInterrupt, preventing clean shutdown.
+  - Repro: Send SIGINT during chat history initialization — it's silently caught.
+- **XSS via health_status injection. `healthStatus` from server data is interpolated**
+  - Code: `dashboard_static/src/modals.js:240`
+  - XSS via health_status injection. `healthStatus` from server data is interpolated as both a CSS class and inner text content without escaping: ``<span class="rec-health-badge ${healthStatus}">${healthStatus.replace('_', ' ')}</span>``. If health_status contains HTML metacharacters, they will be rendered. The server-side CHECK constraint limits this to known values, but the frontend does not validate.
+  - Repro: If a malicious health_status value bypasses the server CHECK constraint (or is injected into the SQLite database), it renders unescaped HTML.
+- **In `api_mission_log_detail`, the error handler at line 1170-1171 returns `str(e)**
+  - Code: `dashboard_modules/core.py:1170`
+  - In `api_mission_log_detail`, the error handler at line 1170-1171 returns `str(e)` to the client: `return jsonify({"error": f"Error reading log: {e}"}), 500`. This leaks internal file paths and error details.
+  - Repro: Cause a read error on a mission log file — the full exception message including file paths is returned to the client.
+- **`Math.max(...selectedRecs.map(r => r.suggested_cycles || 3))` returns `-Infinity**
+  - Code: `dashboard_static/src/modals.js:682`
+  - `Math.max(...selectedRecs.map(r => r.suggested_cycles || 3))` returns `-Infinity` when `selectedRecs` is empty (due to the filtering bug above). This causes the cycle dropdown to have no option selected, defaulting to "1 cycle" which is not the intended behavior.
+  - Repro: Trigger `openMergeModal()` when `selectedRecs` resolves to an empty array.
+- **Cycle budget `<select>` uses overlapping conditions: `maxCycles >= 5` and `maxCy**
+  - Code: `dashboard_static/src/modals.js:709-713`
+  - Cycle budget `<select>` uses overlapping conditions: `maxCycles >= 5` and `maxCycles >= 10`. When `maxCycles` is 10 or greater, BOTH option 5 and option 10 get the `selected` attribute. Browser picks the last one (10), which happens to be correct for that case, but for `maxCycles` values like 4, 6, 7, 8, 9 the wrong option is selected (5 cycles for 6-9, none for 4). For values 1 or 2, no option is selected and it defaults to 1.
+  - Repro: Merge suggestions where the max `suggested_cycles` among sources is 7. The dropdown selects "5 cycles" instead of something sensible.
+- **When the merge picker filter hides items, previously selected hidden items remai**
+  - Code: `dashboard_static/src/modals.js:614-618 vs 632-638`
+  - When the merge picker filter hides items, previously selected hidden items remain in `selectedForMerge` but become invisible/uncontrollable by the user. The "Select All" button only adds visible items, but the Set retains hidden selections. Users can unknowingly merge items they can't see in the filtered view.
+  - Repro: Select 3 items, then type a filter that hides 2 of them. The hidden 2 remain in `selectedForMerge`. Click "Merge Selected" — all 3 are merged including the hidden ones.
+- **Merge endpoint does not validate that all `source_ids` actually exist in storage**
+  - Code: `dashboard_modules/core.py:810-820`
+  - Merge endpoint does not validate that all `source_ids` actually exist in storage. If some IDs are invalid or already deleted (e.g., double-click race), `source_descriptions` will be shorter than `source_ids`. The merge proceeds silently with incomplete provenance data. No error is returned to the client.
+  - Repro: Submit a merge request with one valid and one non-existent source_id. The merge succeeds but `merged_source_descriptions` only contains data for the valid one.
+- **`showMergeCandidatesPrompt` looks up `candidateIds` in the `recommendations` arr**
+  - Code: `dashboard_static/src/modals.js:963-991`
+  - `showMergeCandidatesPrompt` looks up `candidateIds` in the `recommendations` array (line 970). But `recommendations` may be filtered (line 1122). If the similar suggestions happen to be filtered out, `candidates` array is empty, and the modal shows "Your new suggestion is similar to 0 existing suggestion(s)" with an empty list, which is confusing and misleading.
+  - Repro: Add a new suggestion that's similar to an existing one that is hidden by the current tag/health filter. The prompt shows but with 0 candidates.
+- **`proceedToMerge()` calls `closeMergeCandidatesModal()` which removes `modal-open**
+  - Code: `dashboard_static/src/modals.js:1008-1015`
+  - `proceedToMerge()` calls `closeMergeCandidatesModal()` which removes `modal-open` class from body (via `removeModalOpenClass()` seeing no visible modals). Then `openMergeModal()` shows the merge modal but never re-adds `modal-open` class. On mobile, this loses the z-index/scroll-lock fix, causing background scroll and layout issues.
+  - Repro: Trigger auto-prompt by adding a suggestion with similar matches, click "Merge Suggestions" in the merge-candidates prompt modal. Observe on mobile that body scroll is not locked.
+- **`item.id` is interpolated unescaped into the `onchange` HTML attribute: `onchang**
+  - Code: `dashboard_static/src/modals.js:581`
+  - `item.id` is interpolated unescaped into the `onchange` HTML attribute: `onchange="window.toggleMergeSelection('${item.id}')"`. If an ID contains a single quote (e.g., via a crafted API call or database manipulation), this is an HTML attribute injection / stored XSS vector. The `data-rec-id` attribute is similarly unescaped.
+  - Repro: Insert a suggestion with id containing `'); alert('XSS` into the database, then open the merge picker.
+- **`api_merge_candidates()` falls back to `io_utils.atomic_read_json(RECOMMENDATION**
+  - Code: `dashboard_modules/core.py:774`
+  - `api_merge_candidates()` falls back to `io_utils.atomic_read_json(RECOMMENDATIONS_PATH)` when SQLite storage is unavailable, but this JSON file uses a different data format and may not have the same fields (e.g., `auto_tags`, `priority_score`). The fallback path was designed for the old JSON-based storage and may return items with missing/different fields, causing frontend rendering issues.
+  - Repro: Run dashboard without SQLite storage backend available. Open merge picker — items may lack auto_tags, priority_score, etc.
+- **`delete_multiple()` and `storage.add()` run as separate SQLite transactions (sep**
+  - Code: `dashboard_modules/core.py:836-837`
+  - `delete_multiple()` and `storage.add()` run as separate SQLite transactions (separate `_get_connection()` calls). Between the two, concurrent readers (e.g., the dashboard polling `/api/recommendations`) see an inconsistent state where source suggestions are deleted but the merged replacement doesn't exist yet. This creates a brief window of data "disappearance".
+  - Repro: Start a merge of suggestions while the dashboard is polling. During the window between delete_multiple and add, the polling response will be missing both the source records and the merged record.
 
-## LIGHT (0)
-_None_
+## LIGHT (3)
+- **`selectAllForMerge` only selects visible (not hidden) checkboxes but adds their **
+  - Code: `dashboard_static/src/modals.js:614-618`
+  - `selectAllForMerge` only selects visible (not hidden) checkboxes but adds their IDs to `selectedForMerge`. If user filters, selects all, then clears filter, the hidden items are not selected but their checkboxes show unchecked while selectedForMerge still contains them. Actually the reverse: items hidden during selectAll are not added, but if user previously manually selected some, then filters and does selectAll, the previously-selected hidden items remain in the Set but their checkboxes are unchecked.
+  - Repro: 1) Manually check item A, 2) Type a filter that hides item A, 3) Click "Select All" — selectedForMerge now has item A (from step 1) plus all visible items, but item A's checkbox is unchecked (inconsistent state).
+- **`filterMergeCandidates` hides/shows items by `data-title` attribute but does not**
+  - Code: `dashboard_static/src/modals.js:632-638`
+  - `filterMergeCandidates` hides/shows items by `data-title` attribute but does not update `selectedForMerge` set. Hidden items remain in the set if previously selected. When proceeding to merge, hidden (filtered-out) items will still be included in the merge operation, which is confusing.
+  - Repro: Select 3 items, filter to hide 1 of them, proceed to merge — all 3 are still merged even though only 2 are visible.
+- **In `api_mission_logs`, the `except Exception: continue` at line 1152 silently sk**
+  - Code: `dashboard_modules/core.py:1152`
+  - In `api_mission_logs`, the `except Exception: continue` at line 1152 silently skips corrupted log files without any logging. If multiple log files are corrupted, the user sees a shorter list with no indication that data was lost.
+  - Repro: Corrupt a mission log JSON file — it silently disappears from the list with no error message or log entry.
 
 ## NONBLOCKING (0)
 _None_
 
-## SUSPECTED (3)
-- **[SUSPECTED] When HAS_RESPONSE_ADAPTER is False and JSON parsing fails, timeout_ret**
-  - Code: `/home/vader/AI-AtlasForge/atlasforge_conductor.py:2060-2083`
-  - When HAS_RESPONSE_ADAPTER is False and JSON parsing fails, timeout_retries is incremented at line 2072 for what is actually a parse failure, not a transport-level timeout. After MAX_CLAUDE_RETRIES=3 parse failures in a row with no adapter, the mission halts. This conflates transport failures with parse failures. Cannot fully confirm all code paths without running under no-adapter conditions.
-- **[SUSPECTED] In the markdown export path, user-controlled values (query, status, ta**
-  - Code: `/home/vader/AI-AtlasForge/dashboard_modules/investigation.py:1132-1148`
-  - In the markdown export path, user-controlled values (query, status, tags) are embedded directly into md_header without any escaping. If these contain markdown injection characters (e.g. LaTeX-style math, raw HTML, or script tags) and the markdown is later auto-rendered to HTML by a downstream consumer, XSS is possible. Cannot confirm downstream rendering without tracing the full display pipeline.
-- **[SUSPECTED] _asm_complete is called after a time.sleep(0.3) to "let streaming thre**
-  - Code: `/home/vader/AI-AtlasForge/adversarial_testing/blind_agent_runner.py:720-726`
-  - _asm_complete is called after a time.sleep(0.3) to "let streaming thread flush". If the stream thread is still writing at that point and then _asm_complete marks the agent as done in the dashboard, the dashboard may show a completed state while stream content is still being written. This is distinct from the stdout race (stream_thread.join was called at line 681) — the 0.3s sleep only covers the complete notification path, not the stdout drain path. Cannot confirm if this causes visible user-facing corruption without testing under load.
+## SUSPECTED (5)
+- **[SUSPECTED] Race condition potential: delete_multiple and add(new_rec) are not in **
+  - Code: `dashboard_modules/core.py:834-837`
+  - Race condition potential: delete_multiple and add(new_rec) are not in a single atomic transaction. If the server crashes between delete_multiple and add, the source suggestions are deleted but the merged record is never created, resulting in data loss.
+- **[SUSPECTED] In `get_health_status`, timezone-aware vs timezone-naive datetime comp**
+  - Code: `suggestion_analyzer.py:496-511`
+  - In `get_health_status`, timezone-aware vs timezone-naive datetime comparison may raise TypeError. If `created_at` has a timezone suffix (e.g., from ISO format with Z) but `datetime.now()` is naive, the `created.tzinfo` check handles this, but `datetime.now(created.tzinfo)` with a fixed offset timezone may still produce incorrect results depending on the system timezone.
+- **[SUSPECTED] In `api_update_recommendation`, the check `if "original_mission_title"**
+  - Code: `dashboard_modules/core.py:973-977`
+  - In `api_update_recommendation`, the check `if "original_mission_title" not in current` tests for key presence, but `get_by_id` could return a dict where `original_mission_title` exists but is None (from SQLite NULL). The condition `not in` would be False even though no original was saved, causing original values to NOT be preserved on subsequent edits. Should check `current.get("original_mission_title") is None`.
+- **[SUSPECTED] `workspace_base = Path(mission_workspace) if mission_workspace else WO**
+  - Code: `dashboard_modules/core.py:1338`
+  - `workspace_base = Path(mission_workspace) if mission_workspace else WORKSPACE_DIR` — if `mission_workspace` is a user-controlled string from `mission.json`, there's no path traversal check. A crafted `mission_workspace` value in the JSON file could cause `rglob("*")` to enumerate arbitrary directories on the filesystem.
+- **[SUSPECTED] `get_merge_candidates` uses Jaccard word-set similarity without stop-w**
+  - Code: `suggestion_analyzer.py:447-473`
+  - `get_merge_candidates` uses Jaccard word-set similarity without stop-word filtering. Common English words (the, a, to, for, and, etc.) heavily inflate similarity scores. With threshold 0.4, two unrelated suggestions sharing many stop words could falsely match as merge candidates, causing spurious auto-prompts. Cannot confirm without production data, but the word-set approach is known to produce false positives without stop-word removal.

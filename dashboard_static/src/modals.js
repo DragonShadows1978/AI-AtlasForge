@@ -17,6 +17,12 @@ let selectedRecId = null;
 let isEditMode = false;
 let editedRecData = null;
 let selectedForMerge = new Set();
+let mergeCandidatesCache = [];
+let mergeInProgress = false;
+let _openRecModalInFlight = false;
+let _queueInProgress = false;
+let _deleteInFlight = false;
+let _setMissionInFlight = false;
 
 // Store scroll position when modal opens (for mobile)
 let savedScrollX = 0;
@@ -25,6 +31,13 @@ let savedScrollY = 0;
 // Sort order state
 let currentSortField = 'priority_score';
 let currentSortDirection = 'desc'; // 'asc' or 'desc'
+
+// Allowlist for health filter values — must match DB CHECK constraint in suggestion_storage.py:170
+// Valid values: healthy, stale, orphaned, needs_review, hot (plus '' for "show all")
+const _ALLOWED_HEALTH_FILTERS = new Set(['healthy', 'stale', 'orphaned', 'needs_review', 'hot', '']);
+function _safeHealthFilter(value) {
+    return _ALLOWED_HEALTH_FILTERS.has(value) ? value : '';
+}
 
 // localStorage key for sort/filter persistence
 const REC_SORT_STORAGE_KEY = 'rec_sort_filter_state';
@@ -78,9 +91,9 @@ function loadRecSortState() {
             if (tagSelect) tagSelect.value = currentTagFilter;
         }
         if (parsed.healthFilter !== undefined) {
-            currentHealthFilter = parsed.healthFilter;
+            currentHealthFilter = _safeHealthFilter(parsed.healthFilter);
             if (currentHealthFilter) {
-                const activeEl = document.querySelector(`.rec-health-stat.${currentHealthFilter.replace('_', '-')}`);
+                const activeEl = document.querySelector(`.rec-health-stat.${CSS.escape(currentHealthFilter.replace('_', '-'))}`);
                 if (activeEl) activeEl.classList.add('active');
             }
         }
@@ -111,8 +124,11 @@ export function setFullMissionText(text) {
 }
 
 export function openMissionModal() {
-    document.getElementById('mission-full-text').textContent = fullMissionText;
-    document.getElementById('mission-modal').classList.add('show');
+    const fullTextEl = document.getElementById('mission-full-text');
+    if (fullTextEl) fullTextEl.textContent = fullMissionText;
+    const missionModalEl = document.getElementById('mission-modal');
+    if (!missionModalEl) return;
+    missionModalEl.classList.add('show');
     // Add modal-open to body for mobile z-index fix
     // Save scroll position first
     savedScrollX = window.scrollX || window.pageXOffset;
@@ -121,7 +137,8 @@ export function openMissionModal() {
 }
 
 export function closeMissionModal() {
-    document.getElementById('mission-modal').classList.remove('show');
+    const modalEl = document.getElementById('mission-modal');
+    if (modalEl) modalEl.classList.remove('show');
     // Remove modal-open from body
     removeModalOpenClass();
 }
@@ -222,9 +239,10 @@ function renderRecommendations() {
             }
         })();
 
-        // Auto-tags badges
+        // Auto-tags badges — use data-tag attribute to avoid CSS class injection
+        // (a tag containing spaces would inject extra CSS classes if used in class attr)
         const tagBadges = (rec.auto_tags || []).slice(0, 3).map(tag =>
-            `<span class="rec-tag-badge ${tag}">${tag}</span>`
+            `<span class="rec-tag-badge" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`
         ).join('');
 
         // Priority score indicator
@@ -234,14 +252,14 @@ function renderRecommendations() {
             ? `<span class="rec-priority-score ${priorityClass}"><span class="score-value">${Math.round(priorityScore)}</span></span>`
             : '';
 
-        // Health status badge
+        // Health status badge — use data-health attribute to avoid CSS class injection
         const healthStatus = rec.health_status || 'healthy';
         const healthBadge = healthStatus !== 'healthy'
-            ? `<span class="rec-health-badge ${healthStatus}">${healthStatus.replace('_', ' ')}</span>`
+            ? `<span class="rec-health-badge" data-health="${escapeHtml(healthStatus)}">${escapeHtml(healthStatus).replace('_', ' ')}</span>`
             : '';
 
         return `
-            <div class="${itemClass}" onclick="window.openRecModal('${rec.id}')">
+            <div class="${itemClass}" data-rec-id="${escapeHtml(rec.id)}">
                 <div class="rec-item-content">
                     <div class="rec-item-title">
                         ${missionTypeBadge}${escapeHtml(rec.mission_title)}
@@ -259,22 +277,42 @@ function renderRecommendations() {
             </div>
         `;
     }).join('');
+
+    // Delegated click handler — avoids inline onclick JS injection vulnerability.
+    // Guard against duplicate registration on repeated renders.
+    if (!container._recClickAttached) {
+        container._recClickAttached = true;
+        container.addEventListener('click', function _recClickHandler(e) {
+            const item = e.target.closest('[data-rec-id]');
+            if (item) {
+                window.openRecModal(item.dataset.recId);
+            }
+        });
+    }
 }
 
 export async function openRecModal(recId) {
-    selectedRecId = recId;
-    const rec = recommendations.find(r => r.id === recId);
+    if (_openRecModalInFlight) return;
+    _openRecModalInFlight = true;
+    try {
+    const rec = recommendations.find(r => String(r.id) === String(recId));
     if (!rec) return;
+    selectedRecId = recId;
 
     const isDriftHalt = rec.source_type === 'drift_halt';
 
     // Set modal title with source indicator
-    document.getElementById('rec-modal-title').textContent =
+    const recTitleEl = document.getElementById('rec-modal-title');
+    if (recTitleEl) recTitleEl.textContent =
         isDriftHalt ? 'Mission Suggestion (From Drift Analysis)' : 'Mission Recommendation';
-    document.getElementById('rec-modal-mission-title').textContent = rec.mission_title || 'Untitled';
-    document.getElementById('rec-modal-description').textContent = rec.mission_description || 'No description';
-    document.getElementById('rec-modal-rationale').textContent = rec.rationale || 'No rationale provided';
-    document.getElementById('rec-modal-source').textContent = rec.source_mission_id
+    const recMissionTitleEl = document.getElementById('rec-modal-mission-title');
+    if (recMissionTitleEl) recMissionTitleEl.textContent = rec.mission_title || 'Untitled';
+    const recDescEl = document.getElementById('rec-modal-description');
+    if (recDescEl) recDescEl.textContent = rec.mission_description || 'No description';
+    const recRationaleEl = document.getElementById('rec-modal-rationale');
+    if (recRationaleEl) recRationaleEl.textContent = rec.rationale || 'No rationale provided';
+    const recSourceEl = document.getElementById('rec-modal-source');
+    if (recSourceEl) recSourceEl.textContent = rec.source_mission_id
         ? `From: ${rec.source_mission_id}${rec.source_mission_summary ? ' - ' + rec.source_mission_summary.substring(0, 100) : ''}`
         : 'Manual recommendation';
 
@@ -284,35 +322,55 @@ export async function openRecModal(recId) {
         if (isDriftHalt && rec.drift_context) {
             const ctx = rec.drift_context;
             driftContextEl.style.display = 'block';
-            driftContextEl.innerHTML = `
-                <div class="drift-context">
-                    <div class="drift-context-header">Drift Analysis Details</div>
-                    <div class="drift-metrics">
-                        <div class="drift-metric">
-                            <span class="drift-metric-label">Failures:</span>
-                            <span class="drift-metric-value">${ctx.drift_failures || 0}</span>
-                        </div>
-                        <div class="drift-metric">
-                            <span class="drift-metric-label">Similarity:</span>
-                            <span class="drift-metric-value">${((ctx.average_similarity || 0) * 100).toFixed(1)}%</span>
-                        </div>
-                        <div class="drift-metric">
-                            <span class="drift-metric-label">Halted at Cycle:</span>
-                            <span class="drift-metric-value">${ctx.halted_at_cycle || 'N/A'}</span>
-                        </div>
-                    </div>
-                    ${ctx.pattern_analysis ? buildPatternAnalysisHTML(ctx.pattern_analysis) : ''}
-                </div>
-            `;
+            // Build drift context using DOM APIs to avoid innerHTML with server-controlled data
+            driftContextEl.textContent = '';
+            const driftDiv = document.createElement('div');
+            driftDiv.className = 'drift-context';
+
+            const header = document.createElement('div');
+            header.className = 'drift-context-header';
+            header.textContent = 'Drift Analysis Details';
+            driftDiv.appendChild(header);
+
+            const metricsDiv = document.createElement('div');
+            metricsDiv.className = 'drift-metrics';
+
+            function _addMetric(label, value) {
+                const metricDiv = document.createElement('div');
+                metricDiv.className = 'drift-metric';
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'drift-metric-label';
+                labelSpan.textContent = label;
+                const valueSpan = document.createElement('span');
+                valueSpan.className = 'drift-metric-value';
+                valueSpan.textContent = value;
+                metricDiv.appendChild(labelSpan);
+                metricDiv.appendChild(valueSpan);
+                metricsDiv.appendChild(metricDiv);
+            }
+
+            _addMetric('Failures:', String(ctx.drift_failures ?? 0));
+            _addMetric('Similarity:', ((ctx.average_similarity || 0) * 100).toFixed(1) + '%');
+            _addMetric('Halted at Cycle:', String(ctx.halted_at_cycle ?? 'N/A'));
+            driftDiv.appendChild(metricsDiv);
+
+            if (ctx.pattern_analysis) {
+                // buildPatternAnalysisHTML uses escapeHtml internally and returns safe HTML
+                const patternContainer = document.createElement('div');
+                patternContainer.innerHTML = buildPatternAnalysisHTML(ctx.pattern_analysis);
+                driftDiv.appendChild(patternContainer);
+            }
+
+            driftContextEl.appendChild(driftDiv);
         } else {
             driftContextEl.style.display = 'none';
-            driftContextEl.innerHTML = '';
+            driftContextEl.textContent = '';
         }
     }
 
     const cyclesSelect = document.getElementById('rec-modal-cycles');
     const suggestedCycles = rec.suggested_cycles || 3;
-    cyclesSelect.value = suggestedCycles;
+    if (cyclesSelect) cyclesSelect.value = suggestedCycles;
 
     // Reset project name field and trigger async auto-suggestion
     const projectInput = document.getElementById('rec-project-name-input');
@@ -341,9 +399,14 @@ export async function openRecModal(recId) {
     savedScrollX = window.scrollX || window.pageXOffset;
     savedScrollY = window.scrollY || window.pageYOffset;
 
-    document.getElementById('rec-modal').style.display = 'flex';
+    const _recModalEl = document.getElementById('rec-modal');
+    if (!_recModalEl) return;
+    _recModalEl.style.display = 'flex';
     // Add modal-open to body for mobile z-index fix
     document.body.classList.add('modal-open');
+    } finally {
+        _openRecModalInFlight = false;
+    }
 }
 
 /**
@@ -358,7 +421,7 @@ function buildPatternAnalysisHTML(pattern) {
         html += '<div class="pattern-section"><strong>Scope Expansions:</strong><ul>';
         pattern.consistently_added_scope.slice(0, 3).forEach(item => {
             const itemText = typeof item === 'object' ? (item.item || JSON.stringify(item)) : item;
-            const count = typeof item === 'object' ? (item.count || 1) : 1;
+            const count = parseInt(typeof item === 'object' ? (item.count || 1) : 1, 10) || 1;
             html += `<li>${escapeHtml(itemText)} (${count}x)</li>`;
         });
         html += '</ul></div>';
@@ -368,7 +431,7 @@ function buildPatternAnalysisHTML(pattern) {
         html += '<div class="pattern-section"><strong>Lost Focus On:</strong><ul>';
         pattern.consistently_lost_focus.slice(0, 3).forEach(item => {
             const itemText = typeof item === 'object' ? (item.item || JSON.stringify(item)) : item;
-            const count = typeof item === 'object' ? (item.count || 1) : 1;
+            const count = parseInt(typeof item === 'object' ? (item.count || 1) : 1, 10) || 1;
             html += `<li>${escapeHtml(itemText)} (${count}x)</li>`;
         });
         html += '</ul></div>';
@@ -383,47 +446,71 @@ function buildPatternAnalysisHTML(pattern) {
 }
 
 export function closeRecModal() {
-    document.getElementById('rec-modal').style.display = 'none';
+    // Reset edit mode state before closing so next open starts in view mode
+    if (isEditMode) {
+        isEditMode = false;
+        editedRecData = null;
+    }
+    const recModalEl = document.getElementById('rec-modal');
+    if (recModalEl) recModalEl.style.display = 'none';
     selectedRecId = null;
     // Remove modal-open from body
     removeModalOpenClass();
 }
 
 export async function deleteRecommendation() {
+    if (_deleteInFlight) return;
     if (!selectedRecId) return;
 
     if (!confirm('Delete this recommendation?')) return;
 
-    await api('/api/recommendations/' + selectedRecId, 'DELETE');
-    showToast('Recommendation deleted');
-    closeRecModal();
-    await loadRecommendations();
+    _deleteInFlight = true;
+    try {
+        await api('/api/recommendations/' + selectedRecId, 'DELETE');
+        showToast('Recommendation deleted');
+        closeRecModal();
+        await loadRecommendations();
+    } finally {
+        _deleteInFlight = false;
+    }
 }
 
 export async function setMissionFromRec() {
+    if (_setMissionInFlight) return;
     if (!selectedRecId) return;
 
-    const cycleBudget = parseInt(document.getElementById('rec-modal-cycles').value) || 3;
-
-    const projectInputS = document.getElementById('rec-project-name-input');
-    const projectNameS = projectInputS
-        ? (projectInputS.value.trim() || projectInputS.dataset.suggested || '')
-        : '';
-
-    const setPayload = { cycle_budget: cycleBudget };
-    if (projectNameS) setPayload.project_name = projectNameS;
-
-    const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', setPayload);
-
-    if (data.success) {
-        showToast(data.message);
-        closeRecModal();
-        await loadRecommendations();
-        if (typeof window.refresh === 'function') {
-            window.refresh();
+    _setMissionInFlight = true;
+    try {
+        const _cyclesEl = document.getElementById('rec-modal-cycles');
+        const _rawCyclesS = _cyclesEl ? parseInt(_cyclesEl.value, 10) : NaN;
+        if (isNaN(_rawCyclesS) || _rawCyclesS < 1) {
+            showToast('Invalid cycle count — must be a number >= 1', 'error');
+            return;
         }
-    } else {
-        showToast('Error: ' + (data.error || 'Failed to set mission'));
+        const cycleBudget = _rawCyclesS;
+
+        const projectInputS = document.getElementById('rec-project-name-input');
+        const projectNameS = projectInputS
+            ? (projectInputS.value.trim() || projectInputS.dataset.suggested || '')
+            : '';
+
+        const setPayload = { cycle_budget: cycleBudget };
+        if (projectNameS) setPayload.project_name = projectNameS;
+
+        const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', setPayload);
+
+        if (data.success) {
+            showToast(data.message);
+            closeRecModal();
+            await loadRecommendations();
+            if (typeof window.refresh === 'function') {
+                window.refresh();
+            }
+        } else {
+            showToast('Error: ' + (data.error || 'Failed to set mission'));
+        }
+    } finally {
+        _setMissionInFlight = false;
     }
 }
 
@@ -439,9 +526,10 @@ function updateRecCount() {
 // =============================================================================
 
 export function toggleEditMode() {
-    isEditMode = !isEditMode;
-    const rec = recommendations.find(r => r.id === selectedRecId);
+    // Validate rec exists BEFORE mutating state — prevents isEditMode flip with no DOM update
+    const rec = recommendations.find(r => String(r.id) === String(selectedRecId));
     if (!rec) return;
+    isEditMode = !isEditMode;
 
     const editBtn = document.getElementById('rec-edit-toggle-btn');
     const viewContainer = document.getElementById('rec-view-container');
@@ -459,10 +547,14 @@ export function toggleEditMode() {
         };
 
         // Populate edit fields
-        document.getElementById('rec-edit-title').value = editedRecData.mission_title;
-        document.getElementById('rec-edit-description').value = editedRecData.mission_description;
-        document.getElementById('rec-edit-rationale').value = editedRecData.rationale;
-        document.getElementById('rec-modal-cycles').value = editedRecData.suggested_cycles;
+        const recEditTitleEl = document.getElementById('rec-edit-title');
+        if (recEditTitleEl) recEditTitleEl.value = editedRecData.mission_title;
+        const recEditDescEl = document.getElementById('rec-edit-description');
+        if (recEditDescEl) recEditDescEl.value = editedRecData.mission_description;
+        const recEditRatEl = document.getElementById('rec-edit-rationale');
+        if (recEditRatEl) recEditRatEl.value = editedRecData.rationale;
+        const _cyclesEditEl = document.getElementById('rec-modal-cycles');
+        if (_cyclesEditEl) _cyclesEditEl.value = editedRecData.suggested_cycles;
 
         // Show edit container, hide view container
         if (viewContainer) viewContainer.style.display = 'none';
@@ -483,16 +575,22 @@ export function toggleEditMode() {
 
 export async function saveRecChanges() {
     if (!selectedRecId) return;
+    const savedRecId = selectedRecId;  // capture before any await to avoid race with ESC close
+
+    const _titleEl = document.getElementById('rec-edit-title');
+    const _descEl = document.getElementById('rec-edit-description');
+    const _ratEl = document.getElementById('rec-edit-rationale');
+    if (!_titleEl || !_descEl || !_ratEl) return;
 
     const data = {
-        mission_title: document.getElementById('rec-edit-title').value,
-        mission_description: document.getElementById('rec-edit-description').value,
-        rationale: document.getElementById('rec-edit-rationale').value,
-        suggested_cycles: parseInt(document.getElementById('rec-modal-cycles').value)
+        mission_title: _titleEl.value,
+        mission_description: _descEl.value,
+        rationale: _ratEl.value,
+        suggested_cycles: (() => { const _el = document.getElementById('rec-modal-cycles'); if (!_el) return null; const v = parseInt(_el.value, 10); return isNaN(v) ? null : v; })()
     };
 
     try {
-        const result = await api('/api/recommendations/' + selectedRecId, 'PUT', data);
+        const result = await api('/api/recommendations/' + savedRecId, 'PUT', data);
 
         // Check for validation errors
         if (result.success === false) {
@@ -508,98 +606,90 @@ export async function saveRecChanges() {
         }
 
         showToast('Suggestion updated');
-        isEditMode = false;
+        // Use cancelEditMode() to properly reset DOM state (containers, buttons, editedRecData)
+        cancelEditMode();
         await loadRecommendations();
-        // Re-open modal with updated data
-        openRecModal(selectedRecId);
+        // Re-open modal with updated data using the captured ID (avoids ESC-then-reopen with null)
+        openRecModal(savedRecId);
     } catch (e) {
         showToast('Error saving: ' + e.message, 'error');
     }
 }
 
 export function cancelEditMode() {
-    isEditMode = true; // Will be toggled to false
-    toggleEditMode();
+    if (isEditMode) {
+        toggleEditMode();
+    }
 }
 
 // =============================================================================
-// SIMILARITY AUDIT FUNCTIONS
+// MERGE PICKER FUNCTIONS
 // =============================================================================
 
-export async function openSimilarityAudit() {
-    const modal = document.getElementById('similarity-modal');
-    const body = document.getElementById('similarity-modal-body');
+export async function openMergePicker() {
+    const modal = document.getElementById('merge-picker-modal');
+    const body = document.getElementById('merge-picker-body');
 
     if (!modal || !body) {
-        showToast('Similarity modal not found', 'error');
+        showToast('Merge picker modal not found', 'error');
         return;
     }
 
-    body.innerHTML = '<div class="loading-spinner">Analyzing suggestions...</div>';
+    body.innerHTML = '<div class="loading-spinner">Loading suggestions...</div>';
     modal.style.display = 'flex';
     document.body.classList.add('modal-open');
 
     try {
-        const threshold = parseFloat(document.getElementById('similarity-threshold')?.value || 0.3);
-        const data = await api('/api/recommendations/similarity-analysis?threshold=' + threshold);
+        const data = await api('/api/recommendations/merge-candidates');
 
-        if (data.groups && data.groups.length > 0) {
-            renderSimilarityGroups(data.groups, data.threshold);
+        if (data.candidates && data.candidates.length >= 2) {
+            mergeCandidatesCache = data.candidates;
+            renderMergeCandidates(data.candidates);
         } else {
             body.innerHTML = `
-                <div class="similarity-empty">
-                    <p>${data.message || 'No similar suggestions found at this threshold.'}</p>
-                    <p>Total suggestions: ${data.total_items || 0}</p>
-                    <p>Try lowering the similarity threshold.</p>
+                <div class="merge-picker-empty">
+                    <p>Need at least 2 suggestions to merge.</p>
+                    <p>Total suggestions: ${data.total || 0}</p>
                 </div>
             `;
         }
     } catch (e) {
-        body.innerHTML = '<div class="similarity-error">Error analyzing: ' + escapeHtml(e.message) + '</div>';
+        body.innerHTML = '<div class="merge-picker-error">Error loading: ' + escapeHtml(e.message) + '</div>';
     }
 }
 
-function renderSimilarityGroups(groups, threshold) {
-    const body = document.getElementById('similarity-modal-body');
+function renderMergeCandidates(candidates) {
+    const body = document.getElementById('merge-picker-body');
     selectedForMerge.clear();
 
     let html = `
-        <div class="similarity-header">
-            <p>Found ${groups.length} group(s) of similar suggestions (threshold: ${(threshold * 100).toFixed(0)}%)</p>
+        <div class="merge-picker-header">
+            <div class="merge-picker-controls">
+                <input type="text" id="merge-picker-search" class="merge-picker-search" placeholder="Filter by title...">
+                <button class="btn btn-small" data-action="select-all">Select All</button>
+                <button class="btn btn-small" data-action="deselect-all">Deselect All</button>
+            </div>
+            <p class="merge-picker-count">${candidates.length} suggestions available</p>
         </div>
-        <div class="similarity-groups">
+        <div class="merge-picker-list">
     `;
 
-    groups.forEach((group, groupIdx) => {
+    candidates.forEach(item => {
+        const safeId = escapeHtml(String(item.id));
+        const tags = (item.auto_tags || []).map(t => `<span class="rec-tag">${escapeHtml(t)}</span>`).join('');
         html += `
-            <div class="similarity-group" data-group="${groupIdx}">
-                <div class="similarity-group-header">
-                    <span class="group-label">Group ${groupIdx + 1}</span>
-                    <span class="group-similarity">Avg similarity: ${(group.avg_similarity * 100).toFixed(1)}%</span>
-                    <button class="btn btn-small" onclick="window.selectGroupForMerge(${groupIdx})">Select All</button>
-                </div>
-                <div class="similarity-group-items">
-        `;
-
-        group.items.forEach(item => {
-            html += `
-                <div class="similarity-item">
-                    <label class="similarity-item-checkbox">
-                        <input type="checkbox" data-rec-id="${item.id}" onchange="window.toggleMergeSelection('${item.id}')">
-                    </label>
-                    <div class="similarity-item-content">
-                        <div class="similarity-item-title">${escapeHtml(item.mission_title)}</div>
-                        <div class="similarity-item-preview">${escapeHtml(item.mission_description || '')}</div>
-                        <div class="similarity-item-meta">
-                            <span class="rec-cycles-badge">${item.suggested_cycles} cycles</span>
-                            <span class="similarity-score">${(item.similarity_score * 100).toFixed(1)}% match</span>
-                        </div>
+            <div class="merge-candidate-item" data-title="${escapeHtml(item.mission_title).toLowerCase()}" data-candidate-id="${safeId}">
+                <label class="merge-candidate-checkbox">
+                    <input type="checkbox" data-rec-id="${safeId}">
+                </label>
+                <div class="merge-candidate-content">
+                    <div class="merge-candidate-title">${escapeHtml(item.mission_title)}</div>
+                    <div class="merge-candidate-preview">${escapeHtml(item.mission_description || '')}</div>
+                    <div class="merge-candidate-meta">
+                        <span class="rec-cycles-badge">${item.suggested_cycles} cycles</span>
+                        <span class="merge-candidate-priority">Priority: ${item.priority_score}</span>
+                        ${tags}
                     </div>
-                </div>
-            `;
-        });
-
-        html += `
                 </div>
             </div>
         `;
@@ -607,27 +697,43 @@ function renderSimilarityGroups(groups, threshold) {
 
     html += `
         </div>
-        <div class="similarity-actions">
+        <div class="merge-picker-actions">
             <span id="merge-selection-count">0 selected</span>
-            <button class="btn primary" id="merge-selected-btn" onclick="window.openMergeModal()" disabled>Merge Selected</button>
+            <button class="btn primary" id="merge-selected-btn" data-action="merge-selected" disabled>Merge Selected</button>
         </div>
     `;
 
     body.innerHTML = html;
+
+    // Attach delegated event listeners (replaces inline handlers to prevent XSS)
+    const searchInput = body.querySelector('#merge-picker-search');
+    if (searchInput) searchInput.addEventListener('input', e => filterMergeCandidates(e.target.value));
+
+    body.addEventListener('click', function _mergePickerDelegate(e) {
+        const action = e.target.closest('[data-action]');
+        if (!action) return;
+        const actionName = action.dataset.action;
+        if (actionName === 'select-all') selectAllForMerge();
+        else if (actionName === 'deselect-all') deselectAllForMerge();
+        else if (actionName === 'merge-selected') openMergeModal();
+    });
+
+    body.addEventListener('change', function _mergeCheckboxDelegate(e) {
+        const cb = e.target.closest('input[type="checkbox"][data-rec-id]');
+        if (cb) toggleMergeSelection(cb.dataset.recId);
+    });
 }
 
-export function closeSimilarityModal() {
-    const modal = document.getElementById('similarity-modal');
+export function closeMergePicker() {
+    const modal = document.getElementById('merge-picker-modal');
     if (modal) modal.style.display = 'none';
     selectedForMerge.clear();
+    mergeCandidatesCache = [];
     removeModalOpenClass();
 }
 
-export function selectGroupForMerge(groupIdx) {
-    const groupEl = document.querySelector(`.similarity-group[data-group="${groupIdx}"]`);
-    if (!groupEl) return;
-
-    const checkboxes = groupEl.querySelectorAll('input[type="checkbox"]');
+export function selectAllForMerge() {
+    const checkboxes = document.querySelectorAll('.merge-candidate-item:not([style*="display: none"]) input[type="checkbox"]');
     checkboxes.forEach(cb => {
         cb.checked = true;
         selectedForMerge.add(cb.dataset.recId);
@@ -635,11 +741,40 @@ export function selectGroupForMerge(groupIdx) {
     updateMergeSelectionCount();
 }
 
+export function deselectAllForMerge() {
+    const checkboxes = document.querySelectorAll('.merge-candidate-item input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.checked = false;
+    });
+    selectedForMerge.clear();
+    updateMergeSelectionCount();
+}
+
+export function filterMergeCandidates(query) {
+    const items = document.querySelectorAll('.merge-candidate-item');
+    const lowerQuery = query.toLowerCase();
+    items.forEach(item => {
+        const title = item.getAttribute('data-title') || '';
+        const visible = title.includes(lowerQuery);
+        item.style.display = visible ? '' : 'none';
+        // Remove hidden items from selection to prevent invisible merges
+        if (!visible) {
+            const cb = item.querySelector('input[type="checkbox"]');
+            if (cb) {
+                cb.checked = false;
+                selectedForMerge.delete(cb.dataset.recId);
+            }
+        }
+    });
+    updateMergeSelectionCount();
+}
+
 export function toggleMergeSelection(recId) {
-    if (selectedForMerge.has(recId)) {
-        selectedForMerge.delete(recId);
+    const key = String(recId);
+    if (selectedForMerge.has(key)) {
+        selectedForMerge.delete(key);
     } else {
-        selectedForMerge.add(recId);
+        selectedForMerge.add(key);
     }
     updateMergeSelectionCount();
 }
@@ -670,13 +805,23 @@ export function openMergeModal() {
         return;
     }
 
-    // Get selected recommendations
-    const selectedRecs = recommendations.filter(r => selectedForMerge.has(r.id));
+    // Populate cache from recommendations if empty (e.g. called from filtered recommendations)
+    if (mergeCandidatesCache.length === 0 && recommendations.length > 0) {
+        mergeCandidatesCache = recommendations.filter(r => selectedForMerge.has(String(r.id)));
+    }
+
+    // Get selected recommendations from cached merge candidates (not filtered recommendations)
+    const selectedRecs = mergeCandidatesCache.filter(r => selectedForMerge.has(String(r.id)));
+
+    if (selectedRecs.length < 2) {
+        showToast('Selected suggestions not found in cache. Please try again.', 'error');
+        return;
+    }
 
     // Generate combined title and description
     const combinedTitle = selectedRecs.map(r => r.mission_title).join(' + ');
     const combinedDescription = selectedRecs.map(r => `## ${r.mission_title}\n${r.mission_description || ''}`).join('\n\n');
-    const maxCycles = Math.max(...selectedRecs.map(r => r.suggested_cycles || 3));
+    const maxCycles = selectedRecs.reduce((max, r) => Math.max(max, r.suggested_cycles || 3), 3);
 
     body.innerHTML = `
         <div class="merge-preview">
@@ -703,11 +848,11 @@ export function openMergeModal() {
                 <div class="form-group">
                     <label>Cycle Budget:</label>
                     <select id="merge-cycles" class="form-select">
-                        <option value="1">1 cycle</option>
-                        <option value="2">2 cycles</option>
-                        <option value="3" ${maxCycles === 3 ? 'selected' : ''}>3 cycles</option>
-                        <option value="5" ${maxCycles >= 5 ? 'selected' : ''}>5 cycles</option>
-                        <option value="10" ${maxCycles >= 10 ? 'selected' : ''}>10 cycles</option>
+                        ${(() => {
+                            const cycleOptions = [1, 2, 3, 5, 10];
+                            const bestCycle = cycleOptions.reduce((best, v) => v <= maxCycles ? v : best, 1);
+                            return cycleOptions.map(v => `<option value="${v}"${bestCycle === v ? ' selected' : ''}>${v} cycle${v !== 1 ? 's' : ''}</option>`).join('');
+                        })()}
                     </select>
                 </div>
                 <div class="form-group">
@@ -721,23 +866,43 @@ export function openMergeModal() {
     `;
 
     modal.style.display = 'flex';
+    savedScrollX = window.scrollX || window.pageXOffset;
+    savedScrollY = window.scrollY || window.pageYOffset;
+    document.body.classList.add('modal-open');
 }
 
 export function closeMergeModal() {
     const modal = document.getElementById('merge-modal');
     if (modal) modal.style.display = 'none';
+    mergeInProgress = false;
+    const mergeBtn = document.querySelector('#merge-modal .btn.primary');
+    if (mergeBtn) mergeBtn.disabled = false;
     removeModalOpenClass();
 }
 
 export async function executeMerge() {
+    if (mergeInProgress) return;
+    mergeInProgress = true;
+    const mergeBtn = document.querySelector('#merge-modal .btn.primary');
+    if (mergeBtn) mergeBtn.disabled = true;
+
     const sourceIds = Array.from(selectedForMerge);
+    const cyclesEl = document.getElementById('merge-cycles');
+    const parsedCycles = cyclesEl ? parseInt(cyclesEl.value, 10) : NaN;
+    if (isNaN(parsedCycles) || parsedCycles < 1) {
+        showToast('Please enter a valid cycle count (1 or more)', 'error');
+        mergeInProgress = false;
+        if (mergeBtn) mergeBtn.disabled = false;
+        return;
+    }
     const mergedData = {
-        mission_title: document.getElementById('merge-title').value,
-        mission_description: document.getElementById('merge-description').value,
-        rationale: document.getElementById('merge-rationale').value,
-        suggested_cycles: parseInt(document.getElementById('merge-cycles').value)
+        mission_title: document.getElementById('merge-title')?.value ?? '',
+        mission_description: document.getElementById('merge-description')?.value ?? '',
+        rationale: document.getElementById('merge-rationale')?.value ?? '',
+        suggested_cycles: parsedCycles
     };
-    const deleteSources = document.getElementById('merge-delete-sources').checked;
+    const deleteSourcesEl = document.getElementById('merge-delete-sources');
+    const deleteSources = deleteSourcesEl ? deleteSourcesEl.checked : false;
 
     // Confirmation dialog before merging with delete sources option
     if (deleteSources) {
@@ -745,7 +910,11 @@ export async function executeMerge() {
             `This will merge ${sourceIds.length} suggestions into one and DELETE the original ${sourceIds.length} suggestions.\n\n` +
             `Are you sure you want to proceed?`
         );
-        if (!confirmed) return;
+        if (!confirmed) {
+            mergeInProgress = false;
+            if (mergeBtn) mergeBtn.disabled = false;
+            return;
+        }
     }
 
     try {
@@ -758,13 +927,16 @@ export async function executeMerge() {
         if (result.success) {
             showToast('Suggestions merged successfully');
             closeMergeModal();
-            closeSimilarityModal();
+            closeMergePicker();
             await loadRecommendations();
         } else {
             showToast('Merge failed: ' + (result.error || 'Unknown error'), 'error');
         }
     } catch (e) {
         showToast('Error merging: ' + e.message, 'error');
+    } finally {
+        mergeInProgress = false;
+        if (mergeBtn) mergeBtn.disabled = false;
     }
 }
 
@@ -772,22 +944,34 @@ export async function executeMerge() {
  * Add a Mission Suggestion to the queue
  */
 export async function queueMissionSuggestion() {
-    if (!selectedRecId) return;
-
-    const rec = recommendations.find(r => r.id === selectedRecId);
-    if (!rec) {
-        showToast('Recommendation not found', 'error');
-        return;
-    }
-
-    const cycleBudget = parseInt(document.getElementById('rec-modal-cycles').value) || 3;
-
-    const projectInputQ = document.getElementById('rec-project-name-input');
-    const projectNameQ = projectInputQ
-        ? (projectInputQ.value.trim() || projectInputQ.dataset.suggested || '')
-        : '';
-
+    if (_queueInProgress) return;
+    _queueInProgress = true;
     try {
+        if (!selectedRecId) return;
+
+        const rec = recommendations.find(r => String(r.id) === String(selectedRecId));
+        if (!rec) {
+            showToast('Recommendation not found', 'error');
+            return;
+        }
+
+        const recModalCyclesEl = document.getElementById('rec-modal-cycles');
+        if (!recModalCyclesEl) {
+            showToast('Cycles input not found', 'error');
+            return;
+        }
+        const _rawCyclesQ = parseInt(recModalCyclesEl.value, 10);
+        if (isNaN(_rawCyclesQ) || _rawCyclesQ < 1) {
+            showToast('Invalid cycle count — must be a number >= 1', 'error');
+            return;
+        }
+        const cycleBudget = _rawCyclesQ;
+
+        const projectInputQ = document.getElementById('rec-project-name-input');
+        const projectNameQ = projectInputQ
+            ? (projectInputQ.value.trim() || projectInputQ.dataset.suggested || '')
+            : '';
+
         const queuePayload = {
             problem_statement: rec.mission_description || rec.mission_title,
             cycle_budget: cycleBudget,
@@ -811,6 +995,8 @@ export async function queueMissionSuggestion() {
     } catch (e) {
         console.error('Queue suggestion error:', e);
         showToast('Error: ' + e.message, 'error');
+    } finally {
+        _queueInProgress = false;
     }
 }
 
@@ -819,7 +1005,8 @@ export async function queueMissionSuggestion() {
 // =============================================================================
 
 export function closeGlassboxModal() {
-    document.getElementById('glassbox-modal').classList.remove('show');
+    const glassboxModalEl = document.getElementById('glassbox-modal');
+    if (glassboxModalEl) glassboxModalEl.classList.remove('show');
     // Remove modal-open from body
     removeModalOpenClass();
 }
@@ -830,7 +1017,8 @@ export function closeGlassboxModal() {
 
 export function closeRepoLogModal(event) {
     if (event && event.target !== event.currentTarget) return;
-    document.getElementById('repo-log-modal').style.display = 'none';
+    const repoLogModalEl = document.getElementById('repo-log-modal');
+    if (repoLogModalEl) repoLogModalEl.style.display = 'none';
     // Remove modal-open from body
     removeModalOpenClass();
 }
@@ -873,9 +1061,9 @@ function applySortToRecommendations() {
     const dir = currentSortDirection === 'asc' ? 1 : -1;
     recommendations.sort((a, b) => {
         if (currentSortField === 'priority_score') {
-            return dir * ((b.priority_score || 0) - (a.priority_score || 0));
+            return dir * ((a.priority_score || 0) - (b.priority_score || 0));
         } else if (currentSortField === 'created_at') {
-            return dir * (new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            return dir * (new Date(a.created_at || 0) - new Date(b.created_at || 0));
         } else if (currentSortField === 'health_status') {
             // Order: hot > needs_review > healthy > stale > orphaned
             const order = { hot: 0, needs_review: 1, healthy: 2, stale: 3, orphaned: 4 };
@@ -958,14 +1146,15 @@ export async function loadHealthSummary() {
  * Show merge candidates prompt after adding a new suggestion
  */
 export function showMergeCandidatesPrompt(newRecId, candidateIds) {
-    if (!candidateIds || candidateIds.length === 0) return;
+    if (!newRecId || !candidateIds || candidateIds.length === 0) return;
+
+    // Find the candidate recommendations
+    const candidates = recommendations.filter(r => candidateIds.map(String).includes(String(r.id)));
+    const newRec = recommendations.find(r => String(r.id) === String(newRecId));
+    if (!newRec || candidates.length === 0) return;
 
     pendingMergeCandidates = candidateIds;
     newSuggestionId = newRecId;
-
-    // Find the candidate recommendations
-    const candidates = recommendations.filter(r => candidateIds.includes(r.id));
-    const newRec = recommendations.find(r => r.id === newRecId);
 
     const body = document.getElementById('merge-candidates-body');
     if (!body) return;
@@ -984,7 +1173,8 @@ export function showMergeCandidatesPrompt(newRecId, candidateIds) {
     savedScrollX = window.scrollX || window.pageXOffset;
     savedScrollY = window.scrollY || window.pageYOffset;
 
-    document.getElementById('merge-candidates-modal').style.display = 'flex';
+    const mergeCandidatesModalEl = document.getElementById('merge-candidates-modal');
+    if (mergeCandidatesModalEl) mergeCandidatesModalEl.style.display = 'flex';
     document.body.classList.add('modal-open');
 }
 
@@ -1005,8 +1195,14 @@ export function closeMergeCandidatesModal() {
 export function proceedToMerge() {
     // Add both the new suggestion and candidates to selectedForMerge
     selectedForMerge.clear();
-    if (newSuggestionId) selectedForMerge.add(newSuggestionId);
-    pendingMergeCandidates.forEach(id => selectedForMerge.add(id));
+    if (newSuggestionId) selectedForMerge.add(String(newSuggestionId));
+    pendingMergeCandidates.forEach(id => selectedForMerge.add(String(id)));
+
+    // Populate mergeCandidatesCache from recommendations so openMergeModal can find them.
+    // In the auto-prompt flow (addNewSuggestion → showMergeCandidatesPrompt → proceedToMerge),
+    // openMergePicker was never called, so the cache would be empty without this.
+    const allIds = new Set([...selectedForMerge]);
+    mergeCandidatesCache = recommendations.filter(r => allIds.has(String(r.id)));
 
     closeMergeCandidatesModal();
     openMergeModal();
@@ -1057,19 +1253,21 @@ export function filterByTag() {
  * Filter recommendations by health status (clickable from health summary bar)
  */
 export function filterByHealth(status) {
-    // Toggle: click same status again to clear
-    if (currentHealthFilter === status) {
+    // Toggle: click same status again to clear; sanitize against allowlist
+    const sanitizedStatus = _safeHealthFilter(status);
+    if (currentHealthFilter === sanitizedStatus) {
         currentHealthFilter = '';
     } else {
-        currentHealthFilter = status;
+        currentHealthFilter = sanitizedStatus;
     }
 
     // Update visual active state
     document.querySelectorAll('.rec-health-stat').forEach(el => {
         el.classList.remove('active');
     });
-    if (currentHealthFilter) {
-        const activeEl = document.querySelector(`.rec-health-stat.${currentHealthFilter.replace('_', '-')}`);
+    const safeFilter = _safeHealthFilter(currentHealthFilter);
+    if (safeFilter) {
+        const activeEl = document.querySelector(`.rec-health-stat.${CSS.escape(safeFilter.replace('_', '-'))}`);
         if (activeEl) activeEl.classList.add('active');
     }
 
@@ -1234,11 +1432,11 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Close similarity modal on click outside
+// Close merge picker modal on click outside
 document.addEventListener('click', function(e) {
-    const simModal = document.getElementById('similarity-modal');
-    if (e.target === simModal) {
-        closeSimilarityModal();
+    const pickerModal = document.getElementById('merge-picker-modal');
+    if (e.target === pickerModal) {
+        closeMergePicker();
     }
     const mergeModal = document.getElementById('merge-modal');
     if (e.target === mergeModal) {
