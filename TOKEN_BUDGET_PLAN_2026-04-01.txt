@@ -1,0 +1,541 @@
+AI-ATLASFORGE TOKEN BUDGET PLAN
+Date: 2026-04-01
+
+Goal
+Replace AtlasForge's current "time is a primary handoff trigger" behavior with a
+Claude Code style token-work-budget model, while preserving ContextWatcher for
+true context-window safety and cross-session handoff durability.
+
+This is NOT an auto-compact plan.
+This is NOT a context-window-limit plan.
+This is a work-budget plan:
+
+  "Keep the top-level agent working until it has spent enough useful output
+   tokens, unless context pressure or diminishing returns says to stop."
+
+
+======================================================================
+1. WHAT CLAUDE CODE IS ACTUALLY DOING
+======================================================================
+
+Claude Code's token budget is a coordinator-level work target, not a context
+pressure safeguard.
+
+Observed behavior from Claude Code source:
+
+- A per-turn BudgetTracker is created in the main query loop.
+- After each assistant turn, Claude Code checks whether the current turn has
+  produced enough output tokens.
+- If the turn is still under budget, Claude Code injects a meta continuation
+  message and keeps going.
+- If the turn is near or above budget, it stops normally.
+- If continuation has already happened multiple times and output growth becomes
+  small, it stops early for diminishing returns.
+- Sub-agents do NOT participate in token budget tracking.
+  The coordinator owns the budget; workers just do their task.
+
+This is fundamentally different from AtlasForge's current time-based handoff:
+
+- Claude Code:
+  output/work governs continuation
+- AtlasForge today:
+  wall-clock time can independently terminate a healthy session
+
+
+======================================================================
+2. WHAT ATLASFORGE DOES TODAY
+======================================================================
+
+Current AtlasForge state, based on context_watcher and conductor inspection:
+
+- context_watcher already has model-aware context safety logic.
+- It knows that:
+  - claude-opus-4-6 = 1,000,000 token window
+  - claude-sonnet family = 200,000 token window
+- That model-awareness is good and should stay.
+
+But AtlasForge also treats time as a first-class stop reason:
+
+- TIME_BASED_HANDOFF_ENABLED defaults on.
+- SessionMonitor starts a time/activity handoff monitor immediately.
+- If time fires before token/context exhaustion fires, the session is handed off.
+- In the conductor, time handoff is treated as a normal reason to terminate the
+  active Claude subprocess and write HANDOFF.md.
+
+Effect:
+
+- A healthy Opus session can still be killed on elapsed time even if:
+  - it has plenty of context headroom
+  - it is actively producing useful output
+  - it is nowhere near context exhaustion
+
+That is the wrong policy if the objective is Claude Code style token-work
+budgeting.
+
+
+======================================================================
+3. THE CORE DESIGN CHANGE
+======================================================================
+
+AtlasForge should separate three ideas that are currently too entangled:
+
+1. Work Budget
+   "Has this turn/session done enough useful model work yet?"
+
+2. Context Pressure
+   "Are we approaching the model's real context-window limits?"
+
+3. Time Fallback
+   "Has the session gone abnormally long or stalled badly?"
+
+Recommended precedence:
+
+1. Emergency context pressure
+2. Graceful context pressure
+3. Token work-budget completion or token-budget diminishing returns
+4. Time fallback only
+
+In plain terms:
+
+- Time must stop being a peer to token/context logic.
+- Time should become a circuit breaker, not a primary control surface.
+
+
+======================================================================
+4. RECOMMENDED ARCHITECTURE
+======================================================================
+
+Add a new concept beside ContextWatcher:
+
+  WorkBudgetManager (or TokenBudgetManager)
+
+Responsibilities:
+
+- coordinator-level tracking only
+- per top-level session budget accounting
+- continuation nudges
+- diminishing returns detection
+- model-aware default budgets
+- explicit stop reasons
+
+Do NOT put work-budget ownership inside sub-agents.
+Do NOT make each worker decide its own budget policy.
+
+Correct ownership:
+
+- top-level AtlasForge conductor owns mission/session budget
+- red-team coordinator owns red-team budget
+- worker subprocesses are budget-agnostic
+
+
+======================================================================
+5. CONTEXTWATCHER RECOMMENDATIONS
+======================================================================
+
+ContextWatcher should remain in the system, but its role should narrow:
+
+Keep:
+
+- transcript parsing
+- model detection
+- model-context-window mapping
+- graceful/emergency context-pressure handoff
+- cross-session handoff support
+- stage-aware activity detection as a fallback safety system
+
+Change:
+
+- stop treating time-based handoff as default-primary behavior
+- stop starting time handoff as an equal peer when token telemetry is available
+- make time-based handoff conditional/fallback-oriented
+
+Recommended changes:
+
+A. Add policy mode
+
+Introduce a watcher policy setting, for example:
+
+- WATCHER_POLICY=token_first
+- WATCHER_POLICY=legacy_time_first
+- WATCHER_POLICY=context_only
+
+Default recommendation:
+
+- token_first
+
+B. Make time fallback conditional
+
+Time monitor should only be armed when one of these is true:
+
+- transcript/token telemetry is unavailable
+- model provider lacks usable token-pressure signals
+- the session is stalled with no meaningful output growth
+- a hard absolute timeout is reached
+
+C. Add work-budget state to session stats
+
+ContextWatcher stats should expose:
+
+- model name
+- model context window
+- current context pressure state
+- work budget target
+- output tokens spent toward work budget
+- continuation count
+- diminishing-returns signals
+- final stop reason
+
+D. Keep context safety independent from work budget
+
+Even if work budget says "continue", emergency context pressure must still win.
+
+This matters especially for Sonnet.
+
+
+======================================================================
+6. MODEL-AWARE POLICY: OPUS VS SONNET
+======================================================================
+
+This is where AtlasForge should be more explicit than it is today.
+
+Opus and Sonnet should not share the same operational assumptions.
+
+Opus:
+
+- 1M context window
+- can sustain much longer productive sessions
+- should get larger work budgets
+- should tolerate later graceful continuation before restart
+
+Sonnet:
+
+- 200k context window
+- should use smaller work budgets
+- should hand off earlier when context pressure rises
+- should be treated as a more restart-prone worker
+
+Recommendation:
+
+Do not tie work budget directly to full context window size.
+Use model-aware defaults, but keep work budget and context safety separate.
+
+Example policy shape:
+
+- Opus:
+  - larger per-session work budget
+  - larger diminishing-returns patience
+  - later fallback timeout
+
+- Sonnet:
+  - smaller per-session work budget
+  - fewer continuation nudges
+  - earlier graceful restart when context pressure appears
+
+This is important because "1M context exists" does NOT mean "spend 1M tokens
+blindly." It means Opus can keep useful continuity longer before handoff is
+needed.
+
+
+======================================================================
+7. CONDUCTOR RECOMMENDATIONS
+======================================================================
+
+The conductor is where the control logic should live.
+
+Recommended changes to atlasforge_conductor:
+
+A. Replace current time-primary semantics
+
+Current behavior:
+- start watcher
+- start time/activity handoff immediately
+- terminate Claude when time handoff fires
+
+Recommended behavior:
+- start context watcher for context safety
+- start work-budget manager for productivity control
+- only arm time fallback as a safety circuit breaker
+
+B. Add explicit stop reasons
+
+The conductor should distinguish:
+
+- context_emergency
+- context_graceful
+- work_budget_complete
+- work_budget_diminishing_returns
+- time_fallback
+- hard_timeout
+- manual_stop
+
+C. Continue within session before handing off
+
+Claude Code style behavior is "continue this same session with a meta nudge"
+until budget completion or diminishing returns.
+
+AtlasForge equivalent:
+
+- if work budget not yet met
+- and context pressure is healthy
+- and progress is still meaningful
+  => continue the same session
+
+Only hand off when:
+
+- context safety says to hand off
+- or work-budget controller says the session has done enough
+- or fallback timeout/stall policy says the session is unhealthy
+
+D. HANDOFF.md semantics must change
+
+Right now HANDOFF.md often reflects elapsed time.
+
+Recommended:
+
+- HANDOFF.md should record token-centric reasons first
+- elapsed time should become secondary diagnostic metadata
+
+Example:
+
+- Handoff reason: work budget completed at 78k output tokens
+- Handoff reason: diminishing returns after 4 continuations
+- Handoff reason: graceful context pressure on Sonnet at 184k / 200k
+
+
+======================================================================
+8. RED TEAM RECOMMENDATIONS
+======================================================================
+
+The AF Red Team is currently the biggest mismatch.
+
+blind_agent_runner today is fundamentally wall-clock based:
+
+- per-agent timeout
+- adaptive timeout by file count
+- subprocess.TimeoutExpired => kill process
+- outer executor timeout => partial results
+
+This is not compatible with Claude Code style token budgeting.
+
+Recommended red-team design:
+
+A. Split "coverage budget" from "safety timeout"
+
+Red team needs two controls:
+
+1. Coverage/work budget
+   - how much effort each blind agent should expend
+   - how many useful output tokens / continuation cycles are desired
+
+2. Safety timeout
+   - kill only when the process is unhealthy, hung, or truly overlong
+
+B. Coordinator owns red-team budgets
+
+Do NOT give each blind agent independent token policy.
+The red-team coordinator should assign:
+
+- per-agent work budget
+- or team-wide total budget split across agents
+
+Good default:
+
+- team coordinator sets budgets per profile
+- Boundary / Injection / Logic / Concurrency runs do not self-govern
+
+C. Replace file-count adaptive timeout as primary control
+
+File count may still inform expected effort, but it should no longer dictate
+when the subprocess is stopped.
+
+Instead:
+
+- file count can help choose an initial work budget
+- timeout becomes fallback only
+
+D. Add token-aware process observation
+
+For Claude-backed red-team subprocesses, AtlasForge should capture:
+
+- assistant output tokens produced so far
+- continuation count
+- recent output delta
+- context pressure if transcript is available
+
+Then the coordinator can decide:
+
+- continue
+- stop for enough work done
+- stop for diminishing returns
+- stop for context pressure
+- stop for genuine stall
+
+E. Keep worker simplicity
+
+The launched `claude -p` process should not need to understand AtlasForge's
+budget policy directly.
+
+The coordinator can do one of two things:
+
+- soft model:
+  inject follow-up prompts/nudges when budget says continue
+
+- hard wrapper model:
+  run a session monitor beside the subprocess and decide when to terminate and
+  relaunch or when to consider the result complete
+
+Recommendation:
+
+- use the hard wrapper model first
+
+Reason:
+
+- it fits AtlasForge's current architecture
+- it avoids invasive prompt-contract changes
+- it is easier to apply to both mission conductor and red-team sessions
+
+
+======================================================================
+9. DIMINISHING RETURNS LOGIC
+======================================================================
+
+This is the most important Claude Code idea to borrow besides the budget itself.
+
+You do NOT want:
+
+- "keep going forever because budget exists"
+
+You DO want:
+
+- "continue while output is still meaningfully moving"
+
+Recommended signal family:
+
+- output tokens added since last check
+- substantive file/tool activity since last check
+- number of continuation nudges already issued
+- whether new findings / artifacts were produced
+
+Suggested stop rule shape:
+
+- once at least N continuations have happened
+- if recent output delta is low for M consecutive checks
+- and there is no strong artifact progress
+  => stop for diminishing returns
+
+AtlasForge should not copy Claude's exact constants blindly.
+But it should copy the pattern.
+
+
+======================================================================
+10. IMPLEMENTATION PHASES
+======================================================================
+
+Recommended rollout order:
+
+Phase 1: Policy separation
+
+- introduce explicit concepts:
+  - work budget
+  - context pressure
+  - time fallback
+- add stop-reason enums
+- stop describing all proactive exits as "time handoff"
+
+Phase 2: Conductor integration
+
+- add WorkBudgetManager to top-level conductor sessions
+- keep ContextWatcher only for context safety
+- demote time monitor to fallback mode
+
+Phase 3: Red-team integration
+
+- wrap blind-agent subprocesses with budget-aware session tracking
+- keep timeout only as fail-safe
+- log token-budget completion vs timeout separately
+
+Phase 4: Metrics and observability
+
+- log:
+  - model
+  - work budget target
+  - output spent
+  - continuation count
+  - diminishing-returns stop
+  - context window
+  - context-pressure stop
+  - fallback timeout stop
+
+Phase 5: Default policy tuning
+
+- separate defaults for:
+  - Opus
+  - Sonnet
+  - testing/building/planning/research/red-team
+
+
+======================================================================
+11. WHAT NOT TO DO
+======================================================================
+
+Do NOT:
+
+- replace context-pressure protection with work budget
+- push token-budget responsibility into every sub-agent
+- keep time as an equal-priority stop reason
+- assume Opus and Sonnet should share one budget policy
+- confuse work budget with auto-compact
+- use file-count timeout estimation as the main red-team control long-term
+
+
+======================================================================
+12. MY RECOMMENDED POLICY
+======================================================================
+
+If I were implementing this in AtlasForge, I would use this exact policy shape:
+
+Top-level sessions:
+
+- Work budget is primary session-completion logic
+- ContextWatcher graceful/emergency thresholds are primary safety logic
+- Time monitor becomes fallback only
+- Absolute timeout remains as a hard kill for broken sessions
+
+Red-team sessions:
+
+- Per-agent work budget controlled by coordinator
+- Timeout only as hang protection
+- Findings/output delta used in diminishing-returns detection
+- Context pressure still respected if transcript telemetry exists
+
+Model defaults:
+
+- Opus:
+  longer work budgets, more patience, fewer forced restarts
+- Sonnet:
+  shorter work budgets, earlier handoff, tighter safety margins
+
+
+======================================================================
+13. BOTTOM LINE
+======================================================================
+
+AtlasForge should not "replace time with tokens" in a simplistic way.
+
+It should do this:
+
+- work budget governs when a healthy session has done enough
+- context pressure governs when a session is unsafe to continue
+- time governs only when telemetry is missing or the process is unhealthy
+
+That is the correct translation of Claude Code's token budget ideology into
+AtlasForge's mission/handoff architecture.
+
+The strongest version for AtlasForge is a hybrid:
+
+- Claude-style token work-budget inside a live session
+- AtlasForge ContextWatcher for model-aware context safety
+- AtlasForge handoff state for cross-session continuity
+
+That keeps AtlasForge's real advantage while removing the current mistake:
+letting wall-clock time terminate productive sessions too early.

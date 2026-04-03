@@ -403,13 +403,18 @@ def api_narrative_mission():
             story_number = int(story_number)
         except (ValueError, TypeError, OverflowError):
             return jsonify({"success": False, "message": "story_number must be an integer"}), 400
+        if not (0 <= story_number <= 99999):
+            return jsonify({"success": False, "message": "story_number must be between 0 and 99999"}), 400
 
         import uuid
         # Strip null bytes and control characters before using in path
         story_title = re.sub(r'[\x00-\x1f\x7f]', '', story_title)
         if not story_title:
             return jsonify({"success": False, "message": "story_title cannot be empty"}), 400
-        safe_title = story_title.replace(" ", "_").replace("/", "-")[:50]
+        safe_title = re.sub(r'[^\w\-]', '_', story_title)[:50]
+        safe_title = re.sub(r'_+', '_', safe_title).strip('_')
+        if not safe_title:
+            return jsonify({"success": False, "message": "story_title contains no usable characters"}), 400
         project_base = Path("/media/vader/TIE-FIGHTER/RCFT - Narrative Project/01 - Narrative Research/Completed")
         story_workspace = (project_base / f"{story_number:03d}_{safe_title}").resolve()
         _proj_base = str(project_base.resolve()) + "/"
@@ -1356,7 +1361,7 @@ def download_file(filepath):
     )
 
 
-def _safe_read_bytes(path, max_bytes=0, allowed_base=None):
+def _safe_read_bytes(path, max_bytes=None, allowed_base=None):
     """Read file bytes using O_NOFOLLOW to prevent symlink TOCTOU attacks.
 
     O_NOFOLLOW only blocks symlinks in the final path component. Directory
@@ -1387,8 +1392,11 @@ def _safe_read_bytes(path, max_bytes=0, allowed_base=None):
     except Exception:
         os.close(fd)
         return None
+    if max_bytes is not None and (not isinstance(max_bytes, int) or max_bytes < 0):
+        f.close()
+        raise ValueError(f"max_bytes must be a non-negative integer, got {max_bytes!r}")
     try:
-        return f.read(max_bytes) if max_bytes else f.read()
+        return f.read(max_bytes) if max_bytes is not None else f.read()
     except Exception as e:
         raise IOError(f"Read error: {e}") from e
     finally:

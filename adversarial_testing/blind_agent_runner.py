@@ -84,6 +84,155 @@ _TIMEOUT_TIERS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Model-aware work budget defaults (output tokens per agent)
+# ---------------------------------------------------------------------------
+_MODEL_WORK_BUDGETS: Dict[str, int] = {
+    "claude-opus-4-6":   20_000,
+    "claude-opus-4":     18_000,
+    "claude-sonnet-4-6": 10_000,
+    "claude-sonnet-4-5": 10_000,
+    "claude-haiku-4-5":   5_000,
+}
+_MODEL_SAFETY_TIMEOUTS: Dict[str, float] = {
+    "claude-opus-4-6":   3600.0,
+    "claude-opus-4":     3600.0,
+    "claude-sonnet-4-6": 1800.0,
+    "claude-sonnet-4-5": 1800.0,
+    "claude-haiku-4-5":   900.0,
+}
+_DEFAULT_WORK_BUDGET = 10_000          # Sonnet-like fallback
+_DEFAULT_SAFETY_TIMEOUT = 1800.0       # Sonnet-like fallback
+
+# Diminishing returns config
+# BUG-H1/M1: wrap int() in try/except; clamp to minimum 100 so zero/negative cannot silently
+# disable diminishing-returns detection.
+try:
+    _RED_TEAM_LOW_DELTA_THRESHOLD = max(100, int(os.environ.get("RED_TEAM_LOW_DELTA_THRESHOLD", "1000")))
+except (ValueError, TypeError):
+    _RED_TEAM_LOW_DELTA_THRESHOLD = 1000
+    logger.warning(
+        "RED_TEAM_LOW_DELTA_THRESHOLD env var is not a valid integer; defaulting to %d",
+        _RED_TEAM_LOW_DELTA_THRESHOLD,
+    )
+_RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR = 1   # BUG-H4: lowered from 3; single-shot agents don't iterate
+_RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED = 2
+
+
+def _detect_model() -> str:
+    """Return the model string from env, lower-cased, or empty string."""
+    return os.environ.get("CLAUDE_MODEL", "").strip().lower()
+
+
+def _model_work_budget(model: str) -> int:
+    """Return the per-agent work budget (output tokens) for a given model.
+
+    BUG-M5: Sort keys longest-first so more specific keys (e.g. claude-opus-4-6)
+    always win over shorter overlapping keys (e.g. claude-opus-4).
+    """
+    for key in sorted(_MODEL_WORK_BUDGETS, key=len, reverse=True):
+        if key in model:
+            return _MODEL_WORK_BUDGETS[key]
+    return _DEFAULT_WORK_BUDGET
+
+
+def _model_safety_timeout(model: str) -> float:
+    """Return the per-agent safety timeout (seconds) for a given model.
+
+    BUG-M5: Sort keys longest-first so more specific keys always win.
+    """
+    for key in sorted(_MODEL_SAFETY_TIMEOUTS, key=len, reverse=True):
+        if key in model:
+            return _MODEL_SAFETY_TIMEOUTS[key]
+    return _DEFAULT_SAFETY_TIMEOUT
+
+
+def _parse_output_tokens_from_jsonl(text: str) -> tuple[int, str]:
+    """
+    Parse cumulative output_tokens from a claude CLI stream-json stdout blob.
+
+    Each line is a JSONL object. When type == "result", the "usage" field
+    contains output_tokens. Accumulates across all result events found.
+    Falls back to a character-count estimate (len // 4) when nothing parses.
+
+    Returns:
+        (token_count, source) where source is 'jsonl' or 'heuristic'.
+    """
+    if not text:
+        return 0, "heuristic"
+    total = 0
+    found_any = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("type") == "result" and "usage" in obj:
+                usage = obj["usage"]
+                if isinstance(usage, dict) and "output_tokens" in usage:
+                    try:
+                        total += int(usage["output_tokens"])
+                        found_any = True
+                    except (ValueError, TypeError):
+                        pass
+        except (json.JSONDecodeError, ValueError):
+            continue
+    if not found_any and text:
+        # BUG-M4: escalate to WARNING so callers can detect the fallback in logs.
+        # Fallback: rough estimate of output tokens from character count (~4 chars/token).
+        # Systematic undercount (~25%) is an acknowledged limitation documented here.
+        estimate = max(0, len(text) // 4)
+        logger.warning(
+            "output_tokens not found in JSONL stream (no 'result' event with usage field); "
+            "falling back to char-count estimate: ~%d tokens (len=%d // 4). "
+            "This may undercount by ~25%%.",
+            estimate, len(text),
+        )
+        return estimate, "heuristic"
+    return total, "jsonl"
+
+
+@dataclass
+class _AgentBudgetState:
+    """Per-agent work budget and diminishing-returns tracking state."""
+    work_budget: int           # target output tokens
+    safety_timeout: float      # fallback kill timeout (seconds)
+    output_tokens: int = 0     # tokens produced so far
+    finding_count: int = 0     # findings produced
+    continuation_count: int = 0
+    consecutive_low_delta: int = 0
+    last_token_checkpoint: int = 0   # tokens at last delta check
+    stop_reason: str = "pending"     # pending|work_budget_complete|timeout|diminishing_returns|error
+    token_source: str = "heuristic"  # 'jsonl' | 'heuristic'
+
+    def __post_init__(self) -> None:
+        if self.work_budget <= 0:
+            self.work_budget = _DEFAULT_WORK_BUDGET
+        if self.safety_timeout <= 0:
+            self.safety_timeout = _DEFAULT_SAFETY_TIMEOUT
+
+    def record_output(self, tokens: int) -> None:
+        self.output_tokens = tokens
+
+    def check_diminishing_returns(self) -> bool:
+        """
+        Return True if diminishing returns are detected.
+
+        Requires:
+          - At least _RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR continuations
+          - Delta below threshold for _RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED checks
+        """
+        if self.continuation_count < _RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR:
+            return False
+        delta = self.output_tokens - self.last_token_checkpoint
+        if delta < _RED_TEAM_LOW_DELTA_THRESHOLD:
+            self.consecutive_low_delta += 1
+        else:
+            self.consecutive_low_delta = 0
+        self.last_token_checkpoint = self.output_tokens
+        return self.consecutive_low_delta >= _RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED
+
+# ---------------------------------------------------------------------------
 # Parent directory on path so we can import AtlasForge top-level modules
 # ---------------------------------------------------------------------------
 _PACKAGE_ROOT = Path(__file__).parent.parent
@@ -325,11 +474,23 @@ class BlindAgentRedTeam:
     Results are written by each agent to JSON files and then aggregated.
     """
 
-    def __init__(self, timeout: int = 900, n_agents: int = 3):
+    def __init__(
+        self,
+        timeout: int = 900,
+        n_agents: int = 3,
+        work_budget: Optional[int] = None,
+        safety_timeout: Optional[float] = None,
+    ):
         """
         Args:
-            timeout: Per-agent timeout in seconds (default 15 min)
+            timeout: Kept for backward compatibility. Semantically demoted to
+                     fallback hint; actual per-agent kill threshold is safety_timeout.
             n_agents: Number of parallel agents to launch (1-4)
+            work_budget: Target output tokens per agent before stopping.
+                         None → auto-detect from CLAUDE_MODEL env var.
+            safety_timeout: Seconds before forcibly killing a hung/stalled agent.
+                            None → auto-detect from CLAUDE_MODEL env var.
+                            Defaults are much longer than the old `timeout` (1800-3600s).
         """
         # Iter 3 Fix M9: validate timeout parameter
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
@@ -340,7 +501,8 @@ class BlindAgentRedTeam:
         import math as _math
         if not _math.isfinite(timeout):
             raise ValueError(f"timeout must be finite, got {timeout!r}")
-        self.timeout = timeout
+        self.timeout = timeout  # kept for backward compat
+
         # Iter 4 Fix B4: validate n_agents parameter
         if isinstance(n_agents, bool) or not isinstance(n_agents, int):
             raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
@@ -353,6 +515,20 @@ class BlindAgentRedTeam:
                 n_agents, _max_profiles, _max_profiles,
             )
         self.n_agents = min(max(1, n_agents), _max_profiles)
+
+        # Work budget and safety timeout — model-aware defaults
+        # BUG-M2: explicit safety_timeout=0.0 (or negative) is invalid and rejected.
+        if safety_timeout is not None and safety_timeout <= 0:
+            raise ValueError(f"safety_timeout must be positive, got {safety_timeout!r}")
+        _model = _detect_model()
+        _wb = work_budget if work_budget is not None else _model_work_budget(_model)
+        self.work_budget: int = _wb if _wb > 0 else _DEFAULT_WORK_BUDGET
+        _st = safety_timeout if safety_timeout is not None else _model_safety_timeout(_model)
+        self.safety_timeout: float = _st if _st > 0 else _DEFAULT_SAFETY_TIMEOUT
+        logger.info(
+            "BlindAgentRedTeam init: work_budget=%d tokens, safety_timeout=%.0fs, model=%s",
+            self.work_budget, self.safety_timeout, _model or "(unset)",
+        )
 
     # ------------------------------------------------------------------
     # Fix 3 — Path Traversal Guard
@@ -399,6 +575,8 @@ class BlindAgentRedTeam:
         mission_desc: str = "Unknown — explore and determine from code",
         n_agents: Optional[int] = None,
         timeout: Optional[int] = None,
+        work_budget: Optional[int] = None,
+        safety_timeout: Optional[float] = None,
     ) -> RedTeamResult:
         """
         Launch N parallel blind agents against the workspace.
@@ -407,7 +585,11 @@ class BlindAgentRedTeam:
             workspace_dir: Path to the codebase to attack
             mission_desc: Brief description of what the codebase does
             n_agents: Override number of agents (uses self.n_agents if None)
-            timeout: Override per-agent timeout in seconds
+            timeout: Backward-compat alias for safety_timeout (kept for callers).
+            work_budget: Total output tokens across all agents.
+                         Divided evenly per agent. None → use self.work_budget.
+            safety_timeout: Per-agent kill timeout for hung processes.
+                            None → use self.safety_timeout.
 
         Returns:
             Aggregated RedTeamResult with all findings from all agents
@@ -434,22 +616,46 @@ class BlindAgentRedTeam:
         # BAR-5: cap without re-emitting warning (warning already emitted in __init__)
         _max_profiles = len(_ATTACK_PROFILES)
         n = min(max(1, n), _max_profiles)
-        # Fix 7 — adaptive timeout
-        if timeout is not None:
-            t = timeout
+
+        # Resolve safety timeout: explicit arg > backward-compat `timeout` arg > self.safety_timeout
+        if safety_timeout is not None:
+            _safety_t = float(safety_timeout)
+        elif timeout is not None:
+            _safety_t = float(timeout)
         else:
-            t = self._estimate_timeout(workspace_dir)
-            logger.info(f"Adaptive timeout selected: {t}s")
+            _safety_t = self.safety_timeout
+        # Fix 7 — adaptive timeout (kept for legacy log, but actual kill uses _safety_t)
+        _adaptive_t = self._estimate_timeout(workspace_dir)
+        logger.info(
+            f"launch_parallel_team: safety_timeout={_safety_t:.0f}s "
+            f"(adaptive_hint={_adaptive_t}s, n_agents={n})"
+        )
+        t = _adaptive_t  # kept for backward-compat use in as_completed outer timeout
+
+        # Per-agent work budget: distribute total budget evenly.
+        # BUG-M3: distribute the remainder to the first agent so total budget
+        # is always fully allocated (floor division loses remainder tokens).
+        _total_budget = work_budget if work_budget is not None else self.work_budget
+        _base_per_agent = max(1000, _total_budget // n)
+        _remainder = _total_budget - (_base_per_agent * n)
+        # Per-profile list: index 0 gets the remainder, rest get base amount
+        _per_agent_budgets = [_base_per_agent + _remainder] + [_base_per_agent] * (n - 1)
+        logger.info(
+            "Work budget: total=%d tokens, per_agent_base=%d (+%d remainder to agent[0]) across %d agents",
+            _total_budget, _base_per_agent, _remainder, n,
+        )
 
         profiles = _ATTACK_PROFILES[:n]
         session_id = f"brt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         # Cycle 3 Fix (#13): resolve symlinks and verify paths stay within workspace_dir
         # to prevent symlink escape attacks (e.g., workspace_dir/tests -> /etc).
         # RT-02/RT-03 Fix: append os.sep so "/tmp/workspace" doesn't falsely match "/tmp/workspace2/evil".
+        # BUG-M6: remove dead equality arm (results_dir is a subdirectory of workspace_dir,
+        # never equal to it), keeping only the startswith() containment check.
         _workspace_real = str(workspace_dir.resolve())
         _workspace_real_prefix = _workspace_real + os.sep
         results_dir = (workspace_dir / "tests").resolve()
-        if not (str(results_dir) == _workspace_real or str(results_dir).startswith(_workspace_real_prefix)):
+        if not str(results_dir).startswith(_workspace_real_prefix):
             raise ValueError(
                 f"Resolved results_dir {results_dir!r} is outside workspace_dir "
                 f"{workspace_dir!r} (possible symlink escape)"
@@ -458,7 +664,7 @@ class BlindAgentRedTeam:
 
         # Create Red_Team directory for incremental markdown findings files
         red_team_dir = (results_dir / "Red_Team").resolve()
-        if not (str(red_team_dir) == _workspace_real or str(red_team_dir).startswith(_workspace_real_prefix)):
+        if not str(red_team_dir).startswith(_workspace_real_prefix):
             raise ValueError(
                 f"Resolved red_team_dir {red_team_dir!r} is outside workspace_dir "
                 f"{workspace_dir!r} (possible symlink escape)"
@@ -482,7 +688,7 @@ class BlindAgentRedTeam:
         import concurrent.futures as _cf
         executor = ThreadPoolExecutor(max_workers=n)
         try:
-            for profile in profiles:
+            for _agent_idx, profile in enumerate(profiles):
                 results_file = results_dir / f"red_team_agent_{profile.index}.json"
                 findings_file = red_team_dir / f"agent{profile.index}_findings.md"
                 # Fix TOCTOU symlink race: use O_NOFOLLOW so open() itself
@@ -496,6 +702,11 @@ class BlindAgentRedTeam:
                         raise RuntimeError(
                             f"Cannot safely create {_p} (symlink or permission issue): {_e}"
                         ) from _e
+                # BUG-M3: use per-agent budget from list (agent 0 absorbs remainder)
+                _budget_state = _AgentBudgetState(
+                    work_budget=_per_agent_budgets[_agent_idx],
+                    safety_timeout=_safety_t,
+                )
                 future = executor.submit(
                     self._spawn_single_agent,
                     profile=profile,
@@ -505,13 +716,17 @@ class BlindAgentRedTeam:
                     findings_file=findings_file,
                     session_id=session_id,
                     timeout=t,
+                    budget_state=_budget_state,
                 )
                 futures_map[future] = profile
                 logger.info(f"Submitted agent {profile.index}: {profile.label}")
 
             try:
-                _grace = max(10, min(30, int(t * 0.10)))
-                for future in as_completed(futures_map, timeout=t + _grace):
+                # BUG-H8: use _safety_t (real per-agent kill threshold) as the outer
+                # deadline, not the adaptive file-count hint `t`.  Add a grace margin
+                # proportional to n so all agents have time to terminate cleanly.
+                _grace = max(10, min(60, int(_safety_t * 0.05 * n)))
+                for future in as_completed(futures_map, timeout=_safety_t + _grace):
                     profile = futures_map[future]
                     try:
                         agent_result = future.result()
@@ -569,6 +784,16 @@ class BlindAgentRedTeam:
                 logger.warning("executor.shutdown failed during cleanup: %s", exc)
 
         _suite_elapsed = time.time() - _suite_start
+
+        # Log stop reason summary
+        stop_reasons_list = [r.get("stop_reason", "unknown") for r in agent_results]
+        _reason_counts: Dict[str, int] = {}
+        for _sr in stop_reasons_list:
+            _reason_counts[_sr] = _reason_counts.get(_sr, 0) + 1
+        logger.info(
+            "[RED_TEAM] SUMMARY: %s", ", ".join(f"{v}/{n} {k}" for k, v in _reason_counts.items())
+        )
+
         return self._aggregate_results(
             agent_results, session_id, str(workspace_dir), red_team_dir, n,
             suite_elapsed=_suite_elapsed,
@@ -583,18 +808,33 @@ class BlindAgentRedTeam:
         findings_file: Path,
         session_id: str,
         timeout: int,
+        budget_state: Optional["_AgentBudgetState"] = None,
     ) -> Dict:
         """
         Spawn a single blind agent as a Claude CLI subprocess.
 
         Registers with agent_stream_manager (→ Mission Activity tab) if available.
         Waits for process to exit, then reads results_file.
+
+        Args:
+            budget_state: Optional _AgentBudgetState controlling work budget and safety
+                          timeout. When provided, safety_timeout replaces `timeout` as
+                          the subprocess kill threshold. `timeout` is kept as the
+                          as_completed outer guard only.
         """
         import subprocess
 
         agent_id = f"{session_id}_agent{profile.index}"
         start_time = time.time()
         elapsed = 0.0
+
+        # Resolve effective kill threshold: budget_state.safety_timeout > legacy timeout
+        _kill_timeout = budget_state.safety_timeout if budget_state is not None else float(timeout)
+        _work_budget = budget_state.work_budget if budget_state is not None else _DEFAULT_WORK_BUDGET
+        logger.info(
+            "[RED_TEAM] Agent[%d] starting: work_budget=%d tokens, safety_timeout=%.0fs",
+            profile.index, _work_budget, _kill_timeout,
+        )
 
         # Build prompt — use string.Template.safe_substitute() to prevent attribute
         # traversal attacks via {var.__class__} syntax that str.format_map() allows.
@@ -728,7 +968,7 @@ class BlindAgentRedTeam:
                             "profile_index": profile.index,
                             "elapsed_seconds": time.time() - start_time,
                         }
-                    proc.wait(timeout=timeout)
+                    proc.wait(timeout=_kill_timeout)
                     # C3-6: join stream_thread before draining stdout — prevents concurrent readers
                     if stream_thread is not None:
                         stream_thread.join(timeout=5)
@@ -740,9 +980,14 @@ class BlindAgentRedTeam:
                     except (IOError, OSError) as _read_err:
                         logger.debug("stdout read error for agent %s: %s", agent_id, _read_err)
                 else:
-                    stdout_text, _ = proc.communicate(input=prompt, timeout=timeout)
+                    stdout_text, _ = proc.communicate(input=prompt, timeout=_kill_timeout)
             except subprocess.TimeoutExpired:
-                logger.warning(f"Agent {agent_id} timed out after {timeout}s, killing")
+                logger.warning(
+                    "[RED_TEAM] Agent[%d] SAFETY TIMEOUT after %.0fs — process may be hung or crashed",
+                    profile.index, _kill_timeout,
+                )
+                if budget_state is not None:
+                    budget_state.stop_reason = "timeout"
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     proc.wait(timeout=10)
@@ -757,6 +1002,30 @@ class BlindAgentRedTeam:
                 # Join stream_thread on timeout to prevent concurrent stdout reads
                 if stream_thread is not None:
                     stream_thread.join(timeout=5)
+                # BUG-H3: For streaming path, drain residual stdout to capture any
+                # partial JSONL output produced before timeout (enables token counting).
+                # BUG-H2: For non-streaming path (communicate() timeout), drain stdout
+                # and stderr to prevent pipe-buffer deadlock and zombie subprocess.
+                if _use_drain_thread:
+                    # Streaming path: grab whatever is left in the pipe (1MB cap)
+                    try:
+                        _timeout_stdout = proc.stdout.read(1024 * 1024)
+                        if _timeout_stdout:
+                            stdout_text = _timeout_stdout
+                    except (IOError, OSError) as _read_err:
+                        logger.debug("stdout drain on timeout failed for agent %s: %s", agent_id, _read_err)
+                else:
+                    # Non-streaming path: drain both pipes to release zombie
+                    try:
+                        _timeout_stdout = proc.stdout.read(1024 * 1024)
+                        if _timeout_stdout:
+                            stdout_text = _timeout_stdout
+                    except (IOError, OSError):
+                        pass
+                    try:
+                        proc.stderr.read(64 * 1024)
+                    except (IOError, OSError):
+                        pass
                 # On timeout: read whatever was written to findings_file
                 _md_content = ""
                 try:
@@ -782,6 +1051,29 @@ class BlindAgentRedTeam:
 
             elapsed = time.time() - start_time
 
+            # Parse output tokens from JSONL stdout and update budget state
+            if stdout_text:
+                _output_tokens, _token_source = _parse_output_tokens_from_jsonl(stdout_text)
+            else:
+                _output_tokens, _token_source = 0, "heuristic"
+            if budget_state is not None:
+                budget_state.token_source = _token_source
+                budget_state.record_output(_output_tokens)
+                budget_state.continuation_count += 1
+                # Determine stop reason based on work budget
+                if budget_state.output_tokens >= budget_state.work_budget:
+                    budget_state.stop_reason = "work_budget_complete"
+                elif budget_state.check_diminishing_returns():
+                    budget_state.stop_reason = "diminishing_returns"
+                else:
+                    budget_state.stop_reason = "completed"  # normal completion without hitting budget
+            _stop_reason = budget_state.stop_reason if budget_state is not None else "completed"
+
+            logger.info(
+                "[RED_TEAM] Agent[%d] stop_reason=%s output_tokens=%d findings_written=?",
+                profile.index, _stop_reason, _output_tokens,
+            )
+
             # Mark complete in dashboard
             if streaming_enabled and stream_file:
                 try:
@@ -793,6 +1085,9 @@ class BlindAgentRedTeam:
 
         except Exception as e:
             elapsed = time.time() - start_time
+            _stop_reason = "error"
+            if budget_state is not None:
+                budget_state.stop_reason = "error"
             logger.error(f"Agent {agent_id} subprocess failed: {e}")
             # Join any threads that may have been started before the exception
             if stream_thread is not None:
@@ -811,6 +1106,7 @@ class BlindAgentRedTeam:
                 "attack_vectors_tried": [],
                 "profile_index": profile.index,
                 "elapsed_seconds": elapsed,
+                "stop_reason": _stop_reason,
             }
         finally:
             # Fix 5b — zombie cleanup: ensure process is dead regardless of exit path
@@ -880,6 +1176,13 @@ class BlindAgentRedTeam:
         # partial_success=True so callers can distinguish clean partial success
         # (markdown found, JSON also parsed) from corrupt partial success
         # (markdown found but JSON parse failed). Previously error=None hid failures.
+        _final_stop_reason = budget_state.stop_reason if budget_state is not None else "completed"
+        logger.info(
+            "[RED_TEAM] Agent[%d] stop_reason=%s output_tokens=%d findings=%d",
+            profile.index, _final_stop_reason,
+            budget_state.output_tokens if budget_state is not None else 0,
+            len(combined_findings),
+        )
         return {
             "success": success,
             "partial_success": partial_success,
@@ -889,6 +1192,8 @@ class BlindAgentRedTeam:
             "profile_index": profile.index,
             "elapsed_seconds": elapsed,
             "findings_file": str(findings_file),
+            "stop_reason": _final_stop_reason,
+            "output_tokens": budget_state.output_tokens if budget_state is not None else 0,
         }
 
     def _aggregate_results(
@@ -991,6 +1296,11 @@ class BlindAgentRedTeam:
             r.get("success", False) or r.get("partial_success", False)
             for r in agent_results
         )
+        # Surface per-agent stop reasons as a dict on the result object (non-blocking item).
+        _stop_reasons_map: Dict[str, str] = {
+            f"agent{r.get('profile_index', i)}": r.get("stop_reason", "unknown")
+            for i, r in enumerate(agent_results)
+        }
         return RedTeamResult(
             session_id=session_id,
             code_analyzed=f"workspace: {workspace_path}",
@@ -1001,6 +1311,7 @@ class BlindAgentRedTeam:
             attack_vectors_tried=list(dict.fromkeys(all_vectors)),  # deduplicate
             success=any_success,
             error=any_error,
+            stop_reasons=_stop_reasons_map,
         )
 
     # ------------------------------------------------------------------
@@ -1316,11 +1627,20 @@ class RedTeamOrchestrator:
       5 - Data Loss & Content Preservation
     """
 
-    def __init__(self, timeout: int = 900, n_agents: int = 4):
+    def __init__(
+        self,
+        timeout: int = 900,
+        n_agents: int = 4,
+        work_budget: Optional[int] = None,
+        safety_timeout: Optional[float] = None,
+    ):
         """
         Args:
-            timeout: Per-agent timeout in seconds (default 15 min)
+            timeout: Kept for backward compatibility. Actual kill threshold is safety_timeout.
             n_agents: Number of parallel attack agents (1-6)
+            work_budget: Target output tokens per agent. None → model-aware default.
+            safety_timeout: Seconds before killing a hung/stalled agent.
+                            None → model-aware default (1800-3600s).
         """
         # Iter 4 Fix B5: validate timeout + n_agents (mirror BlindAgentRedTeam pattern)
         import math as _math
@@ -1342,6 +1662,17 @@ class RedTeamOrchestrator:
                 n_agents, _max_ext, _max_ext,
             )
         self.n_agents = min(max(1, n_agents), _max_ext)
+
+        # Work budget and safety timeout — model-aware defaults
+        _model = _detect_model()
+        _wb = work_budget if work_budget is not None else _model_work_budget(_model)
+        self.work_budget: int = _wb if _wb > 0 else _DEFAULT_WORK_BUDGET
+        _st = safety_timeout if safety_timeout is not None else _model_safety_timeout(_model)
+        self.safety_timeout: float = _st if _st > 0 else _DEFAULT_SAFETY_TIMEOUT
+        logger.info(
+            "RedTeamOrchestrator init: work_budget=%d tokens, safety_timeout=%.0fs, model=%s",
+            self.work_budget, self.safety_timeout, _model or "(unset)",
+        )
 
     def _validate_workspace_dir(self, path: Path) -> None:
         """Raise ValueError if path is not within any allowed workspace root.
@@ -1431,6 +1762,8 @@ class RedTeamOrchestrator:
         mission_desc: str = "Unknown — explore and determine from code",
         n_agents: Optional[int] = None,
         timeout: Optional[int] = None,
+        work_budget: Optional[int] = None,
+        safety_timeout: Optional[float] = None,
     ) -> RedTeamResult:
         """
         Launch N parallel blind agents against the workspace via HierarchicalExperiment.
@@ -1439,7 +1772,9 @@ class RedTeamOrchestrator:
             workspace_dir: Path to the codebase to attack
             mission_desc: Brief description of what the codebase does
             n_agents: Number of parallel agents (overrides self.n_agents)
-            timeout: Per-agent timeout in seconds (overrides self.timeout)
+            timeout: Backward-compat alias; use safety_timeout for new callers.
+            work_budget: Target output tokens across all agents (overrides self.work_budget).
+            safety_timeout: Per-agent kill timeout in seconds (overrides self.safety_timeout).
 
         Returns:
             Aggregated RedTeamResult with findings from all completed agents.
@@ -1464,7 +1799,13 @@ class RedTeamOrchestrator:
                 raise ValueError(f"timeout must be finite, got {timeout!r}")
         n = min(max(1, n_agents if n_agents is not None else self.n_agents),
                 len(_EXTENDED_ATTACK_PROFILES))
-        t = timeout if timeout is not None else self.timeout
+        # Resolve effective safety timeout
+        _eff_safety = safety_timeout if safety_timeout is not None else (
+            float(timeout) if timeout is not None else self.safety_timeout
+        )
+        # For backward compat pass-through to hierarchical framework, use safety timeout as `t`
+        t = int(_eff_safety)
+        _eff_budget = work_budget if work_budget is not None else self.work_budget
 
         profiles = _EXTENDED_ATTACK_PROFILES[:n]
         session_id = f"rto_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -1480,7 +1821,7 @@ class RedTeamOrchestrator:
 
         logger.info(
             f"RedTeamOrchestrator: launching {n} agents against {workspace_dir} "
-            f"(session={session_id}, per-agent-timeout={t}s)"
+            f"(session={session_id}, safety_timeout={_eff_safety:.0f}s, work_budget={_eff_budget})"
         )
 
         try:
@@ -1498,12 +1839,16 @@ class RedTeamOrchestrator:
                 f"hierarchical_framework not available ({exc}), "
                 f"falling back to BlindAgentRedTeam"
             )
-            team = BlindAgentRedTeam(timeout=t, n_agents=n)
+            team = BlindAgentRedTeam(
+                timeout=t, n_agents=n,
+                work_budget=_eff_budget, safety_timeout=_eff_safety,
+            )
             return team.launch_parallel_team(
                 workspace_dir=workspace_dir,
                 mission_desc=mission_desc,
                 n_agents=n,
-                timeout=t,
+                work_budget=_eff_budget,
+                safety_timeout=_eff_safety,
             )
 
     def _launch_hierarchical(
@@ -1765,6 +2110,8 @@ def run_quick_blind_agent(
     mission_desc: str = "",
     n_agents: int = 2,
     timeout: int = 240,
+    work_budget: Optional[int] = None,
+    safety_timeout: Optional[float] = None,
 ) -> RedTeamResult:
     """
     Quick convenience wrapper: launch blind agents against a workspace.
@@ -1773,17 +2120,23 @@ def run_quick_blind_agent(
         workspace_dir: Directory containing the codebase to test
         mission_desc: Brief description of what the code does
         n_agents: Number of parallel agents (default 2 for speed)
-        timeout: Per-agent timeout in seconds
+        timeout: Backward-compat safety timeout hint in seconds
+        work_budget: Target output tokens per agent (None = model default)
+        safety_timeout: Per-agent kill timeout in seconds (None = model default)
 
     Returns:
         RedTeamResult with aggregated findings
     """
-    orchestrator = RedTeamOrchestrator(timeout=timeout, n_agents=n_agents)
+    orchestrator = RedTeamOrchestrator(
+        timeout=timeout, n_agents=n_agents,
+        work_budget=work_budget, safety_timeout=safety_timeout,
+    )
     return orchestrator.launch(
         workspace_dir=Path(workspace_dir),
         mission_desc=mission_desc,
         n_agents=n_agents,
-        timeout=timeout,
+        work_budget=work_budget,
+        safety_timeout=safety_timeout,
     )
 
 

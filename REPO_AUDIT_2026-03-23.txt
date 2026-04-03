@@ -1,0 +1,227 @@
+AI-AtlasForge Repository Audit
+Date: 2026-03-23
+Scope: /home/vader/AI-AtlasForge
+
+Summary
+
+This repo is not in a collapsed state. A meaningful amount of it works:
+- The modular state-machine architecture is real and substantial.
+- The dashboard frontend build works.
+- The top-level Python regression suite under tests/ passes.
+- Most modules import and compile.
+
+The repo is also drifted and inconsistent:
+- The core af_engine state-machine test suite is failing heavily.
+- Context watcher timing/cleanup behavior has regressed.
+- Dashboard startup logs a real warning on every import.
+- Packaging, verification, and docs do not match the current code layout.
+- There is a large amount of stale/generated/recovery material in-tree.
+
+Repo Shape
+
+Main subsystems:
+- af_engine/: modular state machine and stage handlers.
+- dashboard_v2.py + dashboard_modules/ + dashboard_static/: monitoring UI and API surface.
+- context_watcher/: transcript/time-based handoff subsystem.
+- investigation_engine.py + research_agent/: investigation/research workflows.
+- top-level utility modules: queueing, analytics, knowledge base, recommendation plumbing, etc.
+- workspace/: generated content, red-team tests, and additional in-repo mission artifacts.
+
+State machine flow implemented in code:
+- PLANNING -> BUILDING -> TESTING -> ANALYZING -> CYCLE_END -> COMPLETE
+- Primary orchestration lives in af_engine/orchestrator.py.
+- Stage resolution lives in af_engine/stage_registry.py.
+- State persistence lives in af_engine/state_manager.py.
+
+What I verified
+
+Commands run:
+- pytest --collect-only -q
+- pytest -q tests
+- pytest -q context_watcher/tests
+- pytest af_engine/tests -q -r fE --maxfail=40
+- pytest -q workspace/tests workspace/AI-AtlasForge_red_team/tests
+- python3 -m compileall -q af_engine context_watcher dashboard_modules adversarial_testing atlasforge_enhancements research_agent vision .
+- python3 -c "import af_engine, context_watcher, dashboard_v2, atlasforge_conductor, investigation_engine; print('imports_ok')"
+- npm run build
+- bash verify.sh
+
+What is working
+
+1. Frontend/dashboard asset build works.
+- npm run build completed successfully.
+- dashboard_static/dist was rebuilt successfully.
+
+2. Core Python imports are mostly intact.
+- af_engine, context_watcher, dashboard_v2, atlasforge_conductor, and investigation_engine all imported.
+- Import path still emits warnings and side effects, but it does not crash.
+
+3. Syntax health is broadly okay.
+- compileall completed successfully.
+- Only SyntaxWarning-level noise appeared, mostly in junk/generated test areas.
+
+4. The top-level regression suite under tests/ is green.
+- Collected: 90 tests.
+- Result: 88 passed.
+- Remaining output was warning-only, not failure-only.
+
+5. A lot of the codebase is structurally coherent.
+- af_engine has a real handler registry, stage restrictions, cycle manager, prompt factory, and integrations layer.
+- dashboard_modules is reasonably modularized.
+- context_watcher has meaningful internal design, not placeholder code.
+
+What is not working
+
+1. The af_engine state machine is the biggest breakage.
+- Collected: 336 tests in af_engine/tests.
+- Result from the run I executed: 208 passed, 40 failed, 1 skipped, then pytest stopped because of --maxfail=40.
+- Important: actual total failures are likely higher than 40.
+
+Primary root cause:
+- af_engine/state_manager.py:128-143 rejects any mission_path outside /home/vader/AI-AtlasForge.
+- af_engine/state_manager.py:519-531 rejects any mission_workspace outside /home/vader/AI-AtlasForge.
+- That is too strict for the test harness, temporary mission state, isolated workspaces, and likely some real deployment/test scenarios.
+
+Observed effect:
+- This single guard cascades through cycle budget tests, iteration logic tests, failure scenario tests, pipeline integration tests, e2e tests, and orchestrator/init_guard integration tests.
+- The state machine currently cannot tolerate legitimate temp-path missions used by its own suite.
+
+2. Dashboard import/startup has a real API mismatch.
+- dashboard_v2.py:606 calls io_utils.read_json(MISSION_PATH).
+- io_utils.py does not define read_json; it defines atomic_read_json, atomic_write_json, and atomic_update_json.
+- Result: every dashboard import/startup logs:
+  Failed to resolve mission workspace: module 'io_utils' has no attribute 'read_json'
+
+Observed effect:
+- verify.sh reports the import test as failed.
+- dashboard semantic workspace auto-resolution is degraded at startup.
+
+3. Context watcher time-based handoff behavior is regressed.
+- Collected: 72 tests in context_watcher/tests.
+- Result: 66 passed, 4 failed.
+
+Root causes:
+- context_watcher/context_watcher.py:518-532 checks the global _watcher_instance before firing standalone timers.
+- That causes standalone TimeBasedHandoffMonitor tests to be treated like zombie timers and skipped.
+- context_watcher/context_watcher.py:2193-2211 stop_all() clears sessions without stopping each session's time-handoff monitor first.
+
+Observed effect:
+- Failing tests:
+  - test_timer_fires_at_configured_time
+  - test_callback_receives_correct_signal
+  - test_multiple_start_calls_ignored
+  - test_monitor_loop_cleans_stale_sessions
+- This is not cosmetic. It points to real lifecycle bugs around timer ownership and cleanup.
+
+4. The workspace/red-team test surface is broken in two different ways.
+- Collected: 71 tests across workspace/tests and workspace/AI-AtlasForge_red_team/tests.
+- Result: 31 passed, 35 failed, 8 errors.
+
+Breakage group A: missing validator package.
+- investigation_engine.py expects WORKSPACE_DIR / "investigation_validator".
+- That directory does not exist in this checkout.
+- The red-team validation tests fail because orchestrator.py, models.py, claim_extractor.py, filter.py, and __init__.py are all missing there.
+
+Breakage group B: HTTP/IPC tests are not isolated.
+- Several workspace/tests expect to POST to https://localhost:5010.
+- In this sandbox they fail with PermissionError / urllib.error.URLError when trying to create sockets.
+- That means these tests are environment-coupled and not self-contained enough for reliable CI or local isolated runs.
+
+5. verify.sh is stale and partially misleading.
+- The script is not executable in this checkout, even though the docs tell users to run ./verify.sh.
+- Same issue for install.sh and quick_install.sh.
+- verify.sh:203-207 still requires af_engine.py, which no longer exists.
+- The verification result therefore includes at least one guaranteed false failure.
+
+6. Packaging metadata is incomplete/broken for the actual product surface.
+- pyproject.toml:64-70 only includes:
+  - dashboard_modules*
+  - atlasforge_enhancements*
+  - adversarial_testing*
+- It does not package af_engine, context_watcher, research_agent, or vision.
+
+Observed effect:
+- The built package metadata in ai_atlasforge.egg-info/top_level.txt only lists those three package roots.
+- The published/installable package definition does not match the real repo architecture.
+
+7. pytest default coverage is misleading.
+- pyproject.toml:96-99 points testpaths only at:
+  - workspace/tests
+  - workspace/AI-AtlasForge_red_team/tests
+- A plain pytest does not cover the main repo suites under tests/, af_engine/tests/, and context_watcher/tests/.
+
+Observed effect:
+- A default green pytest run would not prove the state machine is healthy.
+- The repo’s most important suite is currently off the default path.
+
+8. Orchestrator behavior has at least two direct API/design regressions beyond the path guard.
+- af_engine/orchestrator.py:241-245 intentionally does not emit mission_completed on COMPLETE.
+- That may be correct architecturally, but af_engine/tests/test_orchestrator.py expects emit_mission_completed and currently fails.
+- af_engine/orchestrator.py:606-612 assumes self.root exists during build_rd_prompt().
+- Tests that instantiate StageOrchestrator without running __init__ fail with AttributeError.
+- That is a backward-compatibility fragility problem in the public object surface.
+
+Dead code / stale code / suspicious repo content
+
+High-confidence stale or non-runtime material in-tree:
+- atlasforge_engine.py.backup
+- claude_autonomous.py.backup
+- recovery_ai_storyforge_prebase_20260226_004234/
+- recovery_restore_backup_20260226_001939/
+- workspace/.junk/
+- dashboard_static/dist/
+- dist/
+- node_modules/
+- test_printf
+- test_touch_root
+
+Notes:
+- I found no repo references to atlasforge_engine.py.backup, claude_autonomous.py.backup, the recovery trees, test_printf, or test_touch_root.
+- These look like backup/generated/manual-debug artifacts, not live product code.
+- Keeping them in the main repo root increases noise, confuses grep/results, and makes audits harder.
+
+Docs and metadata drift
+
+There is extensive documentation drift against the current codebase:
+- USAGE.md:16 still tells users to run python3 claude_autonomous.py --mode=rd.
+- INSTALL.md:271 does the same.
+- ARCHITECTURE.md:55-68 describes claude_autonomous.py as the main entry point.
+- README.md:182-183 describes atlasforge.py, which is not present.
+- verify.sh still expects af_engine.py.
+- af_engine/README.md:59 says af_engine/tests is an 88-test suite, but the current collected count is 336.
+- af_engine/README.md:86 claims 100% test pass validation, which is no longer true.
+
+This is not just editorial drift. It will mislead users and maintainers about:
+- how to start the system,
+- what files are canonical,
+- what package gets installed,
+- and whether the modular engine is actually healthy.
+
+Lower-severity quality issues
+
+- The passing top-level tests emit multiple PytestReturnNotNoneWarning warnings because several tests return bool instead of asserting directly.
+- Importing dashboard_v2 has side effects: blueprint registration, queue watcher start, token watcher thread start attempt, and warning prints. That makes import-time behavior heavier than it should be.
+- verify.sh and install docs assume executable shell scripts, but the files are not marked executable in this checkout.
+
+Bottom line
+
+Current status:
+- The repo is partially functional.
+- The dashboard frontend build works.
+- Many utility and top-level regression paths work.
+- The core state-machine package is not in a trustworthy passing state right now.
+
+Highest-priority problems:
+1. Fix the over-constrained path validation in af_engine/state_manager.py.
+2. Fix dashboard_v2.py to use io_utils.atomic_read_json instead of io_utils.read_json.
+3. Fix context_watcher cleanup/timer ownership so standalone timers and stop_all() behave correctly.
+4. Decide whether workspace/investigation_validator is required. If yes, add it; if no, remove/adjust the failing validator tests and health assumptions.
+5. Fix pyproject.toml packaging and pytest discovery so the install/test metadata matches the actual repo.
+6. Clean out or relocate stale backups, recovery trees, junk, and generated artifacts.
+7. Update docs and verify.sh to match atlasforge_conductor.py and the modular af_engine package.
+
+Practical verdict
+
+If you asked me whether this repo is safe to treat as "clean and passing", the answer is no.
+If you asked me whether it is recoverable without a rewrite, the answer is yes.
+The architecture is real; the problem is drift, stale assumptions, and a few high-impact regressions at the state/persistence and watcher lifecycle layers.

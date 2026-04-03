@@ -162,6 +162,26 @@ def _safe_float_env(name: str, default: float) -> float:
 
 TIME_BASED_HANDOFF_MINUTES = _safe_int_env("TIME_BASED_HANDOFF_MINUTES", 55)
 
+# ---------------------------------------------------------------------------
+# WATCHER_POLICY — controls time monitor arming behaviour
+#
+#   token_first      (default) — suppress time-based handoff monitor;
+#                                arm only MAX_ABSOLUTE_TIMEOUT_MINUTES fallback.
+#                                WorkBudgetManager (conductor) drives session length.
+#   legacy_time_first          — restore old behaviour exactly (time monitor always on).
+#   context_only               — no time monitor at all, context pressure only.
+#
+# NOTE: emergency context pressure always wins regardless of policy.
+# ---------------------------------------------------------------------------
+_VALID_POLICIES = frozenset({"token_first", "legacy_time_first", "context_only"})
+WATCHER_POLICY: str = os.environ.get("WATCHER_POLICY", "token_first").lower()
+if WATCHER_POLICY not in _VALID_POLICIES:
+    logger.warning(
+        "Unknown WATCHER_POLICY=%r; defaulting to 'token_first'. "
+        "Valid values: %s", WATCHER_POLICY, ", ".join(sorted(_VALID_POLICIES))
+    )
+    WATCHER_POLICY = "token_first"
+
 # Stage-aware adaptive timeout: base timeout per stage (minutes)
 STAGE_TIMEOUT_MINUTES = {
     "PLANNING": _safe_int_env("STAGE_TIMEOUT_PLANNING", 55),
@@ -282,6 +302,13 @@ class WatcherMetrics:
     # Token metrics
     peak_tokens_seen: int = 0
     handoff_token_values: List[int] = field(default_factory=list)
+
+    # Work budget fields (populated by WorkBudgetManager via conductor)
+    work_budget_target: int = 0
+    output_tokens_spent: int = 0
+    continuation_count: int = 0
+    diminishing_returns_signal: bool = False
+    final_stop_reason: str = ""  # StopReason value: context_graceful | work_budget_complete | ...
 
     # Timestamps
     started_at: Optional[datetime] = None
@@ -1752,11 +1779,28 @@ class SessionMonitor:
     def start_time_handoff_monitor(self):
         """Start the time-based or activity-aware handoff monitor for this session.
 
-        When a stage is provided and recognized, uses ActivityAwareHandoffMonitor
-        which watches workspace file modifications instead of a fixed timer.
-        Falls back to TimeBasedHandoffMonitor when no stage is set (backward compat).
+        Behaviour depends on WATCHER_POLICY:
+          token_first      — skip time monitor entirely; only MAX_ABSOLUTE_TIMEOUT
+                             fires if set externally (circuit-breaker via conductor).
+          legacy_time_first — existing behaviour: ActivityAware (stage known) or
+                              TimeBasedHandoffMonitor (no stage).
+          context_only     — no time monitor at all.
+
+        When a stage is provided and recognized (legacy_time_first), uses
+        ActivityAwareHandoffMonitor instead of the fixed TimeBasedHandoffMonitor.
         """
         if not self._enable_time_handoff:
+            # Covers token_first (enable_time_handoff=False passed from conductor)
+            # and context_only explicitly
+            logger.debug(
+                "Session %s: time handoff monitor suppressed "
+                "(enable_time_handoff=False, policy=%s)",
+                self.session_id, WATCHER_POLICY,
+            )
+            return
+
+        if WATCHER_POLICY == "context_only":
+            logger.debug("Session %s: time monitor disabled by WATCHER_POLICY=context_only", self.session_id)
             return
 
         if self._time_handoff_monitor is not None:
@@ -1773,7 +1817,7 @@ class SessionMonitor:
             logger.info(
                 f"Session {self.session_id}: using ActivityAwareHandoffMonitor "
                 f"for stage {self.stage} (base timeout: "
-                f"{STAGE_TIMEOUT_MINUTES.get(self.stage.upper(), 55)}min)"
+                f"{STAGE_TIMEOUT_MINUTES.get(self.stage.upper(), 55)}min, policy={WATCHER_POLICY})"
             )
         else:
             # No stage or unrecognized stage: use fixed timer (backward compat)

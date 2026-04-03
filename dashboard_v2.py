@@ -2087,6 +2087,8 @@ def reload_html_template():
     try:
         HTML_BUNDLED_TEMPLATE = load_template("main_bundled")
         HTML_TEMPLATE = load_template("main")
+        # Invalidate the pre-rendered HTML cache so next request re-renders from new template
+        _rendered_html_cache['html'] = None
         return jsonify({'success': True, 'message': 'Templates reloaded from disk'})
     except Exception as e:
         logger.error(f"API error in reload_html_template: {e}")

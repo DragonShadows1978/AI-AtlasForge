@@ -103,6 +103,15 @@ except ImportError:
     TIME_BASED_HANDOFF_ENABLED = False
     MAX_ABSOLUTE_TIMEOUT_MINUTES = 360
 
+# WorkBudgetManager — token-primary session control
+try:
+    from context_watcher.work_budget_manager import WorkBudgetManager, WorkBudgetDecision
+    HAS_WORK_BUDGET_MANAGER = True
+except ImportError:
+    HAS_WORK_BUDGET_MANAGER = False
+    WorkBudgetManager = None  # type: ignore
+    WorkBudgetDecision = None  # type: ignore
+
 # Enhanced conductor singleton with takeover support
 try:
     # Add ConductorTakeover to path so its internal imports resolve
@@ -188,6 +197,28 @@ logger = logging.getLogger("atlasforge_conductor")
 
 # Global state
 running = True
+
+# =============================================================================
+# SESSION STOP REASON ENUM
+# Priority order (highest to lowest):
+#   1. context_emergency    — ContextWatcher: window nearly full
+#   2. context_graceful     — ContextWatcher: graceful handoff
+#   3. work_budget_complete — WorkBudgetManager: token target reached
+#   4. work_budget_diminishing_returns — WorkBudgetManager: low delta
+#   5. time_fallback        — TimeBasedHandoff: circuit-breaker
+#   6. hard_timeout         — process kill for broken sessions
+#   7. manual_stop          — user/signal requested stop
+# =============================================================================
+from enum import Enum as _Enum
+
+class StopReason(_Enum):
+    CONTEXT_EMERGENCY = "context_emergency"
+    CONTEXT_GRACEFUL = "context_graceful"
+    WORK_BUDGET_COMPLETE = "work_budget_complete"
+    WORK_BUDGET_DIMINISHING = "work_budget_diminishing_returns"
+    TIME_FALLBACK = "time_fallback"
+    HARD_TIMEOUT = "hard_timeout"
+    MANUAL_STOP = "manual_stop"
 
 # Maximum retries when Claude times out or fails to respond
 MAX_CLAUDE_RETRIES = 3
@@ -517,7 +548,7 @@ def terminate_active_claude():
             return False
         _active_claude_process = None  # Atomically claim ownership
     try:
-        if proc.pid is None or not isinstance(proc.pid, int) or proc.pid <= 0:
+        if proc.pid is None or not isinstance(proc.pid, int) or proc.pid <= 2:
             _restore_active_claude(proc)
             return False
     except (TypeError, AttributeError):
@@ -592,10 +623,13 @@ def _should_use_parallel(stage: str, mission: dict) -> bool:
     """
     if stage != "BUILDING":
         return False
-    cycle_budget = mission.get("cycle_budget", 1)
+    try:
+        cycle_budget = int(mission.get("cycle_budget", 1))
+    except (TypeError, ValueError):
+        cycle_budget = 1
     if cycle_budget >= 2:
         return True
-    problem_statement = mission.get("problem_statement", "")
+    problem_statement = mission.get("problem_statement") or ""
     if len(problem_statement) > 500:
         return True
     return False
@@ -1397,6 +1431,8 @@ def _is_valid_mission(mission: dict) -> bool:
     # Rule 3 & 4: Check for meaningful problem statement (not just placeholder)
     # Use .strip() to handle whitespace-only strings like "   \n\t  "
     problem = mission.get("problem_statement", "")
+    if not isinstance(problem, str):
+        return False
     if not problem or not problem.strip() or problem.strip() == "No mission defined. Please set a mission.":
         return False
 
@@ -1943,35 +1979,33 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
                 if signal.level == HandoffLevel.GRACEFUL:
                     # Write HANDOFF.md for graceful handoff with Haiku-generated summary
-                    # Notify user that Haiku is being invoked
                     send_to_chat(f"[HAIKU] Context limit detected ({signal.cache_creation:,} tokens). Invoking Haiku for intelligent handoff summary...")
-                    # Try to get intelligent summary from Haiku
                     recent_context = get_recent_chat_context(n_messages=5)
                     mission_objective = controller.mission.get("problem_statement", "")
                     haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context, mission_objective)
 
                     if haiku_summary:
-                        # Use Haiku-generated summary
                         summary = f"""{haiku_summary}
 
-**Token stats:** {signal.tokens_used:,} total (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})
-**Handoff reason:** Context approaching limit, graceful handoff initiated"""
+**Handoff reason:** {StopReason.CONTEXT_GRACEFUL.value}
+**Token stats:** {signal.tokens_used:,} total (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})"""
                         send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. Haiku wrote HANDOFF.md.")
                     else:
-                        # Fallback to basic summary if Haiku unavailable
                         summary = f"""**Working on:** Stage {current_stage}
+**Handoff reason:** {StopReason.CONTEXT_GRACEFUL.value}
 **Tokens used:** {signal.tokens_used:,} (cache_creation: {signal.cache_creation:,}, cache_read: {signal.cache_read:,})
-**Handoff reason:** Context approaching limit, graceful handoff initiated
 **Next:** Continue from current stage with fresh context"""
                         send_to_chat(f"[CONTEXT] Graceful handoff at {signal.tokens_used:,} tokens. HANDOFF.md written.")
 
                     write_handoff_state(str(workspace), mission_id, current_stage, summary)
 
                 elif signal.level == HandoffLevel.TIME_BASED:
-                    # Time-based handoff at 55 minutes - use Haiku to write intelligent summary
+                    # Time-based handoff: this is the FALLBACK circuit-breaker.
+                    # It should only fire when work budget telemetry is unavailable
+                    # or when a session is genuinely stalled. It is NOT the primary
+                    # stop reason for healthy sessions (token_first policy suppresses it).
                     elapsed_min = signal.elapsed_minutes if signal.elapsed_minutes else 55.0
-                    # Notify user that Haiku is being invoked
-                    send_to_chat(f"[HAIKU] Time limit reached ({elapsed_min:.1f} min). Invoking Haiku for intelligent handoff summary...")
+                    send_to_chat(f"[HAIKU] Time fallback at {elapsed_min:.1f} min. Invoking Haiku for intelligent handoff summary...")
                     recent_context = get_recent_chat_context(n_messages=5)
                     mission_objective = controller.mission.get("problem_statement", "")
                     haiku_summary = invoke_haiku_summary(mission_id, current_stage, recent_context, mission_objective)
@@ -1979,15 +2013,15 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     if haiku_summary:
                         summary = f"""{haiku_summary}
 
-**Elapsed time:** {elapsed_min:.1f} minutes
-**Handoff reason:** Time-based handoff at 55 minutes (proactive, before 1-hour timeout)"""
-                        send_to_chat(f"[CONTEXT] Time-based handoff at {elapsed_min:.1f} minutes. Haiku wrote HANDOFF.md.")
+**Handoff reason:** {StopReason.TIME_FALLBACK.value} (time-based circuit-breaker)
+**Elapsed time (secondary):** {elapsed_min:.1f} minutes"""
+                        send_to_chat(f"[CONTEXT] Time fallback at {elapsed_min:.1f} minutes. Haiku wrote HANDOFF.md.")
                     else:
                         summary = f"""**Working on:** Stage {current_stage}
-**Elapsed time:** {elapsed_min:.1f} minutes
-**Handoff reason:** Time-based handoff at 55 minutes (proactive, before 1-hour timeout)
+**Handoff reason:** {StopReason.TIME_FALLBACK.value} (time-based circuit-breaker)
+**Elapsed time (secondary):** {elapsed_min:.1f} minutes
 **Next:** Continue from current stage with fresh context"""
-                        send_to_chat(f"[CONTEXT] Time-based handoff at {elapsed_min:.1f} minutes. HANDOFF.md written.")
+                        send_to_chat(f"[CONTEXT] Time fallback at {elapsed_min:.1f} minutes. HANDOFF.md written.")
 
                     write_handoff_state(str(workspace), mission_id, current_stage, summary)
 
@@ -2004,19 +2038,46 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # Start ContextWatcher if available
             # Pass current_stage so ActivityAwareHandoffMonitor is used for
             # long-running stages (TESTING, BUILDING) instead of fixed 55min timer
+            #
+            # WATCHER_POLICY=token_first (default): time monitor is demoted to fallback.
+            # The conductor's work budget (WorkBudgetManager) drives session length.
+            # Time monitor only fires for genuinely hung/stalled processes.
+            _watcher_policy = os.environ.get("WATCHER_POLICY", "token_first").lower()
+            _enable_time_handoff = (
+                TIME_BASED_HANDOFF_ENABLED
+                if _watcher_policy != "token_first"
+                else False   # token_first: suppress time monitor, use budget instead
+            )
             if HAS_CONTEXT_WATCHER:
                 try:
                     watcher = get_context_watcher()
                     context_session_id = watcher.start_watching(
                         str(workspace),
                         on_context_handoff,
-                        enable_time_handoff=TIME_BASED_HANDOFF_ENABLED,
+                        enable_time_handoff=_enable_time_handoff,
                         stage=current_stage
                     )
                     if context_session_id:
-                        logger.info(f"ContextWatcher started for session {context_session_id} (stage={current_stage})")
+                        logger.info(
+                            f"ContextWatcher started for session {context_session_id} "
+                            f"(stage={current_stage}, policy={_watcher_policy}, "
+                            f"time_handoff={_enable_time_handoff})"
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to start ContextWatcher: {e}")
+
+            # WorkBudgetManager: token-primary session control (policy=token_first)
+            _work_budget_mgr: Optional["WorkBudgetManager"] = None
+            if HAS_WORK_BUDGET_MANAGER and _watcher_policy == "token_first":
+                try:
+                    _detected_model = os.environ.get("CLAUDE_MODEL", "").strip()
+                    _work_budget_mgr = WorkBudgetManager(model=_detected_model)
+                    logger.info(
+                        "WorkBudgetManager active: model=%s budget=%d tokens",
+                        _detected_model or "(unset)", _work_budget_mgr.budget_tokens,
+                    )
+                except Exception as _wbm_err:
+                    logger.warning("Failed to create WorkBudgetManager: %s", _wbm_err)
 
             # Adaptive subprocess timeout: TESTING/BUILDING get longer timeouts
             # to match the activity-aware handoff monitor's extended window
@@ -2039,6 +2100,57 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
             else:
                 response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
+
+            # WorkBudgetManager check: determine if session should continue or stop.
+            # Context pressure (ContextWatcher) takes precedence and has already
+            # set handoff_triggered if it fired. Only check work budget when no
+            # context handoff occurred.
+            _session_stop_reason: Optional[str] = None
+            if _work_budget_mgr is not None and not handoff_triggered.is_set():
+                try:
+                    # Estimate output tokens from response length (//4 chars-to-tokens)
+                    _resp_tokens = len(response_text) // 4 if response_text else 0
+                    _wbd = _work_budget_mgr.check(
+                        _work_budget_mgr.output_tokens + _resp_tokens
+                    )
+                    logger.info(
+                        "WorkBudgetManager check: action=%s reason=%s pct=%.1f%% "
+                        "output=%d budget=%d",
+                        _wbd.action, _wbd.reason or "none", _wbd.pct,
+                        _wbd.output_tokens, _wbd.budget_tokens,
+                    )
+                    if _wbd.action == "stop":
+                        _session_stop_reason = _wbd.reason
+                        # Write HANDOFF.md with token-centric stop reason
+                        if write_handoff_state is not None:
+                            try:
+                                _mission_id = controller.mission.get("mission_id", "unknown")
+                                _token_summary = (
+                                    f"Handoff reason: {_wbd.reason} "
+                                    f"(output={_wbd.output_tokens:,}, budget={_wbd.budget_tokens:,}, "
+                                    f"pct={_wbd.pct:.0f}%)"
+                                )
+                                write_handoff_state(
+                                    str(workspace), _mission_id, current_stage, _token_summary
+                                )
+                                logger.info(
+                                    "[CONDUCTOR] WorkBudget stop: %s — HANDOFF.md written",
+                                    _wbd.reason,
+                                )
+                            except Exception as _hw_err:
+                                logger.debug("WorkBudget HANDOFF.md write failed: %s", _hw_err)
+                        send_to_chat(
+                            f"[BUDGET] Work budget {_wbd.reason}: "
+                            f"{_wbd.output_tokens:,}/{_wbd.budget_tokens:,} tokens "
+                            f"({_wbd.pct:.0f}%). Starting fresh session."
+                        )
+                except Exception as _wbm_check_err:
+                    logger.debug("WorkBudgetManager check failed: %s", _wbm_check_err)
+
+            # Act on work budget stop decision — break loop so fresh session starts.
+            if _session_stop_reason is not None:
+                logger.info("[CONDUCTOR] Breaking session loop: stop_reason=%s", _session_stop_reason)
+                break
 
             # Stop ContextWatcher
             if context_session_id and HAS_CONTEXT_WATCHER:

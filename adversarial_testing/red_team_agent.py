@@ -132,6 +132,7 @@ class RedTeamResult:
     raw_response: str = ""
     success: bool = True
     error: Optional[str] = None
+    stop_reasons: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         # Cycle 2 7b: asdict() already converts enums to values, so no post-processing needed

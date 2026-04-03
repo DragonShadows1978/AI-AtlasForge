@@ -595,6 +595,73 @@ export async function queueMission() {
 }
 
 // =============================================================================
+// MISSION FILE UPLOAD
+// =============================================================================
+
+export function uploadMissionFile() {
+    const fileInput = document.getElementById('mission-file-input');
+    if (!fileInput) return;
+    fileInput.click();
+}
+
+export function handleMissionFileSelect(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    // BUG-2: Enforce 500 KB size limit to prevent memory/DoS issues
+    if (file.size > 500_000) {
+        showToast('File too large (max 500 KB)', 'error');
+        input.value = '';
+        return;
+    }
+
+    // BUG-3 (hardened): Allowlist MIME types — empty MIME ('') also rejected to prevent bypass
+    const ALLOWED_MIME_PREFIXES = ['text/plain', 'text/markdown', 'text/x-markdown', 'text/'];
+    const mimeOk = file.type === '' ? false : ALLOWED_MIME_PREFIXES.some(m => file.type.startsWith(m));
+    // Empty MIME (unknown extension) — allow only if extension is .txt or .md
+    const nameOk = /\.(txt|md|markdown|rst|csv|log|yaml|yml|json|xml|html|htm|js|ts|py|sh|css)$/i.test(file.name);
+    if (!mimeOk && !nameOk) {
+        showToast('Only text files are supported (.txt, .md, etc.)', 'error');
+        input.value = '';
+        return;
+    }
+
+    // BUG-5: Disable button while read is in progress (race condition guard)
+    const uploadBtn = document.getElementById('upload-mission-btn') ||
+                      document.querySelector('button[onclick="uploadMissionFile()"]');
+    if (uploadBtn) uploadBtn.disabled = true;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const content = e.target.result;
+        // BUG-4 (fixed order): Check whitespace BEFORE populating textarea
+        if (!content.trim()) {
+            showToast(`"${file.name}" appears empty or whitespace-only`, 'warning');
+            input.value = '';
+            if (uploadBtn) uploadBtn.disabled = false;
+            return;
+        }
+        const missionInput = document.getElementById('mission-input');
+        if (missionInput) {
+            missionInput.value = content;
+            missionInput.dispatchEvent(new Event('input')); // trigger project name suggestion
+        }
+        showToast(`Loaded "${file.name}" (${content.length} chars)`, 'success');
+        input.value = ''; // reset so same file can be re-uploaded
+        if (uploadBtn) uploadBtn.disabled = false;
+    };
+    reader.onabort = function() {
+        if (uploadBtn) uploadBtn.disabled = false;
+    };
+    reader.onerror = function() {
+        showToast(`Failed to read file: ${file.name}`, 'error');
+        input.value = '';
+        if (uploadBtn) uploadBtn.disabled = false;
+    };
+    reader.readAsText(file);
+}
+
+// =============================================================================
 // PROJECT NAME SUGGESTION
 // =============================================================================
 
@@ -1162,12 +1229,20 @@ export async function refresh() {
     setFullMissionText(fullMissionText);
     const missionEl = document.getElementById('current-mission');
     const preview = data.mission_preview || data.mission || 'No mission set';
-    missionEl.innerHTML = `
-        <span onclick="window.openMissionModal()" style="cursor: pointer;" title="Click to view full mission">
-            ${preview}
-            ${data.mission && data.mission.length > 100 ? ' <span style="color: var(--accent);">[expand]</span>' : ''}
-        </span>
-    `;
+    // BUG-1: Build DOM nodes instead of using innerHTML to prevent stored XSS
+    missionEl.textContent = '';
+    const spanOuter = document.createElement('span');
+    spanOuter.onclick = () => window.openMissionModal();
+    spanOuter.style.cursor = 'pointer';
+    spanOuter.title = 'Click to view full mission';
+    spanOuter.textContent = preview;
+    if (data.mission && data.mission.length > 100) {
+        const expandSpan = document.createElement('span');
+        expandSpan.style.color = 'var(--accent)';
+        expandSpan.textContent = ' [expand]';
+        spanOuter.appendChild(expandSpan);
+    }
+    missionEl.appendChild(spanOuter);
 
     updateStageIndicator(data.rd_stage);
 

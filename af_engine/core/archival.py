@@ -17,6 +17,7 @@ import logging
 import os
 import shutil
 from datetime import datetime, timezone
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -93,7 +94,8 @@ def _load_provider_from_state() -> Optional[str]:
         return None
     try:
         data = io_utils.atomic_read_json(provider_path, {})
-    except Exception:
+    except Exception as e:
+        logger.warning("_load_provider_from_state: failed to read provider state: %s", e)
         return None
     if not isinstance(data, dict):
         return None
@@ -299,6 +301,10 @@ def _find_transcripts_in_window(
     """
     provider = _get_archive_provider(mission)
     matching_files: List[Path] = []
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=timezone.utc)
+    if end_dt.tzinfo is None:
+        end_dt = end_dt.replace(tzinfo=timezone.utc)
     start_ts = start_dt.timestamp()
     end_ts = end_dt.timestamp()
     seen_files = set()
@@ -460,7 +466,7 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
         },
         "transcripts": [],
         "totals": {
-            "transcript_count": len(transcripts),
+            "transcript_count": 0,
             "total_size_bytes": 0,
             "total_input_tokens": 0,
             "total_output_tokens": 0,
@@ -470,7 +476,17 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
         }
     }
 
-    for transcript, usage in zip(transcripts, usage_data):
+    if len(transcripts) != len(usage_data):
+        logger.warning(
+            "_generate_manifest: transcripts(%d) and usage_data(%d) length mismatch — "
+            "some entries will have empty usage", len(transcripts), len(usage_data)
+        )
+
+    for transcript, usage in zip_longest(transcripts, usage_data, fillvalue={}):
+        if not isinstance(transcript, Path):
+            continue
+        if not isinstance(usage, dict):
+            usage = {}
         try:
             archived_path = archive_dir / transcript.name
             size = archived_path.stat().st_size
@@ -493,6 +509,7 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
         manifest["totals"]["total_cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0)
         manifest["totals"]["total_tokens"] += usage.get("total_tokens", 0)
 
+    manifest["totals"]["transcript_count"] = len(manifest["transcripts"])
     return manifest
 
 
@@ -532,6 +549,8 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
             mission_id = f"mission_{timestamp_clean}"
         else:
             mission_id = str(mission_id)  # Coerce to str for safe Path operations
+            if '\x00' in mission_id:
+                raise ValueError("invalid mission_id: contains null bytes")
 
         raw_created = mission.get("created_at")
         if not isinstance(raw_created, str) or not raw_created.strip():
@@ -560,10 +579,13 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
         transcripts = _find_transcripts_in_window(start_dt, end_dt, mission=mission)
 
         archive_dir = (TRANSCRIPTS_ARCHIVE_DIR / mission_id).resolve()
+        resolved_base = TRANSCRIPTS_ARCHIVE_DIR.resolve()
         try:
-            archive_dir.relative_to(TRANSCRIPTS_ARCHIVE_DIR.resolve())
+            archive_dir.relative_to(resolved_base)
         except ValueError:
             raise ValueError(f"Invalid mission_id rejected to prevent path traversal: {mission_id!r}")
+        if archive_dir == resolved_base:
+            raise ValueError(f"Invalid mission_id resolves to archive root, must be a subdirectory: {mission_id!r}")
         archive_dir.mkdir(parents=True, exist_ok=True)
         result["archive_path"] = str(archive_dir)
 
@@ -645,7 +667,12 @@ def ingest_afterimage_from_archive(archive_path: Optional[str], mission: Optiona
         result["errors"].append("missing_archive_path")
         return result
 
-    archive_dir = Path(archive_path)
+    archive_dir = Path(archive_path).resolve()
+    try:
+        archive_dir.relative_to(TRANSCRIPTS_ARCHIVE_DIR.resolve())
+    except ValueError:
+        result["errors"].append(f"path_traversal_rejected:{archive_dir}")
+        return result
     if not archive_dir.exists():
         result["errors"].append(f"archive_not_found:{archive_dir}")
         return result
