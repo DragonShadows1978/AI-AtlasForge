@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.3.0] - 2026-04-17
+
+### Changed
+
+- chore: bump version to 2.2.0 for PyPI release
+
+### Other
+
+- Release v2.3.0 — WebProxy package, transparent MCP interception, hardening
+- Release v2.2.0 — Token budget system, red team overhaul, dashboard file upload
+
+### Code Changes
+
+- **Added** `WebProxy/__init__.py`
+- **Added** `WebProxy/cli.py` — `_resolve_mcp_config_path`, `proxy_cli_args`, `__getattr__`
+- **Added** `WebProxy/client.py` — `_post`, `search_web_via_proxy`, `fetch_web_via_proxy`, `research_via_proxy`, `proxy_health`
+- **Added** `WebProxy/install/__init__.py`
+- **Added** `WebProxy/install/rewrite_mcp_paths.py` — `validate_root`, `_rewrite_args`, `rewrite_mcp_file`, `main`
+- **Added** `WebProxy/install/rewrite_unit_files.py` — `validate_root`, `validate_user`, `_rewrite_line`, `rewrite_unit`, `main`
+- **Added** `WebProxy/mcp_server.py` — `_sanitize_error`, `_is_blocked_ip`, `_send`, `_make_error`, `_host_from_url`
+- **Added** `WebProxy/scripts/web_fetch_cli.py` — `main`
+- **Added** `WebProxy/scripts/web_search_cli.py` — `main`
+- **Added** `WebProxy/service.py` — `_int_env`, `UnsafeUrlError`, `_ip_is_unsafe`, `_validate_url_structure`, `_resolve_first_safe_ip`
+- **Added** `WebProxy/stats.py` — `ProxyStatsError`, `get_proxy_stats`, `get_proxy_stats_safe`, `is_proxy_alive`
+- **Added** `WebProxy/supervisor.py` — `_port_listening`, `_wait_for_health`, `ensure_proxy_running`, `stop_proxy`
+- **Added** `WebProxy/tests/__init__.py`
+- **Added** `WebProxy/tests/test_mcp_server.py` — `TestHostMatching`, `test_host_matches_exact`, `test_host_matches_subdomain`, `test_host_matches_no_substring_spoof`, `test_host_matches_different_domain`
+- **Added** `WebProxy/tests/test_service.py` — `test_health_endpoint`, `test_fetch_requires_url`, `test_extract_page_content_strips_scripts_and_keeps_text`, `test_fetch_reddit_handles_null_fields`, `_FakeResponse`
+- **Added** `WebProxy/tests/test_supervisor.py` — `supervisor`, `test_disabled_via_env`, `test_already_running_short_circuits`, `_fake_popen`, `test_spawn_failure_returns_failed`
+- **Added** `WebProxy/tests/verify_iter3_findings.py` — `TestC1_IPv4MappedIPv6`, `test_ipv4_mapped_loopback_blocked`, `test_ipv4_mapped_imds_blocked`, `test_ipv4_mapped_rfc1918_blocked`, `test_ipv4_mapped_url_rejected`
+- **Modified** `adversarial_testing/blind_agent_runner.py` — `_detect_model`, `_model_work_budget`, `_model_safety_timeout`, `_parse_output_tokens_from_jsonl`, `_AgentBudgetState`
+- **Modified** `adversarial_testing/enhanced_runner.py`
+- **Modified** `adversarial_testing/red_team_agent.py` — `_find_balanced_json`, `_find_all_balanced_json`, `continues`
+
+### Stats
+
+```
+ mission_snapshot_manager.py                   |  120 +-
+ pyproject.toml                                |    2 +-
+ scripts/check_no_brave_key.sh                 |  131 ++
+ scripts/setup_services.sh                     |   89 +-
+ 61 files changed, 12085 insertions(+), 625 deletions(-)
+```
+
+_Full diff: `git diff v2.1.0..v2.3.0`_
+
+
 ## [2.0.2] - 2026-03-10
 
 ### Added
