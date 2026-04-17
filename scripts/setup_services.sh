@@ -51,18 +51,27 @@ fi
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
+# Unit-file template rewriter: Python helper that is safe under
+# paths containing |, &, \, ', and does atomic writes. Symmetric with
+# WebProxy/install/rewrite_mcp_paths.py for the MCP-JSON case.
+REWRITE_UNIT="$ATLASFORGE_ROOT/WebProxy/install/rewrite_unit_files.py"
+if [ ! -f "$REWRITE_UNIT" ]; then
+    log_error "Missing unit-file rewriter: $REWRITE_UNIT"
+    exit 1
+fi
+
 # Generate dashboard service
 log_info "Generating dashboard service file..."
-sed -e "s|/opt/ai-atlasforge|$ATLASFORGE_ROOT|g" \
-    -e "s|%i|$CURRENT_USER|g" \
-    "$SYSTEMD_DIR/atlasforge-dashboard.service" > "$TEMP_DIR/atlasforge-dashboard.service"
+python3 "$REWRITE_UNIT" "$ATLASFORGE_ROOT" "$CURRENT_USER" \
+    "$SYSTEMD_DIR/atlasforge-dashboard.service" \
+    "$TEMP_DIR/atlasforge-dashboard.service"
 
 # Generate tray service (if exists)
 if [ -f "$SYSTEMD_DIR/atlasforge-tray.service" ]; then
     log_info "Generating tray service file..."
-    sed -e "s|/opt/ai-atlasforge|$ATLASFORGE_ROOT|g" \
-        -e "s|%i|$CURRENT_USER|g" \
-        "$SYSTEMD_DIR/atlasforge-tray.service" > "$TEMP_DIR/atlasforge-tray.service"
+    python3 "$REWRITE_UNIT" "$ATLASFORGE_ROOT" "$CURRENT_USER" \
+        "$SYSTEMD_DIR/atlasforge-tray.service" \
+        "$TEMP_DIR/atlasforge-tray.service"
 fi
 
 # Install services
@@ -81,6 +90,41 @@ fi
 log_info "Reloading systemd..."
 sudo systemctl daemon-reload
 log_success "systemd reloaded"
+
+# ───────────────────────────────────────────────────────────────
+# Web Proxy — installed as a USER-level systemd unit (not system-wide).
+# Rationale: the proxy reads the caller's env (BRAVE_API_KEY etc.) and
+# runs as the same user that invokes Claude Code / AtlasForge subagents.
+# ───────────────────────────────────────────────────────────────
+if [ -f "$ATLASFORGE_ROOT/WebProxy/systemd/atlasforge-web-proxy.service" ]; then
+    echo ""
+    log_info "Generating web proxy user-service file..."
+    USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$USER_SYSTEMD_DIR"
+    python3 "$REWRITE_UNIT" "$ATLASFORGE_ROOT" "$CURRENT_USER" \
+        "$ATLASFORGE_ROOT/WebProxy/systemd/atlasforge-web-proxy.service" \
+        "$USER_SYSTEMD_DIR/atlasforge-web-proxy.service"
+    systemctl --user daemon-reload
+    log_success "Web proxy user-service installed at $USER_SYSTEMD_DIR/atlasforge-web-proxy.service"
+fi
+
+# ───────────────────────────────────────────────────────────────
+# Rewrite MCP JSON configs to point at the real install path via the
+# Python helper (scripts/rewrite_mcp_paths.py). Safer than sed because
+# it parses JSON, anchors the replacement, and writes atomically.
+# Idempotent: re-running against the same root is a no-op.
+# ───────────────────────────────────────────────────────────────
+echo ""
+log_info "Rewriting MCP config paths to $ATLASFORGE_ROOT..."
+if [ -f "$ATLASFORGE_ROOT/WebProxy/install/rewrite_mcp_paths.py" ]; then
+    if python3 "$ATLASFORGE_ROOT/WebProxy/install/rewrite_mcp_paths.py" "$ATLASFORGE_ROOT"; then
+        log_success "MCP config paths rewritten"
+    else
+        log_error "Failed to rewrite MCP config paths"
+    fi
+else
+    log_warning "WebProxy/install/rewrite_mcp_paths.py not found — skipping"
+fi
 
 # Enable services
 echo ""
@@ -117,6 +161,35 @@ if [[ ! $REPLY =~ ^[Nn]$ ]]; then
     fi
 fi
 
+# Web Proxy enable/start prompts (user unit)
+if [ -f "$HOME/.config/systemd/user/atlasforge-web-proxy.service" ]; then
+    echo ""
+    read -p "Enable web proxy user-service to start on login? [Y/n] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        systemctl --user enable atlasforge-web-proxy.service
+        log_success "Web proxy user-service enabled"
+    fi
+
+    read -p "Start web proxy service now? [Y/n] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        systemctl --user start atlasforge-web-proxy.service
+        sleep 2
+        if systemctl --user is-active --quiet atlasforge-web-proxy.service; then
+            log_success "Web proxy service started"
+            if curl -sf http://127.0.0.1:8765/health >/dev/null 2>&1; then
+                log_success "Web proxy health check passed (http://127.0.0.1:8765/health)"
+            else
+                log_warning "Web proxy started but health check failed — check 'journalctl --user -u atlasforge-web-proxy'"
+            fi
+        else
+            log_error "Web proxy service failed to start"
+            echo "Check logs with: journalctl --user -u atlasforge-web-proxy"
+        fi
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}Service Setup Complete${NC}"
@@ -127,4 +200,8 @@ echo "  Start dashboard:   sudo systemctl start atlasforge-dashboard"
 echo "  Stop dashboard:    sudo systemctl stop atlasforge-dashboard"
 echo "  Status:            sudo systemctl status atlasforge-dashboard"
 echo "  View logs:         sudo journalctl -u atlasforge-dashboard -f"
+echo ""
+echo "  Web proxy:         systemctl --user {start,stop,status} atlasforge-web-proxy"
+echo "  Proxy logs:        journalctl --user -u atlasforge-web-proxy -f"
+echo "  Proxy health:      curl -sf http://127.0.0.1:8765/health"
 echo ""

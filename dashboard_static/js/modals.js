@@ -58,17 +58,22 @@ function renderRecommendations() {
     }
 
     container.innerHTML = recommendations.map(rec => `
-        <div class="rec-item" onclick="openRecModal('${rec.id}')">
+        <div class="rec-item" data-rec-id="${escapeHtml(String(rec.id))}">
             <div class="rec-item-content">
                 <div class="rec-item-title">${escapeHtml(rec.mission_title)}</div>
                 <div class="rec-item-preview">${escapeHtml((rec.mission_description || '').substring(0, 100))}${(rec.mission_description || '').length > 100 ? '...' : ''}</div>
             </div>
             <div class="rec-item-meta">
-                <span class="rec-cycles-badge">${rec.suggested_cycles || 3} cycles</span>
-                <span>${formatDate(rec.created_at)}</span>
+                <span class="rec-cycles-badge">${escapeHtml(String(rec.suggested_cycles || 3))} cycles</span>
+                <span>${escapeHtml(formatDate(rec.created_at))}</span>
             </div>
         </div>
     `).join('');
+
+    // Wire click via event delegation — avoids inline onclick with server-controlled rec.id
+    container.querySelectorAll('.rec-item').forEach(el => {
+        el.addEventListener('click', () => openRecModal(el.dataset.recId));
+    });
 }
 
 function openRecModal(recId) {

@@ -768,23 +768,30 @@ def prune_old_audit_logs(
             except Exception as e:
                 logger.error(f"[MissionConfig] Failed to prune {path}: {e}")
 
-    # Prune by total size
+    # Prune by total size — O(N) pre-compute then O(N) subtraction loop
     max_bytes = max_total_mb * 1024 * 1024
-    while candidates:
-        total_bytes = sum(
-            sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
-            for _, _, p in candidates
-            if p.exists()
-        )
-        if total_bytes <= max_bytes:
-            break
+
+    # Pre-compute per-directory sizes once (O(N * files)) instead of recomputing all on each iteration
+    dir_sizes: dict = {}
+    for _, _, p in candidates:
+        if p.exists():
+            dir_sizes[str(p)] = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        else:
+            dir_sizes[str(p)] = 0
+
+    total_bytes = sum(dir_sizes.values())
+
+    while candidates and total_bytes > max_bytes:
         ts, mission_id, path = candidates.pop(0)
         pruned.append(mission_id)
+        deleted_size = dir_sizes.get(str(path), 0)
         if not dry_run:
             try:
                 shutil.rmtree(path)
                 logger.info(f"[MissionConfig] Pruned mission dir (size): {path}")
             except Exception as e:
                 logger.error(f"[MissionConfig] Failed to prune {path}: {e}")
+                deleted_size = 0  # failed deletion — don't subtract size
+        total_bytes -= deleted_size
 
     return pruned

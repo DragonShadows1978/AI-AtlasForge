@@ -309,12 +309,12 @@ async function loadFiles() {
             <div class="file-item">
                 <div class="file-info">
                     <a href="#" class="download-link file-name"
-                       data-content-url="${f.content_url || ''}"
-                       data-download-url="${f.download_url}"
-                       data-filename="${f.name}"
-                       data-file-type="${f.file_type || 'binary'}"
-                       title="${f.path}">${f.name}</a>
-                    <span class="file-meta">${formatBytes(f.size)} · ${formatTimeAgo(f.modified)}</span>
+                       data-content-url="${escapeHtml(f.content_url || '')}"
+                       data-download-url="${escapeHtml(f.download_url || '')}"
+                       data-filename="${escapeHtml(f.name || '')}"
+                       data-file-type="${escapeHtml(f.file_type || 'binary')}"
+                       title="${escapeHtml(f.path || '')}">${escapeHtml(f.name || '')}</a>
+                    <span class="file-meta">${escapeHtml(formatBytes(f.size))} · ${escapeHtml(formatTimeAgo(f.modified))}</span>
                 </div>
             </div>
         `).join('');
@@ -496,7 +496,7 @@ async function refresh() {
     const preview = data.mission_preview || data.mission || 'No mission set';
     missionEl.innerHTML = `
         <span onclick="openMissionModal()" style="cursor: pointer;" title="Click to view full mission">
-            ${preview}
+            ${escapeHtml(preview)}
             ${data.mission && data.mission.length > 100 ? ' <span style="color: var(--accent);">[expand]</span>' : ''}
         </span>
     `;
@@ -509,7 +509,7 @@ async function refresh() {
     document.getElementById('journal').innerHTML = journal.map(j => {
         if (j.is_truncated) {
             return `
-                <div class="journal-entry expandable" data-entry-id="${j.timestamp}" onclick="toggleJournalEntry(this)">
+                <div class="journal-entry expandable" data-entry-id="${escapeHtml(j.timestamp)}" onclick="toggleJournalEntry(this)">
                     <span class="journal-type">${escapeHtml(j.type)}</span>
                     <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
                     <div class="preview-message">${escapeHtml(j.message)}...<span class="expand-indicator">[+]</span></div>
@@ -518,7 +518,7 @@ async function refresh() {
             `;
         } else {
             return `
-                <div class="journal-entry" data-entry-id="${j.timestamp}">
+                <div class="journal-entry" data-entry-id="${escapeHtml(j.timestamp)}">
                     <span class="journal-type">${escapeHtml(j.type)}</span>
                     <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
                     <div>${escapeHtml(j.message || j.status || '')}</div>
@@ -595,6 +595,7 @@ function updateDriftChart(driftHistory) {
     const chart = document.getElementById('af-drift-chart');
     const simEl = document.getElementById('af-drift-similarity');
     const sevEl = document.getElementById('af-drift-severity');
+    if (!chart || !simEl || !sevEl) return;
 
     if (!driftHistory || driftHistory.length === 0) {
         chart.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8em; width: 100%; text-align: center;">No drift data yet</div>';
@@ -606,20 +607,20 @@ function updateDriftChart(driftHistory) {
     // Build bar chart (max 10 bars)
     const recentHistory = driftHistory.slice(-10);
     const bars = recentHistory.map(h => {
-        const sim = h.similarity || 1.0;
+        const sim = h.similarity ?? 1.0;
         const height = Math.max(10, sim * 100);
         let colorClass = 'green';
         if (h.alert === 'YELLOW') colorClass = 'yellow';
         else if (h.alert === 'RED' || h.alert === 'ORANGE') colorClass = 'red';
 
-        return `<div class="af-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
+        return `<div class="af-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${escapeHtml(String(h.cycle))}: ${(sim * 100).toFixed(0)}%"></div>`;
     }).join('');
 
     chart.innerHTML = bars;
 
     // Update current status
     const latest = recentHistory[recentHistory.length - 1];
-    const sim = (latest.similarity * 100).toFixed(1);
+    const sim = ((latest.similarity ?? 0) * 100).toFixed(1);
     simEl.textContent = sim + '%';
     simEl.className = 'value ' + getAlertColor(latest.alert);
     sevEl.textContent = latest.severity || 'N/A';
@@ -634,6 +635,7 @@ function getAlertColor(alert) {
 
 function updateRecentExplorations(explorations) {
     const list = document.getElementById('af-recent-list');
+    if (!list) return;
 
     if (!explorations || explorations.length === 0) {
         list.innerHTML = '<div style="color: var(--text-dim); font-size: 0.85em;">No explorations yet</div>';
@@ -644,9 +646,9 @@ function updateRecentExplorations(explorations) {
         const name = e.name || e.path || 'Unknown';
         const type = e.type || 'file';
         return `
-            <div class="af-exploration-item" title="${e.summary || ''}">
-                <span class="af-exploration-name">${name}</span>
-                <span class="af-exploration-type">${type}</span>
+            <div class="af-exploration-item" title="${escapeHtml(e.summary || '')}">
+                <span class="af-exploration-name">${escapeHtml(name)}</span>
+                <span class="af-exploration-type">${escapeHtml(type)}</span>
             </div>
         `;
     }).join('');
@@ -737,14 +739,15 @@ async function refreshFullAnalytics() {
 
 function renderAnalyticsMissionList(missions) {
     const list = document.getElementById('analytics-missions-list');
+    if (!list) return;
     if (!missions || missions.length === 0) {
         list.innerHTML = '<div style="color: var(--text-dim);">No mission data</div>';
         return;
     }
 
     const html = missions.map(m => `
-        <div class="learning-item" onclick="showMissionAnalytics('${m.mission_id}')">
-            <div class="learning-item-title">${m.mission_id || 'Unknown'}</div>
+        <div class="learning-item" data-mission-id="${escapeHtml(m.mission_id || '')}">
+            <div class="learning-item-title">${escapeHtml(m.mission_id || 'Unknown')}</div>
             <div class="learning-item-meta">
                 <span style="color: var(--yellow);">$${(m.cost || 0).toFixed(4)}</span> |
                 ${formatNumber(m.tokens || 0)} tokens
@@ -753,6 +756,11 @@ function renderAnalyticsMissionList(missions) {
     `).join('');
 
     list.innerHTML = html;
+    list.querySelectorAll('.learning-item[data-mission-id]').forEach(function(el) {
+        el.addEventListener('click', function() {
+            showMissionAnalytics(el.dataset.missionId);
+        });
+    });
 }
 
 function renderAnalyticsTrendChart(missions) {
@@ -854,13 +862,67 @@ async function refreshTokenIntegrityWidget() {
                 const cat = a.category === 'zero_token' ? 'ZERO' : 'LOW';
                 const col = a.category === 'zero_token' ? 'var(--danger,#f85149)' : 'var(--accent-yellow,#d29922)';
                 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border,#30363d);font-size:0.8em;">' +
-                    '<span style="color:var(--text-primary,#c9d1d9);font-family:monospace;">' + (a.mission_id || '-') + '</span>' +
-                    '<span><span style="color:' + col + ';margin-right:6px;">[' + cat + ']</span><span style="color:var(--text-dim,#8b949e);">' + date + '</span></span>' +
+                    '<span style="color:var(--text-primary,#c9d1d9);font-family:monospace;">' + escapeHtml(a.mission_id || '-') + '</span>' +
+                    '<span><span style="color:' + col + ';margin-right:6px;">[' + cat + ']</span><span style="color:var(--text-dim,#8b949e);">' + escapeHtml(date) + '</span></span>' +
                     '</div>';
             }).join('');
         }
     } catch (e) {
         if (badge) { badge.textContent = 'error'; badge.className = 'badge badge-danger'; }
+    }
+}
+
+// =============================================================================
+// WEB PROXY WIDGET (WEB_PROXY_INVESTIGATION_01 cycle 2)
+// =============================================================================
+
+async function refreshWebProxyWidget() {
+    const badge = document.getElementById('web-proxy-status-badge');
+    const provDiv = document.getElementById('web-proxy-providers');
+    const setValue = function(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = formatNumber(value || 0);
+    };
+
+    try {
+        const resp = await fetch('/api/web-proxy/stats');
+        const stats = await resp.json();
+        if (stats && stats.status === 'ok') {
+            if (badge) {
+                badge.textContent = 'LIVE';
+                badge.className = 'badge badge-success';
+            }
+            setValue('web-proxy-searches', stats.cached_searches);
+            setValue('web-proxy-fetches', stats.cached_fetches);
+            setValue('web-proxy-image-searches', stats.cached_image_searches);
+            setValue('web-proxy-images', stats.cached_images);
+            const providers = stats.providers || {};
+            const entries = Object.entries(providers).sort(function(a, b) { return b[1] - a[1]; });
+            if (provDiv) {
+                if (entries.length === 0) {
+                    provDiv.innerHTML = '<span style="color: var(--text-dim);">No provider data</span>';
+                } else {
+                    provDiv.innerHTML = entries.map(function(pair) {
+                        return '<span style="margin-right: 10px;">' + escapeHtml(pair[0]) + ': <b>' + formatNumber(pair[1]) + '</b></span>';
+                    }).join('');
+                }
+            }
+        } else {
+            if (badge) {
+                badge.textContent = 'OFFLINE';
+                badge.className = 'badge badge-error';
+            }
+            const msg = (stats && stats.error) || 'proxy unreachable';
+            if (provDiv) {
+                provDiv.innerHTML = '<span style="color: var(--text-dim);">' + escapeHtml(msg) + '</span>';
+            }
+        }
+    } catch (e) {
+        console.error('[WebProxy] refresh error:', e);
+        if (badge) {
+            badge.textContent = 'OFFLINE';
+            badge.className = 'badge badge-error';
+        }
     }
 }
 

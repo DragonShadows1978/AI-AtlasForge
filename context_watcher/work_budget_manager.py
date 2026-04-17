@@ -74,6 +74,8 @@ def _resolve_budget_for_model(model: str) -> int:
     BUG-M5: Sort keys by descending length so longer (more specific) keys are
     checked first — prevents "claude-opus-4" from matching "claude-opus-4-6".
     """
+    if model is None:
+        model = ''
     env_override = os.environ.get("WORK_BUDGET_TOKENS")
     if env_override:
         try:
@@ -89,6 +91,8 @@ def _resolve_budget_for_model(model: str) -> int:
 
 
 def _resolve_max_continuations(model: str) -> int:
+    if model is None:
+        model = ''
     for key in sorted(_MODEL_MAX_CONTINUATIONS, key=len, reverse=True):
         if key in model.lower():
             return _MODEL_MAX_CONTINUATIONS[key]
@@ -96,6 +100,8 @@ def _resolve_max_continuations(model: str) -> int:
 
 
 def _resolve_low_delta_threshold(model: str) -> int:
+    if model is None:
+        model = ''
     for key in sorted(_MODEL_LOW_DELTA_THRESHOLD, key=len, reverse=True):
         if key in model.lower():
             return _MODEL_LOW_DELTA_THRESHOLD[key]
@@ -149,8 +155,21 @@ class WorkBudgetManager:
         """
         # BUG-H5: coerce non-string model to str before strip/lower
         self._model = str(model).strip().lower() if model is not None else ""
+        if budget_tokens is not None and isinstance(budget_tokens, bool):
+            raise TypeError(f"budget_tokens must be an int, got bool {budget_tokens!r}")
+        if budget_tokens is not None and isinstance(budget_tokens, float):
+            raise TypeError(f"budget_tokens must be an int, got float {budget_tokens!r}")
+        if budget_tokens is not None and budget_tokens <= 0:
+            raise ValueError(f"budget_tokens must be positive, got {budget_tokens!r}")
         _resolved = budget_tokens if budget_tokens is not None else _resolve_budget_for_model(self._model)
-        self._budget = _resolved if _resolved > 0 else _DEFAULT_BUDGET
+        if _resolved <= 0:
+            logger.warning(
+                "_resolve_budget_for_model returned %d for model %r — using default %d",
+                _resolved, self._model or "(unset)", _DEFAULT_BUDGET
+            )
+            self._budget = _DEFAULT_BUDGET
+        else:
+            self._budget = _resolved
         self._max_continuations = _resolve_max_continuations(self._model)
         self._low_delta_threshold = _resolve_low_delta_threshold(self._model)
         self._lock = threading.Lock()
@@ -184,17 +203,46 @@ class WorkBudgetManager:
             WorkBudgetDecision with action='continue' or action='stop'.
         """
         with self._lock:
-            # BUG-H6: guard against non-numeric input (None, str, etc.)
+            # Guard against bool (subclasses int but semantically invalid as token count)
+            if isinstance(output_tokens, bool):
+                raise TypeError(f"output_tokens must be a non-negative int, got bool {output_tokens!r}")
+            # Guard against non-numeric input (None, str, etc.)
             if not isinstance(output_tokens, (int, float)):
-                output_tokens = 0
+                raise TypeError(f"output_tokens must be a non-negative int or float, got {type(output_tokens).__name__} {output_tokens!r}")
+            # H9: guard against inf/nan — int(float('inf')) raises OverflowError
+            import math as _math
+            if isinstance(output_tokens, float) and not _math.isfinite(output_tokens):
+                raise ValueError(f"output_tokens must be finite, got {output_tokens!r}")
+            # Guard against huge finite floats that overflow int conversion
+            if isinstance(output_tokens, float) and output_tokens > 2**53:
+                raise ValueError(f"output_tokens value too large: {output_tokens!r}")
             output_tokens = max(0, int(output_tokens))
 
             # BUG-H7: only count continuations that produced new tokens.
             # Skipping zero-delta calls prevents empty responses from triggering
             # false diminishing-returns decisions.
+            if output_tokens < self._output_tokens:
+                # Decreasing token count — likely a stale/reset watermark from a new agent turn.
+                # Log warning to surface false budget exhaustion risk, keep existing high watermark.
+                logger.warning(
+                    "Decreasing output_tokens detected: %d -> %d (stale watermark kept; "
+                    "budget enforcement continues against prior high watermark)",
+                    self._output_tokens, output_tokens,
+                )
             if output_tokens <= self._output_tokens:
-                # No new output — return continue decision without incrementing counters
+                # No new output — but still enforce budget if already exhausted (H4).
+                # A stale/equal token count must not return "continue" if budget is done.
                 pct = (self._output_tokens / self._budget * 100) if self._budget > 0 else 0.0
+                if self._stop_reason:
+                    return WorkBudgetDecision(
+                        action="stop",
+                        reason=self._stop_reason,
+                        nudge_message=None,
+                        continuation_count=self._continuation_count,
+                        pct=pct,
+                        output_tokens=self._output_tokens,
+                        budget_tokens=self._budget,
+                    )
                 nudge = self._build_nudge_message(pct)
                 return WorkBudgetDecision(
                     action="continue",
@@ -314,6 +362,8 @@ class WorkBudgetManager:
         Lock must be held by caller.
         """
         if len(self._token_history) < 2:
+            # M8: reset counter on early return so it doesn't leak into future checks
+            self._consecutive_low_delta = 0
             return False
         delta = self._token_history[-1] - self._token_history[-2]
         if delta < self._low_delta_threshold:

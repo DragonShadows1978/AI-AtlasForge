@@ -195,8 +195,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("atlasforge_conductor")
 
-# Global state
-running = True
+# Global state — threading.Event for signal-safe flag
+_running = threading.Event()
+_running.set()  # Initially running
+# NOTE: Do NOT use `running` or `bool(_running)` as a loop guard — threading.Event
+# objects are always truthy regardless of their internal state. Always use
+# `_running.is_set()` to check whether the conductor should continue running.
 
 # =============================================================================
 # SESSION STOP REASON ENUM
@@ -309,13 +313,18 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
 
     # Default provider: Claude CLI
     from init_guard import InitGuard
+    from WebProxy import proxy_cli_args
     disallowed = InitGuard.get_disallowed_tools_for_cli(stage or "BUILDING")
+    # Sanitize disallowed tools string — only allow safe characters to prevent CLI injection
+    # if a stage handler somehow returns shell metacharacters.
+    import re as _re
+    disallowed = _re.sub(r'[^a-zA-Z0-9_,\s]', '', disallowed)
     logger.info(f"Stage '{stage or 'BUILDING'}' -> disallowedTools: {disallowed}")
     cmd = [
         "claude", "-p",
         "--dangerously-skip-permissions",
-        "--disallowedTools", disallowed
     ]
+    cmd.extend(proxy_cli_args(disallowed))
     if model:
         cmd[2:2] = ["--model", model]
     return cmd
@@ -371,9 +380,8 @@ def release_conductor_lock():
 
 
 def signal_handler(signum, frame):
-    global running
     logger.info(f"Received signal {signum}, shutting down gracefully...")
-    running = False
+    _running.clear()
 
 
 if threading.current_thread() is threading.main_thread():
@@ -623,13 +631,20 @@ def _should_use_parallel(stage: str, mission: dict) -> bool:
     """
     if stage != "BUILDING":
         return False
+    if not isinstance(mission, dict):
+        return False
+    raw_cb = mission.get("cycle_budget", 1)
+    if isinstance(raw_cb, bool):
+        raise TypeError(f"cycle_budget must be an integer, got bool {raw_cb!r}")
     try:
-        cycle_budget = int(mission.get("cycle_budget", 1))
-    except (TypeError, ValueError):
+        cycle_budget = int(raw_cb)
+    except (TypeError, ValueError, OverflowError):
         cycle_budget = 1
     if cycle_budget >= 2:
         return True
     problem_statement = mission.get("problem_statement") or ""
+    if not isinstance(problem_statement, str):
+        problem_statement = ""
     if len(problem_statement) > 500:
         return True
     return False
@@ -760,6 +775,12 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
     """
     global _active_claude_process
     import math
+    if not isinstance(prompt, str):
+        raise TypeError(
+            f"invoke_llm requires prompt to be a str, got {type(prompt).__name__!r}"
+        )
+    if not prompt:
+        raise ValueError("invoke_llm requires a non-empty prompt string")
     if not isinstance(timeout, (int, float)) or timeout <= 0 or math.isnan(timeout) or math.isinf(timeout):
         raise ValueError(f"invoke_llm timeout must be a finite number > 0, got {timeout}")
     if cwd is None:
@@ -860,6 +881,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
 
         stdout = None  # initialized here so error-path code can safely reference them
         stderr = ""
+        _stderr_thread = None
         try:
             if provider == "claude" and _stream_file:
                 # Streaming path: feed stdin manually because we do not use communicate().
@@ -872,9 +894,21 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     return None, f"broken_pipe:{e}"
                 except Exception as e:
                     logger.debug('proc.stdin.write failed: %s', e)
-                # Streaming thread handles stdout; just wait for process
+                # Streaming thread handles stdout; drain stderr in a background
+                # thread to prevent pipe-buffer exhaustion deadlock, then wait.
+                _stderr_buf = []
+
+                def _drain_stderr():
+                    try:
+                        _stderr_buf.append(proc.stderr.read() if proc.stderr else "")
+                    except Exception:
+                        _stderr_buf.append("")
+
+                _stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+                _stderr_thread.start()
                 proc.wait(timeout=timeout)
-                stderr = proc.stderr.read() if proc.stderr else ""
+                _stderr_thread.join(timeout=5)
+                stderr = _stderr_buf[0] if _stderr_buf else ""
                 stdout = None  # consumed by stream thread
             else:
                 # Non-streaming path: let communicate() own stdin end-to-end.
@@ -903,7 +937,9 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                 except OSError as e:
                     logger.warning(f"OSError sending SIGKILL to process {proc.pid}: {e}")
             logger.error(f"{provider} timed out after {timeout}s")
-            if provider == "codex" and _stream_thread:
+            if _stderr_thread is not None:
+                _stderr_thread.join(timeout=3)
+            if _stream_thread:
                 _stream_thread.join(timeout=3)
             if _agent_id and _comp:
                 try: _comp(_agent_id, error=f"timeout:{timeout}s")
@@ -987,7 +1023,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                     stderr_snippet = best_line[:500]
 
             logger.error(f"{provider} error: {stderr_text}")
-            if provider == "codex" and _stream_thread:
+            if _stream_thread:
                 _stream_thread.join(timeout=3)
             if _agent_id and _comp:
                 try: _comp(_agent_id, error=f"cli_error:{stderr_snippet[:80]}")
@@ -1023,75 +1059,114 @@ def _find_balanced_json(text: str) -> Optional[str]:
     if not isinstance(text, str):
         return None
 
-    search_from = 0
-    for _attempt in range(5):  # Limit retries to prevent O(n²)
-        start = text.find('{', search_from)
-        if start == -1:
-            return None
+    # O(N) linear pass: collect all top-level braced candidates in one scan,
+    # then try json.loads on each (typically ≤ 5 candidates).
+    # Replaces the previous O(N²) approach where _max_attempts scaled with len(text)
+    # and each attempt re-scanned the text from the beginning.
+    candidates: list[tuple[int, int]] = []  # (start, end+1) of each top-level {} block
+    depth = 0
+    in_string = False
+    escape_next = False
+    current_start = -1
 
-        depth = 0
-        in_string = False
-        escape_next = False
-        found_end = -1
-
-        for i, char in enumerate(text[start:], start):
-            if escape_next:
-                escape_next = False
-                continue
-            if char == '\\' and in_string:
-                escape_next = True
-                continue
-            if char == '"' and not escape_next:
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if char == '{':
-                depth += 1
-            elif char == '}':
+    for i, char in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if char == '\\' and in_string:
+            escape_next = True
+            continue
+        # Special case: '{' at depth==0 resets string-tracking state.
+        # Pre-brace text is not JSON, so unmatched quotes in preamble
+        # (e.g. 'use the "key" {...}') must not corrupt in_string tracking
+        # for the actual JSON object. The reset must happen BEFORE the
+        # in_string guard so that '{' is not skipped when in_string=True.
+        if char == '{' and depth == 0:
+            in_string = False
+            escape_next = False
+            current_start = i
+            depth += 1
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == '{':
+            depth += 1
+        elif char == '}':
+            if depth > 0:
                 depth -= 1
-                if depth == 0:
-                    found_end = i
-                    break
+                if depth == 0 and current_start != -1:
+                    candidates.append((current_start, i + 1))
+                    current_start = -1
 
-        if found_end == -1:
-            search_from = start + 1
-            continue  # Try next '{' instead of giving up
-
-        candidate = text[start:found_end + 1]
+    for start, end in candidates:
+        candidate = text[start:end]
         try:
             json.loads(candidate)
             return candidate
         except json.JSONDecodeError:
-            # Try with trailing comma cleanup before giving up on this candidate
+            # Try with trailing comma cleanup before skipping this candidate
             cleaned = _cleanup_trailing_commas(candidate)
             try:
                 json.loads(cleaned)
                 return cleaned  # Return the cleaned version that actually parsed
             except json.JSONDecodeError:
-                # Not valid JSON even after cleanup; skip past this '{' and try the next one
-                search_from = start + 1
+                continue  # Try the next top-level candidate
 
-    return None  # Exhausted retry attempts
+    return None  # No valid JSON found
 
 
 def _cleanup_trailing_commas(json_str: str) -> str:
     """
-    Remove trailing commas that are invalid in JSON.
+    Remove trailing commas outside of JSON string values.
 
     Claude sometimes produces JSON with trailing commas which are valid in
-    JavaScript but not in strict JSON. This cleans them up.
+    JavaScript but not in strict JSON. Uses a character-level tokenizer that
+    tracks whether the current position is inside a string, so commas inside
+    string values (e.g. {"pattern": ",}"}) are never removed.
 
     Args:
         json_str: JSON string that may have trailing commas
 
     Returns:
-        Cleaned JSON string with trailing commas removed
+        Cleaned JSON string with structural trailing commas removed
     """
-    # Remove trailing comma before } or ]
-    cleaned = re.sub(r',\s*\}', '}', json_str)
-    cleaned = re.sub(r',\s*\]', ']', cleaned)
-    return cleaned
+    if not isinstance(json_str, str):
+        return ""
+    result = []
+    in_string = False
+    i = 0
+    n = len(json_str)
+    while i < n:
+        ch = json_str[i]
+        if in_string:
+            result.append(ch)
+            if ch == '\\' and i + 1 < n:
+                # Consume escape sequence without toggling string state
+                i += 1
+                result.append(json_str[i])
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+                result.append(ch)
+            elif ch == ',':
+                # Look ahead past whitespace and other commas; if next non-ws/non-comma
+                # char is } or ], skip this comma (handles double trailing commas too).
+                j = i + 1
+                while j < n and json_str[j] in ' \t\r\n,':
+                    j += 1
+                if j < n and json_str[j] in ']}':
+                    pass  # Drop the trailing comma (and any redundant commas before it)
+                else:
+                    result.append(ch)
+            else:
+                result.append(ch)
+        i += 1
+    return ''.join(result)
 
 
 def extract_json_from_response(text: str) -> Optional[dict]:
@@ -1387,9 +1462,9 @@ def _log_retry_metrics(metrics: dict, completed_mission_id: str) -> None:
         }
         with open(RETRY_METRICS_LOG_PATH, 'a') as f:
             f.write(json.dumps(log_entry) + "\n")
-    except Exception:
+    except Exception as _exc:
         # Silent failure - metrics logging should never disrupt mission flow
-        pass
+        logger.debug("_log_retry_metrics failed: %s", _exc)
 
 
 def _is_valid_mission(mission: dict) -> bool:
@@ -1420,12 +1495,13 @@ def _is_valid_mission(mission: dict) -> bool:
         >>> _is_valid_mission({"mission_id": "m1", "problem_statement": "Fix bug"})
         True
     """
-    # Rule 1: Reject None, empty dict, or falsy values
-    if not mission:
+    # Rule 1: Reject non-dict types, None, empty dict, or falsy values
+    if not isinstance(mission, dict) or not mission:
         return False
 
-    # Rule 2: Check for required mission_id field
-    if not mission.get("mission_id"):
+    # Rule 2: Check for required mission_id field (also reject whitespace-only)
+    mission_id = mission.get("mission_id")
+    if not mission_id or not isinstance(mission_id, str) or not mission_id.strip():
         return False
 
     # Rule 3 & 4: Check for meaningful problem statement (not just placeholder)
@@ -1433,11 +1509,7 @@ def _is_valid_mission(mission: dict) -> bool:
     problem = mission.get("problem_statement", "")
     if not isinstance(problem, str):
         return False
-    if not problem or not problem.strip() or problem.strip() == "No mission defined. Please set a mission.":
-        return False
-
-    # Redundant but explicit check for empty dict
-    if mission == {}:
+    if not problem or not problem.strip() or problem.strip().lower() == "no mission defined. please set a mission.":
         return False
 
     return True
@@ -1482,13 +1554,23 @@ def _calculate_backoff_interval(attempt: int, base_interval: float = 1.0, max_in
     return min(base_interval * (2 ** attempt), max_interval)
 
 
+def _mission_content_hash(mission: dict) -> str:
+    """Return a short hash of mission content fields for re-submission detection."""
+    import hashlib as _hashlib
+    if not isinstance(mission, dict):
+        return _hashlib.md5(b"").hexdigest()[:16]
+    key = (mission.get("problem_statement") or "") + "|" + (mission.get("mission_id") or "")
+    return _hashlib.md5(key.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
 def _wait_for_new_mission_with_retry(
     controller,
     completed_mission_id: str,
     max_retries: int = 3,
     base_interval: float = 1.0,
     max_total_wait: float = None,
-    use_exponential_backoff: bool = True
+    use_exponential_backoff: bool = True,
+    completed_mission_content_hash: str = None
 ) -> tuple:
     """Wait for a new mission using retry loop with file-based signaling.
 
@@ -1658,12 +1740,16 @@ def _wait_for_new_mission_with_retry(
         # Directly check mission.json for changes, works even if signaling breaks
         controller.mission = controller.load_mission()
         new_mission_id = controller.mission.get("mission_id")
-        new_stage = controller.mission.get("current_stage", "COMPLETE")
 
         # Validate the mission is not empty or invalid
         if not _is_valid_mission(controller.mission):
             logger.debug(f"Invalid/empty mission detected, skipping (attempt {attempt + 1})")
-        elif new_mission_id != completed_mission_id and new_stage != "COMPLETE":
+        elif new_mission_id != completed_mission_id or (
+            # Same mission_id: detect re-submission by comparing content hash
+            new_mission_id == completed_mission_id
+            and completed_mission_content_hash is not None
+            and _mission_content_hash(controller.mission) != completed_mission_content_hash
+        ):
             # New valid mission detected via polling!
             logger.info(f"New mission detected on attempt {attempt + 1}: {new_mission_id}")
             _clear_signal_file()  # Clear any lingering signal
@@ -1768,8 +1854,6 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
         takeover: If True, attempt graceful takeover of existing conductor
         force: If True, force takeover with SIGKILL if needed
     """
-    global running
-
     logger.info("=" * 60)
     logger.info("CLAUDE AUTONOMOUS - R&D MODE")
     logger.info("=" * 60)
@@ -1836,14 +1920,15 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
     parse_retries = 0  # Track consecutive parse-only retries (no-adapter path), separate from timeout_retries
     parse_failure_count = 0  # Track consecutive JSON parse failures (separate from transport)
     empty_response_count = 0  # Track consecutive empty responses to prevent infinite loops
+    total_empty_response_count = 0  # Cumulative empty responses — prevents alternating bypass of halt condition
     _announced_mission_id = None  # Track which mission we've announced to avoid duplicate announcements
 
     try:
-        while running:
+        while _running.is_set():
             cycle_count += 1
             state["total_cycles"] = state.get("total_cycles", 0) + 1
 
-            current_stage = controller.mission.get("current_stage", "PLANNING")
+            current_stage = (controller.mission.get("current_stage", "PLANNING") or "PLANNING").upper()
 
             # Sync live-editable params from disk (picks up dashboard PATCH changes)
             try:
@@ -1869,7 +1954,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # Check for human interrupt
             human_msg = check_human_message()
             if human_msg:
-                human_prompt = human_msg.get("prompt", "")
+                human_prompt = human_msg.get("prompt") or ""
                 logger.info(f"Human message: {human_prompt[:100]}...")
                 clear_human_message()
 
@@ -1915,12 +2000,14 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 # while still detecting fast auto-advances quickly on the first poll.
                 #
                 # Graceful degradation: If signal file fails, falls back to mission.json polling
+                _completed_content_hash = _mission_content_hash(controller.mission)
                 new_mission_detected, retry_metrics = _wait_for_new_mission_with_retry(
                     controller,
                     completed_mission_id,
                     max_retries=4,           # More retries with backoff
                     base_interval=1.0,       # Start at 1s, then 2s, 4s, 8s
                     max_total_wait=15.0,     # Cap total wait at 15 seconds
+                    completed_mission_content_hash=_completed_content_hash,
                     use_exponential_backoff=True
                 )
 
@@ -2170,7 +2257,8 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # NOT increment timeout_retries or trigger 3-strike halt.
             if not response_text and not error_info:
                 empty_response_count += 1
-                logger.warning(f"Empty Claude response #{empty_response_count} with rc=0 (not an error)")
+                total_empty_response_count += 1
+                logger.warning(f"Empty Claude response #{empty_response_count} with rc=0 (not an error) [total={total_empty_response_count}]")
                 # Log to CLI error tracker for trend analysis
                 try:
                     from workspace.contextWatcher_Error_Tracking.cli_error_logger import (
@@ -2192,9 +2280,12 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     "note": f"rc=0 with empty stdout #{empty_response_count} - not counting as error"
                 })
 
-                if empty_response_count >= 3:
-                    logger.error("3 consecutive empty responses — treating as retriable error")
-                    send_to_chat(f"[WARN] {empty_response_count} consecutive empty responses in {current_stage}")
+                if empty_response_count >= 3 or total_empty_response_count >= MAX_CLAUDE_RETRIES * 2:
+                    logger.error(
+                        f"Empty response loop: consecutive={empty_response_count}, "
+                        f"total={total_empty_response_count} — treating as retriable error"
+                    )
+                    send_to_chat(f"[WARN] {empty_response_count} consecutive / {total_empty_response_count} total empty responses in {current_stage}")
                     timeout_retries += 1
                     empty_response_count = 0
                     if timeout_retries >= MAX_CLAUDE_RETRIES:
@@ -2396,6 +2487,11 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
                 if HAS_RESPONSE_ADAPTER:
                     response = construct_fallback_response(current_stage, response_text)
+                    if response is None:
+                        logger.error(
+                            f"construct_fallback_response returned None for stage {current_stage}"
+                        )
+                        response = {}
                     logger.warning(
                         f"Using fallback adapter for stage {current_stage} "
                         f"(parse failure {parse_failure_count}/{MAX_PARSE_FAILURES})"
@@ -2542,7 +2638,6 @@ def run_free_mode():
     Run Claude in free exploration mode.
     Original autonomous behavior without directed missions.
     """
-    global running
     provider = get_llm_provider()
     provider_label = provider.capitalize()
 
@@ -2563,7 +2658,7 @@ def run_free_mode():
     cycle_count = 0
 
     try:
-        while running:
+        while _running.is_set():
             cycle_count += 1
             state["total_cycles"] = state.get("total_cycles", 0) + 1
 

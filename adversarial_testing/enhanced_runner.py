@@ -502,8 +502,8 @@ def divide(a, b):
 
 def process_query(user_input):
     """Process user query."""
-    import os
-    os.system(f"echo {user_input}")  # Bug: command injection
+    import subprocess
+    subprocess.run(['echo', user_input], check=False)  # Fixed: list form prevents shell injection
 '''
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:

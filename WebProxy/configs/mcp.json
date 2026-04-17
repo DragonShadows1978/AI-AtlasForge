@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "atlasforge-web-proxy": {
+      "command": "python3",
+      "args": ["/home/vader/AI-AtlasForge/WebProxy/mcp_server.py"],
+      "env": {}
+    }
+  }
+}

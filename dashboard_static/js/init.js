@@ -53,6 +53,12 @@ function setupPeriodicRefreshes() {
         setInterval(refreshAnalyticsWidget, 30000);
     }
 
+    // Web proxy widget - every 15 seconds
+    if (typeof refreshWebProxyWidget === 'function') {
+        refreshWebProxyWidget();
+        setInterval(refreshWebProxyWidget, 15000);
+    }
+
     // Git status widget - every 15 seconds
     if (typeof refreshGitStatusWidget === 'function') {
         refreshGitStatusWidget();

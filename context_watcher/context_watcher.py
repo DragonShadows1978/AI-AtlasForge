@@ -128,36 +128,71 @@ CONTEXT_WATCHER_ENABLED = os.environ.get(
 TIME_BASED_HANDOFF_ENABLED = os.environ.get(
     "TIME_BASED_HANDOFF_ENABLED", "1"
 ).lower() in ("1", "true", "yes")
+_MAX_SAFE_INT_ENV = 10 ** 9  # 1 billion — prevents memory exhaustion from astronomical values
+
+
 def _safe_int_env(name: str, default: int) -> int:
     """Read an integer environment variable, falling back to default on ValueError or non-positive value."""
+    raw = os.environ.get(name, str(default))
     try:
-        val = int(os.environ.get(name, str(default)))
+        val = int(raw)
         if val <= 0:
             logger.warning("Env %s=%d is non-positive, clamping to default %d", name, val, default)
             return default
+        if val > _MAX_SAFE_INT_ENV:
+            logger.warning(
+                "Env %s=%d exceeds safe upper bound %d, clamping to default %d",
+                name, val, _MAX_SAFE_INT_ENV, default,
+            )
+            return default
         return val
     except ValueError:
+        logger.warning("Env %s=%r is not a valid integer, using default %d", name, raw, default)
         return default
 
 
 def _safe_nonneg_int_env(name: str, default: int) -> int:
     """Read an integer env var that may be 0, but rejects negative values with a warning."""
+    raw = os.environ.get(name, str(default))
     try:
-        val = int(os.environ.get(name, str(default)))
+        val = int(raw)
         if val < 0:
             logger.warning("Env %s=%d is negative, clamping to default %d", name, val, default)
             return default
+        if val > _MAX_SAFE_INT_ENV:
+            logger.warning(
+                "Env %s=%d exceeds safe upper bound %d, clamping to default %d",
+                name, val, _MAX_SAFE_INT_ENV, default,
+            )
+            return default
         return val
     except ValueError:
+        logger.warning("Env %s=%r is not a valid integer, using default %d", name, raw, default)
         return default
 
 
+_MAX_SAFE_FLOAT_ENV = 1e9  # 1 billion — prevents astronomically large timeouts/intervals
+
 def _safe_float_env(name: str, default: float) -> float:
-    """Read a float environment variable, falling back to default on ValueError, non-finite, or negative value."""
+    """Read a float environment variable, falling back to default on ValueError, non-finite, negative, or out-of-range value."""
+    raw = os.environ.get(name, str(default))
     try:
-        val = float(os.environ.get(name, str(default)))
-        return val if math.isfinite(val) and val > 0 else default
+        val = float(raw)
+        if not math.isfinite(val):
+            logger.warning("Env %s=%r is non-finite, using default %s", name, raw, default)
+            return default
+        if val <= 0:
+            logger.warning("Env %s=%f is non-positive, clamping to default %s", name, val, default)
+            return default
+        if val > _MAX_SAFE_FLOAT_ENV:
+            logger.warning(
+                "Env %s=%f exceeds safe upper bound %g, clamping to default %s",
+                name, val, _MAX_SAFE_FLOAT_ENV, default,
+            )
+            return default
+        return val
     except ValueError:
+        logger.warning("Env %s=%r is not a valid float, using default %s", name, raw, default)
         return default
 
 TIME_BASED_HANDOFF_MINUTES = _safe_int_env("TIME_BASED_HANDOFF_MINUTES", 55)

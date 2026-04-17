@@ -199,6 +199,7 @@ window.confirmRestart = widgets.confirmRestart;
 window.refresh = widgets.refresh;
 window.refreshAtlasForgeWidgets = widgets.refreshAtlasForgeWidgets;
 window.refreshAnalyticsWidget = widgets.refreshAnalyticsWidget;
+window.refreshWebProxyWidget = widgets.refreshWebProxyWidget;
 window.refreshArtifactHealthWidget = widgets.refreshArtifactHealthWidget;
 window.refreshTokenIntegrityWidget = widgets.refreshTokenIntegrityWidget;
 window.refreshFullAnalytics = widgets.refreshFullAnalytics;
@@ -1045,6 +1046,10 @@ function setupFullPolling() {
     // Analytics widget - every 30 seconds
     widgets.refreshAnalyticsWidget();
     pollingIntervals.push(setInterval(widgets.refreshAnalyticsWidget, 30000));
+
+    // Web proxy widget - every 15 seconds
+    widgets.refreshWebProxyWidget();
+    pollingIntervals.push(setInterval(widgets.refreshWebProxyWidget, 15000));
 
     // Artifact health widget - every 60 seconds
     widgets.refreshArtifactHealthWidget();

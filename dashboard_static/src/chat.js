@@ -4,7 +4,7 @@
  * Dependencies: core.js
  */
 
-import { showToast, downloadFileViaFetch } from './core.js';
+import { showToast, downloadFileViaFetch, escapeHtml } from './core.js';
 
 // =============================================================================
 // FILE PATH DETECTION
@@ -37,7 +37,7 @@ function processMessageForDownloads(content) {
 
         const filename = relativePath.split('/').pop();
         // Use data attributes for fetch-based download (bypasses Chrome's strict cert checks for self-signed SSL)
-        return `<a href="#" class="download-link chat-download" data-download-url="/api/download/${relativePath}" data-filename="${filename}" title="${relativePath}">${filename}</a>`;
+        return `<a href="#" class="download-link chat-download" data-download-url="/api/download/${escapeHtml(relativePath)}" data-filename="${escapeHtml(filename)}" title="${escapeHtml(relativePath)}">${escapeHtml(filename)}</a>`;
     });
 }
 
@@ -101,14 +101,14 @@ export function addMessage(role, content, timestamp = null, metadata = null) {
         ? new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
         : new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 
-    let processedContent = content;
+    let processedContent = escapeHtml(content);
     if (normalizedRole === 'claude' || normalizedRole === 'codex' || normalizedRole === 'gemini') {
-        processedContent = processMessageForDownloads(content);
+        processedContent = processMessageForDownloads(escapeHtml(content));
     }
 
     div.dataset.rawContent = content;
 
-    div.innerHTML = `<button class="message-copy-btn" onclick="window.copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;
+    div.innerHTML = `<button class="message-copy-btn" onclick="window.copyMessageText(this)">Copy</button><div class="message-meta">${escapeHtml(displayRole)} - ${time}</div>${processedContent}`;
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;

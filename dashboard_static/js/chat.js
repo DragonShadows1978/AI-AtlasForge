@@ -79,16 +79,20 @@ function addMessage(role, content, timestamp = null, metadata = null) {
         ? new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
         : new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 
-    // Process content for download links (only for Claude messages)
-    let processedContent = content;
+    // Escape content first to prevent XSS, then process for download links.
+    // processMessageForDownloads() generates safe <a> tags — it must receive
+    // already-escaped content so those tags are not double-escaped.
+    let processedContent = escapeHtml(content);
     if (normalizedRole === 'claude' || normalizedRole === 'codex') {
-        processedContent = processMessageForDownloads(content);
+        processedContent = processMessageForDownloads(escapeHtml(content));
     }
 
     // Store raw content for copy functionality
     div.dataset.rawContent = content;
 
-    div.innerHTML = `<button class="message-copy-btn" onclick="copyMessageText(this)">Copy</button><div class="message-meta">${displayRole} - ${time}</div>${processedContent}`;
+    // processedContent is already escaped (or escaped+link-processed) — do NOT
+    // wrap again in escapeHtml() or the generated <a> tags will be double-escaped.
+    div.innerHTML = `<button class="message-copy-btn" onclick="copyMessageText(this)">Copy</button><div class="message-meta">${escapeHtml(displayRole)} - ${escapeHtml(time)}</div>${processedContent}`;
 
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;

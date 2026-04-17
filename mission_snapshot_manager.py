@@ -52,8 +52,11 @@ class MissionSnapshot:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MissionSnapshot':
-        """Create from dictionary."""
-        return cls(**data)
+        """Create from dictionary, filtering unknown keys to prevent TypeError."""
+        from dataclasses import fields as _dc_fields
+        known = {f.name for f in _dc_fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in known}
+        return cls(**filtered)
 
 
 class SnapshotManager:
@@ -75,7 +78,7 @@ class SnapshotManager:
     def __init__(self, snapshots_dir: Path = None, mission_path: Path = None):
         self.snapshots_dir = snapshots_dir or SNAPSHOTS_DIR
         self.mission_path = mission_path or MISSION_PATH
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock prevents deadlock when rotate_snapshots calls list_snapshots
 
         # Ensure snapshots directory exists
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
@@ -86,9 +89,12 @@ class SnapshotManager:
 
     def _generate_snapshot_id(self, mission_id: str, timestamp: str, content_hash: str) -> str:
         """Generate unique snapshot ID."""
+        import re as _re
+        # Strip path traversal chars — only allow alphanumeric, underscore, hyphen
+        safe_mission_id = _re.sub(r'[^a-zA-Z0-9_-]', '_', str(mission_id))
         short_hash = content_hash[:8]
-        ts_clean = timestamp.replace(':', '-').replace('.', '-')
-        return f"snapshot_{mission_id}_{ts_clean}_{short_hash}"
+        ts_clean = timestamp.replace(':', '-').replace('.', '-').replace('+', '-')
+        return f"snapshot_{safe_mission_id}_{ts_clean}_{short_hash}"
 
     def create_snapshot(self, extra_metadata: Dict[str, Any] = None, stage_hint: str = None) -> Optional[MissionSnapshot]:
         """
@@ -131,6 +137,14 @@ class SnapshotManager:
                 snapshot_filename = f"{snapshot_id}.json"
                 snapshot_path = self.snapshots_dir / snapshot_filename
 
+                # Compute a normalized hash of mission_data for tamper detection.
+                # sha256_hash is the raw-content hash (used for snapshot_id generation).
+                # normalized_sha256 is the canonical hash of mission_state JSON —
+                # this is what verify_snapshot() compares against.
+                normalized_hash = hashlib.sha256(
+                    json.dumps(mission_data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+                ).hexdigest()
+
                 # Build snapshot data
                 snapshot_data = {
                     'snapshot_metadata': {
@@ -139,6 +153,7 @@ class SnapshotManager:
                         'timestamp': timestamp,
                         'stage': stage,
                         'sha256_hash': content_hash,
+                        'normalized_sha256': normalized_hash,
                         'file_path': str(snapshot_path),
                         'stage_hint': stage_hint,
                         'extra': extra_metadata or {}
@@ -201,26 +216,29 @@ class SnapshotManager:
             with open(snapshot_path, 'r') as f:
                 snapshot_data = json.load(f)
 
-            # Recompute hash of mission state
+            meta = snapshot_data.get('snapshot_metadata', {})
             mission_state = snapshot_data.get('mission_state', {})
-            content = json.dumps(mission_state, separators=(',', ':'), sort_keys=True)
 
-            # Note: The original hash was computed on the raw file content,
-            # not JSON-normalized. We store that hash and compare.
-            stored_hash = snapshot_data.get('snapshot_metadata', {}).get('sha256_hash')
-
-            if not stored_hash:
+            # Prefer normalized_sha256 (stored since the integrity fix).
+            # Fall back to sha256_hash for legacy snapshots: recompute normalized
+            # hash and compare — these will only match if the stored hash happened
+            # to be a normalized-JSON hash, which is unlikely for old snapshots,
+            # so legacy snapshots without normalized_sha256 return False.
+            normalized_stored = meta.get('normalized_sha256')
+            if not normalized_stored:
+                # Legacy snapshot without normalized hash: cannot verify integrity
+                logger.warning(
+                    f"Snapshot {snapshot_id} has no normalized_sha256 — verification skipped"
+                )
                 return False
 
-            # For verification, we re-read the original mission state section
-            # The hash should match what was captured
-            # Since we can't recover the exact original formatting, we verify
-            # the snapshot file itself hasn't been corrupted
-            file_hash = hashlib.sha256(json.dumps(snapshot_data, separators=(',', ':')).encode()).hexdigest()
+            if len(normalized_stored) != 64:
+                return False
 
-            # Create a verification marker
-            verification_marker = snapshot_data.get('snapshot_metadata', {}).get('sha256_hash')
-            return verification_marker is not None and len(verification_marker) == 64
+            recomputed = hashlib.sha256(
+                json.dumps(mission_state, sort_keys=True, separators=(',', ':')).encode('utf-8')
+            ).hexdigest()
+            return recomputed == normalized_stored
 
         except Exception as e:
             logger.error(f"Snapshot verification failed for {snapshot_id}: {e}")
@@ -259,9 +277,11 @@ class SnapshotManager:
 
                 mission_state = snapshot_data.get('mission_state', {})
 
-                # Create backup of current mission.json before restoring
+                # Create timestamped backup of current mission.json before restoring
+                # (avoids overwriting previous backup on each call)
                 if self.mission_path.exists():
-                    backup_path = self.mission_path.with_suffix('.json.pre_restore_backup')
+                    ts = datetime.now().strftime('%Y%m%dT%H%M%S')
+                    backup_path = self.mission_path.parent / f"mission.json.pre_restore_{ts}.backup"
                     shutil.copy2(self.mission_path, backup_path)
 
                 # Ensure state directory exists
@@ -296,8 +316,10 @@ class SnapshotManager:
             max_hourly: Maximum hourly snapshots to keep
             max_daily: Maximum daily snapshots to keep
         """
-        max_hourly = max_hourly or self.MAX_HOURLY_SNAPSHOTS
-        max_daily = max_daily or self.MAX_DAILY_SNAPSHOTS
+        if max_hourly is None:
+            max_hourly = self.MAX_HOURLY_SNAPSHOTS
+        if max_daily is None:
+            max_daily = self.MAX_DAILY_SNAPSHOTS
 
         with self._lock:
             try:
@@ -312,20 +334,26 @@ class SnapshotManager:
                 recent = []
                 older = []
 
+                def _parse_ts(x):
+                    try:
+                        return datetime.fromisoformat(x.timestamp).replace(tzinfo=None)
+                    except (ValueError, AttributeError):
+                        return datetime.min
+
                 for s in snapshots:
                     try:
-                        ts = datetime.fromisoformat(s.timestamp)
+                        ts = datetime.fromisoformat(s.timestamp).replace(tzinfo=None)
                         if ts > cutoff_24h:
                             recent.append(s)
                         else:
                             older.append(s)
-                    except:
-                        # Can't parse timestamp, treat as old
+                    except Exception as e:
+                        logger.warning(f"Could not parse snapshot timestamp {s.timestamp!r}: {e}")
                         older.append(s)
 
                 # Sort by timestamp (newest first)
-                recent.sort(key=lambda x: x.timestamp, reverse=True)
-                older.sort(key=lambda x: x.timestamp, reverse=True)
+                recent.sort(key=_parse_ts, reverse=True)
+                older.sort(key=_parse_ts, reverse=True)
 
                 # Keep only max_hourly recent snapshots
                 to_delete = recent[max_hourly:]
@@ -334,17 +362,18 @@ class SnapshotManager:
                 daily_buckets = {}
                 for s in older:
                     try:
-                        ts = datetime.fromisoformat(s.timestamp)
+                        ts = datetime.fromisoformat(s.timestamp).replace(tzinfo=None)
                         day_key = ts.strftime('%Y-%m-%d')
                         if day_key not in daily_buckets:
                             daily_buckets[day_key] = s  # Keep newest for this day
                         else:
                             to_delete.append(s)  # Delete older snapshot from same day
-                    except:
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Could not bucket snapshot {getattr(s, 'timestamp', '?')!r}: {e}")
                         to_delete.append(s)
 
                 # From daily buckets, keep only max_daily
-                daily_snapshots = sorted(daily_buckets.values(), key=lambda x: x.timestamp, reverse=True)
+                daily_snapshots = sorted(daily_buckets.values(), key=_parse_ts, reverse=True)
                 to_delete.extend(daily_snapshots[max_daily:])
 
                 # Delete expired snapshots
@@ -396,7 +425,12 @@ class SnapshotManager:
                     logger.warning(f"Failed to read snapshot {snapshot_file}: {e}")
 
             # Sort by timestamp (newest first)
-            snapshots.sort(key=lambda x: x.timestamp, reverse=True)
+            def _parse_ts_simple(x):
+                try:
+                    return datetime.fromisoformat(x.timestamp).replace(tzinfo=None)
+                except (ValueError, AttributeError):
+                    return datetime.min
+            snapshots.sort(key=_parse_ts_simple, reverse=True)
 
         except Exception as e:
             logger.error(f"Failed to list snapshots: {e}")
@@ -446,7 +480,7 @@ class SnapshotManager:
         try:
             with open(snapshot.file_path, 'r') as f:
                 data = json.load(f)
-            return data.get('mission_json', data)
+            return data.get('mission_state', data)
         except Exception as e:
             logger.error(f"Failed to read snapshot content: {e}")
             return None
@@ -479,6 +513,14 @@ class SnapshotManager:
 
             for repo_path_str in sub_repos:
                 repo_path = Path(repo_path_str)
+                if not repo_path.is_absolute():
+                    repo_path = BASE_DIR / repo_path
+                # Reject paths that escape BASE_DIR to prevent path traversal
+                try:
+                    repo_path.resolve().relative_to(BASE_DIR.resolve())
+                except ValueError:
+                    logger.warning("Skipping sub_repo outside BASE_DIR: %s", repo_path_str)
+                    continue
                 if repo_path.exists():
                     coordination_data['sub_repos'][str(repo_path)] = self._capture_repo_state(repo_path)
 
@@ -570,7 +612,8 @@ class SnapshotScheduler:
 
             stage = mission.get('current_stage', '')
             return stage not in (None, '', 'COMPLETE')
-        except:
+        except (FileNotFoundError, AttributeError, json.JSONDecodeError) as e:
+            logger.debug(f"is_active_mission check failed: {e}")
             return False
 
     def _scheduler_loop(self):
@@ -673,11 +716,12 @@ class StaleBackupMonitor:
 
             # Check age of latest snapshot
             try:
-                snapshot_time = datetime.fromisoformat(latest.timestamp)
+                snapshot_time = datetime.fromisoformat(latest.timestamp).replace(tzinfo=None)
                 age = (datetime.now() - snapshot_time).total_seconds()
                 return age > self.STALE_THRESHOLD
-            except:
-                return True  # Can't parse timestamp, consider stale
+            except (OSError, ValueError) as e:
+                logger.debug(f"StaleBackupMonitor timestamp parse failed: {e}")
+                return False  # not stale — don't false-alarm
 
         except Exception as e:
             logger.error(f"Staleness check failed: {e}")

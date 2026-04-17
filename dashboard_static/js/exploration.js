@@ -303,20 +303,20 @@ class GraphRenderer {
         const color = typeColors[node.type] || '#8b949e';
 
         details.innerHTML = `
-            <div style="font-weight: 500; color: ${color}; margin-bottom: 5px;">${node.name}</div>
+            <div style="font-weight: 500; color: ${color}; margin-bottom: 5px;">${escapeHtml(node.name)}</div>
             <div class="stat-row" style="font-size: 0.8em;">
                 <span class="stat-label">Type:</span>
-                <span class="stat-value">${node.type}</span>
+                <span class="stat-value">${escapeHtml(node.type)}</span>
             </div>
             ${node.path ? `<div class="stat-row" style="font-size: 0.8em;">
                 <span class="stat-label">Path:</span>
-                <span class="stat-value" style="word-break: break-all;">${node.path}</span>
+                <span class="stat-value" style="word-break: break-all;">${escapeHtml(node.path)}</span>
             </div>` : ''}
             <div class="stat-row" style="font-size: 0.8em;">
                 <span class="stat-label">Explored:</span>
-                <span class="stat-value">${node.exploration_count}x</span>
+                <span class="stat-value">${escapeHtml(String(node.exploration_count))}x</span>
             </div>
-            <div style="font-size: 0.75em; color: var(--text-dim); margin-top: 5px;">${node.summary || ''}</div>
+            <div style="font-size: 0.75em; color: var(--text-dim); margin-top: 5px;">${escapeHtml(node.summary || '')}</div>
         `;
     }
 }
@@ -364,7 +364,7 @@ async function searchInsights() {
     try {
         const data = await api('/api/atlasforge/search-insights?q=' + encodeURIComponent(query));
         if (data.error) {
-            results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">${data.error}</div>`;
+            results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">${escapeHtml(data.error)}</div>`;
             return;
         }
 
@@ -375,11 +375,11 @@ async function searchInsights() {
         }
 
         const html = insights.map(i => `
-            <div class="af-exploration-item" title="${i.description || ''}">
+            <div class="af-exploration-item" title="${escapeHtml(i.description || '')}">
                 <div>
-                    <span style="font-weight: 500;">${i.title}</span>
+                    <span style="font-weight: 500;">${escapeHtml(i.title)}</span>
                     <div style="font-size: 0.75em; color: var(--text-dim);">
-                        ${i.type} | ${(i.similarity * 100).toFixed(0)}% match
+                        ${escapeHtml(i.type)} | ${(i.similarity * 100).toFixed(0)}% match
                     </div>
                 </div>
                 <span class="af-exploration-type">${(i.confidence * 100).toFixed(0)}%</span>
@@ -388,7 +388,7 @@ async function searchInsights() {
 
         results.innerHTML = html;
     } catch (e) {
-        results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">Error: ${e.message}</div>`;
+        results.innerHTML = `<div style="color: var(--red); font-size: 0.85em;">Error: ${escapeHtml(e.message || String(e))}</div>`;
     }
 }
 

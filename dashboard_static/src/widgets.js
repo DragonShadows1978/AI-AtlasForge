@@ -114,8 +114,8 @@ function renderStyledJournalEntry(j) {
 
     if (isTruncated) {
         return `
-            <div class="journal-entry expandable ${parsed.class}" data-entry-id="${j.timestamp}" onclick="window.toggleJournalEntry(this)">
-                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${parsed.icon}</span>` : ''}${escapeHtml(displayType)}</span>
+            <div class="journal-entry expandable ${parsed.class}" data-entry-id="${escapeHtml(j.timestamp || '')}" onclick="window.toggleJournalEntry(this)">
+                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${escapeHtml(parsed.icon)}</span>` : ''}${escapeHtml(displayType)}</span>
                 <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
                 <div class="preview-message journal-message">${escapeHtml(parsed.cleanContent)}...<span class="expand-indicator">[+]</span></div>
                 <div class="full-message journal-message">${escapeHtml(parsedFull.cleanContent)}<span class="collapse-indicator">[-]</span></div>
@@ -123,8 +123,8 @@ function renderStyledJournalEntry(j) {
         `;
     } else {
         return `
-            <div class="journal-entry ${parsed.class}" data-entry-id="${j.timestamp}">
-                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${parsed.icon}</span>` : ''}${escapeHtml(displayType)}</span>
+            <div class="journal-entry ${parsed.class}" data-entry-id="${escapeHtml(j.timestamp || '')}">
+                <span class="journal-type">${parsed.icon ? `<span class="msg-icon">${escapeHtml(parsed.icon)}</span>` : ''}${escapeHtml(displayType)}</span>
                 <span class="journal-time">${j.timestamp ? new Date(j.timestamp).toLocaleTimeString() : ''}</span>
                 <div class="journal-message">${escapeHtml(parsed.cleanContent)}</div>
             </div>
@@ -265,7 +265,7 @@ export function renderJournalEntries(entries) {
             <div class="journal-entry ${isExpanded ? 'expanded' : ''}" data-index="${idx}"
                  onclick="window.toggleJournalEntry(this)">
                 <div class="journal-timestamp">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</div>
-                <div class="journal-stage">${stage}
+                <div class="journal-stage">${escapeHtml(stage)}</div>
                 <div class="journal-message">${escapeHtml(displayContent)}</div>
                 ${shouldTruncate ? '<div class="journal-expand-hint">Click to ' + (isExpanded ? 'collapse' : 'expand') + '</div>' : ''}
             </div>
@@ -427,7 +427,8 @@ export async function startClaude(mode) {
 
     if (missionText) {
         // Case 1: Text box has content - create new mission and start
-        const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+        const _cbParsed0 = parseInt(document.getElementById('cycle-budget-input')?.value);
+        const cycleBudget = Number.isNaN(_cbParsed0) ? 1 : _cbParsed0;
         const projectNameInput = document.getElementById('project-name-input');
         const projectName = projectNameInput ? projectNameInput.value.trim() : '';
 
@@ -451,7 +452,7 @@ export async function startClaude(mode) {
 
         // Create the new mission
         const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
-        const payload = { mission: missionText, cycle_budget: cycleBudget, max_iterations: maxIterations };
+        const payload = { mission: missionText.substring(0, 5000), cycle_budget: cycleBudget, max_iterations: maxIterations };
         if (projectName) payload.project_name = projectName;
 
         const setResult = await api('/api/mission', 'POST', payload);
@@ -495,15 +496,26 @@ export async function stopClaude() {
 }
 
 export async function setMission() {
-    const mission = document.getElementById('mission-input').value.trim();
+    const missionInput = document.getElementById('mission-input');
+    const mission = missionInput?.value?.trim() ?? '';
     if (!mission) return;
 
-    const cycleBudget = parseInt(document.getElementById('cycle-budget-input').value) || 1;
+    const _cbInput = document.getElementById('cycle-budget-input');
+    if (!_cbInput) console.warn('setMission: cycle-budget-input element not found');
+    const _cbParsed1 = parseInt(_cbInput?.value);
+    const cycleBudget = Number.isNaN(_cbParsed1) ? 1 : _cbParsed1;
     const projectNameInput = document.getElementById('project-name-input');
+    if (!projectNameInput) console.warn('setMission: project-name-input element not found');
     const projectName = projectNameInput ? projectNameInput.value.trim() : '';
 
-    const currentMission = await api('/api/mission', 'GET');
-    const currentStage = currentMission.current_stage || 'COMPLETE';
+    let currentMission;
+    try {
+        currentMission = await api('/api/mission', 'GET');
+    } catch (err) {
+        console.warn('setMission: failed to fetch current mission', err);
+        currentMission = {};
+    }
+    const currentStage = currentMission?.current_stage || 'COMPLETE';
 
     if (currentStage !== 'COMPLETE') {
         const confirm1 = confirm(
@@ -523,14 +535,14 @@ export async function setMission() {
     }
 
     const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
-    const payload = {mission, cycle_budget: cycleBudget, max_iterations: maxIterations};
+    const payload = {mission: mission.substring(0, 5000), cycle_budget: cycleBudget, max_iterations: maxIterations};
     if (projectName) {
         payload.project_name = projectName;
     }
 
     const data = await api('/api/mission', 'POST', payload);
     showToast(data.message);
-    document.getElementById('mission-input').value = '';
+    if (missionInput) missionInput.value = '';
     if (projectNameInput) projectNameInput.value = '';
     refresh();
 
@@ -558,7 +570,8 @@ export async function queueMission() {
         return;
     }
 
-    const cycleBudget = parseInt(document.getElementById('cycle-budget-input')?.value) || 1;
+    const _cbParsed2 = parseInt(document.getElementById('cycle-budget-input')?.value);
+    const cycleBudget = Number.isNaN(_cbParsed2) ? 1 : _cbParsed2;
     const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
     const projectNameInput = document.getElementById('project-name-input');
     const projectName = projectNameInput ? projectNameInput.value.trim() : '';
@@ -566,7 +579,7 @@ export async function queueMission() {
     // Add to queue via API
     try {
         const payload = {
-            problem_statement: missionText,
+            problem_statement: missionText.substring(0, 5000),
             cycle_budget: cycleBudget,
             max_iterations: maxIterations,
             priority: 0,
@@ -616,7 +629,8 @@ export function handleMissionFileSelect(input) {
     }
 
     // BUG-3 (hardened): Allowlist MIME types — empty MIME ('') also rejected to prevent bypass
-    const ALLOWED_MIME_PREFIXES = ['text/plain', 'text/markdown', 'text/x-markdown', 'text/'];
+    // Explicit allowlist — no trailing 'text/' catch-all to prevent text/html from matching.
+    const ALLOWED_MIME_PREFIXES = ['text/plain', 'text/markdown', 'text/x-markdown', 'text/csv', 'text/yaml'];
     const mimeOk = file.type === '' ? false : ALLOWED_MIME_PREFIXES.some(m => file.type.startsWith(m));
     // Empty MIME (unknown extension) — allow only if extension is .txt or .md
     const nameOk = /\.(txt|md|markdown|rst|csv|log|yaml|yml|json|xml|html|htm|js|ts|py|sh|css)$/i.test(file.name);
@@ -690,7 +704,7 @@ export function initProjectNameSuggestion() {
         projectSuggestTimeout = setTimeout(async () => {
             try {
                 const result = await api('/api/suggest-project-name', 'POST', {
-                    problem_statement: text
+                    problem_statement: text.substring(0, 5000)
                 });
 
                 if (result.suggested_name && !projectInput.value) {
@@ -740,11 +754,11 @@ function _applyFilesData(files) {
             <div class="file-item">
                 <div class="file-info">
                     <a href="#" class="download-link file-name"
-                       data-content-url="${f.content_url || ''}"
-                       data-download-url="${f.download_url}"
-                       data-filename="${f.name}"
-                       data-file-type="${f.file_type || 'binary'}"
-                       title="${f.path}">${f.name}</a>
+                       data-content-url="${escapeHtml(f.content_url || '')}"
+                       data-download-url="${escapeHtml(f.download_url || '')}"
+                       data-filename="${escapeHtml(f.name || '')}"
+                       data-file-type="${escapeHtml(f.file_type || 'binary')}"
+                       title="${escapeHtml(f.path || '')}">${escapeHtml(f.name || '')}</a>
                     <span class="file-meta">${formatBytes(f.size)} - ${formatTimeAgo(f.modified)}</span>
                 </div>
             </div>
@@ -798,7 +812,9 @@ export async function loadFiles() {
     try {
         const files = await api('/api/files');
         const container = document.getElementById('files-list');
-        document.getElementById('files-count').textContent = files.length;
+        if (!container) return;
+        const countEl = document.getElementById('files-count');
+        if (countEl) countEl.textContent = files.length;
 
         if (files.length === 0) {
             container.innerHTML = '<div class="no-files">No files yet</div>';
@@ -809,11 +825,11 @@ export async function loadFiles() {
             <div class="file-item">
                 <div class="file-info">
                     <a href="#" class="download-link file-name"
-                       data-content-url="${f.content_url || ''}"
-                       data-download-url="${f.download_url}"
-                       data-filename="${f.name}"
-                       data-file-type="${f.file_type || 'binary'}"
-                       title="${f.path}">${f.name}</a>
+                       data-content-url="${escapeHtml(f.content_url || '')}"
+                       data-download-url="${escapeHtml(f.download_url || '')}"
+                       data-filename="${escapeHtml(f.name || '')}"
+                       data-file-type="${escapeHtml(f.file_type || 'binary')}"
+                       title="${escapeHtml(f.path || '')}">${escapeHtml(f.name || '')}</a>
                     <span class="file-meta">${formatBytes(f.size)} - ${formatTimeAgo(f.modified)}</span>
                 </div>
             </div>
@@ -1342,19 +1358,19 @@ function updateDriftChart(driftHistory) {
 
     const recentHistory = driftHistory.slice(-10);
     const bars = recentHistory.map(h => {
-        const sim = h.similarity || 1.0;
+        const sim = h.similarity ?? 1.0;
         const height = Math.max(10, sim * 100);
         let colorClass = 'green';
         if (h.alert === 'YELLOW') colorClass = 'yellow';
         else if (h.alert === 'RED' || h.alert === 'ORANGE') colorClass = 'red';
 
-        return `<div class="atlasforge-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${h.cycle}: ${(sim * 100).toFixed(0)}%"></div>`;
+        return `<div class="atlasforge-drift-bar ${colorClass}" style="height: ${height}%" title="Cycle ${escapeHtml(String(h.cycle))}: ${(sim * 100).toFixed(0)}%"></div>`;
     }).join('');
 
     chart.innerHTML = bars;
 
     const latest = recentHistory[recentHistory.length - 1];
-    const sim = (latest.similarity * 100).toFixed(1);
+    const sim = ((latest.similarity ?? 0) * 100).toFixed(1);
     simEl.textContent = sim + '%';
     simEl.className = 'value ' + getAlertColor(latest.alert);
     sevEl.textContent = latest.severity || 'N/A';
@@ -1376,10 +1392,10 @@ function updateRecentExplorations(explorations) {
     }
 
     const items = explorations.slice(0, 8).map(e => {
-        const name = e.name || e.path || 'Unknown';
-        const type = e.type || 'file';
+        const name = escapeHtml(e.name || e.path || 'Unknown');
+        const type = escapeHtml(e.type || 'file');
         return `
-            <div class="atlasforge-exploration-item" title="${e.summary || ''}">
+            <div class="atlasforge-exploration-item" title="${escapeHtml(e.summary || '')}">
                 <span class="atlasforge-exploration-name">${name}</span>
                 <span class="atlasforge-exploration-type">${type}</span>
             </div>
@@ -1448,6 +1464,58 @@ function updateAnalyticsTrendWidget(missions) {
 
 export function showMissionAnalytics(missionId) {
     openMissionAnalyticsModal(missionId);
+}
+
+// =============================================================================
+// WEB PROXY WIDGET (WEB_PROXY_INVESTIGATION_01 cycle 2)
+// =============================================================================
+
+export async function refreshWebProxyWidget() {
+    try {
+        const stats = await api('/api/web-proxy/stats');
+        const badge = document.getElementById('web-proxy-status-badge');
+        const provDiv = document.getElementById('web-proxy-providers');
+        const setValue = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = formatNumber(value || 0);
+        };
+
+        if (stats && stats.status === 'ok') {
+            if (badge) {
+                badge.textContent = 'LIVE';
+                badge.className = 'badge badge-success';
+            }
+            setValue('web-proxy-searches', stats.cached_searches);
+            setValue('web-proxy-fetches', stats.cached_fetches);
+            setValue('web-proxy-image-searches', stats.cached_image_searches);
+            setValue('web-proxy-images', stats.cached_images);
+            const providers = stats.providers || {};
+            const entries = Object.entries(providers).sort((a, b) => b[1] - a[1]);
+            if (provDiv) {
+                provDiv.innerHTML = entries.length === 0
+                    ? '<span style="color: var(--text-dim);">No provider data</span>'
+                    : entries.map(([p, n]) =>
+                        `<span style="margin-right: 10px;">${escapeHtml(p)}: <b>${formatNumber(n)}</b></span>`
+                      ).join('');
+            }
+        } else {
+            if (badge) {
+                badge.textContent = 'OFFLINE';
+                badge.className = 'badge badge-error';
+            }
+            const msg = (stats && stats.error) || 'proxy unreachable';
+            if (provDiv) {
+                provDiv.innerHTML = `<span style="color: var(--text-dim);">${escapeHtml(msg)}</span>`;
+            }
+        }
+    } catch (e) {
+        console.error('[WebProxy] refresh error:', e);
+        const badge = document.getElementById('web-proxy-status-badge');
+        if (badge) {
+            badge.textContent = 'OFFLINE';
+            badge.className = 'badge badge-error';
+        }
+    }
 }
 
 // =============================================================================
@@ -1673,11 +1741,11 @@ function _renderOverrideTable(overrides) {
 
     for (const ov of overrides) {
         const submitted = (ov.submitted_value === null || ov.submitted_value === undefined)
-            ? '<em>null</em>' : String(ov.submitted_value);
+            ? '<em>null</em>' : escapeHtml(String(ov.submitted_value));
         const applied = (ov.applied_value === null || ov.applied_value === undefined)
-            ? '<em>null</em>' : String(ov.applied_value);
-        const reason = reasonLabels[ov.reason] || ov.reason;
-        html += `<tr><td>${ov.param}</td><td>${submitted}</td><td>${applied}</td>`
+            ? '<em>null</em>' : escapeHtml(String(ov.applied_value));
+        const reason = escapeHtml(reasonLabels[ov.reason] || ov.reason || '');
+        html += `<tr><td>${escapeHtml(ov.param || '')}</td><td>${submitted}</td><td>${applied}</td>`
             + `<td class="override-reason">${reason}</td></tr>`;
     }
 
@@ -2035,23 +2103,32 @@ function renderEnhancedMissionList(missions) {
 
     const html = missions.map(m => {
         const dateStr = m.started_at ? new Date(m.started_at).toLocaleDateString() : '-';
-        const statusClass = (m.status || 'unknown').toLowerCase().replace(' ', '_');
+        const safeId = escapeHtml(m.mission_id || 'Unknown');
+        const safeStatus = escapeHtml(m.status || 'unknown');
+        const statusClass = (m.status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
         return `
-            <div class="analytics-mission-item" onclick="window.showMissionAnalytics('${m.mission_id}')">
-                <div class="analytics-mission-id">${m.mission_id || 'Unknown'}</div>
+            <div class="analytics-mission-item" data-mission-id="${safeId}">
+                <div class="analytics-mission-id">${safeId}</div>
                 <div class="analytics-mission-meta">
                     <span class="analytics-mission-cost">$${(m.cost_usd || m.cost || 0).toFixed(4)}</span>
                     <span class="analytics-mission-tokens">${formatNumber(m.total_tokens || m.tokens || 0)} tokens</span>
                 </div>
                 <div class="analytics-mission-date">
                     ${dateStr}
-                    <span class="analytics-mission-status ${statusClass}">${m.status || 'unknown'}</span>
+                    <span class="analytics-mission-status ${statusClass}">${safeStatus}</span>
                 </div>
             </div>
         `;
     }).join('');
 
     list.innerHTML = html;
+
+    // Attach click handlers via event listeners (no inline JS — prevents XSS)
+    list.querySelectorAll('.analytics-mission-item[data-mission-id]').forEach(el => {
+        el.addEventListener('click', () => {
+            window.showMissionAnalytics(el.dataset.missionId);
+        });
+    });
 }
 
 function renderTokenBreakdownDonut(data) {
@@ -2117,7 +2194,7 @@ function renderTokenBreakdownDonut(data) {
         return `
             <div class="analytics-legend-item">
                 <div class="analytics-legend-color" style="background: ${seg.color};"></div>
-                <span>${seg.name} (${pct}%)</span>
+                <span>${escapeHtml(seg.name)} (${pct}%)</span>
             </div>
         `;
     }).join('');
@@ -2273,7 +2350,7 @@ function handleTrendChartHover(e) {
     if (barIndex >= 0 && barIndex < daily.length && x > padding.left && x < w - padding.right) {
         const d = daily[barIndex];
         tooltip.innerHTML = `
-            <div class="tooltip-date">${d.date || '-'}</div>
+            <div class="tooltip-date">${escapeHtml(d.date || '-')}</div>
             <div class="tooltip-cost">$${(d.cost || 0).toFixed(4)}</div>
             <div class="tooltip-tokens">${formatNumber(d.total_tokens || 0)} tokens</div>
         `;
@@ -2388,7 +2465,7 @@ export async function openMissionAnalyticsModal(missionId) {
         const data = await api(`/api/analytics/mission/${missionId}/stages`);
 
         if (data.error) {
-            body.innerHTML = `<div style="color: var(--red);">Error: ${data.error}</div>`;
+            body.innerHTML = `<div style="color: var(--red);">Error: ${escapeHtml(data.error)}</div>`;
             return;
         }
 
@@ -2401,11 +2478,14 @@ export async function openMissionAnalyticsModal(missionId) {
 
             stagesHtml = stages.map(s => {
                 const pct = ((s.total_tokens || 0) / maxTokens) * 100;
+                // Stage names from the server are fixed enum values; escape defensively
+                const safeStage = escapeHtml(s.stage || '');
+                const stageClass = (s.stage || '').replace(/[^a-zA-Z0-9_-]/g, '_');
                 return `
                     <div class="mission-stage-item">
-                        <div class="mission-stage-name analytics-stage-fill ${s.stage}" style="padding: 4px 8px; border-radius: 4px;">${s.stage}</div>
+                        <div class="mission-stage-name analytics-stage-fill ${stageClass}" style="padding: 4px 8px; border-radius: 4px;">${safeStage}</div>
                         <div class="mission-stage-bar">
-                            <div class="mission-stage-bar-fill analytics-stage-fill ${s.stage}" style="width: ${pct}%;"></div>
+                            <div class="mission-stage-bar-fill analytics-stage-fill ${stageClass}" style="width: ${pct}%;"></div>
                         </div>
                         <div class="mission-stage-stats">
                             ${formatNumber(s.total_tokens || 0)} tokens | $${(s.cost || 0).toFixed(4)}
@@ -2420,9 +2500,9 @@ export async function openMissionAnalyticsModal(missionId) {
         body.innerHTML = `
             <div class="mission-analytics-header">
                 <div>
-                    <strong style="color: var(--accent);">${missionId}</strong>
+                    <strong style="color: var(--accent);">${escapeHtml(missionId)}</strong>
                     <div style="color: var(--text-dim); font-size: 0.85em; margin-top: 4px;">
-                        ${data.status || 'Unknown status'}
+                        ${escapeHtml(data.status || 'Unknown status')}
                     </div>
                 </div>
                 <div style="text-align: right;">
@@ -2461,13 +2541,13 @@ export async function openMissionAnalyticsModal(missionId) {
                 <div style="margin-top: 20px;">
                     <h4 style="color: var(--accent); margin-bottom: 10px; font-size: 0.9em;">Problem Statement</h4>
                     <div style="background: var(--bg); padding: 12px; border-radius: 6px; font-size: 0.9em;">
-                        ${data.problem_statement.substring(0, 500)}${data.problem_statement.length > 500 ? '...' : ''}
+                        ${escapeHtml(data.problem_statement.substring(0, 500))}${data.problem_statement.length > 500 ? '...' : ''}
                     </div>
                 </div>
             ` : ''}
         `;
     } catch (e) {
-        body.innerHTML = `<div style="color: var(--red);">Error loading mission data: ${e.message}</div>`;
+        body.innerHTML = `<div style="color: var(--red);">Error loading mission data: ${escapeHtml(e.message || String(e))}</div>`;
     }
 }
 
@@ -2808,11 +2888,11 @@ export async function refreshTokenIntegrityWidget() {
             anomalyList.innerHTML = '<div style="color:var(--accent-green,#3fb950);font-size:0.85em;">All missions healthy</div>';
         } else {
             anomalyList.innerHTML = anomalies.map(a => {
-                const date = (a.created_at || '').slice(0, 10);
+                const date = escapeHtml((a.created_at || '').slice(0, 10));
                 const cat = a.category === 'zero_token' ? 'ZERO' : 'LOW';
                 const col = a.category === 'zero_token' ? 'var(--danger,#f85149)' : 'var(--accent-yellow,#d29922)';
                 return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border,#30363d);font-size:0.8em;">' +
-                    '<span style="color:var(--text-primary,#c9d1d9);font-family:monospace;">' + (a.mission_id || '-') + '</span>' +
+                    '<span style="color:var(--text-primary,#c9d1d9);font-family:monospace;">' + escapeHtml(a.mission_id || '-') + '</span>' +
                     '<span><span style="color:' + col + ';margin-right:6px;">[' + cat + ']</span><span style="color:var(--text-dim,#8b949e);">' + date + '</span></span>' +
                     '</div>';
             }).join('');

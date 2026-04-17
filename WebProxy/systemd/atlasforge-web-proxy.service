@@ -1,0 +1,36 @@
+[Unit]
+Description=AI-AtlasForge Web Proxy Service
+Documentation=https://github.com/DragonShadows1978/AI-AtlasForge
+# Wait for outbound networking: the proxy calls Brave/DuckDuckGo on first request.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai-atlasforge
+# ExecStart prefers the repo venv python so requirements.txt deps (requests,
+# aiohttp, etc.) are available. Falls back to system python3 if no venv.
+ExecStart=/bin/sh -c 'if [ -x "/opt/ai-atlasforge/venv/bin/python3" ]; then exec /opt/ai-atlasforge/venv/bin/python3 /opt/ai-atlasforge/WebProxy/service.py --host 127.0.0.1 --port 8765; else exec /usr/bin/python3 /opt/ai-atlasforge/WebProxy/service.py --host 127.0.0.1 --port 8765; fi'
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+# Tame crash-loop log spam.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+# BRAVE_API_KEY is optional. If unset, the proxy falls back to DuckDuckGo.
+# Provide it via systemctl edit, or by dropping a file at:
+#   ~/.config/atlasforge/web-proxy.env    (user unit — preferred)
+#   /etc/default/atlasforge-web-proxy     (system unit fallback)
+EnvironmentFile=-%h/.config/atlasforge/web-proxy.env
+EnvironmentFile=-/etc/default/atlasforge-web-proxy
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlasforge-web-proxy
+
+[Install]
+WantedBy=default.target

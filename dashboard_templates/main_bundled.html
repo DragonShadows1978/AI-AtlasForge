@@ -944,6 +944,41 @@
                 </div>
             </div>
 
+            <!-- Web Proxy Widget (WEB_PROXY_INVESTIGATION_01 cycle 2) -->
+            <div class="card" id="web-proxy-widget-card">
+                <div class="card-header" onclick="toggleCard('web-proxy-widget')">
+                    <h3>Web Proxy</h3>
+                    <span id="web-proxy-status-badge" class="badge badge-idle">Checking...</span>
+                    <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">▼</span>
+                </div>
+                <div class="card-content">
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="web-proxy-searches">-</div>
+                            <div class="analytics-stat-label">Cached Searches</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="web-proxy-fetches">-</div>
+                            <div class="analytics-stat-label">Cached Fetches</div>
+                        </div>
+                    </div>
+                    <div class="analytics-stat-grid">
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="web-proxy-image-searches">-</div>
+                            <div class="analytics-stat-label">Image Searches</div>
+                        </div>
+                        <div class="analytics-stat-box">
+                            <div class="analytics-stat-value" id="web-proxy-images">-</div>
+                            <div class="analytics-stat-label">Cached Images</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.8em; color: var(--text-dim); margin-top: 8px;">Providers</div>
+                    <div id="web-proxy-providers" style="font-size: 0.8em; color: var(--text); margin-top: 4px;">
+                        <span style="color: var(--text-dim);">No provider data</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Subagent Pool Widget -->
             <div class="card" id="subagent-pool-widget-card">
                 <div class="card-header" onclick="toggleCard('subagent-pool-widget')">

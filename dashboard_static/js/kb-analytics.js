@@ -223,10 +223,10 @@ function renderKBLineChart(missions) {
             const m = missions[idx];
             const date = m.timestamp ? new Date(m.timestamp).toLocaleDateString() : 'N/A';
             tooltip.innerHTML = `
-                <strong>${m.mission_id}</strong><br>
-                <span style="color: var(--text-dim);">${date}</span><br>
-                ${m.count} new learnings<br>
-                <span style="color: var(--green);">Total: ${m.cumulative}</span>
+                <strong>${escapeHtml(m.mission_id)}</strong><br>
+                <span style="color: var(--text-dim);">${escapeHtml(date)}</span><br>
+                ${escapeHtml(String(m.count))} new learnings<br>
+                <span style="color: var(--green);">Total: ${escapeHtml(String(m.cumulative))}</span>
             `;
             tooltip.style.display = 'block';
             tooltip.style.left = (e.pageX + 15) + 'px';
@@ -287,8 +287,8 @@ function renderKBTypePieChart(typeData) {
     const legendHtml = entries.map(([type, count], i) => `
         <div class="kb-pie-legend-item">
             <span class="kb-pie-legend-dot" style="background: ${colors[i % colors.length]};"></span>
-            <span>${type}</span>
-            <span style="color: var(--text-dim); margin-left: auto;">${count}</span>
+            <span>${escapeHtml(type)}</span>
+            <span style="color: var(--text-dim); margin-left: auto;">${escapeHtml(String(count))}</span>
         </div>
     `).join('');
 
@@ -317,20 +317,48 @@ function renderKBThemesList(themesData) {
             <div class="kb-theme-item"
                  role="button"
                  tabindex="0"
-                 aria-label="Theme: ${escapedTheme}, ${t.count} occurrences. Press Enter for details."
-                 onclick="openKBThemeModal('${escapedTheme}', 'domain')"
-                 onkeydown="handleKBThemeKeyDown(event, '${escapedTheme}')">
+                 data-theme="${escapedTheme}"
+                 aria-label="Theme: ${escapedTheme}, ${escapeHtml(String(t.count))} occurrences. Press Enter for details.">
                 <span class="kb-theme-name">${escapedTheme}</span>
                 <div class="kb-theme-bar" style="width: ${barWidth}px;" aria-hidden="true"></div>
-                <span class="kb-theme-count" aria-hidden="true">${t.count}</span>
+                <span class="kb-theme-count" aria-hidden="true">${escapeHtml(String(t.count))}</span>
             </div>
         `;
     }).join('');
 
     list.innerHTML = html;
+
+    // Wire up click/keydown via event listeners using data-theme (safe — avoids onclick string injection)
+    list.querySelectorAll('.kb-theme-item').forEach(el => {
+        const theme = el.dataset.theme;
+        el.addEventListener('click', () => openKBThemeModal(theme, 'domain'));
+        el.addEventListener('keydown', (e) => {
+            const items = Array.from(document.querySelectorAll('.kb-theme-item'));
+            const currentIdx = items.indexOf(e.target);
+            switch(e.key) {
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (currentIdx < items.length - 1) items[currentIdx + 1].focus();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (currentIdx > 0) items[currentIdx - 1].focus();
+                    break;
+                case 'Enter':
+                case ' ':
+                    e.preventDefault();
+                    openKBThemeModal(theme, 'domain');
+                    break;
+                case 'Escape':
+                    e.target.blur();
+                    break;
+            }
+        });
+    });
 }
 
 function handleKBThemeKeyDown(e, theme) {
+    // Kept for backwards compatibility; primary handler now attached via addEventListener
     const items = Array.from(document.querySelectorAll('.kb-theme-item'));
     const currentIdx = items.indexOf(e.target);
 
@@ -401,9 +429,10 @@ async function showThemeDetails(theme, themeType) {
                     <ul class="kb-theme-learnings" role="list">`;
 
                 for (const l of learnings) {
-                    const typeClass = (l.type || 'unknown').toLowerCase();
+                    const safeType = escapeHtml(l.type || 'unknown');
+                    const typeClass = (l.type || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
                     html += `<li role="listitem">
-                        <span class="kb-learning-type ${typeClass}" aria-label="Type: ${l.type || 'unknown'}">${l.type || 'unknown'}</span>
+                        <span class="kb-learning-type ${typeClass}" aria-label="Type: ${safeType}">${safeType}</span>
                         <span class="kb-learning-title">${escapeHtml(l.title || 'Untitled')}</span>
                     </li>`;
                 }
@@ -577,15 +606,20 @@ async function loadKBMissionList() {
 
         const html = kbAllMissions.slice(0, 15).map(m => `
             <div class="kb-mission-checkbox">
-                <input type="checkbox" id="kb-cmp-${m.mission_id}"
-                       onchange="toggleMissionComparison('${m.mission_id}')"
+                <input type="checkbox" id="kb-cmp-${escapeHtml(String(m.mission_id))}"
+                       data-mission-id="${escapeHtml(String(m.mission_id))}"
                        ${kbSelectedMissions.includes(m.mission_id) ? 'checked' : ''}>
-                <label for="kb-cmp-${m.mission_id}">${m.mission_id}</label>
-                <span class="count">${m.learning_count}</span>
+                <label for="kb-cmp-${escapeHtml(String(m.mission_id))}">${escapeHtml(String(m.mission_id))}</label>
+                <span class="count">${escapeHtml(String(m.learning_count))}</span>
             </div>
         `).join('');
 
         container.innerHTML = html;
+
+        // Wire change via event delegation — avoids inline onchange with server-controlled mission_id
+        container.querySelectorAll('.kb-mission-checkbox input[type="checkbox"]').forEach(el => {
+            el.addEventListener('change', () => toggleMissionComparison(el.dataset.missionId));
+        });
     } catch (e) {
         console.error('Load mission list error:', e);
     }
@@ -629,29 +663,29 @@ async function updateMissionComparison() {
                 return `<div class="kb-mission-card">
                     <div class="kb-mission-card-header">
                         ${escapeHtml(p.mission_id || 'Error')}
-                        <span class="remove" onclick="removeMissionComparison('${p.mission_id}')">&times;</span>
+                        <span class="remove" data-mission-id="${escapeHtml(String(p.mission_id || ''))}">&times;</span>
                     </div>
-                    <div style="color: var(--red);">Error: ${p.error}</div>
+                    <div style="color: var(--red);">Error: ${escapeHtml(String(p.error))}</div>
                 </div>`;
             }
 
             const types = Object.entries(p.type_distribution || {})
-                .map(([t, c]) => `${t}: ${c}`)
+                .map(([t, c]) => `${escapeHtml(t)}: ${escapeHtml(String(c))}`)
                 .join(', ') || 'None';
 
             const themes = (p.top_themes || [])
                 .slice(0, 3)
-                .map(t => t.theme)
+                .map(t => escapeHtml(t.theme))
                 .join(', ') || 'None';
 
             return `<div class="kb-mission-card">
                 <div class="kb-mission-card-header">
                     ${escapeHtml(p.mission_id)}
-                    <span class="remove" onclick="removeMissionComparison('${p.mission_id}')">&times;</span>
+                    <span class="remove" data-mission-id="${escapeHtml(String(p.mission_id))}">&times;</span>
                 </div>
                 <div class="kb-mission-card-stat">
                     <span class="label">Learnings</span>
-                    <span class="value">${p.total_learnings}</span>
+                    <span class="value">${escapeHtml(String(p.total_learnings))}</span>
                 </div>
                 <div class="kb-mission-card-stat">
                     <span class="label">Types</span>
@@ -665,6 +699,11 @@ async function updateMissionComparison() {
         }).join('');
 
         container.innerHTML = html;
+
+        // Wire up remove buttons via event delegation — avoids onclick string injection
+        container.querySelectorAll('.remove[data-mission-id]').forEach(el => {
+            el.addEventListener('click', () => removeMissionComparison(el.dataset.missionId));
+        });
     } catch (e) {
         container.innerHTML = `<div style="color: var(--red);">Error: ${e.message}</div>`;
     }

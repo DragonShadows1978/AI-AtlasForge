@@ -265,13 +265,50 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         log_success "Ollama is installed"
         # Update config to enable Ollama
         if [ -f "$ATLASFORGE_ROOT/config.yaml" ]; then
-            sed -i 's/enabled: false/enabled: true/' "$ATLASFORGE_ROOT/config.yaml" 2>/dev/null || true
+            # Anchor to the ollama block's `enabled: false` (first match after
+            # `ollama:`). Unanchored replace flipped every `enabled: false` key.
+            python3 - "$ATLASFORGE_ROOT/config.yaml" <<'PYEOF' || true
+import re, sys
+p = sys.argv[1]
+with open(p) as f:
+    s = f.read()
+s = re.sub(
+    r"(ollama:\s*\n(?:[^\n]*\n)*?\s*enabled:\s*)false",
+    r"\1true",
+    s,
+    count=1,
+)
+with open(p, "w") as f:
+    f.write(s)
+PYEOF
             log_success "Ollama enabled in config.yaml"
         fi
     else
         log_warning "Ollama not found. Install it from: https://ollama.ai/"
         log_info "You can enable Ollama later by setting 'ollama.enabled: true' in config.yaml"
     fi
+fi
+
+# Web Proxy MCP path rewrite — unconditional.
+# The .mcp.json and WebProxy/configs/mcp.json files ship with a placeholder
+# path (/home/vader/AI-AtlasForge). If we don't rewrite them to the actual
+# install path, the MCP server path is broken and `claude -p` subagents fail
+# to start. This runs regardless of the systemd prompt.
+#
+# Rewriting is done via a Python helper (WebProxy/install/rewrite_mcp_paths.py)
+# that parses the JSON rather than sed-replacing strings. This sidesteps every
+# delimiter/escape/prefix-substring bug that would bite a bash sed pipeline
+# when $ATLASFORGE_ROOT contains special characters.
+echo ""
+log_info "Rewriting MCP config paths to $ATLASFORGE_ROOT..."
+if [ -f "$ATLASFORGE_ROOT/WebProxy/install/rewrite_mcp_paths.py" ]; then
+    if python3 "$ATLASFORGE_ROOT/WebProxy/install/rewrite_mcp_paths.py" "$ATLASFORGE_ROOT"; then
+        log_success "MCP config paths rewritten"
+    else
+        log_error "Failed to rewrite MCP config paths — fresh-clone MCP routing will break"
+    fi
+else
+    log_warning "WebProxy/install/rewrite_mcp_paths.py not found — skipping MCP path rewrite"
 fi
 
 # systemd services prompt

@@ -15,6 +15,7 @@ Public API:
 import json
 import logging
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 from itertools import zip_longest
@@ -134,10 +135,26 @@ def _workspace_to_transcript_dir(workspace_path: str) -> Path:
     Claude stores transcripts in: ~/.claude/projects/-{path-with-dashes}
     Note: Claude converts underscores to dashes in directory names.
     """
-    if not workspace_path:
-        return CLAUDE_TRANSCRIPTS_DIR
-
+    # rstrip BEFORE the falsy/blank check so that '/' (truthy) becomes '' (falsy) and is
+    # caught rather than becoming CLAUDE_TRANSCRIPTS_BASE / '' which exposes the base dir.
+    # Also strip() to catch whitespace-only paths (e.g. '   ') that would silently pass
+    # the falsy check and produce a path with spaces.
     workspace_path = str(workspace_path).rstrip('/')
+    # Strip all control characters (including null bytes) from the path before any checks.
+    # A path like /workspace/mis\x00sion could otherwise bypass the null-byte check on
+    # systems where re.sub strips \x00 before the explicit check reaches it.
+    # Strip ASCII control chars AND Unicode line/paragraph separators (U+2028, U+2029).
+    # These Unicode chars are treated as line endings by some log parsers and path tools,
+    # matching the same set that _sanitize_for_log strips in orchestrator.py.
+    workspace_path = re.sub(r'[\x00-\x1f\x7f\u2028\u2029]', '', workspace_path)
+    if not workspace_path.strip():
+        return CLAUDE_TRANSCRIPTS_DIR
+    # Note: re.sub above already strips all control chars including \x00, so no separate
+    # null-byte check is needed here.
+    # Known collision: both '/' and '_' map to '-', matching Claude's actual transcript
+    # directory naming behavior. This means paths like "/foo/bar" and "/foo-bar" produce
+    # the same transcript dir name. This is intentional — it mirrors Claude's behavior,
+    # so the mapping is correct even though distinct input paths may collide.
     escaped = workspace_path.replace('/', '-').replace('_', '-')
     return CLAUDE_TRANSCRIPTS_BASE / escaped
 
@@ -316,6 +333,32 @@ def _find_transcripts_in_window(
             else:
                 transcript_dirs = [CLAUDE_TRANSCRIPTS_DIR] if CLAUDE_TRANSCRIPTS_DIR.exists() else []
 
+        # Validate/coerce transcript_dirs elements to Path objects
+        if transcript_dirs is not None:
+            if isinstance(transcript_dirs, str):
+                logger.warning(
+                    "_find_transcripts_in_window: transcript_dirs received a string "
+                    "instead of a list; wrapping in list to prevent character iteration"
+                )
+                transcript_dirs = [Path(transcript_dirs)]
+            else:
+                coerced = []
+                for item in transcript_dirs:
+                    if isinstance(item, Path):
+                        coerced.append(item)
+                    elif isinstance(item, str):
+                        logger.warning(
+                            f"_find_transcripts_in_window: transcript_dirs entry {item!r} "
+                            f"is a str, not a Path — converting automatically"
+                        )
+                        coerced.append(Path(item))
+                    else:
+                        logger.warning(
+                            f"_find_transcripts_in_window: transcript_dirs entry {item!r} "
+                            f"has unexpected type {type(item).__name__} — skipping"
+                        )
+                transcript_dirs = coerced
+
         for transcript_dir in (transcript_dirs or []):
             if not transcript_dir.exists():
                 logger.debug(f"Transcript directory not found: {transcript_dir}")
@@ -352,7 +395,15 @@ def _find_transcripts_in_window(
             matching_files.append(jsonl_file)
             seen_files.add(file_key)
     elif provider in {"codex", "gemini"} and not matching_files:
-        fallback_dirs = _get_all_transcript_dirs_for_mission(mission or {}) if transcript_dirs is None else transcript_dirs
+        raw_fallback = _get_all_transcript_dirs_for_mission(mission or {}) if transcript_dirs is None else transcript_dirs
+        fallback_dirs = []
+        for item in raw_fallback:
+            if isinstance(item, Path):
+                fallback_dirs.append(item)
+            elif isinstance(item, str):
+                fallback_dirs.append(Path(item))
+            else:
+                logger.warning(f"_find_transcripts_in_window codex/gemini fallback: skipping non-path entry {item!r}")
         for transcript_dir in fallback_dirs:
             if not transcript_dir.exists():
                 continue
@@ -372,6 +423,17 @@ def _find_transcripts_in_window(
     return matching_files
 
 
+def _to_int(value: Any, default: int = 0) -> int:
+    """Safely coerce a value to a non-negative int, returning default on failure.
+
+    Clamps to 0 on success — token counts are always non-negative.
+    """
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
     """
     Parse token usage from a transcript file.
@@ -387,13 +449,7 @@ def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
         "total_tokens": 0
     }
 
-    def _to_int(value: Any, default: int = 0) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
-
-    codex_total_seen = -1
+    codex_total_seen = 0
 
     try:
         with open(transcript_path, 'r', encoding='utf-8') as f:
@@ -436,9 +492,14 @@ def _parse_transcript_usage(transcript_path: Path) -> Dict[str, int]:
                             total_usage = {}
 
                         total_tokens = _to_int(total_usage.get("total_tokens", 0))
-                        if total_tokens > 0 and total_tokens <= codex_total_seen:
+                        if total_tokens == 0:
+                            # Zero-token codex events are semantically meaningless —
+                            # skip ALL of them (first and subsequent) to prevent
+                            # spurious token accumulation from empty transcript events.
                             continue
-                        if total_tokens > 0:
+                        elif total_tokens <= codex_total_seen:
+                            continue
+                        else:
                             codex_total_seen = total_tokens
 
                         usage["input_tokens"] += _to_int(last_usage.get("input_tokens", 0))
@@ -503,11 +564,11 @@ def _generate_manifest(mission_id: str, archive_dir: Path,
         })
 
         manifest["totals"]["total_size_bytes"] += size
-        manifest["totals"]["total_input_tokens"] += usage.get("input_tokens", 0)
-        manifest["totals"]["total_output_tokens"] += usage.get("output_tokens", 0)
-        manifest["totals"]["total_cache_creation_input_tokens"] += usage.get("cache_creation_input_tokens", 0)
-        manifest["totals"]["total_cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0)
-        manifest["totals"]["total_tokens"] += usage.get("total_tokens", 0)
+        manifest["totals"]["total_input_tokens"] += _to_int(usage.get("input_tokens", 0))
+        manifest["totals"]["total_output_tokens"] += _to_int(usage.get("output_tokens", 0))
+        manifest["totals"]["total_cache_creation_input_tokens"] += _to_int(usage.get("cache_creation_input_tokens", 0))
+        manifest["totals"]["total_cache_read_input_tokens"] += _to_int(usage.get("cache_read_input_tokens", 0))
+        manifest["totals"]["total_tokens"] += _to_int(usage.get("total_tokens", 0))
 
     manifest["totals"]["transcript_count"] = len(manifest["transcripts"])
     return manifest
@@ -540,7 +601,7 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
 
     try:
         mission_id = mission.get("mission_id")
-        if not mission_id:
+        if mission_id is None:
             created_at = mission.get("created_at")
             if created_at and isinstance(created_at, str):
                 timestamp_clean = created_at.replace(":", "-").replace(".", "-")[:19]
@@ -549,8 +610,19 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
             mission_id = f"mission_{timestamp_clean}"
         else:
             mission_id = str(mission_id)  # Coerce to str for safe Path operations
+            if '/' in mission_id or '\\' in mission_id:
+                raise ValueError("invalid mission_id: path separators not allowed")
             if '\x00' in mission_id:
                 raise ValueError("invalid mission_id: contains null bytes")
+            if any(ord(c) < 32 or ord(c) == 127 or ord(c) in (0x2028, 0x2029) for c in mission_id):
+                raise ValueError("invalid mission_id: contains control characters or Unicode line separators not valid in directory names")
+            if not mission_id.strip():
+                raise ValueError("invalid mission_id: whitespace-only mission_id is not a valid directory name")
+            if len(mission_id) > 255:
+                raise ValueError(
+                    f"mission_id too long: {len(mission_id)} chars (max 255) — "
+                    f"filesystem cannot create directory with this name"
+                )
 
         raw_created = mission.get("created_at")
         if not isinstance(raw_created, str) or not raw_created.strip():
@@ -830,8 +902,8 @@ def rearchive_mission(mission_id: str) -> Dict:
                 'mission_workspace': mission_log.get('mission_workspace'),
                 'mission_dir': mission_log.get('mission_dir')
             }
-        except (json.JSONDecodeError, KeyError):
-            pass
+        except (json.JSONDecodeError, KeyError, OSError, PermissionError) as _e:
+            logger.warning("rearchive_mission: failed to load mission log %s: %s", mission_log_path, _e)
 
     if mission is None and archive_manifest_path.exists():
         try:
@@ -843,8 +915,8 @@ def rearchive_mission(mission_id: str) -> Dict:
                 'created_at': time_window.get('start'),
                 'last_updated': time_window.get('end')
             }
-        except (json.JSONDecodeError, KeyError):
-            pass
+        except (json.JSONDecodeError, KeyError, OSError, PermissionError) as _manifest_err:
+            logger.warning("rearchive_mission: failed to load manifest %s: %s", archive_manifest_path, _manifest_err)
 
     if mission is None or not mission.get('mission_workspace'):
         inferred_workspace = str(MISSIONS_DIR / mission_id / 'workspace')

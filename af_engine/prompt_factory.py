@@ -170,7 +170,7 @@ class PromptFactory:
 
             # Insert after ground rules but before mission details
             if "=== CURRENT MISSION ===" in prompt:
-                parts = prompt.split("=== CURRENT MISSION ===")
+                parts = prompt.split("=== CURRENT MISSION ===", 1)  # maxsplit=1 prevents content loss
                 return f"{parts[0]}\n{kb_section}\n=== CURRENT MISSION ==={parts[1]}"
             else:
                 return f"{prompt}\n\n{kb_section}"
@@ -368,7 +368,7 @@ class PromptFactory:
 
         # Insert at beginning of mission section
         if "=== CURRENT MISSION ===" in prompt:
-            parts = prompt.split("=== CURRENT MISSION ===")
+            parts = prompt.split("=== CURRENT MISSION ===", 1)  # maxsplit=1 prevents content loss
             return f"{parts[0]}\n{recovery_section}\n=== CURRENT MISSION ==={parts[1]}"
         else:
             return f"{recovery_section}\n\n{prompt}"
@@ -456,16 +456,20 @@ class PromptFactory:
         Returns:
             Formatted history string
         """
-        if not history:
+        if not isinstance(history, list) or not history:
             return "No history yet."
 
+        if not isinstance(max_entries, int) or isinstance(max_entries, bool) or max_entries < 1:
+            max_entries = 10  # Treat invalid/None/bool/float as default
         recent = history[-max_entries:]
         lines = ["Recent History:"]
 
         for entry in recent:
-            timestamp = entry.get("timestamp", "unknown")
+            if not isinstance(entry, dict):
+                continue  # Skip non-dict entries (e.g. None, str, int) without crashing
+            timestamp = str(entry.get("timestamp", "unknown"))
             stage = entry.get("stage", "unknown")
-            event = entry.get("event", "unknown")
+            event = str(entry.get("event", "unknown"))
 
             # Truncate long events
             if len(event) > 100:

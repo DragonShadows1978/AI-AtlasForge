@@ -114,7 +114,11 @@ except (ValueError, TypeError):
         "RED_TEAM_LOW_DELTA_THRESHOLD env var is not a valid integer; defaulting to %d",
         _RED_TEAM_LOW_DELTA_THRESHOLD,
     )
-_RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR = 1   # BUG-H4: lowered from 3; single-shot agents don't iterate
+_RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR = 1   # BUG-H4: lowered from 3; single-shot agents don't iterate.
+# NOTE: Single-pass agents (continuation_count == 0 after first run) will never trigger the
+# diminishing-returns gate because check_diminishing_returns() requires continuation_count >= 1.
+# This is intentional: a single completion carries no trend data, so DR cannot be evaluated.
+# The regression test test_dr_gate_single_pass() verifies this behavior.
 _RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED = 2
 
 
@@ -129,6 +133,8 @@ def _model_work_budget(model: str) -> int:
     BUG-M5: Sort keys longest-first so more specific keys (e.g. claude-opus-4-6)
     always win over shorter overlapping keys (e.g. claude-opus-4).
     """
+    if model is None:
+        return _DEFAULT_WORK_BUDGET
     for key in sorted(_MODEL_WORK_BUDGETS, key=len, reverse=True):
         if key in model:
             return _MODEL_WORK_BUDGETS[key]
@@ -140,6 +146,8 @@ def _model_safety_timeout(model: str) -> float:
 
     BUG-M5: Sort keys longest-first so more specific keys always win.
     """
+    if model is None:
+        return _DEFAULT_SAFETY_TIMEOUT
     for key in sorted(_MODEL_SAFETY_TIMEOUTS, key=len, reverse=True):
         if key in model:
             return _MODEL_SAFETY_TIMEOUTS[key]
@@ -157,6 +165,8 @@ def _parse_output_tokens_from_jsonl(text: str) -> tuple[int, str]:
     Returns:
         (token_count, source) where source is 'jsonl' or 'heuristic'.
     """
+    if not isinstance(text, str):
+        return 0, "heuristic"
     if not text:
         return 0, "heuristic"
     total = 0
@@ -171,7 +181,7 @@ def _parse_output_tokens_from_jsonl(text: str) -> tuple[int, str]:
                 usage = obj["usage"]
                 if isinstance(usage, dict) and "output_tokens" in usage:
                     try:
-                        total += int(usage["output_tokens"])
+                        total += max(0, int(usage["output_tokens"]))
                         found_any = True
                     except (ValueError, TypeError):
                         pass
@@ -206,13 +216,29 @@ class _AgentBudgetState:
     token_source: str = "heuristic"  # 'jsonl' | 'heuristic'
 
     def __post_init__(self) -> None:
-        if self.work_budget <= 0:
-            self.work_budget = _DEFAULT_WORK_BUDGET
-        if self.safety_timeout <= 0:
-            self.safety_timeout = _DEFAULT_SAFETY_TIMEOUT
+        import math as _math
+        # NaN/inf comparisons with <= always return False, so check finiteness first.
+        if isinstance(self.work_budget, bool) or not isinstance(self.work_budget, int) or self.work_budget <= 0:
+            raise ValueError(
+                f"work_budget must be a positive integer, got {self.work_budget!r}. "
+                "Use a positive int value or None to use the model-aware default."
+            )
+        if isinstance(self.safety_timeout, bool):
+            raise ValueError(
+                f"safety_timeout must be a numeric value, got bool {self.safety_timeout!r}. "
+                "Use a positive float/int value."
+            )
+        if self.safety_timeout is None or not isinstance(self.safety_timeout, (int, float)) or not _math.isfinite(self.safety_timeout) or self.safety_timeout <= 0:
+            raise ValueError(
+                f"safety_timeout must be a positive finite number, got {self.safety_timeout!r}. "
+                "Use a positive value — 0, None, NaN, and inf are not valid."
+            )
 
     def record_output(self, tokens: int) -> None:
-        self.output_tokens = tokens
+        if tokens < 0:
+            logger.warning("record_output: negative token count %d clamped to 0", tokens)
+            tokens = 0
+        self.output_tokens += tokens
 
     def check_diminishing_returns(self) -> bool:
         """
@@ -223,6 +249,7 @@ class _AgentBudgetState:
           - Delta below threshold for _RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED checks
         """
         if self.continuation_count < _RED_TEAM_MIN_CONTINUATIONS_BEFORE_DR:
+            self.last_token_checkpoint = self.output_tokens  # keep checkpoint current on early return
             return False
         delta = self.output_tokens - self.last_token_checkpoint
         if delta < _RED_TEAM_LOW_DELTA_THRESHOLD:
@@ -518,8 +545,29 @@ class BlindAgentRedTeam:
 
         # Work budget and safety timeout — model-aware defaults
         # BUG-M2: explicit safety_timeout=0.0 (or negative) is invalid and rejected.
-        if safety_timeout is not None and safety_timeout <= 0:
-            raise ValueError(f"safety_timeout must be positive, got {safety_timeout!r}")
+        # NaN/inf comparisons with <= always return False, so check finiteness first.
+        import math as _math
+        if safety_timeout is not None:
+            if isinstance(safety_timeout, bool):
+                raise TypeError(f"safety_timeout must be numeric, got bool {safety_timeout!r}")
+            if not isinstance(safety_timeout, (int, float)) or not _math.isfinite(safety_timeout) or safety_timeout <= 0:
+                raise ValueError(f"safety_timeout must be a positive finite number, got {safety_timeout!r}")
+        if work_budget is not None:
+            if isinstance(work_budget, bool):
+                raise TypeError(
+                    f"work_budget must be an int, got bool: {work_budget!r}. "
+                    "Pass None to use the model-aware default."
+                )
+            if not isinstance(work_budget, int):
+                raise TypeError(
+                    f"work_budget must be an int, got {type(work_budget).__name__}: {work_budget!r}. "
+                    "Pass None to use the model-aware default."
+                )
+            if work_budget <= 0:
+                raise ValueError(
+                    f"work_budget must be positive, got {work_budget!r}. "
+                    "Pass None to use the model-aware default."
+                )
         _model = _detect_model()
         _wb = work_budget if work_budget is not None else _model_work_budget(_model)
         self.work_budget: int = _wb if _wb > 0 else _DEFAULT_WORK_BUDGET
@@ -565,9 +613,10 @@ class BlindAgentRedTeam:
                     return t
             return 900
         except Exception as e:
+            fallback = self.timeout if isinstance(self.timeout, int) and self.timeout > 0 else 300
             logger.warning("_estimate_timeout failed (%s: %s); using configured default %ds",
-                           type(e).__name__, e, self.timeout)
-            return self.timeout  # fall back to configured default
+                           type(e).__name__, e, fallback)
+            return fallback
 
     def launch_parallel_team(
         self,
@@ -599,6 +648,17 @@ class BlindAgentRedTeam:
         self._validate_workspace_dir(workspace_dir)
 
         # Cycle 3 Fix P3a: validate override params (matching __init__ checks)
+        if work_budget is not None:
+            if isinstance(work_budget, bool) or not isinstance(work_budget, int):
+                raise TypeError(
+                    f"work_budget must be an int, got {type(work_budget).__name__}: {work_budget!r}. "
+                    "Pass None to use the model-aware default."
+                )
+            if work_budget <= 0:
+                raise ValueError(
+                    f"work_budget must be positive, got {work_budget!r}. "
+                    "Pass None to use the model-aware default."
+                )
         if n_agents is not None:
             if isinstance(n_agents, bool) or not isinstance(n_agents, int):
                 raise TypeError(f"n_agents must be int, got {type(n_agents).__name__}: {n_agents!r}")
@@ -635,9 +695,18 @@ class BlindAgentRedTeam:
         # Per-agent work budget: distribute total budget evenly.
         # BUG-M3: distribute the remainder to the first agent so total budget
         # is always fully allocated (floor division loses remainder tokens).
+        # BUG-A0: max(1000, ...) floor clamp can produce negative remainder when
+        # total_budget < 1000 * n_agents; use plain floor division instead and
+        # clamp the final per-agent budget to 1 (not 1000) to avoid under-allocation.
         _total_budget = work_budget if work_budget is not None else self.work_budget
-        _base_per_agent = max(1000, _total_budget // n)
-        _remainder = _total_budget - (_base_per_agent * n)
+        n = min(n, _total_budget)  # cap agents so each gets >= 1 token budget
+        if n <= 0:
+            n = 1  # guard against ZeroDivisionError when _total_budget rounds to 0
+        _base_per_agent = max(1, _total_budget // n)
+        # Clamp remainder to 0 — when total_budget < n, floor division gives 0 so
+        # _base_per_agent becomes 1 via max(1, ...) but _total_budget - (1 * n) < 0.
+        # A negative remainder gives agent[0] a budget of 0, failing _AgentBudgetState.
+        _remainder = max(0, _total_budget - (_base_per_agent * n))
         # Per-profile list: index 0 gets the remainder, rest get base amount
         _per_agent_budgets = [_base_per_agent + _remainder] + [_base_per_agent] * (n - 1)
         logger.info(
@@ -687,6 +756,7 @@ class BlindAgentRedTeam:
         # Explicit executor management lets shutdown(wait=False) on timeout actually work.
         import concurrent.futures as _cf
         executor = ThreadPoolExecutor(max_workers=n)
+        _executor_shutdown_done = False
         try:
             for _agent_idx, profile in enumerate(profiles):
                 results_file = results_dir / f"red_team_agent_{profile.index}.json"
@@ -715,7 +785,7 @@ class BlindAgentRedTeam:
                     results_file=results_file,
                     findings_file=findings_file,
                     session_id=session_id,
-                    timeout=t,
+                    timeout=_safety_t,
                     budget_state=_budget_state,
                 )
                 futures_map[future] = profile
@@ -749,6 +819,7 @@ class BlindAgentRedTeam:
                         })
                 # Normal completion path — clean shutdown
                 executor.shutdown(wait=True)
+                _executor_shutdown_done = True
             except _cf.TimeoutError:
                 # Fix #10: this branch IS now reachable — no 'with' __exit__ blocks here.
                 logger.warning("as_completed timed out — collecting partial results from completed futures")
@@ -776,12 +847,15 @@ class BlindAgentRedTeam:
                         })
                 # B3: non-blocking shutdown — cancel_futures stops pending work
                 executor.shutdown(wait=False, cancel_futures=True)
+                _executor_shutdown_done = True  # prevent double-shutdown in finally
         finally:
-            # Ensure executor is released on unexpected exceptions
-            try:
-                executor.shutdown(wait=False, cancel_futures=True)
-            except Exception as exc:
-                logger.warning("executor.shutdown failed during cleanup: %s", exc)
+            # Ensure executor is released on unexpected exceptions.
+            # Skip if normal shutdown already ran to avoid double-shutdown.
+            if not _executor_shutdown_done:
+                try:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                except Exception as exc:
+                    logger.warning("executor.shutdown failed during cleanup: %s", exc)
 
         _suite_elapsed = time.time() - _suite_start
 
@@ -846,13 +920,20 @@ class BlindAgentRedTeam:
         # cannot inject extra columns into TSV log output or corrupt template expansion.
         _safe_mission_desc = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]', ' ', mission_desc).strip()
         _safe_focus_desc = re.sub(r'[\t\r\n\u2028\u2029\x85\x00]', ' ', profile.focus_description).strip()
+        # Sanitize workspace_dir, results_file, and findings_file: strip '$' to prevent
+        # Template injection when path components contain '${var}' patterns that would be
+        # substituted by Template.safe_substitute. shell_workspace_dir uses shlex.quote
+        # which handles shell safety separately.
+        _safe_workspace_dir = str(workspace_dir).replace('$', '_')
+        _safe_results_file = str(results_file).replace('$', '_')
+        _safe_findings_file = str(findings_file).replace('$', '_')
         prompt = string.Template(_RED_TEAM_HUNT_PROMPT).safe_substitute(
-            workspace_dir=str(workspace_dir),
+            workspace_dir=_safe_workspace_dir,
             shell_workspace_dir=shlex.quote(str(workspace_dir)),
             mission_desc=_safe_mission_desc,
             focus_description=_safe_focus_desc,
-            results_file=str(results_file),
-            findings_file=str(findings_file),
+            results_file=_safe_results_file,
+            findings_file=_safe_findings_file,
             agent_id=agent_id,
         )
 
@@ -880,6 +961,16 @@ class BlindAgentRedTeam:
             "--output-format", "stream-json",
             "--verbose",
         ]
+        # Route WebSearch/WebFetch through the AtlasForge local proxy MCP so the
+        # blind validator gets verbatim source text instead of filtered summaries.
+        # Fail loudly on any routing setup error — filtered web tools would
+        # silently degrade validation quality.
+        import sys as _sys
+        _af_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _af_root not in _sys.path:
+            _sys.path.insert(0, _af_root)
+        from WebProxy import proxy_cli_args
+        command.extend(proxy_cli_args(""))
 
         # Cycle 5 Fix: explicit allowlist instead of prefix-based matching
         env = {k: v for k, v in os.environ.items()
@@ -972,13 +1063,20 @@ class BlindAgentRedTeam:
                     # C3-6: join stream_thread before draining stdout — prevents concurrent readers
                     if stream_thread is not None:
                         stream_thread.join(timeout=5)
-                    # B2: drain residual stdout with 1MB cap to prevent hang/OOM.
-                    # Cycle 3 Fix (#14): capture into stdout_text so it is available
-                    # for downstream logging/parsing (was silently discarded before).
-                    try:
-                        stdout_text = proc.stdout.read(1024 * 1024)
-                    except (IOError, OSError) as _read_err:
-                        logger.debug("stdout read error for agent %s: %s", agent_id, _read_err)
+                        if stream_thread.is_alive():
+                            # Thread still reading stdout — skip drain to avoid concurrent access
+                            logger.warning(
+                                "stream_thread still alive after join timeout for agent %s — skipping stdout drain",
+                                agent_id,
+                            )
+                        else:
+                            # B2: drain residual stdout with 1MB cap to prevent hang/OOM.
+                            # Cycle 3 Fix (#14): capture into stdout_text so it is available
+                            # for downstream logging/parsing (was silently discarded before).
+                            try:
+                                stdout_text = proc.stdout.read(1024 * 1024)
+                            except (IOError, OSError) as _read_err:
+                                logger.debug("stdout read error for agent %s: %s", agent_id, _read_err)
                 else:
                     stdout_text, _ = proc.communicate(input=prompt, timeout=_kill_timeout)
             except subprocess.TimeoutExpired:
@@ -987,7 +1085,13 @@ class BlindAgentRedTeam:
                     profile.index, _kill_timeout,
                 )
                 if budget_state is not None:
-                    budget_state.stop_reason = "timeout"
+                    if budget_state.stop_reason == "pending":
+                        budget_state.stop_reason = "timeout"
+                    else:
+                        logger.debug(
+                            "[RED_TEAM] Agent[%d] secondary stop event: timeout (primary: %s)",
+                            profile.index, budget_state.stop_reason,
+                        )
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                     proc.wait(timeout=10)
@@ -1007,13 +1111,22 @@ class BlindAgentRedTeam:
                 # BUG-H2: For non-streaming path (communicate() timeout), drain stdout
                 # and stderr to prevent pipe-buffer deadlock and zombie subprocess.
                 if _use_drain_thread:
-                    # Streaming path: grab whatever is left in the pipe (1MB cap)
-                    try:
-                        _timeout_stdout = proc.stdout.read(1024 * 1024)
-                        if _timeout_stdout:
-                            stdout_text = _timeout_stdout
-                    except (IOError, OSError) as _read_err:
-                        logger.debug("stdout drain on timeout failed for agent %s: %s", agent_id, _read_err)
+                    # Streaming path: only drain if stream_thread is confirmed done.
+                    # If is_alive() is True, the thread is still reading the fd —
+                    # skip drain to prevent concurrent reads on the same descriptor.
+                    if stream_thread is not None and stream_thread.is_alive():
+                        logger.warning(
+                            "stream_thread still alive after join timeout for agent %s "
+                            "on TimeoutExpired path — skipping stdout drain to prevent concurrent fd read",
+                            agent_id,
+                        )
+                    else:
+                        try:
+                            _timeout_stdout = proc.stdout.read(1024 * 1024)
+                            if _timeout_stdout:
+                                stdout_text = _timeout_stdout
+                        except (IOError, OSError) as _read_err:
+                            logger.debug("stdout drain on timeout failed for agent %s: %s", agent_id, _read_err)
                 else:
                     # Non-streaming path: drain both pipes to release zombie
                     try:
@@ -1060,13 +1173,27 @@ class BlindAgentRedTeam:
                 budget_state.token_source = _token_source
                 budget_state.record_output(_output_tokens)
                 budget_state.continuation_count += 1
-                # Determine stop reason based on work budget
-                if budget_state.output_tokens >= budget_state.work_budget:
-                    budget_state.stop_reason = "work_budget_complete"
-                elif budget_state.check_diminishing_returns():
-                    budget_state.stop_reason = "diminishing_returns"
+                # Determine stop reason based on work budget; preserve first stop_reason
+                # (e.g. "timeout" set above) — only set if still pending.
+                if budget_state.stop_reason == "pending":
+                    if budget_state.output_tokens >= budget_state.work_budget:
+                        budget_state.stop_reason = "work_budget_complete"
+                    elif budget_state.check_diminishing_returns():
+                        budget_state.stop_reason = "diminishing_returns"
+                    else:
+                        budget_state.stop_reason = "completed"  # normal completion without hitting budget
                 else:
-                    budget_state.stop_reason = "completed"  # normal completion without hitting budget
+                    # A primary stop event (e.g. timeout) already fired; log secondary as debug.
+                    if budget_state.output_tokens >= budget_state.work_budget:
+                        _secondary = "work_budget_complete"
+                    elif budget_state.check_diminishing_returns():
+                        _secondary = "diminishing_returns"
+                    else:
+                        _secondary = "completed"
+                    logger.debug(
+                        "[RED_TEAM] Agent[%d] secondary stop event: %s (primary: %s)",
+                        profile.index, _secondary, budget_state.stop_reason,
+                    )
             _stop_reason = budget_state.stop_reason if budget_state is not None else "completed"
 
             logger.info(
@@ -1087,7 +1214,13 @@ class BlindAgentRedTeam:
             elapsed = time.time() - start_time
             _stop_reason = "error"
             if budget_state is not None:
-                budget_state.stop_reason = "error"
+                if budget_state.stop_reason == "pending":
+                    budget_state.stop_reason = "error"
+                else:
+                    logger.debug(
+                        "[RED_TEAM] Agent[%d] secondary stop event: error (primary: %s): %s",
+                        profile.index, budget_state.stop_reason, e,
+                    )
             logger.error(f"Agent {agent_id} subprocess failed: {e}")
             # Join any threads that may have been started before the exception
             if stream_thread is not None:
@@ -1367,7 +1500,8 @@ class BlindAgentRedTeam:
 
         results: List[dict] = []
 
-        for raw in re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL):
+        _complete_raw_matches = re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL)
+        for raw in _complete_raw_matches:
             try:
                 file_val = _field("File", raw).strip()
                 line_val = _field("Line", raw).strip()
@@ -1396,18 +1530,26 @@ class BlindAgentRedTeam:
                 logger.warning(f"Skipping malformed ---BUG--- block: {e}")
 
         # BAR-C3-1: Parse incomplete ---BUG--- blocks (agent timed out mid-output)
-        # Collect already-parsed complete blocks to avoid duplicates
+        # Collect already-parsed complete blocks to avoid duplicates (reuse cached matches)
         _parsed_complete = set()
-        for raw in re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL):
+        for raw in _complete_raw_matches:
             _parsed_complete.add(raw.strip())
         # Find all ---BUG--- blocks (including incomplete ones without ---END BUG---)
-        for partial_match in re.finditer(r'---BUG---\s*(.*?)(?=^---BUG---|^---SUSPECTED---|\Z)', content, re.DOTALL | re.MULTILINE):
-            partial = partial_match.group(1).strip()
-            if not partial or partial in _parsed_complete:
+        # C2-Fix: Drop re.MULTILINE — ^ anchors with MULTILINE allow greedy cross-block
+        # capture when alternation matches mid-line; DOTALL alone is sufficient here.
+        for partial_match in re.finditer(r'---BUG---\s*(.*?)(?=---BUG---|---SUSPECTED---|\Z)', content, re.DOTALL):
+            # H12: strip the ---END BUG--- suffix before dedup comparison — partial blocks
+            # that are actually complete include the END marker in the captured group,
+            # so without stripping, they never match _parsed_complete and get double-counted.
+            partial_raw = partial_match.group(1)
+            # Normalize: remove trailing ---END BUG--- marker if present before dedup check
+            partial_normalized = re.sub(r'\s*---END BUG---\s*$', '', partial_raw).strip()
+            if not partial_normalized or partial_normalized in _parsed_complete:
                 continue  # Skip empty or already-parsed complete blocks
-            # Also skip if it ends with ---END BUG--- (already parsed above)
-            if '---END BUG---' in partial_match.group(0):
+            # Also skip if the original match contains ---END BUG--- (already parsed above)
+            if '---END BUG---' in partial_raw:
                 continue
+            partial = partial_normalized
             try:
                 file_val = _field("File", partial)
                 desc_val = _field("Description", partial)
@@ -1482,7 +1624,7 @@ class BlindAgentRedTeam:
             "low": "LIGHT", "info": "NONBLOCKING",
         }
 
-        suspected = [f for f in findings if getattr(f, 'title', '').startswith('[SUSPECTED]')]
+        suspected = [f for f in findings if (getattr(f, 'title', '') or '').startswith('[SUSPECTED]')]
         confirmed = [f for f in findings if f not in suspected]
         buckets: Dict[str, List[RedTeamFinding]] = {s: [] for s in _SEV_ORDER}
         for f in confirmed:
@@ -1664,6 +1806,11 @@ class RedTeamOrchestrator:
         self.n_agents = min(max(1, n_agents), _max_ext)
 
         # Work budget and safety timeout — model-aware defaults
+        if work_budget is not None and work_budget <= 0:
+            raise ValueError(
+                f"work_budget must be positive, got {work_budget!r}. "
+                "Pass None to use the model-aware default."
+            )
         _model = _detect_model()
         _wb = work_budget if work_budget is not None else _model_work_budget(_model)
         self.work_budget: int = _wb if _wb > 0 else _DEFAULT_WORK_BUDGET

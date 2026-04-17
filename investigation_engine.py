@@ -710,6 +710,12 @@ def invoke_claude(
             cmd.extend(["--model", model.value])
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
+        # Route WebSearch/WebFetch through the AtlasForge local proxy MCP.
+        # Fail loudly if routing can't be set up — silent fallback to the
+        # built-in (filtered) web tools produces mysteriously degraded
+        # research output and contradicts the CLAUDE.md guarantee.
+        from WebProxy import proxy_cli_args
+        cmd.extend(proxy_cli_args(""))
         # Add stream-json for real-time agent activity visibility
         cmd.extend(["--output-format", "stream-json", "--verbose"])
         full_prompt = prompt

@@ -102,15 +102,18 @@ export async function recoveryModeRestore() {
         itemsDiv.innerHTML = snapshots.slice(0, 10).map(s => {
             const time = new Date(s.timestamp).toLocaleString();
             return `
-                <div class="recovery-snapshot-item" onclick="window.restoreFromRecoveryMode('${s.snapshot_id}')">
+                <div class="recovery-snapshot-item" data-snapshot-id="${escapeHtml(s.snapshot_id)}">
                     <div class="recovery-snapshot-info">
-                        <div class="recovery-snapshot-id">${s.snapshot_id.slice(0, 40)}...</div>
+                        <div class="recovery-snapshot-id">${escapeHtml(s.snapshot_id.slice(0, 40))}...</div>
                         <div class="recovery-snapshot-time">${time}</div>
                     </div>
-                    <span class="recovery-snapshot-stage">${s.stage}</span>
+                    <span class="recovery-snapshot-stage">${escapeHtml(s.stage)}</span>
                 </div>
             `;
         }).join('');
+        itemsDiv.querySelectorAll('.recovery-snapshot-item[data-snapshot-id]').forEach(el => {
+            el.addEventListener('click', () => window.restoreFromRecoveryMode(el.dataset.snapshotId));
+        });
 
         // Show snapshots, hide options
         optionsDiv.style.display = 'none';

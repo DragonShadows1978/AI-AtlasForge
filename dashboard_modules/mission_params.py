@@ -14,9 +14,12 @@ Routes:
 """
 
 import json
+import logging
 import time
 from flask import Blueprint, jsonify, request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 mission_params_bp = Blueprint('mission_params', __name__)
 
@@ -122,8 +125,8 @@ def _load_audit_summary(mission_id: str):
                     "submitted_at": audit.get("timestamp"),
                     "validation_errors": audit.get("validation_errors", []),
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("_load_audit_summary(%r) failed: %s", mission_id, e)
     return None
 
 
@@ -133,8 +136,8 @@ def _load_full_audit(mission_id: str):
         from af_engine.mission_config import load_audit_log
         if _MISSIONS_DIR:
             return load_audit_log(_MISSIONS_DIR / mission_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("_load_full_audit(%r) failed: %s", mission_id, e)
     return None
 
 
@@ -195,7 +198,8 @@ def _build_history() -> list:
                 "override_count": override_count,
                 "is_valid": is_valid,
             })
-        except Exception:
+        except Exception as e:
+            logger.warning("_build_history: skipping entry %s: %s", entry.name, e)
             continue
 
     # Sort oldest-first (empty created_at sorts last)
@@ -278,11 +282,16 @@ def api_patch_mission_parameters():
     changes = []
 
     if "cycle_budget" in data:
-        try:
-            new_cb = int(data["cycle_budget"])
-        except (TypeError, ValueError):
-            errors.append("cycle_budget must be an integer")
+        _raw_cb = data["cycle_budget"]
+        if isinstance(_raw_cb, bool):
+            errors.append("cycle_budget must be an integer, not bool")
             new_cb = None
+        else:
+            try:
+                new_cb = int(_raw_cb)
+            except (TypeError, ValueError):
+                errors.append("cycle_budget must be an integer")
+                new_cb = None
 
         if new_cb is not None:
             if new_cb < MIN_CYCLE_BUDGET or new_cb > MAX_CYCLE_BUDGET:
@@ -302,11 +311,16 @@ def api_patch_mission_parameters():
                     mission["cycle_budget"] = new_cb
 
     if "max_iterations" in data:
-        try:
-            new_mi = int(data["max_iterations"])
-        except (TypeError, ValueError):
-            errors.append("max_iterations must be an integer")
+        _raw_mi = data["max_iterations"]
+        if isinstance(_raw_mi, bool):
+            errors.append("max_iterations must be an integer, not bool")
             new_mi = None
+        else:
+            try:
+                new_mi = int(_raw_mi)
+            except (TypeError, ValueError):
+                errors.append("max_iterations must be an integer")
+                new_mi = None
 
         if new_mi is not None:
             if new_mi < MIN_MAX_ITERATIONS or new_mi > MAX_MAX_ITERATIONS:
@@ -352,8 +366,8 @@ def api_patch_mission_parameters():
     if _emit_callback:
         try:
             _emit_callback('mission_params', get_mission_params())
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("WebSocket push after parameter update failed (non-fatal): %s", e)
 
     return jsonify({
         "success": True,
@@ -417,7 +431,7 @@ def api_mission_parameter_audit_history():
         }
     """
     try:
-        limit = min(int(request.args.get("limit", 20)), 100)
+        limit = max(1, min(int(request.args.get("limit", 20)), 100))
     except (ValueError, TypeError):
         limit = 20
 
@@ -442,6 +456,9 @@ def api_mission_parameter_audit_history():
 @mission_params_bp.route('/api/mission/parameter-audit/<mission_id>')
 def api_mission_parameter_audit_by_id(mission_id: str):
     """Get the full parameter audit log for a specific mission by ID."""
+    import re as _re
+    if not _re.match(r'^[a-zA-Z0-9_-]+$', mission_id):
+        return jsonify({'error': 'Invalid mission_id: only alphanumeric, underscore, and hyphen allowed'}), 400
     try:
         audit = _load_full_audit(mission_id)
         if audit is None:
@@ -480,6 +497,9 @@ def prune_audit_logs():
         dry_run = bool(body.get('dry_run', True))
     except (ValueError, TypeError) as e:
         return jsonify({'error': f'Invalid parameter: {e}'}), 400
+
+    if max_missions < 1:
+        return jsonify({'error': 'max_missions must be >= 1 to prevent accidental deletion of all missions'}), 400
 
     if not _MISSIONS_DIR or not _MISSIONS_DIR.exists():
         return jsonify({'error': 'missions directory not configured'}), 503

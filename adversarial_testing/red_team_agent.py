@@ -151,6 +151,91 @@ class RedTeamResult:
         return len(self.findings)
 
 
+def _find_balanced_json(text: str) -> Optional[str]:
+    """O(N) single-pass brace-counting to find the first balanced JSON object.
+
+    Walks the string once, tracking brace depth and respecting string literals
+    and escape sequences. Returns the substring from the opening '{' to the
+    matching '}', or None if no balanced object is found.
+
+    Ported from atlasforge_conductor.py:_find_balanced_json (Cycle 2).
+    """
+    if not isinstance(text, str):
+        return None
+    start = text.find('{')
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    i = start
+    while i < len(text):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+        elif ch == '\\' and in_string:
+            escape_next = True
+        elif ch == '"':
+            in_string = not in_string
+        elif not in_string:
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        i += 1
+    return None
+
+
+def _find_all_balanced_json(text: str):
+    """O(N) scan returning all top-level balanced JSON object substrings.
+
+    Unlike _find_balanced_json which stops at the first candidate, this
+    function continues scanning after each balanced block so that callers
+    can try all candidates and pick the best-matching one (e.g. the first
+    that parses successfully and contains a required key).
+
+    Returns a list of (start, end, substring) tuples in left-to-right order.
+    """
+    if not isinstance(text, str):
+        return []
+    candidates = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] != '{':
+            i += 1
+            continue
+        # Scan forward for the matching closing brace
+        start = i
+        depth = 0
+        in_string = False
+        escape_next = False
+        j = i
+        while j < n:
+            ch = text[j]
+            if escape_next:
+                escape_next = False
+            elif ch == '\\' and in_string:
+                escape_next = True
+            elif ch == '"':
+                in_string = not in_string
+            elif not in_string:
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        candidates.append((start, j + 1, text[start:j + 1]))
+                        break
+            j += 1
+        # Advance past this opening brace to find next candidate
+        i = start + 1
+    return candidates
+
+
 class RedTeamAgent:
     """
     Spawns fresh LLM instances to adversarially analyze code.
@@ -583,17 +668,17 @@ Respond in JSON format:
             except json.JSONDecodeError:
                 pass
 
-        # Try to find raw JSON object using raw_decode to handle nested braces
-        decoder = json.JSONDecoder()
-        idx = text.find('{')
-        while idx != -1:
+        # O(N) scan for all balanced brace blocks; try each until one parses
+        # and contains the required "findings" key.  This prevents stopping
+        # at the first block (which may be a non-JSON fragment like {literal})
+        # when a later block contains the actual JSON payload.
+        for _start, _end, json_str in _find_all_balanced_json(text):
             try:
-                obj, _ = decoder.raw_decode(text, idx)
+                obj = json.loads(json_str)
                 if isinstance(obj, dict) and "findings" in obj:
                     return obj
             except json.JSONDecodeError:
-                pass
-            idx = text.find('{', idx + 1)
+                continue
 
         return None
 
@@ -667,8 +752,8 @@ def get_item(items, index):
 
 def process_user_input(user_input):
     """Process user input and execute."""
-    import os
-    os.system(f"echo {user_input}")
+    import subprocess
+    subprocess.run(['echo', user_input], check=False)
 '''
 
     print("Analyzing vulnerable test code...")

@@ -604,8 +604,11 @@ def api_mission():
                 save_audit_log(audit, mission_dir)
                 applied_cycle_budget = config.cycle_budget
             else:
+                _raw_cb = data.get('cycle_budget', 3)
+                if isinstance(_raw_cb, bool):
+                    return jsonify({"success": False, "message": "Invalid cycle_budget: must be an integer, not bool"}), 400
                 try:
-                    cycle_budget = max(1, int(data.get('cycle_budget', 3)))
+                    cycle_budget = max(1, int(_raw_cb))
                 except (ValueError, TypeError, OverflowError):
                     return jsonify({"success": False, "message": "Invalid cycle_budget: must be an integer"}), 400
                 active_provider = get_llm_provider() if get_llm_provider else "claude"
@@ -1103,8 +1106,11 @@ def api_set_mission_from_recommendation(rec_id):
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
     data = request.get_json(silent=True) or {}
+    _raw_cb_rec = data.get("cycle_budget", 3)
+    if isinstance(_raw_cb_rec, bool):
+        return jsonify({"success": False, "error": "cycle_budget must be an integer, not bool"}), 400
     try:
-        cycle_budget = max(1, min(10, int(data.get("cycle_budget", 3))))
+        cycle_budget = max(1, min(10, int(_raw_cb_rec)))
     except (ValueError, TypeError, OverflowError):
         return jsonify({"success": False, "error": "cycle_budget must be a valid integer"}), 400
     user_project_name = data.get("project_name")  # Optional user-specified project name
@@ -1324,30 +1330,42 @@ def download_file(filepath):
                 mission_id, missions_dir, WORKSPACE_DIR, io_utils
             )
 
-            full_path = mission_workspace / relative_path
-            allowed_base = mission_workspace
+            # C1: Validate mission_workspace itself is within server root to prevent
+            # attacker-crafted mission_ids from setting allowed_base to an arbitrary path.
+            _server_root = WORKSPACE_DIR.resolve()
+            if not mission_workspace.resolve().is_relative_to(_server_root):
+                abort(403)
+
+            full_path = (mission_workspace / relative_path).resolve()
+            allowed_base = mission_workspace.resolve()
         else:
             abort(404)
     else:
-        full_path = WORKSPACE_DIR / filepath
-        allowed_base = WORKSPACE_DIR
+        full_path = (WORKSPACE_DIR / filepath).resolve()
+        allowed_base = WORKSPACE_DIR.resolve()
 
-    # Basic sanity check on the unresolved path (catches obvious traversals).
-    # Uses non-resolving check to avoid symlink info leak (different error paths).
-    # The authoritative containment check happens post-open inside _safe_read_bytes.
-    try:
-        full_path.relative_to(allowed_base)
-    except (ValueError, OSError):
+    # Authoritative pre-open containment check using resolved paths.
+    # resolve() eliminates '..' and symlinks, making this system-independent.
+    if not full_path.is_relative_to(allowed_base):
         abort(403)
 
     mime_type, _ = mimetypes.guess_type(str(full_path))
 
     from io import BytesIO
 
+    # Enforce download size cap to prevent memory exhaustion DoS
+    _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+    try:
+        file_size = full_path.stat().st_size
+    except OSError:
+        abort(403)
+    if file_size > _MAX_DOWNLOAD_BYTES:
+        abort(413)  # Request Entity Too Large
+
     # Pass the *unresolved* path so O_NOFOLLOW sees symlinks,
     # and allowed_base for post-open fd containment check.
     try:
-        data = _safe_read_bytes(full_path, allowed_base=allowed_base)
+        data = _safe_read_bytes(full_path, max_bytes=_MAX_DOWNLOAD_BYTES, allowed_base=allowed_base)
     except IOError:
         abort(500)  # read error (distinct from access denial)
     if data is None:
@@ -1384,15 +1402,20 @@ def _safe_read_bytes(path, max_bytes=None, allowed_base=None):
             real_path = Path(os.readlink(f"/proc/self/fd/{fd}")).resolve()
             allowed_resolved = Path(allowed_base).resolve()
             real_path.relative_to(allowed_resolved)
-        except Exception:
+        except (ValueError, OSError) as _e:
+            logger.warning("_safe_read_bytes: post-open containment check failed: %s", _e)
             os.close(fd)
             return None  # fd points outside allowed_base or allowed_base is invalid
+        except Exception as _e:
+            logger.warning("_safe_read_bytes: unexpected error in containment check: %s", _e)
+            os.close(fd)
+            return None
     try:
         f = os.fdopen(fd, 'rb')
     except Exception:
         os.close(fd)
         return None
-    if max_bytes is not None and (not isinstance(max_bytes, int) or max_bytes < 0):
+    if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0):
         f.close()
         raise ValueError(f"max_bytes must be a non-negative integer, got {max_bytes!r}")
     try:
@@ -1443,19 +1466,16 @@ def get_file_content(filepath):
         from .workspace_resolver import resolve_mission_workspace
         missions_dir = BASE_DIR / "missions"
         mission_workspace = resolve_mission_workspace(mission_id, missions_dir, WORKSPACE_DIR, io_utils)
-        full_path = mission_workspace / relative_path
-        allowed_base = mission_workspace
+        full_path = (mission_workspace / relative_path).resolve()
+        allowed_base = mission_workspace.resolve()
     else:
         if not filepath or not filepath.strip():
             return jsonify({"error": "Empty file path"}), 400
-        full_path = WORKSPACE_DIR / filepath
-        allowed_base = WORKSPACE_DIR
+        full_path = (WORKSPACE_DIR / filepath).resolve()
+        allowed_base = WORKSPACE_DIR.resolve()
 
-    # Basic sanity check on unresolved path (non-resolving to avoid symlink info leak);
-    # authoritative check is post-open.
-    try:
-        full_path.relative_to(allowed_base)
-    except (ValueError, OSError):
+    # Containment check on resolved path — catches symlinks and traversal attempts.
+    if not full_path.is_relative_to(allowed_base):
         return jsonify({"error": "Access denied"}), 403
 
     mime_type, _ = mimetypes.guess_type(str(full_path))
@@ -1527,8 +1547,14 @@ def list_files():
     mission_workspace = mission.get('mission_workspace')
     mission_id = mission.get('mission_id')
 
-    # Use mission-specific workspace when available
-    workspace_base = Path(mission_workspace) if mission_workspace else WORKSPACE_DIR
+    # Use mission-specific workspace when available — validate containment to prevent
+    # attacker-crafted mission_id from enumerating files outside the workspace root.
+    if mission_workspace:
+        workspace_base = Path(mission_workspace)
+        if not workspace_base.resolve().is_relative_to(WORKSPACE_DIR.resolve()):
+            workspace_base = WORKSPACE_DIR
+    else:
+        workspace_base = WORKSPACE_DIR
 
     # Exclusion set for directories that shouldn't appear in the files widget
     exclude_dirs = {"__pycache__", ".git", "node_modules", "atlasforge_data", ".mypy_cache", ".pytest_cache"}
@@ -1552,7 +1578,11 @@ def list_files():
                     stat = f.stat()
                     # Build download/content URLs with mission context if needed
                     if mission_workspace:
-                        download_path = f"mission/{mission_id}/{path_str}"
+                        if not _validate_mission_id(mission_id):
+                            logger.warning(f"list_files: invalid mission_id {mission_id!r}, skipping URL construction")
+                            download_path = path_str
+                        else:
+                            download_path = f"mission/{mission_id}/{path_str}"
                     else:
                         download_path = path_str
 

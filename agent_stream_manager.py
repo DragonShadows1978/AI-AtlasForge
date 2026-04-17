@@ -54,6 +54,12 @@ class AgentContext:
     """Metadata for a single spawned agent subprocess."""
 
     def __init__(self, agent_id: str, context: str, label: str, pid: Optional[int] = None):
+        if not isinstance(agent_id, str):
+            raise TypeError(f"agent_id must be a str, got {type(agent_id).__name__}: {agent_id!r}")
+        if not agent_id or not agent_id.strip():
+            raise ValueError("agent_id must be a non-empty, non-whitespace string")
+        if not isinstance(context, str):
+            raise TypeError(f"context must be a str, got {type(context).__name__}: {context!r}")
         self.agent_id = agent_id
         self.context = context      # 'mission' | 'investigation'
         self.label = label          # Display label e.g. "PLAN Agent 1", "Sub-0"
@@ -342,6 +348,7 @@ class AgentStreamWatcher(threading.Thread):
         stream_file = self.ctx.stream_file
         last_activity = time.time()
         file_pos = 0
+        last_inode = None  # track inode to detect file rotation
 
         # Wait up to 5s for stream file to appear
         for _ in range(50):
@@ -366,6 +373,19 @@ class AgentStreamWatcher(threading.Thread):
             if not stream_file.exists():
                 time.sleep(0.2)
                 continue
+
+            # Detect file rotation: if the inode changed, reset position to 0
+            try:
+                current_inode = os.stat(stream_file).st_ino
+                if last_inode is not None and current_inode != last_inode:
+                    logger.debug(
+                        "Stream file rotated for agent %s (inode %d -> %d), resetting position",
+                        self.ctx.agent_id, last_inode, current_inode,
+                    )
+                    file_pos = 0
+                last_inode = current_inode
+            except OSError:
+                pass
 
             try:
                 with open(stream_file, 'r') as f:
@@ -457,6 +477,10 @@ def _emit_via_ipc(room: str, payload: dict, retries: int = 2):
         body = json.dumps({'room': room, 'payload': payload}).encode('utf-8')
         ipc_url = _get_ipc_url()
         ssl_ctx = ssl.create_default_context()
+        # SSL verification intentionally disabled for localhost-only IPC.
+        # The dashboard runs on localhost (HTTP, not HTTPS) in development.
+        # Risk: any local process could impersonate the dashboard endpoint.
+        # Acceptable: this is internal tooling, not internet-facing infrastructure.
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
         for attempt in range(retries + 1):

@@ -93,44 +93,82 @@ make docker       # Start with Docker
 make sample-mission  # Load sample mission
 ```
 
-## What's New in v1.8.4
+## Web Proxy & Thin MCP
 
-- **Handoff System Overhaul** - Complete rework of the conductor handoff system for improved reliability across mission cycles
-- **Widget Visibility Toggles** - Dashboard widgets can now be hidden/shown without disabling backend services
-- **Dashboard Drag & Drop** - Drag-and-drop widget reordering with layout presets, undo/redo, and touch support
-- **Context Watcher Improvements** - Enhanced token tracking and handoff logic
-- **Systemd Auto-Start** - Fixed graphical-session.target dependency on Linux Mint, Dashboard and Tray services now auto-start on boot via default.target
+AI-AtlasForge ships with a **local web proxy** that every AtlasForge-spawned Claude Code subagent uses in place of Claude's built-in `WebSearch` / `WebFetch`.
 
-## What's New in v1.8.3
+### What it is
 
-- **Test Harness Improvements** - Refactored subprocess mocking in conductor timeout tests, improved phase-aware drift validation, provider-aware ground rules caching
-- **Stability Fixes** - Enhanced test coverage for timeout scenarios, improved error handling in stage handlers, Gemini provider integration tests
+Everything lives under the `WebProxy/` package at the repo root:
 
-## What's New in v1.8.2
+- **`WebProxy/service.py`** — a local HTTP service (default `http://127.0.0.1:8765`) that wraps Brave Search / DuckDuckGo search and a raw HTML fetcher. Endpoints: `/search`, `/fetch`, `/research`, `/image_search`, `/cache`, `/stats`, `/health`.
+- **`WebProxy/mcp_server.py`** — the **thin MCP server**. It advertises tools named `WebSearch` and `WebFetch` (the exact names of Claude Code's built-ins) over JSON-RPC stdin/stdout. Spawn sites thread `--disallowedTools WebSearch,WebFetch` so the model's built-in calls are transparently redirected through the MCP → HTTP proxy.
+- **`WebProxy/supervisor.py`** — dashboard-side auto-start helper. When you run `make dashboard`, the proxy comes up alongside it; when you Ctrl-C the dashboard, the proxy exits too (atexit hook). Opt out with `ATLASFORGE_DISABLE_PROXY_AUTOSTART=1` when you'd rather use the systemd unit.
+- **`.mcp.json`** (stays at repo root) — Claude Code's **project-level** MCP config. Auto-loaded when you launch Claude Code from the repo root; no per-user configuration required.
+- **`WebProxy/configs/mcp.json`** — the same MCP config, threaded explicitly via `--mcp-config` by AtlasForge when spawning subagents.
 
-- **Bug Fixes** - Fixed null handling in suggestion analyzer, improved storage fallback in dashboard similarity analysis
+### Why
 
-## What's New in v1.8.1
+- **~22× more content per query** than Claude's filtered backend.
+- Survives **domain blocks** (Reddit, niche forums, adult domains) — subagents doing adversarial verification need the raw source.
+- Returns **verbatim HTML** for source verification.
+- **24h fetch cache / 30m search cache** for repeatability and cost control.
 
-- **Dashboard Services Config** - Added Atlas Lab service configuration to services registry
+### How it's integrated
 
-## What's New in v1.8.0
+| Surface | How it hooks in |
+|---|---|
+| **Dashboard auto-start** | `dashboard_v2.py` calls `WebProxy.supervisor.ensure_proxy_running()` on launch. If the proxy's port 8765 is already up (e.g. from the systemd unit), it no-ops; otherwise it spawns the proxy as a managed subprocess and terminates it on dashboard shutdown. |
+| **Dashboard widget** | `localhost:5050` → "Web Proxy" card shows live cached-search / cached-fetch counters and provider breakdown. |
+| **Dashboard API** | `GET /api/web-proxy/stats` on the dashboard returns live proxy stats. |
+| **Systemd** | User-level unit `atlasforge-web-proxy.service` (installed by `./install.sh` → `scripts/setup_services.sh` from the template at `WebProxy/systemd/atlasforge-web-proxy.service`). |
+| **MCP auto-load** | `.mcp.json` at the repo root — points at `WebProxy/mcp_server.py`. Claude Code auto-discovers project-level MCP configs. |
+| **Subagent wiring** | `WebProxy.proxy_cli_args()` appends `--mcp-config WebProxy/configs/mcp.json --disallowedTools WebSearch,WebFetch` to every `claude -p` spawn in `atlasforge_conductor.build_llm_command()`, `investigation_engine.py`, and `adversarial_testing/blind_agent_runner.py`. |
 
-- **Google Gemini Support** - Full provider integration with subscription-based API access. Gemini missions validated on complex codebases (custom autograd implementations). Code generation, testing, and iteration loops proven functional
-- **Provider-Agnostic Architecture** - Three LLM backends (Claude, Codex, Gemini) running through unified orchestration with provider-specific hardening
-- **Enhanced Gemini Integration** - Defensive API invocation, clear error parsing, subscription auth support (API key or OAuth)
-- **Mission Validation** - Tested Gemini on Project Tensor (custom autograd) - improved code robustness and performance through multi-cycle iteration
+### Thin MCP explainer
 
-## What's New in v1.7.0
+> **If you're new to MCP:** [Model Context Protocol](https://modelcontextprotocol.io) is the stdin/stdout JSON-RPC protocol Claude Code uses to load tools provided by external processes. A "thin MCP" is just a small process that advertises some tool schemas and forwards calls elsewhere.
 
-- **OpenAI Codex Support** - Full multi-provider support: run missions and investigations with Claude or Codex as the LLM backend. Provider-aware ground rules, prompt templates, and transcript handling
-- **Ground Rules Loader** - Provider-aware ground rules system with overlay support for Claude/Codex/investigation modes
-- **Enhanced Context Watcher** - Major overhaul with improved token tracking, time-based handoff, and Haiku-powered summaries
-- **Experiment Framework** - Expanded scientific experiment orchestration with multi-hypothesis testing
-- **Investigation Engine** - Enhanced multi-subagent investigation system with provider selection
-- **Dashboard Improvements** - New widgets system, improved chat interface, better WebSocket handling
-- **Transcript Archival** - New integration for automatic transcript archival
-- 110 files changed, 3500+ lines added across the platform
+The AtlasForge thin MCP (`WebProxy/mcp_server.py`) does two things:
+
+1. **Advertises** MCP tools named `WebSearch`, `WebFetch`, `WebResearch`, and `ImageSearch` — the first two are the **exact same names** as Claude Code's built-ins.
+2. **Forwards** each call as an HTTP request to the local proxy service and streams the response back.
+
+The redirection works because of a tiny trick in Claude Code's tool-resolution order:
+
+- When Claude Code sees `--disallowedTools WebSearch,WebFetch`, it refuses the **built-in** tools with those names.
+- But the thin MCP has advertised tools under the **same names**, and the disallowlist doesn't apply to MCP-provided tools.
+- So the model's call to `WebSearch(...)` resolves to the MCP version, which forwards to our proxy.
+
+From the model's perspective, nothing changed: it still calls `WebSearch(...)` and `WebFetch(...)`. Under the hood, those calls now route through the local proxy.
+
+This is what "rolling the MCP into AtlasForge itself" means: `.mcp.json` sits at the repo root and Claude Code auto-loads it the moment you launch from that directory. No per-user MCP configuration required — clone the repo, run `install.sh`, and the tools re-route themselves.
+
+### Quick commands
+
+```bash
+make dashboard      # starts dashboard AND auto-starts the proxy
+make proxy-start    # systemctl --user start atlasforge-web-proxy
+make proxy-status   # show unit status
+make proxy-logs     # journalctl --user -u atlasforge-web-proxy -f
+make proxy-health   # curl http://127.0.0.1:8765/health
+```
+
+### Configuration
+
+Set `BRAVE_API_KEY` to use Brave Search (recommended); otherwise the proxy falls back to DuckDuckGo HTML scraping. Set `ATLASFORGE_DISABLE_PROXY_AUTOSTART=1` if you prefer the systemd unit over dashboard-managed startup. See `.env.example` for all proxy-related environment variables.
+
+For the full API reference, see [WebProxy/docs/LOCAL_WEB_PROXY.md](WebProxy/docs/LOCAL_WEB_PROXY.md).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history. Highlights of recent releases:
+
+- **v2.3.0** — `WebProxy/` package: local HTTP proxy + thin MCP server transparently replaces Claude Code's `WebSearch` / `WebFetch` with unfiltered verbatim-source web access. SSRF hardening, Reddit JSON auto-routing, image pipeline, systemd unit with externalized secrets, dashboard auto-start and live stats widget, validator proxy-first fetching.
+- **v2.2.0** — Token budget system (`WorkBudgetManager`), dashboard file upload for mission creation, blind validator coordinator-owns-budget pattern.
+- **v2.1.0** — Adversarial hardening, conductor expansion, dashboard overhaul.
+- **v2.0.0** — Automated release pipeline, scripts modularization, agent streaming.
+- **v1.8.4** — Handoff system overhaul, widget toggles, dashboard drag & drop, systemd auto-start.
 
 ## Architecture
 

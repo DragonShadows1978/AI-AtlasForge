@@ -10,16 +10,18 @@ YELLOW := \033[1;33m
 RED := \033[0;31m
 NC := \033[0m  # No Color
 
-# Paths
-ATLASFORGE_ROOT := $(shell pwd)
+# Paths — resolve from the Makefile's own directory, not the caller's pwd.
+# This lets `make -f /path/to/Makefile <target>` work from anywhere.
+ATLASFORGE_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 VENV := $(ATLASFORGE_ROOT)/venv
 PYTHON := $(VENV)/bin/python3
 PIP := $(VENV)/bin/pip
+PROXY_UNIT := $(HOME)/.config/systemd/user/atlasforge-web-proxy.service
 
 # Default target
 .DEFAULT_GOAL := help
 
-.PHONY: help install dev verify dashboard run stop clean docker docker-down sample-mission test lint check-api
+.PHONY: help install dev verify dashboard run stop clean docker docker-down sample-mission test lint check-api check-secrets proxy-check-unit proxy-install proxy-start proxy-stop proxy-status proxy-logs proxy-health
 
 ##@ Getting Started
 
@@ -61,8 +63,8 @@ lint: ## Run code linting (if configured)
 	fi
 
 test: ## Run tests
-	@if [ -d "tests" ]; then \
-		$(PYTHON) -m pytest tests/ -v; \
+	@if [ -d "tests" ] || [ -d "WebProxy/tests" ]; then \
+		$(PYTHON) -m pytest tests/ WebProxy/tests/ -v; \
 	else \
 		echo "$(YELLOW)No tests directory found$(NC)"; \
 	fi
@@ -122,6 +124,9 @@ docker-build: ## Rebuild Docker image
 verify: ## Verify installation is complete and working
 	@./verify.sh
 
+check-secrets: ## Scan the tracked tree for Brave API key leaks
+	@bash $(ATLASFORGE_ROOT)/scripts/check_no_brave_key.sh --all
+
 check-api: ## Check if Anthropic API key is configured
 	@echo "$(BLUE)[AtlasForge]$(NC) Checking API configuration..."
 	@if [ -n "$$ANTHROPIC_API_KEY" ]; then \
@@ -147,6 +152,37 @@ sample-mission: ## Load the hello-world sample mission
 	fi
 	@echo ""
 	@echo "$(GREEN)Sample mission loaded!$(NC) Run 'make run' to start it."
+
+##@ Web Proxy
+
+# Gate systemctl-using targets on the unit being installed so the user gets
+# a clear, actionable error instead of systemd's cryptic "Unit not found".
+proxy-check-unit:
+	@if [ ! -f "$(PROXY_UNIT)" ]; then \
+		echo "$(RED)[ERROR]$(NC) Web proxy unit not installed at $(PROXY_UNIT)"; \
+		echo "         Run: $(YELLOW)bash $(ATLASFORGE_ROOT)/scripts/setup_services.sh$(NC)"; \
+		exit 1; \
+	fi
+
+proxy-install: ## Install the web proxy user-service (runs setup_services.sh)
+	@bash $(ATLASFORGE_ROOT)/scripts/setup_services.sh
+
+proxy-start: proxy-check-unit ## Start the web proxy user-service
+	@systemctl --user start atlasforge-web-proxy
+	@echo "$(GREEN)Web proxy started$(NC) — check with 'make proxy-health'"
+
+proxy-stop: proxy-check-unit ## Stop the web proxy user-service
+	@systemctl --user stop atlasforge-web-proxy
+	@echo "$(GREEN)Web proxy stopped$(NC)"
+
+proxy-status: proxy-check-unit ## Show web proxy service status
+	@systemctl --user status atlasforge-web-proxy --no-pager || true
+
+proxy-logs: proxy-check-unit ## Follow web proxy service logs
+	@journalctl --user -u atlasforge-web-proxy -f
+
+proxy-health: ## Check web proxy health endpoint
+	@curl -sf http://127.0.0.1:8765/health && echo " $(GREEN)OK$(NC)" || (echo "$(RED)FAIL$(NC)"; exit 1)
 
 ##@ Maintenance
 

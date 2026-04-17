@@ -33,6 +33,18 @@ from .integrations.base import Event, StageEvent
 
 logger = logging.getLogger(__name__)
 
+import re as _re
+
+
+def _sanitize_for_log(value: str) -> str:
+    """Strip control characters and newlines to prevent log injection.
+
+    Covers ASCII controls (\\x00-\\x1f, \\x7f) and Unicode line/paragraph
+    separators (U+2028, U+2029) which some terminals and log parsers treat
+    as line endings.
+    """
+    return _re.sub(r'[\x00-\x1f\x7f\u2028\u2029]', '', str(value))
+
 
 def _format_research_context(findings, prior_found: bool = False) -> str:
     """Format ResearchFindings into a prompt-injectable context block."""
@@ -199,12 +211,12 @@ class StageOrchestrator:
             new_stage: The new stage to transition to
         """
         if not isinstance(new_stage, str):
-            logger.error(f"Invalid stage type: {type(new_stage).__name__} (expected str)")
+            logger.error("Invalid stage type: %s (expected str)", type(new_stage).__name__)
             return False
 
         new_stage = new_stage.upper()
         if new_stage not in self.STAGES:
-            logger.error(f"Invalid stage: {new_stage}")
+            logger.error("Invalid stage: %s", _sanitize_for_log(new_stage))
             return False
 
         old_stage = self.current_stage
@@ -223,7 +235,7 @@ class StageOrchestrator:
 
         # Update state
         old = self.state.update_stage(new_stage)
-        logger.info(f"Stage transition: {old} -> {new_stage}")
+        logger.info("Stage transition: %s -> %s", _sanitize_for_log(str(old)), _sanitize_for_log(new_stage))
 
         # Emit STAGE_STARTED for new stage
         if new_stage != "COMPLETE":
@@ -362,20 +374,40 @@ class StageOrchestrator:
         handler = self.registry.get_handler(stage)
         stage_context = self._build_stage_context()
 
-        # Log incoming response for debugging
-        logger.info(f"Processing {stage} response with status='{response.get('status', '')}'")
+        # Log incoming response for debugging (sanitize status to prevent log injection)
+        _status = _sanitize_for_log(response.get('status', ''))
+        logger.info(f"Processing {stage} response with status='{_status}'")
 
         # Process response through handler
         result: StageResult = handler.process_response(response, stage_context)
 
         # Validate transition before accepting it
-        if result.next_stage and result.next_stage != stage:
+        # Fix: explicit check for empty string (falsy but distinct from None)
+        if result.next_stage == "":
+            logger.warning(
+                f"Stage handler returned empty string for next_stage in {stage}. "
+                "Treating as no transition (staying in current stage)."
+            )
+            result = StageResult(
+                success=result.success,
+                next_stage=stage,
+                status=result.status,
+                message=result.message,
+                output_data=result.output_data,
+                events_to_emit=result.events_to_emit,
+            )
+        elif result.next_stage and result.next_stage != stage:
             original_target = result.next_stage
             try:
                 target_handler = self.registry.get_handler(result.next_stage)
-            except KeyError:
+            except (KeyError, ImportError):
                 target_handler = None
             if target_handler is None:
+                if result.events_to_emit:
+                    logger.warning(
+                        f"Discarding {len(result.events_to_emit)} event(s) from rejected "
+                        f"transition to '{original_target}': {[e.type for e in result.events_to_emit]}"
+                    )
                 logger.warning(
                     f"Unregistered stage '{original_target}' rejected. Staying in {stage}."
                 )
@@ -386,17 +418,66 @@ class StageOrchestrator:
                     message=f"Stage '{original_target}' is not registered"
                 )
             elif hasattr(target_handler, 'validate_transition'):
-                if not target_handler.validate_transition(stage, stage_context):
+                try:
+                    _transition_valid = target_handler.validate_transition(stage, stage_context)
+                except Exception as _e:
+                    logger.warning(
+                        f"validate_transition() raised {type(_e).__name__}: {_e}. "
+                        "Treating as validation failure."
+                    )
+                    _transition_valid = False
+                if not _transition_valid:
                     logger.warning(
                         f"Invalid transition {stage} -> {original_target} rejected. "
                         f"Staying in {stage}."
                     )
-                    result = StageResult(
-                        success=False,
-                        next_stage=stage,
-                        status="invalid_transition",
-                        message=f"Transition from {stage} to {original_target} not allowed"
-                    )
+                    # Fix: CYCLE_END->PLANNING rejection must fall back to COMPLETE to prevent deadlock
+                    if stage == "CYCLE_END" and original_target == "PLANNING":
+                        if result.events_to_emit:
+                            logger.warning(
+                                f"Discarding {len(result.events_to_emit)} event(s) from CYCLE_END "
+                                f"deadlock-prevention fallback: {[e.type for e in result.events_to_emit]}"
+                            )
+                        logger.error(
+                            "CYCLE_END->PLANNING transition rejected — falling back to COMPLETE "
+                            "to prevent state machine deadlock."
+                        )
+                        result = StageResult(
+                            success=False,
+                            next_stage="COMPLETE",
+                            status="cycle_deadlock_prevented",
+                            message="CYCLE_END->PLANNING rejected; transitioning to COMPLETE"
+                        )
+                    else:
+                        if result.events_to_emit:
+                            logger.warning(
+                                f"Discarding {len(result.events_to_emit)} event(s) from rejected "
+                                f"transition to '{original_target}': {[e.type for e in result.events_to_emit]}"
+                            )
+                        result = StageResult(
+                            success=False,
+                            next_stage=stage,
+                            status="invalid_transition",
+                            message=f"Transition from {stage} to {original_target} not allowed"
+                        )
+
+        # Pre-logging CYCLE_END continuation check:
+        # Check should_continue_cycle() BEFORE emitting events or logging so that the
+        # state machine log is consistent — if we're going to COMPLETE, log it as COMPLETE,
+        # not as PLANNING.
+        if stage == "CYCLE_END" and result.next_stage == "PLANNING":
+            if not self.should_continue_cycle():
+                logger.info(
+                    "Cycle budget exhausted — overriding PLANNING to COMPLETE before logging"
+                )
+                result = StageResult(
+                    success=True,
+                    next_stage="COMPLETE",
+                    status="cycle_budget_exhausted",
+                    message="All cycles complete",
+                    output_data=result.output_data,
+                    events_to_emit=result.events_to_emit,
+                )
 
         # Emit events from result
         for event in result.events_to_emit:
@@ -418,40 +499,36 @@ class StageOrchestrator:
             self.state.increment_iteration()
             logger.info(f"Iteration incremented to {self.state.iteration}")
 
-        # Handle cycle advancement for CYCLE_END -> PLANNING transitions
-        # This is the key fix: when transitioning from CYCLE_END to PLANNING,
-        # we need to advance the cycle counter before returning the next stage
+        # Handle cycle advancement for CYCLE_END -> PLANNING transitions.
+        # Note: by the time we reach here, result.next_stage is already corrected to
+        # COMPLETE if cycle budget is exhausted (handled by the pre-logging block above),
+        # so this branch only fires when continuation is actually allowed.
         if stage == "CYCLE_END" and result.next_stage == "PLANNING":
-            if self.should_continue_cycle():
-                continuation_prompt = result.output_data.get("continuation_prompt", "")
-                if not continuation_prompt:
-                    # Generate default continuation if Claude didn't provide one
-                    continuation_prompt = self._generate_default_continuation()
-                    logger.warning(f"No continuation_prompt provided, using default for cycle {self.cycles.current_cycle + 1}")
+            continuation_prompt = result.output_data.get("continuation_prompt", "")
+            if not continuation_prompt:
+                # Generate default continuation if Claude didn't provide one
+                continuation_prompt = self._generate_default_continuation()
+                logger.warning(f"No continuation_prompt provided, using default for cycle {self.cycles.current_cycle + 1}")
 
-                # === DRIFT VALIDATION ===
-                # Validate continuation prompt against original mission before advancing.
-                # Fails open: any error returns (prompt, False) to preserve current behavior.
-                validated_prompt, should_halt = self._validate_continuation_drift(
-                    continuation_prompt, self.cycles.current_cycle + 1
+            # === DRIFT VALIDATION ===
+            # Validate continuation prompt against original mission before advancing.
+            # Fails open: any error returns (prompt, False) to preserve current behavior.
+            validated_prompt, should_halt = self._validate_continuation_drift(
+                continuation_prompt, self.cycles.current_cycle + 1
+            )
+            if should_halt:
+                logger.warning(
+                    f"Mission halted at cycle {self.cycles.current_cycle} due to drift — "
+                    "transitioning to COMPLETE"
                 )
-                if should_halt:
-                    logger.warning(
-                        f"Mission halted at cycle {self.cycles.current_cycle} due to drift — "
-                        "transitioning to COMPLETE"
-                    )
-                    self.update_stage("COMPLETE")
-                    return "COMPLETE"
-
-                logger.info(f"Advancing cycle from {self.cycles.current_cycle} to next cycle")
-                self.advance_to_next_cycle(validated_prompt)
-                # Note: advance_to_next_cycle already calls update_stage("PLANNING")
-                # so we return the current stage to prevent double-transition
-                return self.current_stage
-            else:
-                logger.info("Cycle continuation declined by should_continue_cycle(), transitioning to COMPLETE")
                 self.update_stage("COMPLETE")
                 return "COMPLETE"
+
+            logger.info(f"Advancing cycle from {self.cycles.current_cycle} to next cycle")
+            self.advance_to_next_cycle(validated_prompt)
+            # Note: advance_to_next_cycle already calls update_stage("PLANNING")
+            # so we return the current stage to prevent double-transition
+            return self.current_stage
 
         return result.next_stage
 
@@ -1056,6 +1133,23 @@ Continue the mission from where the previous cycle left off.
         else:
             mission_workspace = MISSIONS_DIR / mid / "workspace"
 
+        # Defence-in-depth: ensure resolved workspace stays within expected base dir
+        mission_workspace_resolved = mission_workspace.resolve()
+        if resolve_project_name is not None:
+            try:
+                mission_workspace_resolved.relative_to(WORKSPACE_DIR.resolve())
+            except ValueError:
+                raise ValueError(
+                    f"Resolved workspace escapes WORKSPACE_DIR: {mission_workspace_resolved!r}"
+                )
+        else:
+            try:
+                mission_workspace_resolved.relative_to(MISSIONS_DIR.resolve())
+            except ValueError:
+                raise ValueError(
+                    f"Resolved workspace escapes MISSIONS_DIR: {mission_workspace_resolved!r}"
+                )
+
         # Create mission directory (for config, analytics, drift validation)
         mission_dir = MISSIONS_DIR / mid
         mission_dir.mkdir(parents=True, exist_ok=True)
@@ -1420,6 +1514,23 @@ Continue the mission from where the previous cycle left off.
                 logger.info(f"Queue mission resolved project name: {resolved_project_name}")
             else:
                 mission_workspace = MISSIONS_DIR / mission_id / "workspace"
+
+            # Defence-in-depth: ensure resolved workspace stays within expected base dir
+            mission_workspace_resolved = mission_workspace.resolve()
+            if resolved_project_name is not None:
+                try:
+                    mission_workspace_resolved.relative_to(WORKSPACE_DIR.resolve())
+                except ValueError:
+                    raise ValueError(
+                        f"Resolved workspace escapes WORKSPACE_DIR: {mission_workspace_resolved!r}"
+                    )
+            else:
+                try:
+                    mission_workspace_resolved.relative_to(MISSIONS_DIR.resolve())
+                except ValueError:
+                    raise ValueError(
+                        f"Resolved workspace escapes MISSIONS_DIR: {mission_workspace_resolved!r}"
+                    )
 
             # Create mission directory (for config, analytics, drift validation)
             mission_dir = MISSIONS_DIR / mission_id

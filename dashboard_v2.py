@@ -271,7 +271,7 @@ def find_process_cached(script_name: str) -> dict | None:
 
     result = find_process(script_name)
     with _process_cache_lock:
-        _process_cache['pid'] = result['pid'] if result else None
+        _process_cache['pid'] = result.get('pid') if result else None
         _process_cache['valid'] = result is not None
         _process_cache['checked_at'] = now
     return result
@@ -981,6 +981,21 @@ def serve_dist_gz(filename):
 # =============================================================================
 # SERVER-SIDE OPTIMIZATIONS (Gzip + Cache Headers)
 # =============================================================================
+
+@app.after_request
+def add_security_headers(response):
+    """Add Content-Security-Policy and other security headers to mitigate XSS."""
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none';"
+    )
+    return response
+
 
 @app.after_request
 def add_server_push_headers(response):
@@ -1829,6 +1844,32 @@ def api_subprocess_gate_status():
 
 
 # =============================================================================
+# WEB PROXY STATS API (WEB_PROXY_INVESTIGATION_01)
+# Exposes the local AtlasForge web proxy's /stats counters so the dashboard
+# can show investigation-pipeline activity (cached searches/fetches, provider
+# breakdown). Graceful when the proxy is down.
+# =============================================================================
+
+@app.route('/api/web-proxy/stats')
+def api_web_proxy_stats():
+    """Return live counters from the AtlasForge local web proxy.
+
+    Response shape on success:
+        {"status": "ok", "cached_fetches": N, "cached_searches": N,
+         "cached_images": N, "cached_image_searches": N,
+         "providers": {...}, "cache_dir": "..."}
+
+    On proxy unavailability:
+        {"status": "error", "error": "<reason>"}
+    """
+    try:
+        from WebProxy import get_proxy_stats_safe
+        return jsonify(get_proxy_stats_safe())
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"handler: {e}"}), 500
+
+
+# =============================================================================
 # RESTART STATS API (Cycle 3)
 # Aggregates restart statistics from journal for Activity Log visibility
 # =============================================================================
@@ -2181,6 +2222,17 @@ if __name__ == '__main__':
     # Start background watchers
     threading.Thread(target=watch_chat, daemon=True).start()
     threading.Thread(target=watch_engine_stage, daemon=True).start()
+
+    # Auto-start local web proxy alongside the dashboard.
+    # Subagents spawned later (conductor/investigation/blind-agent) rely on it
+    # for WebSearch/WebFetch. Opt-out: ATLASFORGE_DISABLE_PROXY_AUTOSTART=1
+    # (useful when you prefer the systemd unit).
+    try:
+        from WebProxy.supervisor import ensure_proxy_running
+        _proxy_result = ensure_proxy_running()
+        print(f"[WebProxy] {_proxy_result['status']}: {_proxy_result['detail']}")
+    except Exception as _proxy_err:
+        print(f"[WebProxy] Auto-start failed (non-fatal): {_proxy_err}")
 
     # Auto-start AfterImage Embedder Daemon
     # This indexes code for episodic memory retrieval
