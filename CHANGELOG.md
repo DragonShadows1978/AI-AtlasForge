@@ -1,5 +1,51 @@
 # Changelog
 
+## [2.4.0] - 2026-04-25
+
+### Added
+
+- feat: add vision module and claude_hooks as integrated repo components
+- docs: update v1.11.0 changelog with full feature list
+
+### Changed
+
+- chore: bump version to 2.2.0 for PyPI release
+
+### Fixed
+
+- fix: update stale workspace/glassbox paths after glassbox move to repo root
+- fix: update backup-core-files.py paths from mini-mind-v2 to AI-AtlasForge
+- Release v1.10.0 - Automated release pipeline, clean push, conductor fixes
+- Release v1.9.1 - Dashboard persistence and stage gate fixes
+
+### Other
+
+- Release v2.3.0 - automated release pipeline
+- Release v2.3.0 — WebProxy package, transparent MCP interception, hardening
+- Release v2.2.0 — Token budget system, red team overhaul, dashboard file upload
+- Release v2.1.0 — Adversarial hardening, conductor expansion, dashboard overhaul
+- Release v2.0.2 - automated release pipeline
+- Release v2.0.1 - automated release pipeline
+- Release v2.0.0 — Agent Streaming, Dashboard Modularization, Red Team Overhaul
+- Release v1.12.0 - automated release pipeline
+- Release v1.11.0 - automated release pipeline
+- feat: make investigation_validator permanent (was symlink)
+- Release v1.10.0 - automated release pipeline
+- Release v1.9.0 - Modular engine only, legacy af_engine.py retired
+
+### Stats
+
+```
+ vision/desktop_vision.py                           |  253 +
+ vision/screen_capture.py                           |  279 +
+ vision/x11_bindings.py                             |  401 ++
+ websocket_events.py                                |  261 +-
+ 14775 files changed, 43978 insertions(+), 231887 deletions(-)
+```
+
+_Full diff: `git diff v2.3.0..v2.4.0`_
+
+
 ## [2.3.0] - 2026-04-17
 
 ### Changed
