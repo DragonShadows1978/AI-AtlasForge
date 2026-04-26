@@ -132,3 +132,6 @@ recovery_ai_storyforge_*/
 tmp*.lock
 .af_archives/
 .af_snapshots/
+
+# Local config (not public-facing)
+config.yaml

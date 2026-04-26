@@ -745,8 +745,8 @@ function initKeyboardShortcuts() {
 
 function initMobileHeaderColumn() {
     const header = document.querySelector('body > header');
-    const row1 = header ? header.querySelector('.header-row-1') : null;
-    const row2 = header ? header.querySelector('.header-row-2') : null;
+    const row1 = document.querySelector('.header-row-1');
+    const row2 = document.querySelector('.header-row-2');
     const shell = document.getElementById('mobile-header-shell');
 
     if (!header || !row1 || !row2 || !shell) return;

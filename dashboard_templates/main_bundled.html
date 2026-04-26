@@ -123,6 +123,7 @@
         /* Layout */
         .container{display:grid;grid-template-columns:minmax(280px,1fr) minmax(280px,1fr) minmax(300px,1.2fr);gap:15px;padding:15px;height:calc(100vh - 140px);overflow:hidden}
         .widget-column-1,.widget-column-2{overflow-y:auto;height:100%;padding-right:5px;scrollbar-gutter:stable}
+        .mobile-header-column{display:none}
         .left-panel{overflow-y:auto;max-height:calc(100vh - 140px)}
         /* Mobile: horizontal scroll layout with a dedicated header column */
         @media(max-width:600px){:root{--mobile-tabs-height:44px}html,body{width:100vw;overflow-x:hidden;background:var(--bg)}header,header.mobile-header-relocated{display:none}.main-tabs{position:sticky;top:0;z-index:99;width:100vw;background:var(--panel)}#atlasforge-tab{width:100vw;overflow:visible;background:var(--bg)}.mobile-scroll-wrapper{width:100vw;overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain}.header-row-2{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;white-space:nowrap}.container{display:flex;flex-direction:row;flex-wrap:nowrap;width:400vw;min-width:400vw;padding:10px;gap:15px;overflow:visible;height:auto;min-height:calc(100vh - var(--mobile-tabs-height) - 24px);background:var(--bg)}.mobile-header-column,.widget-column-1,.widget-column-2,.chat-container{min-width:calc(100vw - 30px);max-width:calc(100vw - 30px);flex-shrink:0;scroll-snap-align:start;height:auto;max-height:calc(100vh - var(--mobile-tabs-height) - 36px);overflow-y:auto}.mobile-header-column{display:block}.mobile-header-shell{display:flex;flex-direction:column;gap:14px;min-height:100%}.mobile-header-shell .header-row-1,.mobile-header-shell .header-row-2{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;box-sizing:border-box}.mobile-header-shell .header-row-1{align-items:flex-start;gap:14px}.mobile-header-shell .header-row-1>div:last-child{width:100%;flex-wrap:wrap;justify-content:flex-start;gap:10px}.mobile-header-shell .version-indicators{margin-left:0!important;padding-left:0!important;border-left:none!important;flex-wrap:wrap;gap:8px!important}.mobile-header-shell .header-row-2{overflow:visible;flex-wrap:wrap;white-space:normal;align-items:stretch;gap:12px}.mobile-header-shell .status-group,.mobile-header-shell .controls-group,.mobile-header-shell .layout-toolbar{width:100%}.mobile-header-shell .layout-toolbar{flex-wrap:wrap;justify-content:flex-start;row-gap:8px}}
@@ -439,6 +440,25 @@
     <div id="atlasforge-tab" class="tab-content active">
     <div class="mobile-scroll-wrapper">
     <div class="container">
+        <div class="mobile-header-column">
+            <div id="mobile-header-shell" class="mobile-header-shell"></div>
+        </div>
+        <script>
+            // Populate mobile slot 1 during HTML parsing, before heavier
+            // dashboard/activity widgets can delay the module bundle.
+            (function () {
+                if (window.innerWidth > 600) return;
+                var header = document.querySelector('body > header');
+                var shell = document.getElementById('mobile-header-shell');
+                if (!header || !shell) return;
+                var row1 = document.querySelector('.header-row-1');
+                var row2 = document.querySelector('.header-row-2');
+                if (row1 && row1.parentElement !== shell) shell.appendChild(row1);
+                if (row2 && row2.parentElement !== shell) shell.appendChild(row2);
+                header.classList.add('mobile-header-relocated');
+            })();
+        </script>
+
         <!-- Widget Column 1 (Primary - User Priority) -->
         <div class="widget-column-1">
             <!-- Controls -->
@@ -1615,9 +1635,6 @@
                 </div>
             </div>
         </div>
-        <div class="mobile-header-column">
-            <div id="mobile-header-shell" class="mobile-header-shell"></div>
-        </div>
     </div><!-- End container -->
     </div><!-- End mobile-scroll-wrapper -->
     </div><!-- End of atlasforge-tab -->
@@ -2360,24 +2377,24 @@
     <!-- Mobile Scroll Indicators (positioned outside all tabs for proper fixed positioning) -->
     <nav class="mobile-scroll-dots" id="mobile-scroll-dots" role="tablist" aria-label="Dashboard column navigation">
         <button class="column-nav-btn active" data-column="0" onclick="scrollToColumn(0)"
-                role="tab" aria-selected="true" title="Controls & Mission" type="button">
+                role="tab" aria-selected="true" title="Header and layout controls" type="button">
             <span class="column-nav-num">1</span>
-            <span class="column-nav-label">Controls</span>
+            <span class="column-nav-label">Header</span>
         </button>
         <button class="column-nav-btn" data-column="1" onclick="scrollToColumn(1)"
-                role="tab" aria-selected="false" title="Analytics & Graphs" type="button">
+                role="tab" aria-selected="false" title="Controls & Mission" type="button">
             <span class="column-nav-num">2</span>
-            <span class="column-nav-label">Analytics</span>
+            <span class="column-nav-label">Controls</span>
         </button>
         <button class="column-nav-btn" data-column="2" onclick="scrollToColumn(2)"
-                role="tab" aria-selected="false" title="AtlasForge Activity" type="button">
+                role="tab" aria-selected="false" title="Analytics & Graphs" type="button">
             <span class="column-nav-num">3</span>
-            <span class="column-nav-label">Activity</span>
+            <span class="column-nav-label">Analytics</span>
         </button>
         <button class="column-nav-btn" data-column="3" onclick="scrollToColumn(3)"
-                role="tab" aria-selected="false" title="Header and layout controls" type="button">
+                role="tab" aria-selected="false" title="AtlasForge Activity" type="button">
             <span class="column-nav-num">4</span>
-            <span class="column-nav-label">Header</span>
+            <span class="column-nav-label">Activity</span>
         </button>
     </nav>
     <script>

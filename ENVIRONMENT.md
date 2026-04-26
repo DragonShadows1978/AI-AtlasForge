@@ -1,6 +1,6 @@
 # Environment Profile
 
-Auto-generated on 2026-03-02
+Auto-generated on 2026-04-17 12:27:05
 
 This file documents the hardware profile of this installation.
 The autonomous agent uses this information for resource-aware planning.
@@ -9,7 +9,7 @@ The autonomous agent uses this information for resource-aware planning.
 
 | Component | Details |
 |-----------|---------|
-| OS | Linux 6.17.0-14-generic |
+| OS | Linux 6.17.0-19-generic |
 | Architecture | x86_64 |
 | Python | 3.12.3 |
 
@@ -17,16 +17,16 @@ The autonomous agent uses this information for resource-aware planning.
 
 | Property | Value |
 |----------|-------|
-| Model | AMD Ryzen 5 3600 6-Core Processor |
-| Cores | 6 |
-| Threads | 12 |
+| Model | Intel(R) Core(TM) i7-6700K CPU @ 4.00GHz |
+| Cores | 4 |
+| Threads | 8 |
 
 ## Memory
 
 | Property | Value |
 |----------|-------|
-| Total RAM | 62Gi |
-| Available | 54Gi |
+| Total RAM | 23Gi |
+| Available | 12Gi |
 | Swap | 2.0Gi |
 
 ## GPU
@@ -34,34 +34,33 @@ The autonomous agent uses this information for resource-aware planning.
 | Property | Value |
 |----------|-------|
 | Available | Yes |
-| Model | NVIDIA GeForce RTX 3070 |
-| VRAM Total | 8192 MiB |
-| VRAM Free | 7603 MiB |
-| CUDA Available | Yes |
-| CUDA Version | 13.1 |
-| Driver Version | 590.48.01 |
+| Model | NVIDIA GeForce GTX 1660 SUPER |
+| VRAM Total | 6144 MiB |
+| VRAM Free | 5306 MiB |
+| CUDA Available | No |
+| CUDA Version | N/A |
 
 ## Storage
 
 | Path | Total | Available |
 |------|-------|-----------|
-| / | 916G | 850G |
+| / | 457G | 184G |
 
 ## Services
 
 | Service | Status |
 |---------|--------|
-| Ollama | Running (llama3.1:8b loaded) |
+| Ollama | Running |
 | Docker | Not available |
 
 ## Resource Recommendations
 
 Based on detected hardware:
 
-- **GPU Available**: Use CUDA for ML workloads. NVIDIA GeForce RTX 3070 detected with 8192 MiB VRAM.
-- **Multi-core CPU**: Use multiprocessing for parallel tasks (12 threads available).
-- **High RAM**: Can cache large datasets in memory (62Gi total).
-- **Ollama Online**: Local LLM available at http://localhost:11434 with llama3.1:8b loaded. Use for local inference tasks.
+- **GPU Available**: Use CUDA for ML workloads. NVIDIA GeForce GTX 1660 SUPER detected with 6144 MiB VRAM.
+- **Multi-core CPU**: Use multiprocessing for parallel tasks (8 threads available).
+- **Moderate RAM**: Use memory-efficient data structures (23Gi total).
+- **Ollama Running**: Local LLM available for testing and data generation.
 
 ## Notes
 
