@@ -175,6 +175,27 @@ python3 "$ATLASFORGE_ROOT/WebProxy/scripts/web_search_cli.py" "state machine"
 python3 "$ATLASFORGE_ROOT/WebProxy/scripts/web_fetch_cli.py" "https://example.com"
 ```
 
+## Interactive Codex
+
+Normal AtlasForge subprocesses inject the Codex MCP config automatically. For
+manual interactive sessions, use the launcher:
+
+```bash
+/home/vader/AI-AtlasForge/WebProxy/scripts/codex_proxy_interactive.sh
+```
+
+It starts `codex` with:
+
+```bash
+-c 'mcp_servers.atlasforge-web-proxy.command="python3"'
+-c 'mcp_servers.atlasforge-web-proxy.args=["/home/vader/AI-AtlasForge/WebProxy/mcp_server.py"]'
+```
+
+The launcher rejects native Codex `--search` unless
+`ATLASFORGE_CODEX_WEB_SEARCH=1` is explicitly set. That keeps interactive
+sessions proxy-first instead of falling back to the built-in Responses
+`web_search` tool.
+
 ## Dashboard visibility
 
 `GET http://localhost:5050/api/web-proxy/stats` on the dashboard mirrors

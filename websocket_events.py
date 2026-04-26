@@ -476,7 +476,7 @@ def emit_research_event(
     sources_found: int = 0
 ):
     """
-    Emit a research phase event to the mission_agents room.
+    Emit a research progress event over the dedicated `research_progress` socket.io room.
 
     Called by the ResearchStreamEmitter in af_engine/orchestrator.py during
     the pre-planning research phase so progress is visible in Mission Activity.
@@ -515,7 +515,11 @@ def emit_research_event(
         'timestamp': datetime.now().isoformat()
     }
 
-    _safe_emit('mission_agents', 'update', data, event_key=event_key)
+    # Research progress is rendered inside the Mission panel by activity-mission.js,
+    # but it is NOT a stream-line event — the SSE transport for agent activity
+    # only carries actual subprocess output. Send research progress over its own
+    # dedicated socket.io room so the frontend can subscribe independently.
+    _safe_emit('research_progress', 'update', data, event_key=event_key)
 
 
 # =============================================================================

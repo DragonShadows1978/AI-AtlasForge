@@ -5,7 +5,7 @@
  */
 
 import { showToast, escapeHtml, formatBytes, formatNumber, formatTimeAgo, stages, downloadFileViaFetch } from './core.js';
-import { handleMissionAgentEvent, handleInvestigationAgentEvent } from './modules/agent-activity.js';
+import { handleResearchProgress } from './modules/activity-mission.js';
 import { initSubagentPoolWidget, handlePoolStatusEvent } from './modules/subagent-pool.js';
 import { api } from './api.js';
 import { setFullMissionText } from './modals.js';
@@ -351,7 +351,21 @@ function getProviderSelectElements() {
         .filter(Boolean);
 }
 
-export async function setLlmProvider(provider, showSuccessToast = true) {
+function getSelectedProvider() {
+    const selectEl = getProviderSelectElements()[0];
+    return normalizeProvider(selectEl?.value || 'claude');
+}
+
+async function persistSelectedProvider(showSuccessToast = false) {
+    const provider = getSelectedProvider();
+    const savedProvider = await setLlmProvider(provider, showSuccessToast, false);
+    if (!savedProvider) {
+        throw new Error('Failed to persist selected LLM provider');
+    }
+    return savedProvider;
+}
+
+export async function setLlmProvider(provider, showSuccessToast = true, refreshAfter = true) {
     const selectEls = getProviderSelectElements();
     const normalized = normalizeProvider(provider);
 
@@ -362,21 +376,24 @@ export async function setLlmProvider(provider, showSuccessToast = true) {
         const result = await api('/api/llm-provider', 'POST', { provider: normalized });
         if (!result.success) {
             showToast(result.message || 'Failed to set provider', 'error');
-            return;
+            return null;
         }
         if (showSuccessToast) {
             showToast(result.message || `Provider set to ${result.provider}`, 'success');
         }
+        return normalizeProvider(result.provider || normalized);
     } catch (e) {
         console.error('Failed to set provider:', e);
         showToast('Failed to set provider', 'error');
+        return null;
     } finally {
         selectEls.forEach((selectEl) => {
             selectEl.disabled = false;
         });
+        if (refreshAfter) {
+            await refresh();
+        }
     }
-
-    await refresh();
 }
 
 async function syncProviderControls(statusProvider) {
@@ -414,6 +431,7 @@ export async function startClaude(mode) {
     // Get mission input text
     const missionInput = document.getElementById('mission-input');
     const missionText = missionInput ? missionInput.value.trim() : '';
+    const selectedProvider = getSelectedProvider();
 
     // Get current mission state
     let currentMission = {};
@@ -452,7 +470,13 @@ export async function startClaude(mode) {
 
         // Create the new mission
         const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
-        const payload = { mission: missionText.substring(0, 5000), cycle_budget: cycleBudget, max_iterations: maxIterations };
+        const savedProvider = await persistSelectedProvider(false);
+        const payload = {
+            mission: missionText.substring(0, 5000),
+            cycle_budget: cycleBudget,
+            max_iterations: maxIterations,
+            llm_provider: savedProvider
+        };
         if (projectName) payload.project_name = projectName;
 
         const setResult = await api('/api/mission', 'POST', payload);
@@ -465,8 +489,8 @@ export async function startClaude(mode) {
         missionInput.value = '';
         if (projectNameInput) projectNameInput.value = '';
 
-        // Now start Claude
-        const startResult = await api(`/api/start/${mode}`, 'POST');
+        // Now start the selected provider
+        const startResult = await api(`/api/start/${mode}`, 'POST', { provider: savedProvider });
         showToast(`Mission set and started: ${startResult.message}`, 'success');
         refresh();
 
@@ -479,7 +503,8 @@ export async function startClaude(mode) {
 
     } else if (!isComplete) {
         // Case 2: Empty text box, mission in progress - restart/resume
-        const data = await api(`/api/start/${mode}`, 'POST');
+        const savedProvider = await persistSelectedProvider(false);
+        const data = await api(`/api/start/${mode}`, 'POST', { provider: savedProvider || selectedProvider });
         showToast(data.message);
         refresh();
 
@@ -535,7 +560,13 @@ export async function setMission() {
     }
 
     const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
-    const payload = {mission: mission.substring(0, 5000), cycle_budget: cycleBudget, max_iterations: maxIterations};
+    const savedProvider = await persistSelectedProvider(false);
+    const payload = {
+        mission: mission.substring(0, 5000),
+        cycle_budget: cycleBudget,
+        max_iterations: maxIterations,
+        llm_provider: savedProvider
+    };
     if (projectName) {
         payload.project_name = projectName;
     }
@@ -578,12 +609,14 @@ export async function queueMission() {
 
     // Add to queue via API
     try {
+        const savedProvider = await persistSelectedProvider(false);
         const payload = {
             problem_statement: missionText.substring(0, 5000),
             cycle_budget: cycleBudget,
             max_iterations: maxIterations,
             priority: 0,
-            source: 'dashboard'
+            source: 'dashboard',
+            llm_provider: savedProvider
         };
         if (projectName) payload.project_name = projectName;
 
@@ -2821,9 +2854,10 @@ export function handleJournalEvent(data) {
  */
 export function initWebSocketHandlers() {
     // Import registerHandler from socket module if available
-    // Note: mission_status, journal, mission_agents, investigation_agents, pool_status
-    // are registered in main.js::setupWebSocketHandlers() — do NOT register them here
-    // to avoid duplicate handler execution.
+    // Note: mission_status, journal, pool_status are registered in
+    // main.js::setupWebSocketHandlers() — do NOT register them here to avoid
+    // duplicate handler execution. Mission/investigation activity uses SSE,
+    // not socket.io rooms.
     if (typeof window.registerSocketHandler === 'function') {
         window.registerSocketHandler('file_events', handleFileEvent);
         window.registerSocketHandler('glassbox_archive', handleGlassboxArchiveEvent);
@@ -2848,8 +2882,9 @@ window.handleRecommendationEvent = handleRecommendationEvent;
 window.handleMissionStatusEvent = handleMissionStatusEvent;
 window.handleJournalEvent = handleJournalEvent;
 window.initWebSocketHandlers = initWebSocketHandlers;
-window.handleMissionAgentEvent = handleMissionAgentEvent;
-window.handleInvestigationAgentEvent = handleInvestigationAgentEvent;
+// Mission agent events come from SSE now; this exposes the legacy
+// research_progress dispatcher so socket.js can keep routing those messages.
+window.handleResearchProgress = handleResearchProgress;
 window.toggleMissionParamEdit = toggleMissionParamEdit;
 window.closeMissionParamEdit = closeMissionParamEdit;
 window.applyMissionParamEdit = applyMissionParamEdit;

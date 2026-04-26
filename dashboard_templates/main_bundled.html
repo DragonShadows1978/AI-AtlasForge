@@ -2380,6 +2380,52 @@
             <span class="column-nav-label">Header</span>
         </button>
     </nav>
+    <script>
+        // Early fallback: mobile pane buttons must work before the ES module
+        // bundle finishes its slower dashboard initialization.
+        (function () {
+            function getMobileScrollContainer() {
+                var wrapper = document.querySelector('#atlasforge-tab .mobile-scroll-wrapper');
+                var container = document.querySelector('#atlasforge-tab .container');
+                return window.innerWidth <= 600 ? wrapper : container;
+            }
+            function updateMobileNavDotsEarly() {
+                var dotsContainer = document.getElementById('mobile-scroll-dots');
+                if (!dotsContainer) return;
+                var atlasforgeTab = document.getElementById('atlasforge-tab');
+                var active = atlasforgeTab && atlasforgeTab.classList.contains('active');
+                dotsContainer.style.display = (window.innerWidth <= 600 && active) ? 'flex' : 'none';
+            }
+            function setActiveMobileDot(index) {
+                document.querySelectorAll('#mobile-scroll-dots .column-nav-btn').forEach(function (btn, i) {
+                    var active = i === Math.max(0, Math.min(3, index));
+                    btn.classList.toggle('active', active);
+                    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+                    btn.setAttribute('tabindex', active ? '0' : '-1');
+                });
+            }
+            window.updateMobileNavDots = window.updateMobileNavDots || updateMobileNavDotsEarly;
+            window.scrollToColumn = window.scrollToColumn || function (columnIndex) {
+                if (window.innerWidth > 600) return;
+                var scroller = getMobileScrollContainer();
+                if (!scroller) return;
+                var idx = Math.max(0, Math.min(3, Number(columnIndex) || 0));
+                scroller.scrollTo({ left: window.innerWidth * idx, behavior: 'smooth' });
+                setActiveMobileDot(idx);
+            };
+            document.addEventListener('DOMContentLoaded', function () {
+                updateMobileNavDotsEarly();
+                var scroller = getMobileScrollContainer();
+                if (scroller) {
+                    scroller.addEventListener('scroll', function () {
+                        if (window.innerWidth > 600) return;
+                        setActiveMobileDot(Math.round(scroller.scrollLeft / window.innerWidth));
+                    }, { passive: true });
+                }
+                window.addEventListener('resize', updateMobileNavDotsEarly);
+            });
+        })();
+    </script>
 
     <!-- Create Session Modal -->
     <div id="narr-modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">

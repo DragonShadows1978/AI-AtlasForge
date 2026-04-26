@@ -331,6 +331,17 @@ def _now_ts() -> int:
     return int(time.time())
 
 
+def _js_render_enabled() -> bool:
+    """Gate for the headless-browser fallback in `fetch_page`.
+
+    Disabled when `ATLASFORGE_WEBPROXY_JS_RENDER=0`. Defaults on.
+    Also disabled if Playwright isn't importable, but that check is lazy
+    inside `fetch_page` to avoid startup-time import cost.
+    """
+    val = os.environ.get("ATLASFORGE_WEBPROXY_JS_RENDER", "1").strip().lower()
+    return val not in ("0", "false", "no", "off", "")
+
+
 def _first_env(names: tuple[str, ...]) -> Optional[str]:
     for name in names:
         value = os.environ.get(name)
@@ -419,6 +430,7 @@ class FetchResponse:
     byte_length: Optional[int] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    rendered: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -1050,6 +1062,54 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
         except LookupError:
             html = body_bytes.decode("utf-8", errors="replace")
         extracted = extract_page_content(url=url, html=html, max_chars=max_chars)
+
+        # JS-rendering fallback. Plain requests can't execute JavaScript, so
+        # SPAs (ChatGPT shares, Claude shares, Twitter/X, etc.) and
+        # Cloudflare-challenged endpoints come back with near-empty bodies.
+        # Two triggers: either the host is on a known-needs-render list, OR
+        # the extracted text looks suspiciously thin.
+        used_js_render = False
+        _jsr = None
+        try:
+            # Package-context import (python -m WebProxy.service or imported)
+            from . import js_render as _jsr  # type: ignore
+        except ImportError:
+            try:
+                # Script-context import (systemd invokes service.py directly,
+                # so __name__ == "__main__" and there is no parent package).
+                import js_render as _jsr  # type: ignore
+            except ImportError:
+                _jsr = None
+
+        needs_render = False
+        if _js_render_enabled() and _jsr is not None:
+            if _jsr.host_wants_render(url):
+                needs_render = True
+            elif extracted["text_length"] < 200 or status_code == 403:
+                needs_render = _jsr.should_render(html, status_code, content_type)
+
+        if needs_render and _jsr is not None:
+            if True:  # kept as nested to minimize diff to existing body
+                try:
+                    rendered = _jsr.render(url)
+                except Exception as e:
+                    logger.warning("js_render: rendering %s failed: %s", url, e)
+                    rendered = None
+                if rendered:
+                    rendered_html = rendered.get("rendered_html") or html
+                    extracted = extract_page_content(
+                        url=url, html=rendered_html, max_chars=max_chars
+                    )
+                    rtext = rendered.get("rendered_text") or ""
+                    if rtext and len(rtext) > extracted["text_length"]:
+                        if max_chars > 0:
+                            rtext = rtext[:max_chars]
+                        extracted["text"] = rtext
+                        extracted["text_length"] = len(rtext)
+                    if not extracted.get("title"):
+                        extracted["title"] = rendered.get("rendered_title", "")
+                    used_js_render = True
+
         return FetchResponse(
             url=url,
             status_code=status_code,
@@ -1061,6 +1121,7 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
             text=extracted["text"],
             links=extracted["links"],
             text_length=extracted["text_length"],
+            rendered=used_js_render,
         ).to_dict()
 
 

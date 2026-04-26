@@ -40,8 +40,11 @@ _SAFE_ENV_EXACT = frozenset({
     'OPENAI_API_KEY',
     'GEMINI_API_KEY', 'GOOGLE_API_KEY',
     'CLAUDE_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'ATLASFORGE_CODEX_MODEL', 'CODEX_MODEL',
+    'ATLASFORGE_GEMINI_MODEL', 'ATLASFORGE_GEMINI_MODEL_BALANCED',
     'OLLAMA_URL', 'OLLAMA_MODEL',
     'ATLASFORGE_PORT', 'ATLASFORGE_ROOT', 'ATLASFORGE_DATA_DIR',
+    'ATLASFORGE_LLM_PROVIDER',
 })
 _SAFE_ENV_PREFIXES = ('LC_', 'XDG_')
 
@@ -151,6 +154,8 @@ CLAUDE_MEMORY_PATH = STATE_DIR / "claude_memory.json"
 CLAUDE_JOURNAL_PATH = STATE_DIR / "claude_journal.jsonl"
 CLAUDE_PROMPT_PATH = STATE_DIR / "claude_prompt.json"
 CHAT_HISTORY_PATH = STATE_DIR / "chat_history.json"
+MISSION_PATH = STATE_DIR / "mission.json"
+LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 CONDUCTOR_LOCK_PATH = BASE_DIR / "atlasforge_conductor.lock"
 
@@ -246,8 +251,12 @@ def _env_flag_enabled(name: str, default: bool = False) -> bool:
 
 
 def _codex_web_search_enabled() -> bool:
-    """Enable Codex web search by default; allow opt-out via env."""
-    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=True)
+    """Enable Codex native web_search only when explicitly requested.
+
+    Default is False because proxy-only search requires omitting Codex's
+    `--search` flag. AtlasForge loads the local WebProxy MCP server instead.
+    """
+    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=False)
 
 
 def _codex_autonomous_enabled() -> bool:
@@ -260,14 +269,59 @@ def _gemini_autonomous_enabled() -> bool:
     return _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True)
 
 
+def _normalize_llm_provider(value: Any) -> Optional[str]:
+    """Normalize a provider string, returning None for unsupported values."""
+    provider = str(value or "").strip().lower()
+    if provider in SUPPORTED_LLM_PROVIDERS:
+        return provider
+    return None
+
+
+def _read_provider_from_json(path: Path) -> Optional[str]:
+    """Read provider from a small state JSON file without failing startup."""
+    try:
+        data = io_utils.atomic_read_json(path, {}) or {}
+    except Exception as exc:
+        logger.debug("Unable to read provider from %s: %s", path, exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _normalize_llm_provider(data.get("llm_provider") or data.get("provider"))
+
+
 def get_llm_provider() -> str:
-    """Get the configured LLM provider from environment."""
-    provider = os.environ.get("ATLASFORGE_LLM_PROVIDER", DEFAULT_LLM_PROVIDER)
-    provider = str(provider).strip().lower()
-    if provider not in SUPPORTED_LLM_PROVIDERS:
-        logger.warning(f"Unknown ATLASFORGE_LLM_PROVIDER='{provider}', falling back to {DEFAULT_LLM_PROVIDER}")
-        return DEFAULT_LLM_PROVIDER
-    return provider
+    """Resolve the active LLM provider from mission, env, persisted state, then default."""
+    mission_provider = _read_provider_from_json(MISSION_PATH)
+    if mission_provider:
+        return mission_provider
+
+    env_raw = os.environ.get("ATLASFORGE_LLM_PROVIDER")
+    env_provider = _normalize_llm_provider(env_raw)
+    if env_provider:
+        return env_provider
+    if env_raw:
+        logger.warning(
+            "Unknown ATLASFORGE_LLM_PROVIDER='%s', checking persisted provider state",
+            str(env_raw).strip().lower(),
+        )
+
+    state_provider = _read_provider_from_json(LLM_PROVIDER_PATH)
+    if state_provider:
+        return state_provider
+
+    return DEFAULT_LLM_PROVIDER
+
+
+def get_llm_model(provider: str) -> Optional[str]:
+    """Resolve provider-specific model override for CLI invocation."""
+    if provider == "codex":
+        model = os.environ.get("ATLASFORGE_CODEX_MODEL") or os.environ.get("CODEX_MODEL")
+        return model.strip() if model and model.strip() else None
+    if provider == "gemini":
+        model = os.environ.get("ATLASFORGE_GEMINI_MODEL") or os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED")
+        return model.strip() if model and model.strip() else None
+    model = os.environ.get("CLAUDE_MODEL")
+    return model.strip() if model and model.strip() else None
 
 
 def build_llm_command(provider: str, model: Optional[str] = None, stage: Optional[str] = None) -> List[str]:
@@ -280,9 +334,11 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
     """
     logger.info(f"Building command for provider: {provider}, model: {model}, stage: {stage}")
     if provider == "codex":
+        from WebProxy import codex_proxy_cli_args
         cmd = ["codex"]
+        cmd.extend(codex_proxy_cli_args())
         if _codex_web_search_enabled():
-            # `--search` is a top-level Codex flag and must come before `exec`.
+            # Native Responses web_search. Off by default so proxy MCP is authoritative.
             cmd.append("--search")
         cmd.extend([
             "exec",
@@ -333,7 +389,7 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
 def _llm_command_preview(provider: str) -> str:
     """Build a safe, user-visible command preview for activity feed."""
     try:
-        cmd = build_llm_command(provider)
+        cmd = build_llm_command(provider, model=get_llm_model(provider))
         return shlex.join(cmd)
     except Exception as e:
         return f"<command unavailable: {e}>"
@@ -788,7 +844,8 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
 
     try:
         provider = get_llm_provider()
-        command = build_llm_command(provider, stage=stage)
+        model = get_llm_model(provider)
+        command = build_llm_command(provider, model=model, stage=stage)
         env = {k: v for k, v in os.environ.items()
                if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
         env.pop("CLAUDECODE", None)  # Prevent "nested session" error when spawning Claude CLI
@@ -800,7 +857,7 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
                 google_api_key = env.get("GOOGLE_API_KEY", "").strip()
                 if google_api_key:
                     env["GEMINI_API_KEY"] = google_api_key
-        logger.info(f"Invoking {provider}: {prompt[:100]}...")
+        logger.info(f"Invoking {provider} model={model or '(default)'}: {prompt[:100]}...")
 
         # For Claude provider: register agent for streaming before spawn
         _agent_id = None
@@ -1294,7 +1351,7 @@ def invoke_haiku_summary(
         logger.info(f"Invoking Haiku summary with provider: {provider}")
         command = build_llm_command(
             provider,
-            model=HANDOFF_MODEL if provider == "claude" else None
+            model=HANDOFF_MODEL if provider == "claude" else get_llm_model(provider)
         )
 
         haiku_env = {k: v for k, v in os.environ.items()
@@ -2157,10 +2214,12 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             _work_budget_mgr: Optional["WorkBudgetManager"] = None
             if HAS_WORK_BUDGET_MANAGER and _watcher_policy == "token_first":
                 try:
-                    _detected_model = os.environ.get("CLAUDE_MODEL", "").strip()
+                    _detected_provider = get_llm_provider()
+                    _detected_model = get_llm_model(_detected_provider) or ""
                     _work_budget_mgr = WorkBudgetManager(model=_detected_model)
                     logger.info(
-                        "WorkBudgetManager active: model=%s budget=%d tokens",
+                        "WorkBudgetManager active: provider=%s model=%s budget=%d tokens",
+                        _detected_provider,
                         _detected_model or "(unset)", _work_budget_mgr.budget_tokens,
                     )
                 except Exception as _wbm_err:

@@ -262,6 +262,10 @@ except ImportError:
 # Codex scanning
 CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
+CODEX_TRANSCRIPT_START_SLOP_SECONDS = _safe_nonneg_int_env("CODEX_TRANSCRIPT_START_SLOP_SECONDS", 30)
+CODEX_CONTEXT_HANDOFF_ENABLED = os.environ.get(
+    "CODEX_CONTEXT_HANDOFF_ENABLED", "0"
+).lower() in ("1", "true", "yes", "on")
 CODEX_GRACEFUL_CONTEXT_RATIO = _safe_float_env("CODEX_GRACEFUL_CONTEXT_RATIO", 0.92)
 CODEX_EMERGENCY_CONTEXT_RATIO = _safe_float_env("CODEX_EMERGENCY_CONTEXT_RATIO", 0.97)
 CODEX_GRACEFUL_HEADROOM_TOKENS = _safe_nonneg_int_env("CODEX_GRACEFUL_HEADROOM_TOKENS", 0)
@@ -1323,6 +1327,7 @@ class SessionMonitor:
         self._codex_candidates: List[Path] = []
         self._codex_last_scan: float = 0.0
         self._detected_model: str = ""  # Model name from JSONL (for dynamic thresholds)
+        self._codex_context_handoff_disabled_logged = False
 
         # Handoff state
         self.handoff_triggered = False
@@ -1377,7 +1382,13 @@ class SessionMonitor:
             all_files = []
 
         candidates: List[Path] = []
+        lower_bound = self.started_at.timestamp() - CODEX_TRANSCRIPT_START_SLOP_SECONDS
         for jsonl_path in all_files[:CODEX_MAX_CANDIDATE_FILES]:
+            try:
+                if jsonl_path.stat().st_mtime < lower_bound:
+                    break
+            except OSError:
+                continue
             if self._is_codex_candidate(jsonl_path):
                 candidates.append(jsonl_path)
                 if len(candidates) >= 20:
@@ -1608,6 +1619,17 @@ class SessionMonitor:
             self.peak_tokens = tracked_total
 
         if self.provider == "codex":
+            if not CODEX_CONTEXT_HANDOFF_ENABLED:
+                if not self._codex_context_handoff_disabled_logged:
+                    logger.info(
+                        "Session %s: Codex context handoff disabled; "
+                        "WorkBudgetManager controls Codex token budget "
+                        "(set CODEX_CONTEXT_HANDOFF_ENABLED=1 to re-enable)",
+                        self.session_id,
+                    )
+                    self._codex_context_handoff_disabled_logged = True
+                return None
+
             context_window = tokens.model_context_window
             if context_window <= 0:
                 return None
@@ -2320,6 +2342,7 @@ class ContextWatcher:
                     "emergency_legacy": EMERGENCY_THRESHOLD,
                     "claude_graceful_ratio": CLAUDE_GRACEFUL_CONTEXT_RATIO,
                     "claude_emergency_ratio": CLAUDE_EMERGENCY_CONTEXT_RATIO,
+                    "codex_context_handoff_enabled": CODEX_CONTEXT_HANDOFF_ENABLED,
                     "low_cache_read": LOW_CACHE_READ_THRESHOLD,
                     "model_context_windows": MODEL_CONTEXT_WINDOWS,
                 },

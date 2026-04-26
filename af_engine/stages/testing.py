@@ -59,12 +59,11 @@ Tasks:
 
 **Launch the red team BEFORE or DURING self-tests for maximum parallelism.**
 
-The adversarial_testing module provides `BlindAgentRedTeam` — a parallel team of
-REAL Claude CLI subprocess agents that explore your workspace, run your tests,
-and try to break your code. These are NOT single LLM calls with code pasted in;
-they are full agents with Read/Grep/Bash/Write tool loops that navigate the
-codebase themselves. Each agent appears as its own tab in the Mission Activity
-dashboard.
+    The adversarial_testing module provides `BlindAgentRedTeam` — a parallel team of
+    REAL configured-provider CLI subprocess agents that explore your workspace, run
+    your tests, and try to break your code. These are NOT single LLM calls with code
+    pasted in; they are full agents with tool loops that navigate the codebase
+    themselves. Each agent appears as its own tab in the Mission Activity dashboard.
 
 **How to launch:**
 
@@ -98,8 +97,8 @@ result = agent.analyze_workspace(
 ```
 
 **What the blind agents do (one agent per attack focus):**
-- Agent 0 — Boundary/Type: empty inputs, None, 0, -1, wrong types
-- Agent 1 — Injection/Errors: command injection, path traversal, swallowed exceptions
+- Agent 0 — Injection: command injection, path traversal, SQL/template/config injection
+- Agent 1 — Boundary/Type: empty inputs, None, 0, -1, wrong types
 - Agent 2 — Logic/State: off-by-one, state machine bypass, invariant violations
 - Agent 3 — Concurrency/Resources: race conditions, leaks, missing timeouts
 

@@ -376,10 +376,11 @@ After searching, respond ONLY with JSON in this exact format:
 
         try:
             from atlasforge_config import BASE_DIR
+            from WebProxy import proxy_cli_args
             cmd = [
                 "claude", "-p",
-                "--allowedTools", "WebSearch",
             ]
+            cmd.extend(proxy_cli_args(""))
 
             _safe_keys = {"HOME", "PATH", "TERM", "LANG", "LC_ALL", "USER",
                           "ANTHROPIC_API_KEY", "TMPDIR", "TMP", "TEMP"}

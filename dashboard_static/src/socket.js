@@ -85,8 +85,7 @@ const eventHandlers = {
     queue_paused: [],
     queue_resumed: [],
     mission_params: [],
-    mission_agents: [],
-    investigation_agents: [],
+    research_progress: [],
     pool_status: []
 };
 
@@ -595,8 +594,6 @@ function resubscribeToRooms() {
             'journal',
             'analytics',
             'mission_params',
-            'mission_agents',
-            'investigation_agents',
         ];
         // Non-critical rooms deferred 2s to avoid blocking initial render
         const deferredRooms = [
@@ -607,6 +604,7 @@ function resubscribeToRooms() {
             'recommendations',
             'queue_updated',
             'pool_status',
+            'research_progress',
         ];
 
         criticalRooms.forEach(room => subscribeToRoom(room));

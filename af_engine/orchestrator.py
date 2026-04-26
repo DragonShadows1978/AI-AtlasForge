@@ -714,16 +714,15 @@ class StageOrchestrator:
                     prior_findings_path, exc,
                 )
 
-        # S3 fix: only enable real subprocess web search when explicitly allowed via
-        # env var. When running inside a Claude Code session (CLAUDECODE is set),
-        # unconditional use_web_search=True risks recursive subprocess spawning.
-        # Set ATLASFORGE_ENABLE_WEB_SEARCH=1 in production deployments to enable.
-        _web_search_enabled = os.environ.get("ATLASFORGE_ENABLE_WEB_SEARCH", "0").lower() in ("1", "true", "yes", "on")
+        # Web search routes through the WebProxy MCP (proxy_cli_args in
+        # research_agent/web_researcher.py), which is the isolation boundary that
+        # prevents recursive subprocess spawning. The previous ATLASFORGE_ENABLE_WEB_SEARCH
+        # env-var gate is no longer needed.
         config = ResearchConfig(
             max_topics=5,
             max_queries_per_topic=3,
             timeout_seconds=120,
-            use_web_search=_web_search_enabled,
+            use_web_search=True,
         )
         orchestrator = ResearchOrchestrator(config=config)
 

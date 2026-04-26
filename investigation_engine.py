@@ -72,8 +72,12 @@ def _env_flag_enabled(name: str, default: bool = False) -> bool:
 
 
 def _codex_web_search_enabled() -> bool:
-    """Enable Codex web search by default; allow opt-out via env."""
-    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=True)
+    """Enable Codex native web_search only when explicitly requested.
+
+    Proxy-only search depends on omitting Codex's top-level `--search` flag.
+    AtlasForge loads the local WebProxy MCP server instead.
+    """
+    return _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=False)
 
 
 def _codex_autonomous_enabled() -> bool:
@@ -644,9 +648,11 @@ def invoke_claude(
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
     if provider == "codex":
+        from WebProxy import codex_proxy_cli_args
         cmd = ["codex"]
+        cmd.extend(codex_proxy_cli_args())
         if _codex_web_search_enabled():
-            # `--search` is a top-level Codex flag and must come before `exec`.
+            # Native Responses web_search. Off by default so proxy MCP is authoritative.
             cmd.append("--search")
         cmd.extend([
             "exec",

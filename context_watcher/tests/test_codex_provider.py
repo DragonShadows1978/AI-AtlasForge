@@ -4,7 +4,9 @@ Targeted regression tests for Codex provider compatibility.
 """
 
 import json
+import os
 import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -15,9 +17,15 @@ AF_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(AF_ROOT) not in sys.path:
     sys.path.insert(0, str(AF_ROOT))
 
+import context_watcher.context_watcher as cw_mod  # noqa: E402
 from context_watcher import HandoffLevel, SessionMonitor  # noqa: E402
 from context_watcher.context_watcher import _is_codex_file_for_workspace  # noqa: E402
 from af_engine.core.archival import _codex_transcript_matches_workspace  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def enable_codex_context_handoff_for_legacy_tests(monkeypatch):
+    monkeypatch.setattr(cw_mod, "CODEX_CONTEXT_HANDOFF_ENABLED", True)
 
 
 def _write_codex_session(
@@ -255,6 +263,50 @@ def test_codex_startup_grace_suppresses_early_high_reported_total(tmp_path):
     assert monitor.process_updates() is None
 
 
+def test_codex_monitor_ignores_matching_transcript_from_before_start(tmp_path):
+    workspace = tmp_path / "workspace" / "project" / "mission_123"
+    workspace.mkdir(parents=True)
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+
+    old_session = session_dir / "old-session.jsonl"
+    _write_codex_session(
+        old_session,
+        cwd=str(workspace),
+        total_tokens=980,
+        model_context_window=1000,
+        input_tokens=970,
+        cached_input_tokens=400,
+        output_tokens=10,
+    )
+
+    new_session = session_dir / "new-session.jsonl"
+    _write_codex_session(
+        new_session,
+        cwd=str(workspace),
+        total_tokens=100,
+        model_context_window=1000,
+        input_tokens=100,
+    )
+
+    now = time.time()
+    os.utime(old_session, (now - 120, now - 120))
+    os.utime(new_session, (now, now))
+
+    monitor = SessionMonitor(
+        "codex-session",
+        str(workspace),
+        lambda signal: None,
+        enable_time_handoff=False,
+        provider="codex",
+    )
+    monitor.transcript_dir = session_dir
+
+    assert monitor.process_updates() is None
+    assert monitor.current_jsonl == new_session
+    assert monitor.peak_tokens == 100
+
+
 def test_codex_handoff_after_startup_grace_window(tmp_path):
     workspace = tmp_path / "workspace" / "project" / "mission_123"
     workspace.mkdir(parents=True)
@@ -286,6 +338,39 @@ def test_codex_handoff_after_startup_grace_window(tmp_path):
     assert signal is not None
     assert signal.level == HandoffLevel.EMERGENCY
     assert signal.tokens_used == 980
+
+
+def test_codex_context_handoff_disabled_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(cw_mod, "CODEX_CONTEXT_HANDOFF_ENABLED", False)
+
+    workspace = tmp_path / "workspace" / "project" / "mission_123"
+    workspace.mkdir(parents=True)
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    session_file = session_dir / "codex-session.jsonl"
+    _write_codex_session(
+        session_file,
+        cwd=str(workspace),
+        total_tokens=980,
+        model_context_window=1000,
+        input_tokens=970,
+        cached_input_tokens=400,
+        output_tokens=10,
+    )
+
+    monitor = SessionMonitor(
+        "codex-session",
+        str(workspace),
+        lambda signal: None,
+        enable_time_handoff=False,
+        provider="codex",
+    )
+    monitor.transcript_dir = session_dir
+    monitor.started_at -= timedelta(seconds=120)
+
+    assert monitor.process_updates() is None
+    assert monitor.handoff_triggered is False
+    assert monitor.peak_tokens == 980
 
 
 @pytest.mark.parametrize("total_tokens", [100, 500, 910])

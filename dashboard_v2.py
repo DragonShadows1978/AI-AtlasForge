@@ -154,10 +154,13 @@ VALID_WS_ROOMS = [
     'glassbox_archive',  # GlassBox transcript archival events
     'subprocess_gate',   # Intelligent Subprocess Gate status
     'mission_params',        # Active mission validated parameters + audit summary
-    'mission_agents',        # Real-time Mission agent activity streams
-    'investigation_agents',  # Real-time Investigation agent activity streams
+    'research_progress',     # Pre-planning research progress (rendered in Mission panel)
     'pool_status',           # Subagent pool utilization updates
 ]
+# Note: mission_agents and investigation_agents are now served via SSE
+# (see dashboard_modules/agent_sse.py). The flask-socketio rooms with those
+# names were removed during the SSE rebuild — clients connect over EventSource
+# at /api/agents/stream?context=mission|investigation instead.
 
 # Register websocket_events module with socketio reference
 try:
@@ -642,6 +645,15 @@ app.register_blueprint(mission_params_bp)
 app.register_blueprint(pool_manager_bp)
 print("[Dashboard] pool_manager_bp registered successfully at /api/pool/*")
 
+# SSE transport for agent activity streams (replaces flask-socketio rooms
+# mission_agents / investigation_agents).
+try:
+    from dashboard_modules.agent_sse import agent_sse_bp
+    app.register_blueprint(agent_sse_bp)
+    print("[Dashboard] agent_sse_bp registered (SSE on /api/agents/*)")
+except Exception as _agent_sse_err:
+    print(f"[Dashboard] agent_sse_bp registration failed: {_agent_sse_err}")
+
 # Conductor status and control API (enhanced singleton with takeover support)
 try:
     # Add ConductorTakeover to path so its internal imports resolve
@@ -749,6 +761,10 @@ def queue_auto_start_watcher():
                     mission_title = signal_data.get("mission_title", "Queued Mission")
                     retry_count = signal_data.get("retry_count", 0)
                     signaled_at = signal_data.get("signaled_at", "")
+                    raw_signal_provider = signal_data.get("llm_provider")
+                    signal_provider = _normalize_provider(raw_signal_provider) if raw_signal_provider else get_llm_provider()
+                    if signal_provider not in ("claude", "codex", "gemini"):
+                        signal_provider = get_llm_provider()
 
                     print(f"[QueueWatcher] Queue auto-start signal detected for {mission_id} (retry {retry_count})")
 
@@ -790,8 +806,9 @@ def queue_auto_start_watcher():
                             io_utils.atomic_write_json(QUEUE_AUTO_START_SIGNAL_PATH, signal_data)
                             continue
 
-                    # Start Claude in RD mode
-                    print(f"[QueueWatcher] Starting Claude in RD mode for: {mission_title}")
+                    # Start the queued mission with the provider captured at queue time.
+                    set_llm_provider(signal_provider)
+                    print(f"[QueueWatcher] Starting {signal_provider} in RD mode for: {mission_title}")
                     success, msg = start_claude(mode="rd")
 
                     if success:
@@ -1308,32 +1325,6 @@ def get_initial_room_data(room: str) -> dict:
             return get_subprocess_gate_status()
         elif room == 'mission_params':
             return get_mission_params()
-        elif room == 'mission_agents':
-            try:
-                from agent_stream_manager import get_recent_agents as _get_agents, get_agent_stream_lines as _get_lines
-                agents = _get_agents(limit=6)
-                mission_agents = agents.get('mission', [])
-                for agent_info in mission_agents:
-                    aid = agent_info.get('agent_id')
-                    if aid:
-                        agent_info['stream_lines'] = _get_lines(aid, limit=100)
-                return {'event': 'initial_state', 'agents': mission_agents}
-            except Exception as e:
-                logger.debug("mission_agents room data failed: %s", e)
-                return {'event': 'initial_state', 'agents': []}
-        elif room == 'investigation_agents':
-            try:
-                from agent_stream_manager import get_recent_agents as _get_agents, get_agent_stream_lines as _get_lines
-                agents = _get_agents(limit=6)
-                inv_agents = agents.get('investigation', [])
-                for agent_info in inv_agents:
-                    aid = agent_info.get('agent_id')
-                    if aid:
-                        agent_info['stream_lines'] = _get_lines(aid, limit=100)
-                return {'event': 'initial_state', 'agents': inv_agents}
-            except Exception as e:
-                logger.debug("investigation_agents room data failed: %s", e)
-                return {'event': 'initial_state', 'agents': []}
     except Exception as e:
         logger.error(f'get_initial_room_data error for room {room}: {e}')
         return {'error': 'Internal error'}
@@ -2136,42 +2127,6 @@ def reload_html_template():
         return jsonify({'success': False, 'error': 'An internal error occurred'})
 
 
-@app.route('/api/internal/agent-event', methods=['POST'])
-def internal_agent_event():
-    """
-    IPC endpoint: receive agent lifecycle/stream events from subprocess contexts
-    (atlasforge_conductor.py, investigation_engine.py) and emit via SocketIO
-    to connected browser clients.
-
-    Subprocesses cannot share the dashboard's SocketIO instance, so they POST
-    events here and this endpoint re-emits them from within the dashboard process.
-
-    POST body: {"room": "mission_agents"|"investigation_agents", "payload": {...}}
-    """
-    try:
-        if request.content_length and request.content_length > 1_048_576:  # 1MB limit
-            return jsonify({'success': False, 'error': 'Payload too large'}), 413
-        data = request.get_json(silent=True) or {}
-        if not isinstance(data, dict):
-            return jsonify({'success': False, 'error': 'Invalid payload format'}), 400
-        room = data.get('room', '')
-        payload = data.get('payload', {})
-
-        if room not in ('mission_agents', 'investigation_agents'):
-            return jsonify({'success': False, 'error': 'Invalid room specified'})
-
-        socketio.emit('update', {
-            'room': room,
-            'data': payload,
-            'timestamp': datetime.now().isoformat()
-        }, room=room, namespace='/widgets')
-
-        return jsonify({'success': True, 'room': room})
-    except Exception as e:
-        logger.error(f"API error in internal_agent_event: {e}")
-        return jsonify({'success': False, 'error': 'An internal error occurred'})
-
-
 @app.route('/api/agent-stream/test-emit', methods=['POST'])
 def test_agent_emit():
     """
@@ -2181,7 +2136,10 @@ def test_agent_emit():
     """
     try:
         import uuid, time, threading
-        from agent_stream_manager import register_agent, complete_agent, STREAM_DIR
+        from agent_stream_manager import (
+            register_agent, complete_agent, STREAM_DIR,
+            _next_seq_for_writer, _wrap_with_seq,
+        )
         data = request.get_json(silent=True) or {}
         context = data.get('context', 'mission')
         if context not in ('mission', 'investigation'):
@@ -2204,7 +2162,11 @@ def test_agent_emit():
             ]
             with open(str(stream_file), 'a') as f:
                 for evt in events:
-                    f.write(evt + '\n')
+                    seq = _next_seq_for_writer(agent_id)
+                    if seq > 0:
+                        f.write(_wrap_with_seq(evt, seq))
+                    else:
+                        f.write(evt + '\n')
                     f.flush()
                     time.sleep(0.4)
             time.sleep(0.5)

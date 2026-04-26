@@ -9,12 +9,21 @@ These rules apply when the active provider is `codex` and are appended to the ba
 ## Execution Mode
 - Run fully autonomously and non-interactively.
 - Prefer Codex invocation in autonomous mode:
-  - `codex --search exec --dangerously-bypass-approvals-and-sandbox -`
+- Native Codex `--search` is intentionally disabled in AtlasForge by default.
+- AtlasForge registers the local WebProxy MCP server for Codex instead, then runs:
+  - `codex -c mcp_servers.atlasforge-web-proxy.command="python3" -c mcp_servers.atlasforge-web-proxy.args='["/home/vader/AI-AtlasForge/WebProxy/mcp_server.py"]' exec --dangerously-bypass-approvals-and-sandbox -`
+- For manual interactive sessions, prefer:
+  - `/home/vader/AI-AtlasForge/WebProxy/scripts/codex_proxy_interactive.sh`
 - Do not block waiting for approval/confirmation prompts.
 
 ## Web Research Requirement
-- Treat web research as enabled capability when using Codex.
-- For research stages, use live search-capable flows; do not silently downgrade to offline assumptions.
+- Treat web research as enabled through the AtlasForge WebProxy only.
+- Do not use native Codex web search unless `ATLASFORGE_CODEX_WEB_SEARCH=1` is explicitly set.
+- Prefer the MCP tools `WebSearch`, `WebFetch`, `WebResearch`, and `ImageSearch`.
+- If MCP tools are unavailable, use the shell wrappers:
+  - `python3 /home/vader/AI-AtlasForge/WebProxy/scripts/web_search_cli.py "query"`
+  - `python3 /home/vader/AI-AtlasForge/WebProxy/scripts/web_fetch_cli.py "https://example.com"`
+- If the proxy is down, fail loudly rather than silently downgrading to offline assumptions.
 
 ## Prompt/Response Discipline
 - If a stage requires strict JSON output, return strict JSON only.

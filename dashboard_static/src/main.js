@@ -25,7 +25,10 @@ import * as queue from './modules/queue.js';
 import * as backupStatus from './modules/backup-status.js';
 import * as activityFeed from './modules/activity-feed.js';
 import * as conductorStatus from './modules/conductor-status.js';
-import * as agentActivity from './modules/agent-activity.js';
+import { initActivityPanelBar } from './modules/activity-panel-bar.js';
+import { initMissionPanel, handleResearchProgress } from './modules/activity-mission.js';
+import { initInvestigationPanel } from './modules/activity-investigation.js';
+import { initAtlasforgePanel } from './modules/activity-atlasforge.js';
 import * as subagentPool from './modules/subagent-pool.js';
 
 // Import new socket functions for WebSocket push
@@ -553,6 +556,26 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Setup insight search
     exploration.setupInsightSearch();
 
+    // Mobile pane navigation must work before the expensive dashboard refresh.
+    // The buttons call window.scrollToColumn inline, so define it immediately.
+    initMobileHeaderColumn();
+    initMobileScrollDots();
+    initMobileModalFix();
+
+    // Activity panels are latency-sensitive: initialize them before the full
+    // dashboard refresh so agent streams connect immediately on page load.
+    initActivityPanelBar();
+    initAtlasforgePanel();
+    initMissionPanel();
+    initInvestigationPanel();
+
+    // Research-progress events are still pushed via the legacy socket path
+    // (mission_status broadcasts); route them into the mission panel's
+    // research widget renderer.
+    registerHandler('research_progress', (data) => {
+        handleResearchProgress(data);
+    });
+
     // Initial data refresh
     await widgets.refresh();
 
@@ -592,20 +615,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Initialize conductor status widget
     conductorStatus.initConductorStatus();
 
-    // Register mission/investigation agent handlers BEFORE initAgentActivity() so the
-    // handlers are in place when the WebSocket fires initial_data on subscription ack.
-    // Previously these lived in setupWebSocketHandlers() which runs after DOMContentLoaded
-    // completes — causing the initial_state payload to be dropped when no handler existed yet.
-    registerHandler('mission_agents', (data) => {
-        agentActivity.handleMissionAgentEvent(data);
-    });
-    registerHandler('investigation_agents', (data) => {
-        agentActivity.handleInvestigationAgentEvent(data);
-    });
-
-    // Initialize agent activity widget (real-time subagent streaming)
-    agentActivity.initAgentActivity();
-
     // Initialize subagent pool widget
     subagentPool.initSubagentPoolWidget();
 
@@ -622,15 +631,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Register service worker
     registerServiceWorker();
-
-    // Relocate bulky top header into a swipe column on mobile
-    initMobileHeaderColumn();
-
-    // Initialize mobile scroll dots
-    initMobileScrollDots();
-
-    // Initialize modal z-index fix for mobile
-    initMobileModalFix();
 
     const elapsed = performance.now() - startTime;
     console.log(`Dashboard initialized in ${elapsed.toFixed(0)}ms`);
@@ -932,9 +932,10 @@ function setupWebSocketHandlers() {
         widgets.updateMissionParamsWidget(data);
     });
 
-    // Note: mission_agents and investigation_agents handlers are registered early
-    // in DOMContentLoaded (before initAgentActivity) to avoid a race where
-    // initial_state payloads arrive before setupWebSocketHandlers() runs.
+    // Mission/investigation agent activity is now driven by SSE
+    // (see modules/activity-mission.js and activity-investigation.js).
+    // No socket.io rooms — the EventSource handles initial state, replay,
+    // and reconnect natively via Last-Event-ID.
 
     // Subagent pool widget real-time updates
     registerHandler('pool_status', (data) => {

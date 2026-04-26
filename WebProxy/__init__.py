@@ -1,7 +1,8 @@
 """AtlasForge local web proxy + thin MCP package.
 
 Public API surface re-exported for convenience. External callers can say
-`from WebProxy import proxy_cli_args` instead of digging into submodules.
+`from WebProxy import proxy_cli_args, codex_proxy_cli_args` instead of digging
+into submodules.
 
 Submodules:
     service     — Flask HTTP proxy (localhost:8765)
@@ -14,7 +15,7 @@ Submodules:
 
 from __future__ import annotations
 
-from .cli import proxy_cli_args
+from .cli import codex_proxy_cli_args, proxy_cli_args
 from .client import (
     fetch_web_via_proxy,
     proxy_health,
@@ -30,6 +31,7 @@ from .stats import (
 
 __all__ = [
     "proxy_cli_args",
+    "codex_proxy_cli_args",
     "search_web_via_proxy",
     "fetch_web_via_proxy",
     "research_via_proxy",

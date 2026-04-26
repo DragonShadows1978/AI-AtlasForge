@@ -65,6 +65,7 @@ try:
         update_agent_pid as _asm_update_pid,
         complete_agent as _asm_complete,
         stream_stdout_to_file as _asm_stream,
+        stream_codex_session_to_file as _asm_stream_codex,
         reconstruct_text_from_stream_file as _asm_reconstruct,
     )
     HAS_AGENT_STREAM_MANAGER = True
@@ -83,6 +84,105 @@ try:
     HAS_POOL_MANAGER = True
 except ImportError:
     HAS_POOL_MANAGER = False
+
+
+_SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
+_DEFAULT_LLM_PROVIDER = "claude"
+
+
+def _normalize_llm_provider(value: Any) -> Optional[str]:
+    provider = str(value or "").strip().lower()
+    if provider in _SUPPORTED_LLM_PROVIDERS:
+        return provider
+    return None
+
+
+def _read_provider_from_json(path: Path) -> Optional[str]:
+    try:
+        if not path.exists():
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _normalize_llm_provider(data.get("llm_provider") or data.get("provider"))
+
+
+def _resolve_llm_provider() -> str:
+    mission_provider = _read_provider_from_json(BASE_DIR / "state" / "mission.json")
+    if mission_provider:
+        return mission_provider
+    env_provider = _normalize_llm_provider(os.environ.get("ATLASFORGE_LLM_PROVIDER"))
+    if env_provider:
+        return env_provider
+    state_provider = _read_provider_from_json(BASE_DIR / "state" / "llm_provider.json")
+    if state_provider:
+        return state_provider
+    return _DEFAULT_LLM_PROVIDER
+
+
+def _resolve_llm_model(provider: str) -> Optional[str]:
+    if provider == "codex":
+        model = os.environ.get("ATLASFORGE_CODEX_MODEL") or os.environ.get("CODEX_MODEL")
+    elif provider == "gemini":
+        model = os.environ.get("ATLASFORGE_GEMINI_MODEL") or os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED")
+    else:
+        model = os.environ.get("CLAUDE_MODEL")
+    return model.strip() if model and model.strip() else None
+
+
+def _env_flag_enabled(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_provider_command(provider: str, stage: str = "BUILDING", stream: bool = True) -> List[str]:
+    provider = _normalize_llm_provider(provider) or _DEFAULT_LLM_PROVIDER
+    model = _resolve_llm_model(provider)
+
+    if provider == "codex":
+        from WebProxy import codex_proxy_cli_args
+        command = ["codex"]
+        command.extend(codex_proxy_cli_args())
+        if _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=False):
+            command.append("--search")
+        command.extend(["exec", "--color", "never"])
+        if _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True):
+            command.append("--dangerously-bypass-approvals-and-sandbox")
+        if model:
+            command.extend(["--model", model])
+        command.append("-")
+        return command
+
+    if provider == "gemini":
+        command = ["gemini"]
+        if _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True):
+            command.append("--yolo")
+        command.extend(["--output-format", "json"])
+        if model:
+            command.extend(["-m", model])
+        return command
+
+    try:
+        disallowed = InitGuard.get_disallowed_tools_for_cli(stage) if HAS_INIT_GUARD else "NotebookEdit"
+    except Exception:
+        disallowed = "NotebookEdit"
+    disallowed = re.sub(r'[^a-zA-Z0-9_,\s]', '', disallowed)
+    command = [
+        "claude", "-p",
+        "--dangerously-skip-permissions",
+    ]
+    if model:
+        command[2:2] = ["--model", model]
+    from WebProxy import proxy_cli_args
+    command.extend(proxy_cli_args(disallowed))
+    if stream:
+        command.extend(["--output-format", "stream-json", "--verbose"])
+    return command
 
 # Legacy experiment_framework import (kept for SubagentSpawner backward compat)
 try:
@@ -212,7 +312,7 @@ _parallel_agent_counter = 0
 _parallel_agent_counter_lock = threading.Lock()
 
 
-def _next_parallel_agent_id(work_unit_id: str, stage: str) -> tuple:
+def _next_parallel_agent_id(work_unit_id: str, stage: str, label_hint: str = "") -> tuple:
     """Return (agent_id, label) for a new parallel agent."""
     global _parallel_agent_counter
     with _parallel_agent_counter_lock:
@@ -220,7 +320,10 @@ def _next_parallel_agent_id(work_unit_id: str, stage: str) -> tuple:
         n = _parallel_agent_counter
     agent_id = f"par_{uuid.uuid4().hex[:8]}"
     stage_short = (stage or 'BUILDING').upper()[:6]
-    label = f"[PAR] {stage_short} {work_unit_id[:12]} #{n}"
+    if label_hint:
+        label = f"[PAR] {stage_short} {label_hint} #{n}"
+    else:
+        label = f"[PAR] {stage_short} {work_unit_id[:12]} #{n}"
     return agent_id, label
 
 
@@ -401,7 +504,10 @@ class HierarchicalExperiment:
         prompt = self._build_agent_prompt(work_unit)
 
         # Dashboard agent registration
-        agent_id, agent_label = _next_parallel_agent_id(wu_id, self.config.stage)
+        label_hint = ""
+        if isinstance(work_unit.metadata, dict):
+            label_hint = str(work_unit.metadata.get("profile_label") or "")
+        agent_id, agent_label = _next_parallel_agent_id(wu_id, self.config.stage, label_hint=label_hint)
         stream_file = None
         streaming_enabled = self.config.enable_streaming and HAS_AGENT_STREAM_MANAGER
 
@@ -414,27 +520,8 @@ class HierarchicalExperiment:
                 stream_file = None
                 streaming_enabled = False
 
-        # Build Claude CLI command with stage-appropriate tool restrictions
-        try:
-            if HAS_INIT_GUARD:
-                disallowed = InitGuard.get_disallowed_tools_for_cli(self.config.stage)
-            else:
-                disallowed = "NotebookEdit"  # Safe minimal default
-
-            command = [
-                "claude", "-p",
-                "--dangerously-skip-permissions",
-                "--disallowedTools", disallowed,
-                "--output-format", "stream-json",
-                "--verbose",
-            ]
-        except Exception:
-            command = [
-                "claude", "-p",
-                "--dangerously-skip-permissions",
-                "--output-format", "stream-json",
-                "--verbose",
-            ]
+        provider = _resolve_llm_provider()
+        command = _build_provider_command(provider, stage=self.config.stage, stream=True)
 
         # Prepare environment — must clear CLAUDECODE to avoid nested session error
         env = os.environ.copy()
@@ -459,11 +546,17 @@ class HierarchicalExperiment:
                 except Exception:
                     pass
 
-            # Start streaming thread (daemon — reads stdout, writes to stream_file)
+            # Start streaming thread (daemon — reads provider stream, writes to stream_file)
+            stream_thread = None
             if streaming_enabled and stream_file:
+                stream_args = (
+                    (proc, stream_file, str(BASE_DIR), start_time)
+                    if provider == "codex"
+                    else (proc, stream_file, agent_id)
+                )
                 stream_thread = threading.Thread(
-                    target=_asm_stream,
-                    args=(proc, stream_file, agent_id),
+                    target=_asm_stream_codex if provider == "codex" else _asm_stream,
+                    args=stream_args,
                     daemon=True,
                     name=f"hf-stream-{agent_id}",
                 )
@@ -478,9 +571,13 @@ class HierarchicalExperiment:
                         proc.stdin.close()
                     except Exception:
                         pass
-                    # Streaming thread handles stdout; just wait for process
                     proc.wait(timeout=timeout)
                     proc.stderr.read() if proc.stderr else ""
+                    if provider != "claude" and proc.stdout:
+                        try:
+                            stdout_text = proc.stdout.read(1024 * 1024)
+                        except Exception:
+                            stdout_text = ""
                 else:
                     stdout_text, _ = proc.communicate(input=prompt, timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -521,7 +618,12 @@ class HierarchicalExperiment:
                 try:
                     # Give streaming thread brief time to flush
                     time.sleep(0.5)
-                    response = _asm_reconstruct(stream_file, provider='claude')
+                    if stream_thread is not None:
+                        stream_thread.join(timeout=3)
+                    if provider == "claude":
+                        response = _asm_reconstruct(stream_file, provider='claude')
+                    else:
+                        response = (stdout_text or "").strip() or _asm_reconstruct(stream_file, provider=provider)
                 except Exception as e:
                     logger.warning(f"Failed to reconstruct response for {agent_id}: {e}")
                     response = ""
@@ -588,6 +690,10 @@ class HierarchicalExperiment:
         the minimal completion requirements, not the full mission context.
         """
         base_prompt = work_unit.prompt
+
+        metadata = work_unit.metadata if isinstance(work_unit.metadata, dict) else {}
+        if metadata.get("agent_kind") == "red_team":
+            return base_prompt
 
         completion_block = """
 # Completion Requirements
@@ -867,12 +973,8 @@ class SubagentSpawner:
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)
 
-        command = [
-            "claude", "-p",
-            "--dangerously-skip-permissions",
-            "--output-format", "stream-json",
-            "--verbose",
-        ]
+        provider = _resolve_llm_provider()
+        command = _build_provider_command(provider, stage="SUBAGENT", stream=True)
 
         stream_file = None
         agent_id = subagent_id
@@ -899,9 +1001,14 @@ class SubagentSpawner:
             if stream_file and HAS_AGENT_STREAM_MANAGER:
                 try:
                     _asm_update_pid(agent_id, proc.pid)
+                    stream_args = (
+                        (proc, stream_file, str(BASE_DIR), start_time)
+                        if provider == "codex"
+                        else (proc, stream_file, agent_id)
+                    )
                     t = threading.Thread(
-                        target=_asm_stream,
-                        args=(proc, stream_file, agent_id),
+                        target=_asm_stream_codex if provider == "codex" else _asm_stream,
+                        args=stream_args,
                         daemon=True,
                     )
                     t.start()
@@ -917,6 +1024,11 @@ class SubagentSpawner:
                     except Exception:
                         pass
                     proc.wait(timeout=self.timeout_per_subagent)
+                    if provider != "claude" and proc.stdout:
+                        try:
+                            stdout_text = proc.stdout.read(1024 * 1024)
+                        except Exception:
+                            stdout_text = ""
                 else:
                     stdout_text, _ = proc.communicate(input=prompt, timeout=self.timeout_per_subagent)
             except subprocess.TimeoutExpired:
@@ -946,7 +1058,11 @@ class SubagentSpawner:
             if stream_file and HAS_AGENT_STREAM_MANAGER:
                 try:
                     time.sleep(0.3)
-                    response = _asm_reconstruct(stream_file, provider='claude')
+                    response = (
+                        _asm_reconstruct(stream_file, provider='claude')
+                        if provider == "claude"
+                        else (stdout_text or "").strip() or _asm_reconstruct(stream_file, provider=provider)
+                    )
                     _asm_complete(agent_id, error=None)
                 except Exception:
                     pass

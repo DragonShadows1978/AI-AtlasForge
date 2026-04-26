@@ -51,12 +51,20 @@ _SAFE_ENV_EXACT = frozenset({
     'PATH', 'HOME', 'USER', 'LANG', 'TERM', 'SHELL', 'DISPLAY',
     'TMPDIR', 'TEMP', 'TMP',
     'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY', 'GOOGLE_API_KEY',
     'CLAUDE_MODEL', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'ATLASFORGE_CODEX_MODEL', 'CODEX_MODEL',
+    'ATLASFORGE_GEMINI_MODEL', 'ATLASFORGE_GEMINI_MODEL_BALANCED',
     'OLLAMA_URL', 'OLLAMA_MODEL',
     # ATLASFORGE_* vars needed by subprocess — explicit allowlist, NOT prefix
     'ATLASFORGE_PORT', 'ATLASFORGE_ROOT', 'ATLASFORGE_DATA_DIR',
+    'ATLASFORGE_LLM_PROVIDER',
 })
 _SAFE_ENV_PREFIXES = ('LC_', 'XDG_')
+
+_SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
+_DEFAULT_LLM_PROVIDER = "claude"
 
 # ---------------------------------------------------------------------------
 # Allowed workspace roots — path traversal guard
@@ -124,7 +132,120 @@ _RED_TEAM_CONSECUTIVE_LOW_DELTA_REQUIRED = 2
 
 def _detect_model() -> str:
     """Return the model string from env, lower-cased, or empty string."""
-    return os.environ.get("CLAUDE_MODEL", "").strip().lower()
+    provider = _resolve_red_team_llm_provider()
+    return (_resolve_red_team_llm_model(provider) or "").strip().lower()
+
+
+def _normalize_llm_provider(value: Any) -> Optional[str]:
+    provider = str(value or "").strip().lower()
+    if provider in _SUPPORTED_LLM_PROVIDERS:
+        return provider
+    return None
+
+
+def _read_provider_from_json(path: Path) -> Optional[str]:
+    try:
+        if not path.exists():
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _normalize_llm_provider(data.get("llm_provider") or data.get("provider"))
+
+
+def _resolve_red_team_llm_provider() -> str:
+    mission_provider = _read_provider_from_json(_ATLASFORGE_ROOT / "state" / "mission.json")
+    if mission_provider:
+        return mission_provider
+    env_provider = _normalize_llm_provider(os.environ.get("ATLASFORGE_LLM_PROVIDER"))
+    if env_provider:
+        return env_provider
+    state_provider = _read_provider_from_json(_ATLASFORGE_ROOT / "state" / "llm_provider.json")
+    if state_provider:
+        return state_provider
+    return _DEFAULT_LLM_PROVIDER
+
+
+def _resolve_red_team_llm_model(provider: str) -> Optional[str]:
+    if provider == "codex":
+        model = os.environ.get("ATLASFORGE_CODEX_MODEL") or os.environ.get("CODEX_MODEL")
+    elif provider == "gemini":
+        model = os.environ.get("ATLASFORGE_GEMINI_MODEL") or os.environ.get("ATLASFORGE_GEMINI_MODEL_BALANCED")
+    else:
+        model = os.environ.get("CLAUDE_MODEL")
+    return model.strip() if model and model.strip() else None
+
+
+def _env_flag_enabled(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_red_team_llm_command(provider: str, stage: str = "TESTING") -> List[str]:
+    """Build the subprocess command for blind red-team agents."""
+    provider = _normalize_llm_provider(provider) or _DEFAULT_LLM_PROVIDER
+    model = _resolve_red_team_llm_model(provider)
+
+    if provider == "codex":
+        from WebProxy import codex_proxy_cli_args
+        import shutil as _shutil
+        codex_bin = _shutil.which("codex")
+        if codex_bin is None:
+            raise FileNotFoundError("'codex' binary not found in PATH")
+        cmd = [codex_bin]
+        cmd.extend(codex_proxy_cli_args())
+        if _env_flag_enabled("ATLASFORGE_CODEX_WEB_SEARCH", default=False):
+            cmd.append("--search")
+        cmd.extend(["exec", "--color", "never"])
+        if _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True):
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append("-")
+        return cmd
+
+    if provider == "gemini":
+        import shutil as _shutil
+        gemini_bin = _shutil.which("gemini")
+        if gemini_bin is None:
+            raise FileNotFoundError("'gemini' binary not found in PATH")
+        cmd = [gemini_bin]
+        if _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True):
+            cmd.append("--yolo")
+        cmd.extend(["--output-format", "json"])
+        if model:
+            cmd.extend(["-m", model])
+        return cmd
+
+    import shutil as _shutil
+    claude_bin = _shutil.which("claude")
+    if claude_bin is None:
+        raise FileNotFoundError("'claude' binary not found in PATH")
+    command = [
+        claude_bin, "-p",
+        "--dangerously-skip-permissions",
+        "--output-format", "stream-json",
+        "--verbose",
+    ]
+    if model:
+        command[2:2] = ["--model", model]
+
+    disallowed = ""
+    try:
+        from init_guard import InitGuard
+        disallowed = InitGuard.get_disallowed_tools_for_cli(stage)
+        disallowed = re.sub(r'[^a-zA-Z0-9_,\s]', '', disallowed)
+    except Exception:
+        pass
+
+    from WebProxy import proxy_cli_args
+    command.extend(proxy_cli_args(disallowed))
+    return command
 
 
 def _model_work_budget(model: str) -> int:
@@ -274,6 +395,7 @@ try:
         update_agent_pid as _asm_update_pid,
         complete_agent as _asm_complete,
         stream_stdout_to_file as _asm_stream,
+        stream_codex_session_to_file as _asm_stream_codex,
         reconstruct_text_from_stream_file as _asm_reconstruct,
     )
     HAS_ASM = True
@@ -301,6 +423,18 @@ class AttackProfile:
 _ATTACK_PROFILES = [
     AttackProfile(
         index=0,
+        categories=[AttackCategory.INJECTION],
+        label="Red Team - Injection",
+        focus_description=(
+            "INJECTION VULNERABILITIES.\n"
+            "Look for command injection (os.system, subprocess with user input), "
+            "path traversal, SQL injection, format string injection.\n"
+            "Trace every user-controlled string that reaches a shell, filesystem path, "
+            "database query, template, config loader, or dynamic import/exec boundary."
+        ),
+    ),
+    AttackProfile(
+        index=1,
         categories=[AttackCategory.BOUNDARY_TESTING, AttackCategory.TYPE_CONFUSION],
         label="Red Team - Boundary",
         focus_description=(
@@ -308,18 +442,6 @@ _ATTACK_PROFILES = [
             "Try empty inputs, None, 0, -1, very large numbers, wrong types.\n"
             "Look for missing guard clauses, implicit type conversions, "
             "index-out-of-range, numeric overflow/underflow."
-        ),
-    ),
-    AttackProfile(
-        index=1,
-        categories=[AttackCategory.INJECTION, AttackCategory.ERROR_HANDLING],
-        label="Red Team - Injection",
-        focus_description=(
-            "INJECTION VULNERABILITIES and ERROR HANDLING GAPS.\n"
-            "Look for command injection (os.system, subprocess with user input), "
-            "path traversal, SQL injection, format string injection.\n"
-            "Also look for bare except clauses, swallowed exceptions, "
-            "missing error propagation, functions that silently return None on failure."
         ),
     ),
     AttackProfile(
@@ -885,7 +1007,7 @@ class BlindAgentRedTeam:
         budget_state: Optional["_AgentBudgetState"] = None,
     ) -> Dict:
         """
-        Spawn a single blind agent as a Claude CLI subprocess.
+        Spawn a single blind agent as the configured provider CLI subprocess.
 
         Registers with agent_stream_manager (→ Mission Activity tab) if available.
         Waits for process to exit, then reads results_file.
@@ -905,9 +1027,11 @@ class BlindAgentRedTeam:
         # Resolve effective kill threshold: budget_state.safety_timeout > legacy timeout
         _kill_timeout = budget_state.safety_timeout if budget_state is not None else float(timeout)
         _work_budget = budget_state.work_budget if budget_state is not None else _DEFAULT_WORK_BUDGET
+        provider = _resolve_red_team_llm_provider()
+        model = _resolve_red_team_llm_model(provider)
         logger.info(
-            "[RED_TEAM] Agent[%d] starting: work_budget=%d tokens, safety_timeout=%.0fs",
-            profile.index, _work_budget, _kill_timeout,
+            "[RED_TEAM] Agent[%d] starting: provider=%s model=%s work_budget=%d tokens, safety_timeout=%.0fs",
+            profile.index, provider, model or "(default)", _work_budget, _kill_timeout,
         )
 
         # Build prompt — use string.Template.safe_substitute() to prevent attribute
@@ -950,27 +1074,7 @@ class BlindAgentRedTeam:
                 stream_file = None
                 streaming_enabled = False
 
-        # Build CLI command — Bug 14: resolve 'claude' via shutil.which to prevent PATH injection
-        import shutil as _shutil
-        _claude_bin = _shutil.which("claude")
-        if _claude_bin is None:
-            raise FileNotFoundError("'claude' binary not found in PATH")
-        command = [
-            _claude_bin, "-p",
-            "--dangerously-skip-permissions",
-            "--output-format", "stream-json",
-            "--verbose",
-        ]
-        # Route WebSearch/WebFetch through the AtlasForge local proxy MCP so the
-        # blind validator gets verbatim source text instead of filtered summaries.
-        # Fail loudly on any routing setup error — filtered web tools would
-        # silently degrade validation quality.
-        import sys as _sys
-        _af_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if _af_root not in _sys.path:
-            _sys.path.insert(0, _af_root)
-        from WebProxy import proxy_cli_args
-        command.extend(proxy_cli_args(""))
+        command = _build_red_team_llm_command(provider, stage="TESTING")
 
         # Cycle 5 Fix: explicit allowlist instead of prefix-based matching
         env = {k: v for k, v in os.environ.items()
@@ -1003,8 +1107,8 @@ class BlindAgentRedTeam:
             # Start streaming thread (initialized to None before outer try for leak-safe except)
             if streaming_enabled and stream_file:
                 stream_thread = threading.Thread(
-                    target=_asm_stream,
-                    args=(proc, stream_file, agent_id),
+                    target=_asm_stream_codex if provider == "codex" else _asm_stream,
+                    args=(proc, stream_file, str(workspace_dir), start_time) if provider == "codex" else (proc, stream_file, agent_id),
                     daemon=True,
                     name=f"brt-stream-{agent_id}",
                 )
@@ -1165,7 +1269,7 @@ class BlindAgentRedTeam:
             elapsed = time.time() - start_time
 
             # Parse output tokens from JSONL stdout and update budget state
-            if stdout_text:
+            if stdout_text and provider == "claude":
                 _output_tokens, _token_source = _parse_output_tokens_from_jsonl(stdout_text)
             else:
                 _output_tokens, _token_source = 0, "heuristic"
@@ -1437,7 +1541,7 @@ class BlindAgentRedTeam:
         return RedTeamResult(
             session_id=session_id,
             code_analyzed=f"workspace: {workspace_path}",
-            agent_model="claude-blind-agent-team",
+            agent_model=f"{_resolve_red_team_llm_provider()}-blind-agent-team",
             timestamp=datetime.now().isoformat(),
             duration_ms=total_elapsed * 1000,
             findings=all_findings,
@@ -1895,7 +1999,9 @@ class RedTeamOrchestrator:
                 wave=1,
                 strategy=SplitStrategy.TASK_BASED,
                 metadata={
+                    "agent_kind": "red_team",
                     "profile_index": profile.index,
+                    "profile_label": profile.label,
                     "categories": [c.value for c in profile.categories],
                     "results_file": str(results_file),
                     "findings_file": str(findings_file),
@@ -2201,7 +2307,7 @@ class RedTeamOrchestrator:
         return RedTeamResult(
             session_id=session_id,
             code_analyzed=f"workspace: {workspace_dir}",
-            agent_model="claude-red-team-orchestrator",
+            agent_model=f"{_resolve_red_team_llm_provider()}-red-team-orchestrator",
             timestamp=datetime.now().isoformat(),
             duration_ms=total_elapsed * 1000,
             findings=all_findings,

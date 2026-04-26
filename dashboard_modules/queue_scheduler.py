@@ -28,9 +28,11 @@ queue_scheduler_bp = Blueprint('queue_scheduler', __name__, url_prefix='/api/que
 
 # Base paths - use centralized configuration
 from atlasforge_config import MISSION_QUEUE_PATH, STATE_DIR, BASE_DIR
+LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 
 # Queue lock for thread safety
 _queue_lock = threading.Lock()
+_SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 
 
 def _safe_priority_key(x):
@@ -43,6 +45,34 @@ def _safe_priority_key(x):
         return -int(p)
     except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _normalize_llm_provider(provider) -> Optional[str]:
+    normalized = str(provider or "").strip().lower()
+    if normalized in _SUPPORTED_LLM_PROVIDERS:
+        return normalized
+    return None
+
+
+def _load_active_llm_provider() -> str:
+    try:
+        if LLM_PROVIDER_PATH.exists():
+            with open(LLM_PROVIDER_PATH, 'r') as f:
+                data = json.load(f) or {}
+            provider = _normalize_llm_provider(data.get("provider") or data.get("llm_provider"))
+            if provider:
+                return provider
+    except Exception as exc:
+        logger.debug("Unable to read active LLM provider: %s", exc)
+    return "claude"
+
+
+def _resolve_queue_llm_provider(data: Dict[str, Any]) -> str:
+    return (
+        _normalize_llm_provider(data.get("llm_provider"))
+        or _normalize_llm_provider(data.get("provider"))
+        or _load_active_llm_provider()
+    )
 
 
 # SocketIO instance (set by init function)
@@ -345,6 +375,7 @@ def add_to_queue():
                 "cycle_budget": cycle_budget,
                 "max_iterations": max_iterations,
                 "priority": priority,  # clamped to [0, 100]
+                "llm_provider": _resolve_queue_llm_provider(data),
                 "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
                 "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
                 "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
@@ -543,6 +574,7 @@ def start_next_mission():
             "mission_workspace": mission_workspace,
             "mission_dir": str(BASE_DIR / "missions" / mission_id),
             "project_name": project_name,  # Preserve project name in mission
+            "llm_provider": _resolve_queue_llm_provider(next_mission),
             "metadata": {
                 "source": next_mission.get("source", "queue"),
                 "source_id": next_mission.get("source_id"),
@@ -570,6 +602,7 @@ def start_next_mission():
             "action": "start_rd",
             "mission_id": mission_id,
             "mission_title": mission_title,
+            "llm_provider": _resolve_queue_llm_provider(next_mission),
             "signaled_at": datetime.now().isoformat(),
             "source": "queue_next_button"
         })
@@ -729,6 +762,7 @@ def add_from_kb_recommendation():
             "mission_description": problem_statement,
             "cycle_budget": cycle_budget,
             "priority": priority_val,
+            "llm_provider": _resolve_queue_llm_provider(data),
             "source": "kb_recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -799,6 +833,7 @@ def add_from_recommendation():
             "problem_statement": mission_data["problem_statement"],
             "cycle_budget": cycle_budget,
             "priority": priority_val,
+            "llm_provider": _resolve_queue_llm_provider(data),
             "source": "recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -1070,6 +1105,7 @@ def add_to_queue_enhanced():
             "start_condition": data.get("start_condition"),  # e.g., "idle_after:17:00"
             "depends_on": data.get("depends_on"),  # mission_id
             "estimated_minutes": estimated_minutes,
+            "llm_provider": _resolve_queue_llm_provider(data),
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),
             "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal

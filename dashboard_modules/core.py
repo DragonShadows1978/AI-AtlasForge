@@ -91,6 +91,29 @@ NARRATIVE_MISSION_PATH = None
 MISSION_QUEUE_PATH = None
 
 
+def _normalize_runtime_provider(provider):
+    """Normalize provider values that can actually run the conductor."""
+    normalized = str(provider or "").strip().lower()
+    if normalized in {"claude", "codex", "gemini"}:
+        return normalized
+    return None
+
+
+def _update_active_mission_provider(provider):
+    """Keep mission metadata aligned with the provider used for start/resume."""
+    if not provider or not io_utils or not MISSION_PATH:
+        return
+    try:
+        mission = io_utils.atomic_read_json(MISSION_PATH, {}) or {}
+        if not isinstance(mission, dict) or not mission:
+            return
+        mission["llm_provider"] = provider
+        mission["last_updated"] = datetime.now(timezone.utc).isoformat()
+        io_utils.atomic_write_json(MISSION_PATH, mission)
+    except Exception:
+        logger.exception("Failed to update active mission provider")
+
+
 def init_core_blueprint(
     base_dir, state_dir, workspace_dir,
     mission_path, proposals_path, recommendations_path,
@@ -297,8 +320,18 @@ def api_engine_status():
 def api_start(mode):
     if mode not in _ALLOWED_MODES:
         return jsonify({"success": False, "message": "Invalid mode"}), 400
+    data = request.get_json(silent=True) or {}
+    requested_provider = data.get("llm_provider") or data.get("provider")
+    normalized_provider = None
+    if requested_provider:
+        normalized_provider = _normalize_runtime_provider(requested_provider)
+        if not normalized_provider:
+            return jsonify({"success": False, "message": "Invalid provider"}), 400
+        if set_llm_provider:
+            set_llm_provider(normalized_provider)
+        _update_active_mission_provider(normalized_provider)
     success, message = start_claude(mode)
-    return jsonify({"success": success, "message": message})
+    return jsonify({"success": success, "message": message, "provider": normalized_provider})
 
 
 @core_bp.route('/api/stop', methods=['POST'])
@@ -611,7 +644,10 @@ def api_mission():
                     cycle_budget = max(1, int(_raw_cb))
                 except (ValueError, TypeError, OverflowError):
                     return jsonify({"success": False, "message": "Invalid cycle_budget: must be an integer"}), 400
-                active_provider = get_llm_provider() if get_llm_provider else "claude"
+                active_provider = (
+                    _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
+                    or (get_llm_provider() if get_llm_provider else "claude")
+                )
                 new_mission = {
                     "mission_id": mission_id, "problem_statement": problem_statement,
                     "original_problem_statement": problem_statement,
@@ -1204,7 +1240,10 @@ def api_set_mission_from_recommendation(rec_id):
             "cycle_budget": max(1, cycle_budget), "current_cycle": 1, "cycle_history": [],
             "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
             "project_name": resolved_project_name,
-            "llm_provider": get_llm_provider() if get_llm_provider else "claude",
+            "llm_provider": (
+                _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
+                or (get_llm_provider() if get_llm_provider else "claude")
+            ),
             "source_recommendation_id": rec_id
         }
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
