@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.5.0] - 2026-05-07
+
+### Other
+
+- feat: investigation pipeline v2.5 — staggered waves, Opus synthesis, blind validator restored
+
+### Code Changes
+
+- **Modified** `WebProxy/mcp_server.py` — `_atlasforge_root`, `_read_json_file`, `_current_mission`, `_stage_guard_context`, `_env_provider`
+- **Modified** `WebProxy/service.py` — `_stream_capped_body_with_limit`, `_paper_key`, `_normalize_arxiv_pdf_url`, `_extract_pdf_text_bytes`, `fetch_paper`
+- **Modified** `WebProxy/tests/test_mcp_server.py` — `TestWebFetchProxyContract`, `test_webfetch_requests_content_from_proxy`, `fake_proxy_post`, `TestPaperFetchProxyContract`, `test_paperfetch_uses_paper_endpoint`
+- **Added** `WebProxy/tests/test_mcp_stage_guard.py` — `_prepare_root`, `test_submit_plan_writes_default_planning_artifact`, `test_stage_guard_prefers_codex_runtime_context`, `test_stage_guard_uses_codex_context_file_when_env_missing`, `test_stage_guard_ignores_stale_codex_context_for_claude_mission`
+- **Modified** `WebProxy/tests/test_service.py` — `TestFetchEndpointFullTextContract`, `test_full_text_flag_returns_untruncated_cached_text`, `fake_fetch_page`, `TestPaperFetch`, `test_arxiv_abs_url_normalizes_to_pdf_url`
+- **Modified** `af_engine/mission_config.py`
+- **Added** `af_engine/mission_profiles.py` — `is_valid_mission_type`, `get_profile`, `apply_mission_type_profile`, `stage_allowed_for_mission`, `next_enabled_stage`
+- **Modified** `af_engine/orchestrator.py` — `_sanitize_prompt_input`
+- **Modified** `af_engine/stages/base.py`
+- **Modified** `af_engine/stages/building.py`
+- **Modified** `af_engine/stages/planning.py` — `_sanitize_resumption_content`
+- **Modified** `af_engine/stages/testing.py` — `_coerce_nonnegative_int`, `_coerce_bool`, `_is_codex_context`
+- **Modified** `af_engine/tests/conftest.py`
+- **Modified** `af_engine/tests/test_conductor_timeout.py` — `TestTestingWaitFallback`, `test_detects_testing_monitor_wait_response`, `test_testing_wait_fallback_returns_tests_error`, `Controller`
+- **Modified** `af_engine/tests/test_e2e_integration.py` — `test_testing_handler_requires_three_red_team_agents_to_pass`, `test_testing_handler_allows_early_close_when_agents_finish`, `test_testing_handler_rejects_agent_timeout_even_with_count`
+- **Added** `af_engine/tests/test_mission_config_validation_gaps.py` — `test_success_criteria_scalar_raises_validation_error`, `test_success_criteria_string_wraps_to_single_element_list`, `test_success_criteria_none_becomes_empty_list`, `test_success_criteria_list_passes_through`, `test_from_request_non_dict_raises_validation_error`
+- **Added** `af_engine/tests/test_mission_profiles.py` — `test_profile_map_completeness`, `test_profile_map_stages_are_canonical`, `test_apply_profile_full_rd`, `test_apply_profile_bug_hunt`, `test_apply_profile_review_existing`
+- **Added** `af_engine/tests/test_profile_flag_enforcement.py` — `_ws`, `test_allow_code_writes_false_blocks_building_source_writes`, `test_allow_code_writes_false_allows_artifacts_research_writes`, `test_allow_code_writes_false_planning_unaffected`, `test_no_profile_means_no_profile_restriction`
+- **Modified** `af_engine/tests/test_real_claude_integration.py`
+- **Modified** `agent_stream_manager.py` — `_reconcile_completed_disk_agent`, `_json_default`, `stream_stdout_to_file`, `_extract_urls_from_event_text`, `_extract_cache_json_paths_from_raw_event`
+
+### Stats
+
+```
+ tests/test_investigation_subagent_waves.py         | 320 ++++++++
+ tests/test_investigation_timing.py                 |  56 ++
+ tests/test_llm_provider_selection.py               |  98 ++-
+ tests/test_subagent_pool_manager.py                |  91 +++
+ 70 files changed, 13269 insertions(+), 940 deletions(-)
+```
+
+_Full diff: `git diff v2.4.3..v2.5.0`_
+
+
 ## [2.4.3] - 2026-04-27
 
 ### Added
