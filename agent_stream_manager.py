@@ -13,14 +13,20 @@ JSONL is the durable log of record. The ring buffer is the live transport.
 Per-agent monotonic `seq` enables Last-Event-ID resume.
 """
 
+import errno
+import hashlib
+import html
 import json
 import os
+import re
+import stat as stat_module
 import queue
+import shutil
 import threading
 import time
 import logging
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional, Tuple, List, Dict
 
@@ -29,12 +35,14 @@ from typing import Iterable, Optional, Tuple, List, Dict
 # =============================================================================
 
 STREAM_DIR = Path('/home/vader/AI-AtlasForge/state/agent_streams')
+REPO_ROOT = Path(__file__).resolve().parent
 CODEX_SESSIONS_DIR = Path.home() / '.codex' / 'sessions'
 CODEX_TRANSCRIPT_DISCOVERY_TIMEOUT = 12.0
 CODEX_TRANSCRIPT_POLL_INTERVAL = 0.2
 CODEX_TRANSCRIPT_MAX_SCAN = 200
 RECENT_AGENT_WINDOW_SECONDS = 1800
 _MAX_ACTIVE_AGENTS_BYTES = 10 * 1024 * 1024  # 10 MB — OOM guard for active_agents.json
+_RING_MAX_SEQ = 2**31 - 1  # upper-bound guard for get_ring_since last_seq
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +68,13 @@ def _scan_max_seq(stream_file: Path) -> int:
     """
     if not stream_file.exists():
         return 0
+    if stream_file.is_symlink():
+        return 0
     max_seq = 0
     try:
-        with open(stream_file, 'r', encoding='utf-8', errors='replace') as f:
+        # O_NOFOLLOW prevents symlink swap between is_symlink() check and open().
+        fd = os.open(str(stream_file), os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, 'r', encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -133,11 +145,10 @@ class AgentContext:
             raise ValueError(f"context must be 'mission' or 'investigation', got {context!r}")
         self.agent_id = agent_id
         self.context = context      # 'mission' | 'investigation'
-        self.label = label          # Display label e.g. "PLAN Agent 1", "Sub-0"
+        self.label = label if label is not None else ''  # Display label e.g. "PLAN Agent 1", "Sub-0"
         # Sanitize agent_id and context to prevent path traversal: whitelist-only approach
-        import re as _re
-        safe_id = _re.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
-        safe_context = _re.sub(r'[^a-zA-Z0-9_\-]', '_', context)
+        safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
+        safe_context = re.sub(r'[^a-zA-Z0-9_\-]', '_', context)
         self.stream_file = STREAM_DIR / f"{safe_context}_{safe_id}.jsonl"
         self.status = 'running'     # 'running' | 'complete' | 'error'
         self.spawned_at = time.time()
@@ -157,6 +168,7 @@ class AgentContext:
         self._watcher_started = False
         self._watcher_lock = threading.Lock()
         self._tail_start_pos: Optional[int] = None
+        self._completion_broadcasted = False
 
     def to_dict(self) -> dict:
         return {
@@ -179,7 +191,9 @@ def _copy_agent_fields(info: dict) -> dict:
     completed_at = agent.get('completed_at')
     if started_at is not None:
         agent['started_at'] = started_at
-    if completed_at is not None and started_at is not None:
+    if (completed_at is not None and started_at is not None
+            and isinstance(completed_at, (int, float))
+            and isinstance(started_at, (int, float))):
         agent['duration_seconds'] = round(completed_at - started_at, 1)
     return agent
 
@@ -197,6 +211,8 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
 
     event_type: 'thinking' | 'tool_call' | 'tool_result' | 'error' | 'raw'
     """
+    if not isinstance(line, str):
+        return None
     raw = line.strip()
     if not raw:
         return None
@@ -204,12 +220,14 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
     try:
         obj = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
-        # Not JSON — raw text line (e.g. from non-stream-json provider)
-        return {'event_type': 'raw', 'display_text': raw[:400], 'raw': raw}
+        # Not JSON — raw text line; HTML-escape to prevent XSS via SSE broadcast
+        safe_text = html.escape(''.join(c for c in raw[:400] if c.isprintable() or c in '\t\n'))
+        return {'event_type': 'raw', 'display_text': safe_text, 'raw': raw}
 
     if not isinstance(obj, dict):
         # Valid JSON but not an object (e.g. null, number, array) — treat as raw
-        return {'event_type': 'raw', 'display_text': raw[:400], 'raw': raw}
+        safe_text = html.escape(''.join(c for c in raw[:400] if c.isprintable() or c in '\t\n'))
+        return {'event_type': 'raw', 'display_text': safe_text, 'raw': raw}
 
     # Codex exec transcript format
     record_type = obj.get('type', '')
@@ -221,7 +239,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
             if message:
                 return {
                     'event_type': 'thinking',
-                    'display_text': message[:600],
+                    'display_text': html.escape(message[:600]),
                     'raw': raw,
                 }
             return None
@@ -231,7 +249,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
     if record_type == 'response_item' and isinstance(payload, dict):
         item_type = payload.get('type', '')
         if item_type == 'function_call':
-            name = payload.get('name', '?')
+            name = html.escape(str(payload.get('name', '?')))
             args = payload.get('arguments', '')
             if not isinstance(args, str):
                 try:
@@ -240,7 +258,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     args = str(args)
             return {
                 'event_type': 'tool_call',
-                'display_text': f"{name}({args[:300]})",
+                'display_text': f"{name}({html.escape(args[:300])})",
                 'raw': raw,
             }
         if item_type == 'function_call_output':
@@ -252,7 +270,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     output = str(output)
             return {
                 'event_type': 'tool_result',
-                'display_text': output[:400],
+                'display_text': html.escape(output[:400]),
                 'raw': raw,
             }
         if item_type in ('message', 'reasoning'):
@@ -272,12 +290,12 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                 continue
             btype = block.get('type', '')
             if btype == 'tool_use':
-                name = block.get('name', '?')
+                name = html.escape(str(block.get('name', '?')))
                 inp = block.get('input', {})
                 inp_str = json.dumps(inp)[:300] if inp else ''
                 return {
                     'event_type': 'tool_call',
-                    'display_text': f"{name}({inp_str})",
+                    'display_text': f"{name}({html.escape(inp_str)})",
                     'raw': raw,
                 }
             elif btype == 'text' and first_text is None:
@@ -289,7 +307,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
         if first_text is not None:
             return {
                 'event_type': 'thinking',
-                'display_text': first_text[:600],
+                'display_text': html.escape(first_text[:600]),
                 'raw': raw,
             }
 
@@ -304,7 +322,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     content = ' '.join(text_parts)
                 return {
                     'event_type': 'tool_result',
-                    'display_text': str(content)[:400],
+                    'display_text': html.escape(str(content)[:400]),
                     'raw': raw,
                 }
 
@@ -315,7 +333,9 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
     # Fallback: return raw only for truly unrecognized message types
     # 'assistant' and 'user' are handled above (may produce None for whitespace/empty)
     if msg_type and msg_type not in ('assistant', 'user', 'system', 'init', 'result'):
-        return {'event_type': 'raw', 'display_text': f"[{msg_type}] {raw[:200]}", 'raw': raw}
+        safe_type = html.escape(str(msg_type))
+        safe_raw = html.escape(raw[:200])
+        return {'event_type': 'raw', 'display_text': f"[{safe_type}] {safe_raw}", 'raw': raw}
     return None
 
 
@@ -365,7 +385,8 @@ def _is_codex_exec_session_payload(payload: dict) -> bool:
 def _codex_transcript_matches_workspace(jsonl_path: Path, workspace_path: str) -> bool:
     """Return True if the Codex transcript belongs to the workspace."""
     try:
-        with open(jsonl_path, 'r', encoding='utf-8', errors='replace') as f:
+        raw_fd = os.open(str(jsonl_path), os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(raw_fd, 'r', encoding='utf-8', errors='replace') as f:
             for idx, line in enumerate(f):
                 if idx > 40:
                     break
@@ -394,19 +415,25 @@ def _find_codex_transcript_for_workspace(workspace_path: str, started_at: float)
 
     _codex_root = CODEX_SESSIONS_DIR.resolve()
     try:
-        _all = sorted(
-            CODEX_SESSIONS_DIR.rglob('*.jsonl'),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        files = [
-            p for p in _all
-            if not p.is_symlink() and p.resolve().is_relative_to(_codex_root)
-        ]
+        _candidates = [p for p in CODEX_SESSIONS_DIR.rglob('*.jsonl') if p.exists()]
     except OSError:
         return None
+    _all_with_mtime = []
+    for _p in _candidates:
+        try:
+            _all_with_mtime.append((_p.stat().st_mtime, _p))
+        except OSError:
+            continue
+    _all_with_mtime.sort(key=lambda t: t[0], reverse=True)
+    files = []
+    for _, _p in _all_with_mtime:
+        try:
+            if not _p.is_symlink() and _p.resolve().is_relative_to(_codex_root):
+                files.append(_p)
+        except OSError:
+            continue
 
-    lower_bound = started_at - 30.0
+    lower_bound = (started_at - 30.0) if isinstance(started_at, (int, float)) else 0.0
     for path in files[:CODEX_TRANSCRIPT_MAX_SCAN]:
         try:
             if path.stat().st_mtime < lower_bound:
@@ -462,9 +489,11 @@ class AgentStreamWatcher(threading.Thread):
                 break
             time.sleep(0.1)
 
-        if self.tail_from_end and stream_file.exists():
+        if self.tail_from_end and stream_file.exists() and not stream_file.is_symlink():
             try:
-                with open(stream_file, 'r', encoding='utf-8', errors='replace') as f:
+                # O_NOFOLLOW prevents TOCTOU: symlink swap between is_symlink() and open().
+                _tail_fd = os.open(str(stream_file), os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(_tail_fd, 'r', encoding='utf-8', errors='replace') as f:
                     tail_start = getattr(self.ctx, '_tail_start_pos', None)
                     if tail_start is None:
                         f.seek(0, os.SEEK_END)
@@ -495,6 +524,14 @@ class AgentStreamWatcher(threading.Thread):
                 time.sleep(0.2)
                 continue
 
+            if stream_file.is_symlink():
+                logger.warning(
+                    "Stream file for agent %s replaced by symlink — watcher exiting",
+                    self.ctx.agent_id,
+                )
+                _manager.complete_agent(self.ctx.agent_id, error='stream_symlink_detected')
+                break
+
             # Detect file rotation: if the inode changed, reset position to 0
             try:
                 current_inode = os.stat(stream_file).st_ino
@@ -509,7 +546,18 @@ class AgentStreamWatcher(threading.Thread):
                 pass
 
             try:
-                with open(stream_file, 'r', encoding='utf-8', errors='replace') as f:
+                try:
+                    raw_fd = os.open(str(stream_file), os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as _oe:
+                    if _oe.errno == errno.ELOOP:
+                        logger.warning(
+                            "Stream file for agent %s became a symlink — watcher exiting",
+                            self.ctx.agent_id,
+                        )
+                        _manager.complete_agent(self.ctx.agent_id, error='stream_symlink_detected')
+                        break
+                    raise
+                with os.fdopen(raw_fd, 'r', encoding='utf-8', errors='replace') as f:
                     f.seek(file_pos)
                     lines = f.readlines()
                     new_pos = f.tell()
@@ -551,14 +599,16 @@ class AgentStreamWatcher(threading.Thread):
         completion_payload = {
             'event': 'agent_complete' if self.ctx.status != 'error' else 'agent_error',
             'agent_id': self.ctx.agent_id,
-            'label': self.ctx.label,
+            'label': html.escape(str(self.ctx.label)) if self.ctx.label else '',
             'context': self.ctx.context,
-            'error': self.ctx.error,
+            'error': html.escape(str(self.ctx.error)) if self.ctx.error else None,
             'duration_seconds': duration,
             'line_count': line_count,
             'timestamp': datetime.now().isoformat(),
         }
-        _manager.broadcast_lifecycle(self.ctx, completion_payload)
+        if not self.ctx._completion_broadcasted:
+            self.ctx._completion_broadcasted = True
+            _manager.broadcast_lifecycle(self.ctx, completion_payload)
 
 
 # =============================================================================
@@ -608,10 +658,15 @@ class AgentStreamManager:
     MISSION_KEY = '__mission__'
     INVESTIGATION_KEY = '__investigation__'
     SUBSCRIBER_QUEUE_MAXSIZE = 1000  # slow-client threshold for gap signaling
+    MAX_SUBSCRIBERS_PER_KEY = 16     # DoS guard: cap concurrent SSE connections per agent
 
     def __init__(self):
         self._agents: dict = {}  # agent_id -> AgentContext
         self._lock = threading.Lock()
+        # Per-agent-id init locks: prevent both threads from building AgentContext
+        # simultaneously when two concurrent register_agent() calls race for the same id.
+        self._agent_init_locks: Dict[str, threading.Lock] = {}
+        self._agent_init_locks_lock = threading.Lock()
         # SSE subscriber registry: key (agent_id or fan-in marker) -> list of queue.Queue
         self._subscribers: Dict[str, List[queue.Queue]] = {}
         # broadcast_lock serializes ring-buffer append + subscriber fan-out so a new
@@ -642,7 +697,7 @@ class AgentStreamManager:
             'seq': seq,
             'agent_id': ctx.agent_id,
             'context': ctx.context,
-            'label': ctx.label,
+            'label': html.escape(str(ctx.label)) if ctx.label else '',
             'event_type': event.get('event_type', 'raw'),
             'text': event.get('display_text', ''),
             'timestamp': ts,
@@ -663,10 +718,12 @@ class AgentStreamManager:
         if not ctx.stream_file.exists():
             ctx._tail_start_pos = 0
             return 0
+        if ctx.stream_file.is_symlink():
+            return 0
         loaded = 0
         max_seq_seen = 0
         raw_lines = self._read_jsonl_lines_capped(ctx.stream_file, max_bytes=self._MAX_JSONL_BYTES)
-        ts = datetime.fromtimestamp(ctx.spawned_at).isoformat()
+        ts = datetime.fromtimestamp(ctx.spawned_at).isoformat() if isinstance(ctx.spawned_at, (int, float)) else datetime.utcnow().isoformat()
         for raw_line in raw_lines:
             seq, event = _parse_stream_line(raw_line)
             if event is None:
@@ -734,7 +791,14 @@ class AgentStreamManager:
         with self._broadcast_lock:
             # 1. Ring buffer (per agent) — bounded deque(maxlen=500)
             ctx.ring.append(payload)
-            # 2. Fan-out to subscribers under the same lock so atomic snapshots work.
+            # 2. If agent is already tombstoned (complete_agent ran first), mirror the
+            #    event into tombstone['ring_tail'] so get_ring_since can replay it.
+            with self._lock:
+                current = self._agents.get(agent_key)
+            if isinstance(current, dict) and current.get('_tombstone'):
+                tail = current.setdefault('ring_tail', deque(maxlen=500))
+                tail.append(payload)
+            # 3. Fan-out to subscribers under the same lock so atomic snapshots work.
             for key in (agent_key, fanin_key):
                 subs = self._subscribers.get(key)
                 if not subs:
@@ -883,11 +947,17 @@ class AgentStreamManager:
                     snapshot.sort(key=lambda e: e.get('seq', 0))
             # Register the queue under the same lock so no broadcast slips between
             # snapshot completion and registration.
-            self._subscribers.setdefault(key, []).append(q)
+            key_subs = self._subscribers.setdefault(key, [])
+            if len(key_subs) >= self.MAX_SUBSCRIBERS_PER_KEY:
+                raise RuntimeError(
+                    f"subscribe: too many concurrent SSE connections for key {key!r} "
+                    f"(limit {self.MAX_SUBSCRIBERS_PER_KEY})"
+                )
+            key_subs.append(q)
         return snapshot, q
 
     def sync_running_disk_agents(self, context: Optional[str] = None) -> int:
-        """Hydrate running disk-known agents into this process and tail their JSONL.
+        """Hydrate running disk-known agents and reconcile completed disk state.
 
         Mission and investigation workers are launched by sibling processes, so
         their in-memory ring buffers are not shared with the Flask/SSE process.
@@ -899,10 +969,12 @@ class AgentStreamManager:
         for agent_id, info in disk_agents.items():
             if not isinstance(info, dict):
                 continue
-            if info.get('status') != 'running':
-                continue
             agent_context = info.get('context') or 'mission'
             if context and agent_context != context:
+                continue
+            agent_status = info.get('status') or 'running'
+            if agent_status != 'running':
+                self._reconcile_completed_disk_agent(agent_id, info)
                 continue
 
             ctx = None
@@ -951,6 +1023,66 @@ class AgentStreamManager:
                     started += 1
         return started
 
+    def _reconcile_completed_disk_agent(self, agent_id: str, info: dict) -> bool:
+        """Mirror a sibling-process completion into this process without rewriting disk state."""
+        disk_status = info.get('status')
+        if disk_status not in ('complete', 'error'):
+            return False
+
+        ctx = None
+        with self._lock:
+            entry = self._agents.get(agent_id)
+            if not isinstance(entry, AgentContext):
+                return False
+            if entry.status != 'running':
+                return False
+            entry.status = 'error' if disk_status == 'error' else 'complete'
+            entry.error = info.get('error') if entry.status == 'error' else None
+            completed_at = info.get('completed_at')
+            entry.completed_at = completed_at if isinstance(completed_at, (int, float)) else time.time()
+            ctx = entry
+            self._agents[agent_id] = {
+                '_tombstone': True,
+                'agent_id': ctx.agent_id,
+                'context': ctx.context,
+                'label': ctx.label,
+                'stream_file': str(ctx.stream_file),
+                'snapshot_file': str(ctx.stream_file.with_suffix('.snapshot.json')),
+                'status': ctx.status,
+                'started_at': ctx.started_at,
+                'completed_at': ctx.completed_at,
+                'error': ctx.error,
+            }
+
+        if ctx is None:
+            return False
+
+        try:
+            self._write_snapshot(ctx)
+        except Exception:
+            pass
+        if ctx.error:
+            self._log_agent_error(ctx, ctx.error)
+
+        if not ctx._completion_broadcasted:
+            ctx._completion_broadcasted = True
+            duration = None
+            if ctx.completed_at and ctx.started_at:
+                duration = round(ctx.completed_at - ctx.started_at, 1)
+            with ctx._lock:
+                line_count = len(ctx._parsed_lines)
+            self.broadcast_lifecycle(ctx, {
+                'event': 'agent_error' if ctx.status == 'error' else 'agent_complete',
+                'agent_id': ctx.agent_id,
+                'label': html.escape(str(ctx.label)) if ctx.label else '',
+                'context': ctx.context,
+                'error': html.escape(str(ctx.error)) if ctx.error else None,
+                'duration_seconds': duration,
+                'line_count': line_count,
+                'timestamp': datetime.now().isoformat(),
+            })
+        return True
+
     def unsubscribe(self, key: str, q: queue.Queue) -> None:
         """Remove a previously-registered subscriber queue."""
         with self._broadcast_lock:
@@ -968,10 +1100,19 @@ class AgentStreamManager:
         """Return ring-buffer entries for agent_id with seq > last_seq, sorted by seq."""
         if last_seq is None or not isinstance(last_seq, int) or isinstance(last_seq, bool):
             last_seq = 0
+        if last_seq > _RING_MAX_SEQ:
+            last_seq = 0
         with self._lock:
             entry = self._agents.get(agent_id)
-        if entry is None or isinstance(entry, dict) or entry is _PREWARM_SENTINEL:
+        if entry is None or entry is _PREWARM_SENTINEL:
             return []
+        if isinstance(entry, dict):
+            # Tombstone: replay completion event from ring_tail if available
+            ring_tail = entry.get('ring_tail', [])
+            return sorted(
+                (ev for ev in ring_tail if ev.get('seq', 0) > last_seq),
+                key=lambda e: e.get('seq', 0),
+            )
         with self._broadcast_lock:
             return sorted(
                 (ev for ev in entry.ring if ev.get('seq', 0) > last_seq),
@@ -1017,44 +1158,61 @@ class AgentStreamManager:
             raise ValueError(f"register_agent: agent_id {agent_id!r} is reserved for SSE fan-in keys")
         _ensure_stream_dir()
 
-        # Idempotency + TOCTOU guard: claim slot atomically with sentinel before
-        # doing file I/O, then replace with real ctx. Two concurrent calls for the
-        # same agent_id will both try to claim; only one succeeds, the other returns
-        # the existing context once it appears.
-        with self._lock:
-            existing = self._agents.get(agent_id)
-            if isinstance(existing, AgentContext):
-                logging.warning("register_agent: duplicate call for %r — returning existing", agent_id)
-                return existing.stream_file
-            if existing is _PREWARM_SENTINEL:
-                # Another thread is mid-registration; fall through, will be overwritten.
-                pass
-            # Claim slot atomically so no concurrent call can race past this point.
-            self._agents[agent_id] = _PREWARM_SENTINEL
+        # Per-agent mutex: only one thread builds AgentContext at a time for a given id.
+        with self._agent_init_locks_lock:
+            if agent_id not in self._agent_init_locks:
+                self._agent_init_locks[agent_id] = threading.Lock()
+            init_lock = self._agent_init_locks[agent_id]
 
-        try:
-            ctx = AgentContext(agent_id=agent_id, context=context, label=label, pid=pid)
-        except Exception:
+        with init_lock:
+            # Idempotency + TOCTOU guard: claim slot atomically with sentinel before
+            # doing file I/O, then replace with real ctx. Two concurrent calls for the
+            # same agent_id will both try to claim; only one succeeds, the other returns
+            # the existing context once it appears.
             with self._lock:
-                if self._agents.get(agent_id) is _PREWARM_SENTINEL:
-                    del self._agents[agent_id]
-            raise
+                existing = self._agents.get(agent_id)
+                if isinstance(existing, AgentContext):
+                    logging.warning("register_agent: duplicate call for %r — returning existing", agent_id)
+                    # Clean up init lock before early return
+                    with self._agent_init_locks_lock:
+                        self._agent_init_locks.pop(agent_id, None)
+                    return existing.stream_file
+                if existing is _PREWARM_SENTINEL:
+                    # Another thread is mid-registration; fall through, will be overwritten.
+                    pass
+                # Claim slot atomically so no concurrent call can race past this point.
+                self._agents[agent_id] = _PREWARM_SENTINEL
 
-        # Resume per-agent seq counter from any existing JSONL file. Lines without
-        # a `seq` field count as 0; counter starts at max_seen + 1.
-        try:
-            existing_max = _scan_max_seq(ctx.stream_file)
-        except Exception:
-            existing_max = 0
-        ctx.next_seq = existing_max + 1
+            try:
+                ctx = AgentContext(agent_id=agent_id, context=context, label=label, pid=pid)
+            except Exception:
+                with self._lock:
+                    if self._agents.get(agent_id) is _PREWARM_SENTINEL:
+                        del self._agents[agent_id]
+                raise
 
-        with self._lock:
-            current = self._agents.get(agent_id)
-            if isinstance(current, AgentContext):
-                # Concurrent caller already committed — return the winner
-                return current.stream_file
-            self._agents[agent_id] = ctx
-            self._save_state_locked()
+            # Resume per-agent seq counter from any existing JSONL file. Lines without
+            # a `seq` field count as 0; counter starts at max_seen + 1.
+            try:
+                existing_max = _scan_max_seq(ctx.stream_file)
+            except Exception:
+                existing_max = 0
+            ctx.next_seq = existing_max + 1
+
+            with self._lock:
+                current = self._agents.get(agent_id)
+                if isinstance(current, AgentContext):
+                    # Concurrent caller already committed — return the winner
+                    # Clean up init lock before early return
+                    with self._agent_init_locks_lock:
+                        self._agent_init_locks.pop(agent_id, None)
+                    return current.stream_file
+                self._agents[agent_id] = ctx
+                self._save_state_locked()
+
+        # Clean up init lock now that registration is complete
+        with self._agent_init_locks_lock:
+            self._agent_init_locks.pop(agent_id, None)
 
         self._start_watcher(ctx, tail_from_end=False, emit_spawn=True)
 
@@ -1067,6 +1225,8 @@ class AgentStreamManager:
         with self._lock:
             if agent_id in self._agents:
                 entry = self._agents[agent_id]
+                if isinstance(entry, dict):
+                    return  # Tombstone — nothing to update
                 # Skip sentinel — plain object() has no .pid attribute
                 if entry is _PREWARM_SENTINEL:
                     return
@@ -1088,7 +1248,9 @@ class AgentStreamManager:
                 'lines': lines,  # full buffer (deque already bounded at maxlen=200)
             }
             tmp = snapshot_path.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8', errors='replace') as f:
+            # O_NOFOLLOW prevents write-through-symlink if .tmp path is pre-placed as a symlink.
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
                 json.dump(snapshot, f)
             tmp.replace(snapshot_path)
         except Exception as e:
@@ -1101,8 +1263,10 @@ class AgentStreamManager:
             if agent_id not in self._agents:
                 return
             entry = self._agents[agent_id]
-            # Already a tombstone — nothing to do
-            if isinstance(entry, dict) and entry.get('_tombstone'):
+            # Guard against any dict entry (tombstone or legacy/malformed disk hydration).
+            # A plain dict without _tombstone would crash entry.status below with AttributeError
+            # while holding the lock, leaving it deadlocked.
+            if isinstance(entry, dict):
                 return
             # Guard against _PREWARM_SENTINEL: a plain object() has no .status attribute.
             # Race: prewarm_active_agents placed a sentinel; real AgentContext not yet registered.
@@ -1169,6 +1333,7 @@ class AgentStreamManager:
             duration = None
             if ctx.completed_at and ctx.started_at:
                 duration = round(ctx.completed_at - ctx.started_at, 2)
+            error = (error or '')[:4096]
             entry = {
                 'type': 'agent_error',
                 'timestamp': datetime.now().isoformat(),
@@ -1202,6 +1367,7 @@ class AgentStreamManager:
         try:
             af_root = Path(__file__).parent
             journal_path = af_root / 'state' / 'claude_journal.jsonl'
+            error = (error or '')[:4096]
             entry = {
                 'type': 'agent_error',
                 'timestamp': datetime.now().isoformat(),
@@ -1247,8 +1413,8 @@ class AgentStreamManager:
 
     def get_recent_agents(self, limit: int = 6, max_age_seconds: int = RECENT_AGENT_WINDOW_SECONDS) -> dict:
         """Return recent running/completed agents grouped by context for reconnect replay."""
-        if limit is not None and limit < 0:
-            raise ValueError(f'limit must be non-negative, got {limit}')
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+            raise ValueError(f'limit must be a non-negative int, got {limit!r}')
         now = time.time()
         by_id = {}
 
@@ -1261,8 +1427,11 @@ class AgentStreamManager:
                 if status not in ('running', 'complete', 'error'):
                     continue
                 ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
-                if max_age_seconds and ts and (now - ts) > max_age_seconds:
-                    continue
+                if not isinstance(ts, (int, float)):
+                    ts = 0
+                if max_age_seconds is not None:
+                    if ts == 0 or (now - ts) > max_age_seconds:
+                        continue
                 by_id[agent_id] = _copy_agent_fields(info)
 
         for agent_id, info in self._load_disk_agents().items():
@@ -1272,13 +1441,18 @@ class AgentStreamManager:
             if status not in ('running', 'complete', 'error'):
                 continue
             ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
-            if max_age_seconds and ts and (now - ts) > max_age_seconds:
-                continue
+            if not isinstance(ts, (int, float)):
+                ts = 0
+            if max_age_seconds is not None:
+                if ts == 0 or (now - ts) > max_age_seconds:
+                    continue
             by_id[agent_id] = _copy_agent_fields(info)
 
         def _sort_key(info: dict):
             status_rank = 0 if info.get('status') == 'running' else 1
             ts = info.get('completed_at') or info.get('started_at') or info.get('spawned_at') or 0
+            if not isinstance(ts, (int, float)):
+                ts = 0
             return (status_rank, -ts)
 
         recent = sorted(by_id.values(), key=_sort_key)
@@ -1293,19 +1467,19 @@ class AgentStreamManager:
     def _load_disk_agents(self) -> dict:
         """Load agent state from active_agents.json (written by all process contexts)."""
         try:
-            if self.STATE_FILE.exists():
-                try:
-                    sz = self.STATE_FILE.stat().st_size
-                except OSError:
-                    return {}
-                if sz > _MAX_ACTIVE_AGENTS_BYTES:
+            if self.STATE_FILE.exists() and not self.STATE_FILE.is_symlink():
+                # Read with a hard cap to prevent TOCTOU and OOM: open once, read limited bytes.
+                # O_NOFOLLOW prevents symlink swap between is_symlink() check and open().
+                fd = os.open(str(self.STATE_FILE), os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd, 'rb') as f:
+                    raw = f.read(_MAX_ACTIVE_AGENTS_BYTES + 1)
+                if len(raw) > _MAX_ACTIVE_AGENTS_BYTES:
                     logger.warning(
                         'active_agents.json exceeds size cap (%d bytes) — skipping load',
-                        sz,
+                        len(raw),
                     )
                     return {}
-                with open(self.STATE_FILE, 'r', encoding='utf-8', errors='replace') as f:
-                    data = json.load(f)
+                data = json.loads(raw.decode('utf-8', errors='replace'))
                 if isinstance(data, dict):
                     return data
         except Exception:
@@ -1320,11 +1494,13 @@ class AgentStreamManager:
           2. Tombstone: read .snapshot.json (completed agents — fast, no JSONL re-parse)
           3. Disk fallback: scan STREAM_DIR for matching .jsonl (cold-start / cross-process)
         """
+        if agent_id is None:
+            return []
         # limit=None means "return all lines" (no limit).
         # limit=0 means "return no lines" (empty).
-        # limit<0 is invalid — raise ValueError (ASM-NEW-4: consistent with get_stream_history).
-        if limit is not None and limit < 0:
-            raise ValueError(f'limit must be non-negative, got {limit}')
+        # limit<0 or non-int is invalid — raise ValueError.
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+            raise ValueError(f'limit must be a non-negative int, got {limit!r}')
         if limit == 0:
             return []
 
@@ -1341,14 +1517,23 @@ class AgentStreamManager:
             if snap_path:
                 try:
                     snap_resolved = Path(snap_path).resolve()
-                    if (snap_resolved.is_relative_to(STREAM_DIR.resolve())
-                            and not Path(snap_path).is_symlink()
-                            and snap_resolved.is_file()):
+                    if snap_resolved.is_relative_to(STREAM_DIR.resolve()):
                         try:
-                            with open(snap_resolved, encoding='utf-8', errors='replace') as f:
-                                data = json.load(f)
-                            lines_all = data.get('lines', [])
-                            return lines_all if limit is None else lines_all[-limit:]
+                            # O_NOFOLLOW + nlink>1 check: rejects symlinks (TOCTOU-safe) and hardlinks
+                            fd = os.open(snap_resolved, os.O_RDONLY | os.O_NOFOLLOW)
+                            try:
+                                st = os.fstat(fd)
+                                if st.st_nlink == 1 and stat_module.S_ISREG(st.st_mode):
+                                    with os.fdopen(fd, encoding='utf-8', errors='replace') as f:
+                                        fd = -1
+                                        data = json.load(f)
+                                    lines_all = data.get('lines') or []
+                                    if not isinstance(lines_all, list):
+                                        lines_all = []
+                                    return lines_all if limit is None else lines_all[-limit:]
+                            finally:
+                                if fd != -1:
+                                    os.close(fd)
                         except Exception:
                             pass
                 except (OSError, RuntimeError, UnicodeDecodeError, ValueError):
@@ -1358,10 +1543,20 @@ class AgentStreamManager:
             if stream_file:
                 try:
                     sf_resolved = Path(stream_file).resolve()
-                    if (sf_resolved.is_relative_to(STREAM_DIR.resolve())
-                            and not Path(stream_file).is_symlink()
-                            and sf_resolved.is_file()):
-                        return self._parse_jsonl_file(sf_resolved, limit)
+                    if sf_resolved.is_relative_to(STREAM_DIR.resolve()):
+                        try:
+                            fd = os.open(sf_resolved, os.O_RDONLY | os.O_NOFOLLOW)
+                            try:
+                                st = os.fstat(fd)
+                                if st.st_nlink == 1 and stat_module.S_ISREG(st.st_mode):
+                                    os.close(fd)
+                                    fd = -1
+                                    return self._parse_jsonl_file(sf_resolved, limit)
+                            finally:
+                                if fd != -1:
+                                    os.close(fd)
+                        except OSError:
+                            pass
                 except (OSError, RuntimeError):
                     pass
             return []
@@ -1399,21 +1594,32 @@ class AgentStreamManager:
         max_bytes: int = _MAX_JSONL_BYTES,
     ) -> list:
         """Parse a JSONL stream file with a configurable size cap."""
-        # ASM-NEW-4: internal consistency — reject negative limits uniformly.
+        if path.resolve().parent != STREAM_DIR.resolve() and not path.resolve().is_relative_to(STREAM_DIR.resolve()):
+            raise ValueError(f'_parse_jsonl_file: path {path!r} is outside STREAM_DIR')
+        # ASM-NEW-4: internal consistency — reject negative/non-int limits uniformly.
         # Public callers (get_agent_stream_lines) already validate, but this
         # catches programming errors in future callers of this private method.
-        if limit is not None and limit < 0:
-            raise ValueError(f'_parse_jsonl_file: limit must be non-negative, got {limit}')
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+            raise ValueError(f'_parse_jsonl_file: limit must be a non-negative int, got {limit!r}')
         # C3-B fix (optimized): early-exit before any I/O when limit=0
         if limit == 0:
             return []
+        if max_bytes is not None and max_bytes <= 0:
+            return []
+        # Normalise: None means unbounded (no cap).  Cast float→int; reject other non-int types.
+        if max_bytes is not None:
+            if isinstance(max_bytes, float):
+                max_bytes = int(max_bytes)
+            elif not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
+                raise TypeError(f'_parse_jsonl_file: max_bytes must be an int or None, got {type(max_bytes).__name__}')
+        _cap = max_bytes
         disk_lines = []
         try:
             bytes_read = 0
             with open(path, 'r', encoding='utf-8', errors='replace') as fh:
                 for raw_line in fh:
                     bytes_read += len(raw_line.encode('utf-8', errors='replace'))
-                    if bytes_read > max_bytes:
+                    if _cap is not None and bytes_read > _cap:
                         break
                     seq, event = _parse_stream_line(raw_line)
                     if event:
@@ -1430,6 +1636,10 @@ class AgentStreamManager:
 
     def _read_jsonl_lines_capped(self, path: Path, max_bytes: int = _MAX_JSONL_BYTES) -> list:
         """Return raw text lines from a JSONL file, stopping at max_bytes."""
+        if path.resolve().parent != STREAM_DIR.resolve() and not path.resolve().is_relative_to(STREAM_DIR.resolve()):
+            raise ValueError(f'_read_jsonl_lines_capped: path {path!r} is outside STREAM_DIR')
+        if max_bytes is None:
+            max_bytes = self._MAX_JSONL_BYTES
         lines = []
         try:
             bytes_read = 0
@@ -1446,10 +1656,11 @@ class AgentStreamManager:
     def _get_stream_lines_from_disk(self, agent_id: str, limit: int) -> list:
         """Scan STREAM_DIR for any file matching *_{agent_id}.jsonl and parse it."""
         _ensure_stream_dir()
-        import re as _re_safe
-        safe_id = _re_safe.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
+        safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', agent_id)
         for context in ('mission', 'investigation'):
             candidate = STREAM_DIR / f"{context}_{safe_id}.jsonl"
+            if candidate.is_symlink():
+                continue
             try:
                 resolved = candidate.resolve()
                 if not resolved.is_relative_to(STREAM_DIR.resolve()):
@@ -1467,9 +1678,9 @@ class AgentStreamManager:
         Scans STREAM_DIR for .jsonl files. Optionally filters by mission_id.
         Returns newest-first, up to limit entries.
         """
-        # ASM-NEW-3: reject negative limit
-        if limit is not None and limit < 0:
-            raise ValueError(f'limit must be non-negative, got {limit}')
+        # ASM-NEW-3: reject negative/non-int limit
+        if limit is not None and (not isinstance(limit, int) or isinstance(limit, bool) or limit < 0):
+            raise ValueError(f'limit must be a non-negative int, got {limit!r}')
         _ensure_stream_dir()
 
         # Collect currently running stream file names (skip tombstones and sentinels)
@@ -1497,17 +1708,22 @@ class AgentStreamManager:
             except (OSError, FileNotFoundError):
                 pass
 
-        # Sort newest-first; enrich all candidates before applying final limit
+        # Sort newest-first; apply limit before enrichment to avoid O(n) stat/parse on large dirs.
+        # When mission_id filter is active, we cannot pre-slice — we don't know which candidates
+        # match until after enrichment. Only pre-slice when there is no mission_id filter.
         candidates.sort(key=lambda t: t[0], reverse=True)
-        if limit is None:
-            limit = len(candidates)  # no-op limit: keep all
+        if limit is not None and not mission_id:
+            candidates = candidates[:limit]
 
         manifests = []
         current_mission_id = self._get_current_mission_id()
+        _stem_re = re.compile(r'^[a-zA-Z0-9_-]+$')
         for mtime, p in candidates:
             try:
                 # Parse context and agent_id from filename: {context}_{safe_id}.jsonl
                 fname = p.stem
+                if not _stem_re.match(fname):
+                    continue  # reject filenames that could inject arbitrary values
                 parts = fname.split('_', 1)
                 context = parts[0] if len(parts) == 2 else 'unknown'
                 agent_id = parts[1] if len(parts) == 2 else fname
@@ -1647,7 +1863,9 @@ class AgentStreamManager:
                     continue
                 if info.get('status') == 'running' and raw_pid > 0:
                     if aid not in self._agents:
-                        candidates.append((aid, raw_pid, info.get('spawned_at', 0)))
+                        raw_sat = info.get('spawned_at', 0)
+                        sat = raw_sat if isinstance(raw_sat, (int, float)) else 0
+                        candidates.append((aid, raw_pid, sat))
 
         for agent_id, pid, spawned_at in candidates:
             if not _is_pid_alive(pid, spawned_at):
@@ -1663,6 +1881,8 @@ class AgentStreamManager:
                             continue  # Prewarm claimed this slot; let prewarm handle it
                         if entry.status != 'running':
                             continue  # Already completed by another thread
+                        if entry.pid != pid:
+                            continue  # Agent re-registered with new pid; don't kill new agent
                         ctx_for_io = entry
                     else:
                         # Agent only exists on disk — hydrate a minimal ctx
@@ -1674,6 +1894,8 @@ class AgentStreamManager:
                         ctx_for_io = self._agents.get(agent_id)
                         if ctx_for_io is None or not isinstance(ctx_for_io, AgentContext):
                             continue
+                        if ctx_for_io.pid != pid:
+                            continue  # Agent re-registered with new pid between candidate build and tombstone
                     # Complete atomically inside the same lock block
                     ctx_for_io.status = 'error'
                     ctx_for_io.error = 'process_died'
@@ -1796,16 +2018,22 @@ class AgentStreamManager:
 
     def _save_state_locked(self):
         """Write active agent state to STATE_FILE (call with self._lock held)."""
+        def _json_default(obj):
+            if isinstance(obj, deque):
+                return list(obj)
+            raise TypeError(f'Object of type {type(obj).__name__} is not JSON serializable')
+
         try:
             state = {
                 agent_id: (entry if isinstance(entry, dict) else entry.to_dict())
                 for agent_id, entry in self._agents.items()
                 if entry is not _PREWARM_SENTINEL
-                and not (isinstance(entry, dict) and entry.get('_tombstone'))
             }
             tmp = self.STATE_FILE.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8', errors='replace') as f:
-                json.dump(state, f, indent=2)
+            # O_NOFOLLOW prevents write-through-symlink if .tmp path is pre-placed as a symlink.
+            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w', encoding='utf-8', errors='replace') as f:
+                json.dump(state, f, indent=2, default=_json_default)
             tmp.replace(self.STATE_FILE)
         except Exception as e:
             logger.warning("_save_state_locked failed: %s", e)
@@ -1829,7 +2057,7 @@ def _is_pid_alive(pid, expected_start_time: float = 0) -> bool:
             return False
 
         # PID reuse guard: check process start time
-        if expected_start_time > 0:
+        if isinstance(expected_start_time, (int, float)) and expected_start_time > 0:
             try:
                 with open(stat_path, 'r', encoding='utf-8', errors='replace') as f:
                     stat_content = f.read()
@@ -1843,6 +2071,8 @@ def _is_pid_alive(pid, expected_start_time: float = 0) -> bool:
                 if len(fields) > 19:
                     boot_ticks = int(fields[19])
                     clock_hz = os.sysconf('SC_CLK_TCK')
+                    if clock_hz == 0:
+                        return True  # Cannot verify start time — assume alive
                     with open('/proc/stat', 'r', encoding='utf-8', errors='replace') as sf:
                         for line in sf:
                             if line.startswith('btime'):
@@ -1901,6 +2131,8 @@ def get_recent_agents(limit: int = 6, max_age_seconds: int = RECENT_AGENT_WINDOW
 
 def get_agent_stream_lines(agent_id: str, limit: int = 200) -> list:
     """Return buffered parsed stream lines for replay on reconnect."""
+    if agent_id is None:
+        return []
     return _manager.get_agent_stream_lines(agent_id, limit)
 
 
@@ -1947,12 +2179,149 @@ def _next_seq_for_writer(agent_id: str) -> int:
     with _manager._lock:
         live_ctx = _manager._agents.get(agent_id)
     if live_ctx is not ctx:
+        with ctx.seq_lock:
+            ctx.next_seq -= 1
         logger.warning("_next_seq_for_writer: ctx replaced for %s after seq allocation; returning 0", agent_id)
         return 0
     return seq
 
 
-def stream_stdout_to_file(proc, stream_file: Path, agent_id: str):
+_URL_RE = re.compile(r"https?://[^\s\"'<>)}\]]+")
+_CACHE_JSON_LINE_RE = re.compile(
+    r"(?:Cache JSON|_cache_path|cache_path)\s*[:=]\s*[\"']?(?P<path>/[^\s\"'<>]+?\.json)"
+)
+
+
+def _extract_urls_from_event_text(text: str) -> list[str]:
+    if not isinstance(text, str) or not text:
+        return []
+    urls = []
+    for match in _URL_RE.findall(text):
+        url = match.rstrip(".,;:")
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _extract_cache_json_paths_from_raw_event(raw_line: str) -> list[str]:
+    """Extract WebProxy cache JSON paths from provider tool result payloads."""
+    if not isinstance(raw_line, str) or not raw_line:
+        return []
+
+    candidates: list[str] = []
+
+    def _add_path(value: str) -> None:
+        if value and value not in candidates:
+            candidates.append(value)
+
+    def _scan_text(value: str) -> None:
+        for match in _CACHE_JSON_LINE_RE.finditer(value):
+            _add_path(match.group("path").rstrip(".,;:"))
+        for match in re.finditer(r"(/[^\s\"'<>]+/web_proxy_cache/[^\s\"'<>]+?\.json)", value):
+            _add_path(match.group(1).rstrip(".,;:"))
+
+    def _walk(value) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if isinstance(item, str) and str(key) in {"_cache_path", "cache_path", "cache_json_path"}:
+                    _add_path(item)
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+        elif isinstance(value, str):
+            _scan_text(value)
+
+    _scan_text(raw_line)
+    try:
+        parsed = json.loads(raw_line)
+    except (json.JSONDecodeError, ValueError):
+        parsed = None
+    if parsed is not None:
+        _walk(parsed)
+
+    return candidates
+
+
+def _is_allowed_proxy_cache_json(path: Path) -> bool:
+    """Restrict runner-side evidence pinning to AtlasForge WebProxy cache JSON."""
+    if path.suffix.lower() != ".json":
+        return False
+    parts = set(path.parts)
+    if "web_proxy_cache" not in parts:
+        return False
+
+    allowed_roots = {
+        REPO_ROOT.resolve(),
+        Path("/home/vader/AI-AtlasForge").resolve(),
+        Path("/mnt/ForgeRealm/AI-AtlasForge").resolve(),
+    }
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in allowed_roots:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _pin_proxy_cache_json(
+    cache_json_path: str,
+    artifact_sources_file: Path,
+    seq: int,
+    agent_id: str,
+    artifact_label: Optional[str],
+    event_type: str,
+    timestamp: str,
+) -> Optional[dict]:
+    """Copy a full WebProxy cache JSON into the subagent source artifacts."""
+    try:
+        source_path = Path(cache_json_path).expanduser().resolve()
+        if not _is_allowed_proxy_cache_json(source_path) or not source_path.exists():
+            return None
+
+        data = source_path.read_bytes()
+        sha256 = hashlib.sha256(data).hexdigest()
+        evidence_dir = artifact_sources_file.parent / "source_payloads"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = evidence_dir / f"webproxy_{seq}_{sha256[:12]}.json"
+        if not dest_path.exists():
+            tmp_path = dest_path.with_name(f".{dest_path.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+            tmp_path.write_bytes(data)
+            os.replace(tmp_path, dest_path)
+            try:
+                shutil.copystat(source_path, dest_path)
+            except OSError:
+                pass
+
+        return {
+            "timestamp": timestamp,
+            "seq": seq,
+            "agent_id": artifact_label or agent_id,
+            "artifact_type": "web_proxy_cache_json",
+            "source_event_type": event_type,
+            "cache_json_path": str(source_path),
+            "evidence_json_path": str(dest_path),
+            "sha256": sha256,
+            "byte_length": len(data),
+        }
+    except Exception as exc:
+        logging.debug("proxy cache JSON pin failed for agent %s: %s", agent_id, exc)
+        return None
+
+
+def stream_stdout_to_file(
+    proc,
+    stream_file: Path,
+    agent_id: str,
+    artifact_event_file: Optional[Path] = None,
+    artifact_sources_file: Optional[Path] = None,
+    artifact_label: Optional[str] = None,
+):
     """
     Daemon thread target: read proc.stdout line-by-line, stamp each with a
     monotonic per-agent `seq`, and append to stream_file as a JSONL envelope:
@@ -1960,7 +2329,81 @@ def stream_stdout_to_file(proc, stream_file: Path, agent_id: str):
 
     Legacy raw lines without an envelope are tolerated by readers (treated as seq=0
     and re-stamped by the watcher).
+
+    If artifact_event_file/artifact_sources_file are supplied, this function
+    also mirrors normalized runner-owned investigation telemetry to append-only
+    per-agent artifacts. Those paths must be unique to one writer.
     """
+    seen_source_urls: set[str] = set()
+    seen_cache_json_paths: set[str] = set()
+
+    def _append_artifacts(seq: int, raw_line: str) -> None:
+        if not artifact_event_file and not artifact_sources_file:
+            return
+        try:
+            event = _parse_jsonl_line(raw_line)
+            now = datetime.now(timezone.utc).isoformat()
+            event_type = (event or {}).get("event_type") if isinstance(event, dict) else None
+            display_text = (event or {}).get("display_text") if isinstance(event, dict) else None
+
+            if artifact_event_file:
+                artifact_event_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(artifact_event_file, "a", encoding="utf-8") as ef:
+                    ef.write(json.dumps({
+                        "timestamp": now,
+                        "seq": seq,
+                        "agent_id": artifact_label or agent_id,
+                        "event_type": event_type or "raw",
+                        "display_text": display_text or "",
+                        "raw": raw_line.strip(),
+                    }, ensure_ascii=False) + "\n")
+
+            if artifact_sources_file and event_type in {"tool_call", "tool_result"}:
+                urls = _extract_urls_from_event_text(raw_line)
+                if display_text:
+                    urls.extend(_extract_urls_from_event_text(str(display_text)))
+                new_urls = []
+                for url in urls:
+                    if url not in seen_source_urls:
+                        seen_source_urls.add(url)
+                        new_urls.append(url)
+                if new_urls:
+                    artifact_sources_file.parent.mkdir(parents=True, exist_ok=True)
+                    with open(artifact_sources_file, "a", encoding="utf-8") as sf:
+                        for url in new_urls:
+                            sf.write(json.dumps({
+                                "timestamp": now,
+                                "seq": seq,
+                                "agent_id": artifact_label or agent_id,
+                                "source_url": url,
+                                "source_event_type": event_type,
+                            }, ensure_ascii=False) + "\n")
+
+                if event_type == "tool_result":
+                    cache_paths = _extract_cache_json_paths_from_raw_event(raw_line)
+                    new_cache_paths = []
+                    for cache_path in cache_paths:
+                        if cache_path not in seen_cache_json_paths:
+                            seen_cache_json_paths.add(cache_path)
+                            new_cache_paths.append(cache_path)
+                    if new_cache_paths:
+                        artifact_sources_file.parent.mkdir(parents=True, exist_ok=True)
+                        with open(artifact_sources_file, "a", encoding="utf-8") as sf:
+                            for cache_path in new_cache_paths:
+                                pinned = _pin_proxy_cache_json(
+                                    cache_path,
+                                    artifact_sources_file,
+                                    seq,
+                                    agent_id,
+                                    artifact_label,
+                                    event_type,
+                                    now,
+                                )
+                                if pinned:
+                                    sf.write(json.dumps(pinned, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logging.debug("artifact stream append failed for agent %s: %s", agent_id, exc)
+
     try:
         with open(stream_file, 'a', buffering=1, encoding='utf-8', errors='replace') as f:
             for line in proc.stdout:
@@ -1973,6 +2416,7 @@ def stream_stdout_to_file(proc, stream_file: Path, agent_id: str):
                     # No tracked context — write the raw line; watcher will normalize.
                     f.write(line)
                 f.flush()
+                _append_artifacts(seq, line)
     except Exception as exc:
         logging.error('stream write failed for agent %s: %s', agent_id, exc)
         # Drain stdout so proc can exit without blocking on a full pipe.
@@ -1990,6 +2434,10 @@ def stream_stdout_to_file(proc, stream_file: Path, agent_id: str):
             error = f"Process wait failed: {_wait_exc}"
             try:
                 proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
             except Exception:
                 pass
         complete_agent(agent_id, error=error)

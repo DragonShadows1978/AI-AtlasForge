@@ -180,6 +180,9 @@ window.collapseAllJournal = widgets.collapseAllJournal;
 window.startClaude = widgets.startClaude;
 window.stopClaude = widgets.stopClaude;
 window.setLlmProvider = widgets.setLlmProvider;
+window.openLlmSettingsModal = widgets.openLlmSettingsModal;
+window.closeLlmSettingsModal = widgets.closeLlmSettingsModal;
+window.saveLlmSettingsModal = widgets.saveLlmSettingsModal;
 window.setMission = widgets.setMission;
 window.resetMission = widgets.resetMission;
 window.queueMission = widgets.queueMission;
@@ -244,7 +247,9 @@ window.applyRecovery = recovery.applyRecovery;
 
 // Investigation Mode
 window.toggleInvestigationMode = investigation.toggleInvestigationMode;
+window.initInvestigationControls = investigation.initInvestigationControls;
 window.startInvestigation = investigation.startInvestigation;
+window.adoptStartedInvestigation = investigation.adoptStartedInvestigation;
 window.stopInvestigation = investigation.stopInvestigation;
 window.showInvestigationStatus = investigation.showInvestigationStatus;
 window.hideInvestigationStatus = investigation.hideInvestigationStatus;
@@ -547,6 +552,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load saved card states
     widgets.loadCardStates();
 
+    // Wire prompt file drops before any awaited dashboard refresh work.
+    if (typeof widgets.initMissionInputFileDrop === 'function') {
+        widgets.initMissionInputFileDrop();
+    }
+
     // Initialize drag-drop for widget columns
     dragDrop.initDragDrop();
 
@@ -584,6 +594,9 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Check for crash recovery
     recovery.checkForRecovery();
+
+    // Hydrate investigation form state before checking for an active investigation.
+    investigation.initInvestigationControls();
 
     // Check for running investigation
     investigation.checkForRunningInvestigation();

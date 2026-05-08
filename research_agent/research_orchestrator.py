@@ -19,49 +19,121 @@ Usage:
 """
 
 import sys
+import re as _re
 import json
 import logging
+import importlib.util
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from experiment_framework import invoke_fresh_llm, ModelType
+# Import investigation_engine without permanently mutating sys.path.
+if "investigation_engine" not in sys.modules:
+    _IE_PATH = Path(__file__).parent.parent / "investigation_engine.py"
+    _ie_spec = importlib.util.spec_from_file_location("investigation_engine", str(_IE_PATH))
+    _ie_mod = importlib.util.module_from_spec(_ie_spec)
+    sys.modules["investigation_engine"] = _ie_mod
+    _ie_spec.loader.exec_module(_ie_mod)
+from investigation_engine import invoke_claude, ModelType
 from .web_researcher import WebResearcher, WebResearchResult, SearchStrategy
 from .knowledge_synthesizer import (
     KnowledgeSynthesizer,
     SynthesisResult,
-    ConfidenceLevel
+    ConfidenceLevel,
+    _sanitize_field,
 )
+
+
+def _extract_first_json_object(text: str, required_key: str = ""):
+    """Return the first balanced {...} block from text that contains required_key, or None.
+
+    Uses a character-level brace-depth scan that correctly skips braces
+    inside string literals, so arbitrary nesting depth is handled without
+    a depth-limited regex.  Preamble '{}' blocks that don't contain the
+    required_key are skipped rather than returned.
+    """
+    if not text:
+        return None
+    text = text[:200_000]
+    start = text.find('{')
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape_next = False
+        found_end = None
+        for i, ch in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    found_end = i
+                    break
+        if found_end is None:
+            # No matching '}' exists from here; no later '{' can match either.
+            break
+        candidate = text[start:found_end + 1]
+        # Match required_key as a JSON key (followed by optional whitespace and ':'),
+        # not just anywhere in the string (which would false-positive on values).
+        if not required_key or _re.search(
+            _re.escape(required_key) + r'\s*:', candidate
+        ):
+            return candidate
+        start = text.find('{', found_end + 1)
+    return None
 
 
 @dataclass
 class ResearchConfig:
     """Configuration for research activities."""
-    model: ModelType = ModelType.BALANCED
-    max_topics: int = 5
+    orchestrator_model: ModelType = ModelType.CLAUDE_SONNET   # topic extraction + synthesis
+    researcher_model: ModelType = ModelType.CLAUDE_HAIKU      # web queries
+    max_topics: int = 10          # ceiling; Sonnet decides actual count
     max_queries_per_topic: int = 3
     max_results_per_query: int = 5
     timeout_seconds: int = 300  # 5 minutes total
     enable_parallel: bool = True
-    max_workers: int = 3
+    max_workers: int = 10         # ceiling; scales with topic count
     simulate_search: bool = False  # Use for testing
     use_web_search: bool = False  # Enable real web search via --allowedTools WebSearch
 
     def __post_init__(self):
-        # Guard against None/invalid values that crash at runtime
-        if self.timeout_seconds is None or isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, int):
+        # TD-MOD-1: reject non-positive-integer values BEFORE any coercion.
+        # bool subclasses int, so check it first. Also reject floats — they
+        # cause slice TypeError at runtime (slice indices must be integers).
+        def _require_positive_int(val, name: str) -> None:
+            if isinstance(val, bool) or isinstance(val, float) or not isinstance(val, int) or val <= 0:
+                raise ValueError(f"{name} must be a positive integer, got {val!r}")
+        _require_positive_int(self.timeout_seconds, "timeout_seconds")
+        _require_positive_int(self.max_results_per_query, "max_results_per_query")
+        _require_positive_int(self.max_queries_per_topic, "max_queries_per_topic")
+        # Coerce remaining fields with None/invalid to safe defaults
+        if self.timeout_seconds is None or not isinstance(self.timeout_seconds, int):
             self.timeout_seconds = 300
-        if not isinstance(self.max_workers, int) or self.max_workers < 1:
+        if isinstance(self.max_workers, bool) or not isinstance(self.max_workers, int) or self.max_workers < 1:
             self.max_workers = 1
-        if not isinstance(self.max_topics, int) or self.max_topics < 1:
-            self.max_topics = 5
+        if isinstance(self.max_topics, bool) or not isinstance(self.max_topics, int) or self.max_topics < 1:
+            self.max_topics = 10
+        if self.orchestrator_model is None:
+            self.orchestrator_model = ModelType.CLAUDE_SONNET
+        if self.researcher_model is None:
+            self.researcher_model = ModelType.CLAUDE_HAIKU
 
 
 @dataclass
@@ -121,9 +193,15 @@ class ResearchFindings:
 
         return md
 
-    def save_report(self, filepath: Path) -> Path:
+    def save_report(self, filepath: Path, base_dir: Optional[Path] = None) -> Path:
         """Save research report to markdown file."""
-        filepath = Path(filepath)
+        filepath = Path(filepath).resolve()
+        if base_dir is not None:
+            base_dir = Path(base_dir).resolve()
+            try:
+                filepath.relative_to(base_dir)
+            except ValueError:
+                raise ValueError(f"save_report: filepath outside allowed base_dir: {filepath}")
         filepath.write_text(self.to_markdown())
         return filepath
 
@@ -148,11 +226,16 @@ class ResearchOrchestrator:
         findings.save_report(Path("research/research_findings.md"))
     """
 
-    TOPIC_EXTRACTION_PROMPT = """Analyze this mission and identify research topics.
+    TOPIC_EXTRACTION_PROMPT = """Analyze this mission and identify the appropriate research topics.
 
 Mission: $mission
 
-Identify 3-5 specific topics to research that would help plan this mission.
+Identify the right number of research topics (1–10) based on mission complexity:
+- Simple, single-component missions: 1–2 topics
+- Moderate missions with clear scope: 3–4 topics
+- Complex multi-component missions: 5–7 topics
+- Large cross-cutting architectural missions: 8–10 topics
+
 Consider:
 1. Core technologies/techniques needed
 2. Best practices for this type of work
@@ -183,14 +266,14 @@ Respond in JSON:
 
         # Initialize components
         self.web_researcher = WebResearcher(
-            model=self.config.model,
+            model=self.config.researcher_model,
             max_results_per_query=self.config.max_results_per_query,
             timeout_seconds=max(1, self.config.timeout_seconds // 3),
             use_web_search=self.config.use_web_search
         )
 
         self.synthesizer = KnowledgeSynthesizer(
-            model=self.config.model,
+            model=self.config.orchestrator_model,
             timeout_seconds=max(1, self.config.timeout_seconds // 2)
         )
 
@@ -205,28 +288,27 @@ Respond in JSON:
             List of topic dicts with topic, why, and priority
         """
         import string as _string
-        prompt = _string.Template(self.TOPIC_EXTRACTION_PROMPT).safe_substitute(mission=mission)
-
-        response, _ = invoke_fresh_llm(
-            prompt=prompt,
-            model=self.config.model,
-            timeout=60
+        prompt = _string.Template(self.TOPIC_EXTRACTION_PROMPT).safe_substitute(
+            mission=_sanitize_field(mission, max_len=4000)
         )
 
+        response, _ = invoke_claude(
+            prompt=prompt,
+            model=self.config.orchestrator_model,
+            timeout=60
+        )
+        response = response or ""
+
         try:
-            import re
-            _balanced = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
-            _fallback = re.search(r'\{.*?\}', response, re.DOTALL)
-            json_match = _balanced or _fallback
-            if json_match:
-                parsed = json.loads(json_match.group(0))
+            _candidate = _extract_first_json_object(response, required_key='"topics"')
+            if _candidate:
+                parsed = json.loads(_candidate)
                 return parsed.get("topics", [])
         except (json.JSONDecodeError, ValueError) as _e:
-            import logging as _log
-            _log.getLogger(__name__).debug("JSON parse error in extract_research_topics: %s", _e)
+            logger.debug("JSON parse error in extract_research_topics: %s", _e)
 
-        # Fallback: extract keywords from mission
-        return [{"topic": mission, "why": "Main mission topic", "priority": "high"}]
+        # Fallback: extract keywords from mission (sanitize to prevent injection propagation)
+        return [{"topic": _sanitize_field(mission, max_len=500), "why": "Main mission topic", "priority": "high"}]
 
     def research_topic(
         self,
@@ -283,17 +365,26 @@ Respond in JSON:
                 except Exception as _cb_exc:
                     logger.debug("[Research] progress_callback raised: %s", _cb_exc)
 
-        # Extract topics if not provided
-        if not topics:
+        # Extract topics if not provided (empty list [] is treated as caller-supplied)
+        if topics is None:
             log_progress("Extracting research topics from mission...")
             topic_data = self.extract_topics(mission)
             topics = [t.get("topic", "") for t in topic_data if t.get("topic")]
             topics = topics[:self.config.max_topics]
+        else:
+            # Guard against non-iterable callers (int, float, etc.)
+            if not hasattr(topics, '__iter__') or isinstance(topics, str):
+                raise TypeError(f"topics must be a list or None, got {type(topics).__name__}")
+            # Cap caller-supplied topics by max_topics ceiling; filter None/empty
+            topics = [str(t) for t in topics if t and str(t).strip()][:self.config.max_topics]
+
+        # Sanitize topics before use: ensures topics_researched and r.topic in research
+        # results stay consistent (failed_topics comparison uses same sanitized values).
+        topics = [s for s in (_sanitize_field(t, max_len=500) for t in topics) if s]
 
         if not topics:
             logger.warning("Research: no topics extracted from mission — skipping research phase")
-            if progress_callback:
-                progress_callback("Warning: could not extract research topics from mission statement.")
+            log_progress("Warning: could not extract research topics from mission statement.")
 
         findings.topics_researched = topics
         log_progress(f"Researching {len(topics)} topics: {', '.join(str(t) for t in topics[:3])}...")
@@ -306,10 +397,21 @@ Respond in JSON:
 
         # Calculate source counts
         for result in findings.research_results:
-            findings.total_sources += len(result.results)
+            _results = result.results or []
+            findings.total_sources += len(_results)
             findings.primary_sources += sum(
-                1 for r in result.results if r.is_primary_source
+                1 for r in _results if r.is_primary_source
             )
+
+        # TD-MOD-2: record topics that produced zero results so callers can
+        # distinguish genuine failure from zero-result research.
+        topics_with_results = {r.topic for r in findings.research_results if r.results}
+        failed_topics = [t for t in topics if t not in topics_with_results]
+        if failed_topics:
+            for t in failed_topics:
+                findings.errors.append(f"No results for topic: {t}")
+            if not findings.research_results or not any(r.results for r in findings.research_results):
+                findings.success = False
 
         # Synthesize findings using per-topic synthesis + merge
         if findings.research_results:
@@ -318,20 +420,21 @@ Respond in JSON:
                 per_topic = self._synthesize_per_topic(
                     findings.research_results, context, log_progress
                 )
-                if len(per_topic) > 1:
-                    log_progress(f"Merging {len(per_topic)} per-topic syntheses...")
-                    merged = self.synthesizer.merge_syntheses(per_topic)
-                    merged.topic = mission
-                    findings.synthesis = merged
-                elif len(per_topic) == 1:
-                    findings.synthesis = per_topic[0]
-                    findings.synthesis.topic = mission
-                else:
-                    raise RuntimeError("Per-topic synthesis produced no results")
-                log_progress(f"Synthesis complete. Confidence: {findings.synthesis.synthesis_confidence.value}")
             except Exception as e:
-                # Fallback: single flat synthesis (original behavior)
+                per_topic = []
                 log_progress(f"Per-topic synthesis failed ({e}), falling back to flat synthesis...")
+
+            if len(per_topic) > 1:
+                log_progress(f"Merging {len(per_topic)} per-topic syntheses...")
+                merged = self.synthesizer.merge_syntheses(per_topic)
+                merged.topic = mission
+                findings.synthesis = merged
+                log_progress(f"Synthesis complete. Confidence: {findings.synthesis.synthesis_confidence.value}")
+            elif len(per_topic) == 1:
+                findings.synthesis = per_topic[0]
+                findings.synthesis.topic = mission
+                log_progress(f"Synthesis complete. Confidence: {findings.synthesis.synthesis_confidence.value}")
+            else:
                 try:
                     findings.synthesis = self.synthesizer.synthesize(
                         topic=mission,
@@ -382,7 +485,7 @@ Respond in JSON:
         """Research topics in parallel."""
         results = []
 
-        executor = ThreadPoolExecutor(max_workers=self.config.max_workers)
+        executor = ThreadPoolExecutor(max_workers=max(1, min(len(topics), self.config.max_workers)))
         try:
             futures = {
                 executor.submit(self.research_topic, topic, context): topic
@@ -398,13 +501,13 @@ Respond in JSON:
                         log_progress(f"Completed research: {topic}")
                     except Exception as e:
                         log_progress(f"Failed to research {topic}: {e}")
-            except TimeoutError:
+            except (TimeoutError, concurrent.futures.TimeoutError):
                 log_progress(f"Parallel research timed out after {self.config.timeout_seconds}s; returning {len(results)} results")
                 # Cancel pending futures to avoid blocking shutdown
                 for f in futures:
                     f.cancel()
         finally:
-            executor.shutdown(wait=False)
+            executor.shutdown(wait=False, cancel_futures=True)
 
         return results
 
@@ -434,12 +537,17 @@ Respond in JSON:
             if not result.results:
                 continue
             log_progress(f"Synthesizing topic: {result.topic}")
-            synthesis = self.synthesizer.synthesize_single(
-                topic=result.topic,
-                research=result,
-                context=context
-            )
-            syntheses.append(synthesis)
+            # BUG-COR-1: wrap each topic in try/except so one failure does not
+            # discard all already-synthesized topics for other topics.
+            try:
+                synthesis = self.synthesizer.synthesize_single(
+                    topic=result.topic,
+                    research=result,
+                    context=context
+                )
+                syntheses.append(synthesis)
+            except Exception as e:
+                log_progress(f"Synthesis failed for topic '{result.topic}': {e}")
         return syntheses
 
     def merge_research_syntheses(
@@ -496,17 +604,20 @@ Respond in JSON:
             log_progress: Callback for progress updates
         """
         try:
-            # Import the code extraction pipeline
-            import sys
+            # BUG-SEC-3: use importlib with an explicit absolute path instead of
+            # sys.path.insert(0, ...) to prevent workspace-relative module hijacking.
+            import importlib.util
+            import uuid
             from pathlib import Path
 
-            # Add Investigation module to path
-            investigation_path = Path(__file__).parent.parent / "workspace" / "Investigation"
-            if str(investigation_path) not in sys.path:
-                sys.path.insert(0, str(investigation_path))
-
-            from afterimage_injector import ResearchCodePipeline, InjectionConfig
-            import uuid
+            _injector_path = Path(__file__).parent.parent / "workspace" / "Investigation" / "afterimage_injector.py"
+            if not _injector_path.exists():
+                raise ImportError(f"afterimage_injector not found at {_injector_path}")
+            _spec = importlib.util.spec_from_file_location("afterimage_injector", str(_injector_path))
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            ResearchCodePipeline = _mod.ResearchCodePipeline
+            InjectionConfig = _mod.InjectionConfig
 
             # Generate a research session ID
             research_id = f"research_{uuid.uuid4().hex[:8]}"
@@ -546,7 +657,8 @@ Respond in JSON:
 def research_for_mission(
     mission: str,
     topics: Optional[List[str]] = None,
-    model: ModelType = ModelType.BALANCED,
+    orchestrator_model: ModelType = ModelType.CLAUDE_SONNET,
+    researcher_model: ModelType = ModelType.CLAUDE_HAIKU,
     simulate: bool = False,
     use_web_search: bool = False
 ) -> ResearchFindings:
@@ -556,7 +668,8 @@ def research_for_mission(
     Args:
         mission: Mission statement
         topics: Optional specific topics
-        model: Model to use
+        orchestrator_model: Model for topic extraction and synthesis (default: Sonnet)
+        researcher_model: Model for web queries (default: Haiku)
         simulate: Use simulated searches
         use_web_search: Enable real web search via --allowedTools WebSearch
 
@@ -564,7 +677,8 @@ def research_for_mission(
         ResearchFindings
     """
     config = ResearchConfig(
-        model=model,
+        orchestrator_model=orchestrator_model,
+        researcher_model=researcher_model,
         simulate_search=simulate,
         use_web_search=use_web_search
     )
@@ -578,7 +692,8 @@ if __name__ == "__main__":
     print("=" * 50)
 
     config = ResearchConfig(
-        model=ModelType.FAST,
+        orchestrator_model=ModelType.CLAUDE_HAIKU,
+        researcher_model=ModelType.CLAUDE_HAIKU,
         max_topics=2,
         max_queries_per_topic=2,
         simulate_search=True  # Use simulation for self-test

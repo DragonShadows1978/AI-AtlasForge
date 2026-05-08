@@ -156,8 +156,15 @@ class TestStageHandlerProcessing:
         claude_response_factory
     ):
         """Test PlanningStageHandler transitions to BUILDING on plan_complete."""
+        from pathlib import Path
         context = stage_context_factory()
         response = claude_response_factory("PLANNING", status="plan_complete")
+
+        # Two-phase gate requires both artifacts to exist on disk
+        Path(context.research_dir).mkdir(parents=True, exist_ok=True)
+        Path(context.artifacts_dir).mkdir(parents=True, exist_ok=True)
+        (Path(context.research_dir) / "research_findings.md").write_text("# Research\n\n" + "Findings. " * 60)
+        (Path(context.artifacts_dir) / "implementation_plan.md").write_text("# Plan\n\n" + "Steps. " * 40)
 
         result = planning_handler.process_response(response, context)
 
@@ -201,6 +208,119 @@ class TestStageHandlerProcessing:
         response_failed = claude_response_factory("TESTING", status="tests_failed")
         result = testing_handler.process_response(response_failed, context)
         assert result.next_stage == "ANALYZING"
+
+    @pytest.mark.unit
+    def test_testing_handler_requires_three_red_team_agents_to_pass(
+        self,
+        testing_handler,
+        stage_context_factory,
+        claude_response_factory
+    ):
+        """TESTING cannot pass on BUILDING self-validation alone."""
+        context = stage_context_factory()
+        context.mission["llm_provider"] = "codex"
+        response = claude_response_factory(
+            "TESTING",
+            status="tests_passed",
+            adversarial_testing={
+                "red_team_issues": [],
+                "red_team_agent_count": 0,
+                "red_team_duration_seconds": 0,
+                "red_team_completion": {
+                    "agent_reports_collected": 0,
+                    "all_agents_completed": False,
+                    "agents_reached_report_phase": 0,
+                    "timed_out_agents": [],
+                },
+                "property_violations": [],
+                "mutation_score": None,
+                "spec_alignment": None,
+                "epistemic_score": 0.0,
+                "rigor_level": "insufficient",
+            },
+        )
+
+        result = testing_handler.process_response(response, context)
+
+        assert result.next_stage == "ANALYZING"
+        assert result.status == "tests_error"
+        assert result.output_data["status"] == "tests_error"
+        assert "red-team gate incomplete" in result.message
+        assert result.events_to_emit[0].data["official_red_team_complete"] is False
+
+    @pytest.mark.unit
+    def test_testing_handler_allows_early_close_when_agents_finish(
+        self,
+        testing_handler,
+        stage_context_factory,
+        claude_response_factory
+    ):
+        """TESTING can pass before timeout when all required reports are complete."""
+        context = stage_context_factory()
+        context.mission["llm_provider"] = "codex"
+        response = claude_response_factory(
+            "TESTING",
+            status="tests_passed",
+            adversarial_testing={
+                "red_team_issues": [],
+                "red_team_agent_count": 3,
+                "red_team_duration_seconds": 600,
+                "red_team_completion": {
+                    "agent_reports_collected": 3,
+                    "all_agents_completed": True,
+                    "agents_reached_report_phase": 3,
+                    "timed_out_agents": [],
+                },
+                "property_violations": [],
+                "mutation_score": None,
+                "spec_alignment": None,
+                "epistemic_score": 0.8,
+                "rigor_level": "strong",
+            },
+        )
+
+        result = testing_handler.process_response(response, context)
+
+        assert result.status == "tests_passed"
+        assert result.events_to_emit[0].data["official_red_team_complete"] is True
+        assert result.events_to_emit[0].data["red_team_reports_collected"] == 3
+
+    @pytest.mark.unit
+    def test_testing_handler_rejects_agent_timeout_even_with_count(
+        self,
+        testing_handler,
+        stage_context_factory,
+        claude_response_factory
+    ):
+        """Agent count alone is insufficient when completion metadata says timeout."""
+        context = stage_context_factory()
+        context.mission["llm_provider"] = "codex"
+        response = claude_response_factory(
+            "TESTING",
+            status="tests_passed",
+            adversarial_testing={
+                "red_team_issues": [],
+                "red_team_agent_count": 3,
+                "red_team_duration_seconds": 2700,
+                "red_team_completion": {
+                    "agent_reports_collected": 2,
+                    "all_agents_completed": False,
+                    "agents_reached_report_phase": 2,
+                    "timed_out_agents": [2],
+                },
+                "property_violations": [],
+                "mutation_score": None,
+                "spec_alignment": None,
+                "epistemic_score": 0.4,
+                "rigor_level": "weak",
+            },
+        )
+
+        result = testing_handler.process_response(response, context)
+
+        assert result.status == "tests_error"
+        assert result.events_to_emit[0].data["official_red_team_complete"] is False
+        assert result.events_to_emit[0].data["red_team_timed_out_agents"] == [2]
 
     @pytest.mark.unit
     def test_analyzing_handler_transitions_to_cycle_end_on_success(

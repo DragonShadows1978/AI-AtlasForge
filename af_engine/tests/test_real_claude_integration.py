@@ -231,6 +231,9 @@ class TestPromptStructure:
         # Verify required sections
         assert "=== TESTING STAGE ===" in prompt, "Missing TESTING STAGE header"
         assert '"status"' in prompt, "Missing status in template"
+        assert "NON-INTERACTIVE COMPLETION CONTRACT" in prompt
+        assert "Do not use ScheduleWakeup" in prompt
+        assert "Every TESTING invocation must end with the strict JSON object" in prompt
 
     @pytest.mark.real_claude
     def test_cycle_end_prompt_contains_required_sections(self, tmp_path):

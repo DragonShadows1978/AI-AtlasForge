@@ -62,6 +62,73 @@ def test_parse_jsonl_line_codex_function_events():
     assert "atlasforge_conductor.py" in output_event["display_text"]
 
 
+def test_stream_stdout_pins_webproxy_cache_json_from_tool_result(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "REPO_ROOT", tmp_path)
+
+    cache_dir = tmp_path / "WebProxy" / "atlasforge_data" / "web_proxy_cache"
+    cache_dir.mkdir(parents=True)
+    cache_json = cache_dir / "fetch_example.json"
+    cache_payload = {
+        "type": "fetch",
+        "url": "https://example.com",
+        "text": "full source text",
+    }
+    cache_json.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    raw_line = json.dumps(
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "content": (
+                            "URL: https://example.com\n"
+                            f"Cache JSON: {cache_json}\n"
+                            "Text: bounded display text"
+                        ),
+                    }
+                ]
+            },
+        }
+    )
+
+    class FakeProc:
+        stdout = [raw_line + "\n"]
+        returncode = 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    stream_file = tmp_path / "stream.jsonl"
+    event_file = tmp_path / "subagent" / "events.jsonl"
+    sources_file = tmp_path / "subagent" / "sources.jsonl"
+
+    asm.stream_stdout_to_file(
+        FakeProc(),
+        stream_file,
+        "agent_1",
+        artifact_event_file=event_file,
+        artifact_sources_file=sources_file,
+        artifact_label="inv_1_sub_0",
+    )
+
+    source_payloads = list((tmp_path / "subagent" / "source_payloads").glob("webproxy_*.json"))
+    assert len(source_payloads) == 1
+    assert json.loads(source_payloads[0].read_text(encoding="utf-8")) == cache_payload
+
+    source_records = [
+        json.loads(line)
+        for line in sources_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    pinned = [r for r in source_records if r.get("artifact_type") == "web_proxy_cache_json"]
+    assert len(pinned) == 1
+    assert pinned[0]["cache_json_path"] == str(cache_json.resolve())
+    assert pinned[0]["evidence_json_path"] == str(source_payloads[0])
+    assert pinned[0]["byte_length"] == cache_json.stat().st_size
+
+
 def test_get_recent_agents_includes_completed_tombstones(monkeypatch, tmp_path):
     monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
     manager = asm.AgentStreamManager()
@@ -144,4 +211,3 @@ def test_stream_codex_session_to_file_mirrors_matching_transcript(monkeypatch, t
 
     content = stream_file.read_text(encoding="utf-8")
     assert "Running targeted search." in content
-

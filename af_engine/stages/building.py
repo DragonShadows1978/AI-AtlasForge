@@ -79,6 +79,7 @@ Respond with JSON:
         ready_for_testing = response.get("ready_for_testing", False)
         files_created = response.get("files_created", [])
         files_modified = response.get("files_modified", [])
+        self_validation = response.get("self_validation", {})
 
         # Log unrecognized status values for debugging
         valid_statuses = ["build_complete", "build_in_progress", "build_blocked"]
@@ -95,6 +96,8 @@ Respond with JSON:
                         "status": status,
                         "files_created": files_created,
                         "files_modified": files_modified,
+                        "self_validation": self_validation,
+                        "requires_official_testing": True,
                     }
                 )
             ]

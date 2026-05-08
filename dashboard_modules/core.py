@@ -78,6 +78,7 @@ send_message_to_claude = None
 get_recent_journal = None
 get_llm_provider = None
 set_llm_provider = None
+get_llm_config = None
 
 # Narrative-specific functions
 get_narrative_status = None
@@ -99,8 +100,15 @@ def _normalize_runtime_provider(provider):
     return None
 
 
-def _update_active_mission_provider(provider):
-    """Keep mission metadata aligned with the provider used for start/resume."""
+def _clean_llm_option(value):
+    option = str(value or "").strip()
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", option):
+        return option
+    return None
+
+
+def _update_active_mission_provider(provider, model=None, thinking=None):
+    """Keep mission metadata aligned with the model selection used for start/resume."""
     if not provider or not io_utils or not MISSION_PATH:
         return
     try:
@@ -108,6 +116,12 @@ def _update_active_mission_provider(provider):
         if not isinstance(mission, dict) or not mission:
             return
         mission["llm_provider"] = provider
+        cleaned_model = _clean_llm_option(model)
+        cleaned_thinking = _clean_llm_option(thinking)
+        if cleaned_model:
+            mission["llm_model"] = cleaned_model
+        if cleaned_thinking:
+            mission["llm_thinking"] = cleaned_thinking
         mission["last_updated"] = datetime.now(timezone.utc).isoformat()
         io_utils.atomic_write_json(MISSION_PATH, mission)
     except Exception:
@@ -119,7 +133,7 @@ def init_core_blueprint(
     mission_path, proposals_path, recommendations_path,
     io_utils_module,
     status_fn, start_fn, stop_fn, send_msg_fn, journal_fn,
-    get_provider_fn=None, set_provider_fn=None,
+    get_provider_fn=None, set_provider_fn=None, get_provider_config_fn=None,
     narrative_status_fn=None, narrative_start_fn=None, narrative_stop_fn=None,
     narrative_send_msg_fn=None, narrative_chat_fn=None, narrative_mission_path=None,
     mission_queue_path=None
@@ -128,7 +142,7 @@ def init_core_blueprint(
     global BASE_DIR, STATE_DIR, WORKSPACE_DIR, MISSION_PATH, PROPOSALS_PATH, RECOMMENDATIONS_PATH
     global MISSION_LOGS_DIR, io_utils, MISSION_QUEUE_PATH
     global get_claude_status, start_claude, stop_claude, send_message_to_claude, get_recent_journal
-    global get_llm_provider, set_llm_provider
+    global get_llm_provider, set_llm_provider, get_llm_config
     global get_narrative_status, start_narrative, stop_narrative, send_message_to_narrative
     global get_narrative_chat_history, NARRATIVE_MISSION_PATH
 
@@ -148,6 +162,7 @@ def init_core_blueprint(
     get_recent_journal = journal_fn
     get_llm_provider = get_provider_fn
     set_llm_provider = set_provider_fn
+    get_llm_config = get_provider_config_fn
 
     # Narrative functions (optional)
     get_narrative_status = narrative_status_fn
@@ -278,6 +293,12 @@ def api_engine_status():
         "cycle_budget": None,
         "stages": None,
         "error": None,
+        # Mission-type profile fields (cycle 2). Defaults match pre-profile
+        # missions; populated from mission.json below when available.
+        "mission_type": "full_rd",
+        "mission_type_label": "Full R&D",
+        "enabled_stages": [],
+        "stop_after_profile_complete": False,
     }
 
     try:
@@ -302,6 +323,23 @@ def api_engine_status():
             "stages": STAGES,
             "error": None,
         })
+
+        # Mission-type profile surfacing — read straight from mission.json so
+        # the field appears even if StateManager hasn't been extended yet.
+        try:
+            import io_utils as _io_utils
+            _mission_doc = _io_utils.atomic_read_json(MISSION_PATH, {}) or {}
+            engine_data["mission_type"] = _mission_doc.get("mission_type", "full_rd") or "full_rd"
+            engine_data["mission_type_label"] = (
+                _mission_doc.get("mission_type_label") or "Full R&D"
+            )
+            _es = _mission_doc.get("enabled_stages") or []
+            engine_data["enabled_stages"] = list(_es) if isinstance(_es, list) else []
+            engine_data["stop_after_profile_complete"] = bool(
+                _mission_doc.get("stop_after_profile_complete", False)
+            )
+        except Exception:
+            logger.debug("api_engine_status: mission_type read failed", exc_info=True)
     except ImportError:
         logger.warning("af_engine import error", exc_info=True)
         engine_data["error"] = "af_engine not importable"
@@ -328,8 +366,16 @@ def api_start(mode):
         if not normalized_provider:
             return jsonify({"success": False, "message": "Invalid provider"}), 400
         if set_llm_provider:
-            set_llm_provider(normalized_provider)
-        _update_active_mission_provider(normalized_provider)
+            set_llm_provider(
+                normalized_provider,
+                model=data.get("model"),
+                thinking=data.get("thinking"),
+            )
+        _update_active_mission_provider(
+            normalized_provider,
+            model=data.get("model"),
+            thinking=data.get("thinking"),
+        )
     success, message = start_claude(mode)
     return jsonify({"success": success, "message": message, "provider": normalized_provider})
 
@@ -344,10 +390,11 @@ def api_stop():
 def api_llm_provider():
     """Get or set the active LLM provider for AtlasForge starts."""
     if request.method == 'GET':
-        if get_llm_provider:
-            provider = get_llm_provider()
-        else:
-            provider = "claude"
+        if get_llm_config:
+            config = get_llm_config()
+            config["supported"] = ["claude", "codex", "gemini"]
+            return jsonify(config)
+        provider = get_llm_provider() if get_llm_provider else "claude"
         return jsonify({"provider": provider, "supported": ["claude", "codex", "gemini"]})
 
     if not set_llm_provider:
@@ -358,10 +405,18 @@ def api_llm_provider():
     if not provider:
         return jsonify({"success": False, "message": "Missing provider"}), 400
 
-    normalized = set_llm_provider(provider)
+    normalized = set_llm_provider(
+        provider,
+        model=data.get("model"),
+        thinking=data.get("thinking"),
+        options=data.get("options"),
+    )
+    config = get_llm_config() if get_llm_config else {"provider": normalized}
     return jsonify({
         "success": True,
         "provider": normalized,
+        "selected": config.get("selected"),
+        "options": config.get("options"),
         "message": f"Provider set to {normalized}"
     })
 
@@ -590,6 +645,18 @@ def api_mission():
                 return jsonify({"success": False, "errors": param_errors,
                                 "message": "; ".join(param_errors)}), 400
 
+        # Validate mission_type early (must be a known profile key or absent)
+        try:
+            from af_engine.mission_profiles import is_valid_mission_type
+            mt_submitted = data.get('mission_type')
+            if mt_submitted is not None and not is_valid_mission_type(mt_submitted):
+                return jsonify({
+                    "success": False,
+                    "message": f"Invalid mission_type: {mt_submitted!r}",
+                }), 400
+        except ImportError:
+            pass
+
         raw_cb = data.get('cycle_budget')
         _logging.getLogger(__name__).info(f"[MISSION] cycle_budget submitted={raw_cb!r}")
 
@@ -614,8 +681,13 @@ def api_mission():
             (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
             (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
 
+            active_provider = (
+                _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
+                or (get_llm_provider() if get_llm_provider else "claude")
+            )
+            active_model = _clean_llm_option(data.get("llm_model") or data.get("model"))
+            active_thinking = _clean_llm_option(data.get("llm_thinking") or data.get("thinking"))
             if _mc_available:
-                active_provider = get_llm_provider() if get_llm_provider else None
                 req = dict(data)
                 req["problem_statement"] = problem_statement
                 if active_provider and "llm_provider" not in req:
@@ -626,6 +698,12 @@ def api_mission():
                     mission_dir=mission_dir, resolved_project_name=resolved_project_name,
                     audit=audit,
                 )
+                if active_provider:
+                    new_mission["llm_provider"] = active_provider
+                if active_model:
+                    new_mission["llm_model"] = active_model
+                if active_thinking:
+                    new_mission["llm_thinking"] = active_thinking
                 io_utils.atomic_write_json(MISSION_PATH, new_mission)
                 mission_config_path = mission_dir / "mission_config.json"
                 with open(mission_config_path, 'w') as f:
@@ -644,10 +722,6 @@ def api_mission():
                     cycle_budget = max(1, int(_raw_cb))
                 except (ValueError, TypeError, OverflowError):
                     return jsonify({"success": False, "message": "Invalid cycle_budget: must be an integer"}), 400
-                active_provider = (
-                    _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
-                    or (get_llm_provider() if get_llm_provider else "claude")
-                )
                 new_mission = {
                     "mission_id": mission_id, "problem_statement": problem_statement,
                     "original_problem_statement": problem_statement,
@@ -662,6 +736,17 @@ def api_mission():
                     "project_name": resolved_project_name, "llm_provider": active_provider,
                     "metadata": data.get('metadata', {})
                 }
+                if active_model:
+                    new_mission["llm_model"] = active_model
+                if active_thinking:
+                    new_mission["llm_thinking"] = active_thinking
+                # Apply mission type profile (sets current_stage, enabled_stages,
+                # stop_after_profile_complete, mission_profile, mission_type_label).
+                try:
+                    from af_engine.mission_profiles import apply_mission_type_profile
+                    apply_mission_type_profile(new_mission, data.get('mission_type'))
+                except ImportError:
+                    pass
                 io_utils.atomic_write_json(MISSION_PATH, new_mission)
                 applied_cycle_budget = cycle_budget
 
@@ -824,6 +909,16 @@ def api_add_recommendation():
     except (ValueError, TypeError, OverflowError):
         return jsonify({"success": False, "error": "suggested_cycles must be an integer 1-10"}), 400
 
+    _VALID_EXECUTION_PROFILES = {
+        'full_rd', 'plan_only', 'build_only', 'test_red_team',
+        'bug_hunt', 'research_only', 'review_existing',
+    }
+    raw_exec_profile = data.get("execution_profile", "full_rd")
+    try:
+        execution_profile = raw_exec_profile if raw_exec_profile in _VALID_EXECUTION_PROFILES else "full_rd"
+    except TypeError:
+        execution_profile = "full_rd"
+
     recommendation = {
         "id": f"rec_{uuid.uuid4().hex[:8]}",
         "mission_title": data.get("mission_title", "Untitled Mission"),
@@ -833,7 +928,8 @@ def api_add_recommendation():
         "source_mission_summary": data.get("source_mission_summary", ""),
         "rationale": data.get("rationale", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "source_type": source_type
+        "source_type": source_type,
+        "execution_profile": execution_profile,
     }
 
     # Auto-tag and check for similar suggestions
@@ -949,6 +1045,12 @@ def api_merge_recommendations():
             _merged_cycles = max(1, min(10, int(merged_data.get("suggested_cycles", 3))))
         except (ValueError, TypeError, OverflowError):
             _merged_cycles = 3
+        _VALID_MERGE_PROFILES = {
+            'full_rd', 'plan_only', 'build_only', 'test_red_team',
+            'bug_hunt', 'research_only', 'review_existing',
+        }
+        _raw_merge_profile = merged_data.get("execution_profile", "full_rd")
+        _merge_profile = _raw_merge_profile if _raw_merge_profile in _VALID_MERGE_PROFILES else "full_rd"
         new_rec = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
             "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
@@ -958,7 +1060,8 @@ def api_merge_recommendations():
             "source_type": "merged",
             "merged_from": source_ids,
             "merged_source_descriptions": source_descriptions,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "execution_profile": _merge_profile,
         }
 
         # Add new record first, then delete sources (atomic safety: if add fails, sources remain)
@@ -1123,6 +1226,20 @@ def api_update_recommendation(rec_id):
                 return jsonify({"success": False, "error": "suggested_cycles must be an integer"}), 400
         if "rationale" in data:
             updates["rationale"] = data["rationale"]
+        if "execution_profile" in data:
+            _VALID_EDIT_PROFILES = {
+                'full_rd', 'plan_only', 'build_only', 'test_red_team',
+                'bug_hunt', 'research_only', 'review_existing',
+            }
+            _ep = data["execution_profile"]
+            try:
+                updates["execution_profile"] = _ep if _ep in _VALID_EDIT_PROFILES else "full_rd"
+            except TypeError:
+                updates["execution_profile"] = "full_rd"
+        if "mission_type" in data:
+            _VALID_MTYPES = {'BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'}
+            _mt = str(data["mission_type"]).upper().strip()
+            updates["mission_type"] = _mt if _mt in _VALID_MTYPES else "EXPANSION"
         updates["last_edited_at"] = datetime.now(timezone.utc).isoformat()
         storage.update(rec_id, updates)
         return jsonify({"success": True})
@@ -1149,7 +1266,22 @@ def api_set_mission_from_recommendation(rec_id):
         cycle_budget = max(1, min(10, int(_raw_cb_rec)))
     except (ValueError, TypeError, OverflowError):
         return jsonify({"success": False, "error": "cycle_budget must be a valid integer"}), 400
-    user_project_name = data.get("project_name")  # Optional user-specified project name
+    _raw_pn = data.get("project_name")
+    user_project_name = _raw_pn if isinstance(_raw_pn, str) and _raw_pn else None
+
+    _VALID_EXEC_PROFILES = {
+        'full_rd', 'plan_only', 'build_only', 'test_red_team',
+        'bug_hunt', 'research_only', 'review_existing',
+    }
+    # Accept either `execution_profile` (canonical) or `mission_type` (alias).
+    # Treat None/empty/non-string in the canonical key as "fall through to alias"
+    # so callers sending `false` or `""` still get the intended profile.
+    _raw_exec = data.get("execution_profile")
+    if not isinstance(_raw_exec, str) or not _raw_exec:
+        _raw_exec = data.get("mission_type")
+    if not isinstance(_raw_exec, str) or not _raw_exec:
+        _raw_exec = "full_rd"
+    execution_profile = _raw_exec if _raw_exec in _VALID_EXEC_PROFILES else "full_rd"
 
     try:
         target_rec = storage.get_by_id(rec_id)
@@ -1200,16 +1332,39 @@ def api_set_mission_from_recommendation(rec_id):
         mission_workspace = WORKSPACE_DIR / resolved_project_name / mission_id
     except ImportError:
         mission_workspace = mission_dir / "workspace"
+    except Exception as _e:
+        _rlog.warning("resolve_project_name failed: %s; falling back to mission_dir/workspace", _e)
+        mission_workspace = mission_dir / "workspace"
 
-    mission_dir.mkdir(parents=True, exist_ok=True)
-    (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
-    (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
-    (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
+    try:
+        mission_dir.mkdir(parents=True, exist_ok=True)
+        (mission_workspace / "artifacts").mkdir(parents=True, exist_ok=True)
+        (mission_workspace / "research").mkdir(parents=True, exist_ok=True)
+        (mission_workspace / "tests").mkdir(parents=True, exist_ok=True)
+    except Exception as _e:
+        _rlog.exception("Failed to create mission directories")
+        try:
+            import shutil as _shutil
+            if mission_dir.exists():
+                _shutil.rmtree(mission_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return jsonify({
+            "success": False,
+            "error": "Failed to create mission workspace",
+        }), 500
 
+    active_provider = (
+        _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
+        or (get_llm_provider() if get_llm_provider else "claude")
+    )
+    active_model = _clean_llm_option(data.get("llm_model") or data.get("model"))
+    active_thinking = _clean_llm_option(data.get("llm_thinking") or data.get("thinking"))
     if _mcr_ok:
-        active_provider = get_llm_provider() if get_llm_provider else None
         _req_r = dict(data)
         _req_r["problem_statement"] = problem_statement
+        # execution_profile from the suggestion modal always takes precedence as mission_type
+        _req_r["mission_type"] = execution_profile
         if active_provider and "llm_provider" not in _req_r:
             _req_r["llm_provider"] = active_provider
         _cfg_r, _aud_r = _MCR.from_request(_req_r, mission_id=mission_id)
@@ -1218,6 +1373,12 @@ def api_set_mission_from_recommendation(rec_id):
             mission_dir=mission_dir, resolved_project_name=resolved_project_name,
             source_recommendation_id=rec_id, audit=_aud_r,
         )
+        if active_provider:
+            new_mission["llm_provider"] = active_provider
+        if active_model:
+            new_mission["llm_model"] = active_model
+        if active_thinking:
+            new_mission["llm_thinking"] = active_thinking
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
         with open(mission_dir / "mission_config.json", 'w') as _f:
             json.dump(_cfg_r.to_config_dict(
@@ -1240,12 +1401,13 @@ def api_set_mission_from_recommendation(rec_id):
             "cycle_budget": max(1, cycle_budget), "current_cycle": 1, "cycle_history": [],
             "mission_workspace": str(mission_workspace), "mission_dir": str(mission_dir),
             "project_name": resolved_project_name,
-            "llm_provider": (
-                _normalize_runtime_provider(data.get("llm_provider") or data.get("provider"))
-                or (get_llm_provider() if get_llm_provider else "claude")
-            ),
+            "llm_provider": active_provider,
             "source_recommendation_id": rec_id
         }
+        if active_model:
+            new_mission["llm_model"] = active_model
+        if active_thinking:
+            new_mission["llm_thinking"] = active_thinking
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
         applied_cycle_budget = cycle_budget
 

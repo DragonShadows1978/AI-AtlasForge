@@ -11,10 +11,10 @@ concurrent investigations. Features:
 
 Architecture:
 - Pool size: 50 slots (matches dashboard cap)
-- Monopoly cap: 60% of pool per investigation when others are sharing
+- Monopoly cap: 60% of pool per investigation only when others are sharing
 - Fair-share quota: pool_size // active_investigation_count
 - Priority levels: 0=CRITICAL, 5=HIGH, 10=NORMAL, 20=LOW
-- State persisted to state/pool_state.json for cross-process visibility
+- State persisted to state/pool_state.json for dashboard visibility
 
 Usage:
     from subagent_pool_manager import get_pool_manager, get_resource_detector
@@ -509,6 +509,8 @@ class SubagentPoolManager:
         count = max(1, int(count))
 
         with self._lock:
+            self._prune_inactive_trackers_locked()
+
             if inv_id not in self._investigations:
                 self._investigations[inv_id] = InvestigationSlotTracker(
                     investigation_id=inv_id,
@@ -520,7 +522,12 @@ class SubagentPoolManager:
             self._recalculate_quotas()
             tracker = self._investigations[inv_id]
             quota = tracker.allocated_quota
-            monopoly_cap = int(self.MAX_POOL_SIZE * self.MONOPOLY_CAP_FRACTION)
+            sharing_pool = len(self._investigations) > 1
+            monopoly_cap = (
+                int(self.MAX_POOL_SIZE * self.MONOPOLY_CAP_FRACTION)
+                if sharing_pool
+                else self.MAX_POOL_SIZE
+            )
 
             already_active = tracker.active_slots
             effective_max = min(quota, monopoly_cap) - already_active
@@ -651,6 +658,7 @@ class SubagentPoolManager:
     def get_status(self) -> PoolStatus:
         """Return a live snapshot of pool utilization."""
         with self._lock:
+            self._prune_inactive_trackers_locked()
             self._push_history_sample()
             investigations = [
                 InvestigationSlotStatus(
@@ -695,7 +703,11 @@ class SubagentPoolManager:
             return
 
         base_quota = max(2, self.MAX_POOL_SIZE // n)
-        monopoly_cap = int(self.MAX_POOL_SIZE * self.MONOPOLY_CAP_FRACTION)
+        monopoly_cap = (
+            int(self.MAX_POOL_SIZE * self.MONOPOLY_CAP_FRACTION)
+            if n > 1
+            else self.MAX_POOL_SIZE
+        )
 
         for tracker in self._investigations.values():
             prio = tracker.priority
@@ -708,8 +720,23 @@ class SubagentPoolManager:
 
             tracker.allocated_quota = min(q, monopoly_cap)
 
+    def _prune_inactive_trackers_locked(self) -> None:
+        """Remove stale trackers that hold no active or queued slots.
+
+        Persisted pool state is for dashboard visibility, not a durable lease.
+        A zero-active, zero-queued tracker cannot launch work, but it can still
+        reduce fair-share quotas if left in the active investigation map.
+        """
+        stale_ids = [
+            inv_id
+            for inv_id, tracker in self._investigations.items()
+            if tracker.active_slots <= 0 and tracker.queued_slots <= 0
+        ]
+        for inv_id in stale_ids:
+            del self._investigations[inv_id]
+
     def _save_state(self) -> None:
-        """Atomically persist pool state to disk for cross-process visibility."""
+        """Atomically persist pool state to disk for dashboard visibility."""
         try:
             with self._lock:
                 state = {
@@ -729,7 +756,7 @@ class SubagentPoolManager:
             logger.warning(f"[PoolManager] Failed to save state: {exc}")
 
     def _load_state(self) -> None:
-        """Load persisted state on startup. Slots are reset since semaphore is fresh."""
+        """Read persisted state on startup without restoring process-local leases."""
         if not POOL_STATE_FILE.exists():
             return
 
@@ -737,21 +764,9 @@ class SubagentPoolManager:
             data = json.loads(POOL_STATE_FILE.read_text())
             investigations = data.get("investigations", {})
 
-            for inv_id, inv_data in investigations.items():
-                self._investigations[inv_id] = InvestigationSlotTracker(
-                    investigation_id=inv_id,
-                    priority=inv_data.get("priority", 10),
-                    requested_slots=inv_data.get("requested_slots", 0),
-                    active_slots=0,   # reset on restart
-                    queued_slots=0,
-                    allocated_quota=inv_data.get("allocated_quota", 0),
-                    started_at=time.time(),
-                    query_preview=inv_data.get("query_preview", ""),
-                )
-
             logger.info(
-                f"[PoolManager] Loaded state: "
-                f"{len(investigations)} investigations restored (slots reset)"
+                f"[PoolManager] Ignored persisted pool leases for "
+                f"{len(investigations)} investigations on startup"
             )
         except Exception as exc:
             logger.warning(f"[PoolManager] Failed to load state: {exc}")

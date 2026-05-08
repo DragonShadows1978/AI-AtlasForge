@@ -128,6 +128,9 @@ recovery_ai_storyforge_*/
 # ------ Mypy Cache ------
 .mypy_cache/
 
+# ------ Investigation Validator Cache ------
+investigation_validator/.source_cache/
+
 # Stale lock files
 tmp*.lock
 .af_archives/

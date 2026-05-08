@@ -268,6 +268,14 @@ def claude_response_factory():
                 ]),
                 "adversarial_testing": kwargs.get("adversarial_testing", {
                     "red_team_issues": [],
+                    "red_team_agent_count": 3,
+                    "red_team_duration_seconds": 2700,
+                    "red_team_completion": {
+                        "agent_reports_collected": 3,
+                        "all_agents_completed": True,
+                        "agents_reached_report_phase": 3,
+                        "timed_out_agents": [],
+                    },
                     "property_violations": [],
                     "mutation_score": 0.85,
                     "spec_alignment": 0.95,

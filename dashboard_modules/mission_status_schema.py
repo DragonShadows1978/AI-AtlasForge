@@ -102,6 +102,12 @@ OPTIONAL_DEFAULTS: Dict[str, Any] = {
     'event': None,
     'old_stage': None,
     'timestamp': '',
+    # Mission-type profile fields (cycle 2). Default to full_rd for
+    # backwards-compat with pre-profile missions.
+    'mission_type': 'full_rd',
+    'mission_type_label': 'Full R&D',
+    'enabled_stages': [],
+    'stop_after_profile_complete': False,
 }
 
 # Legacy field name mappings: legacy_name -> canonical_name

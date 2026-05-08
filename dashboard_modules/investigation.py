@@ -21,6 +21,7 @@ Endpoints:
 """
 
 import html
+import logging
 import threading
 import re
 import subprocess
@@ -31,6 +32,7 @@ import json
 
 # Create Blueprint
 investigation_bp = Blueprint('investigation', __name__)
+logger = logging.getLogger(__name__)
 
 # Module-level references (set by init function)
 BASE_DIR = None
@@ -147,6 +149,7 @@ def api_investigation_start():
 
     # Check if an investigation is already running
     from investigation_engine import (
+        archive_current_investigation,
         load_investigation_state,
         save_investigation_state,
         InvestigationStatus,
@@ -155,10 +158,13 @@ def api_investigation_start():
     state = load_investigation_state()
     if state.get("current"):
         current_status = state["current"].get("status")
-        if current_status not in [
+        if current_status in [
             InvestigationStatus.COMPLETED.value,
-            InvestigationStatus.FAILED.value
+            InvestigationStatus.FAILED.value,
         ]:
+            archive_current_investigation()
+            state = load_investigation_state()
+        else:
             thread_running = _investigation_thread is not None and _investigation_thread.is_alive()
             external_running = _has_external_investigation_process()
 
@@ -188,6 +194,17 @@ def api_investigation_start():
         timeout_minutes=timeout_minutes,
         deliverable_format=deliverable_format
     )
+    try:
+        config.workspace_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config.workspace_dir / "config.json"
+        config_data = config.to_dict()
+        config_data.setdefault("has_attachments", False)
+        config_data.setdefault("attachment_count", 0)
+        config_data.setdefault("attachments", [])
+        with open(config_path, 'w') as f:
+            json.dump(config_data, f, indent=2)
+    except Exception as e:
+        logger.warning("Failed to persist investigation config: %s", e)
 
     def run_investigation_thread():
         """Run investigation in background."""
@@ -274,12 +291,21 @@ def api_investigation_status(investigation_id=None):
                     status["has_attachments"] = config.get("has_attachments", False)
                     status["attachment_count"] = config.get("attachment_count", 0)
                     status["attachments"] = config.get("attachments", [])
+                    for key in (
+                        "max_subagents",
+                        "timeout_minutes",
+                        "deliverable_format",
+                        "enable_validation",
+                        "validation_filter_mode",
+                    ):
+                        if key in config:
+                            status[key] = config[key]
                 except Exception:
                     pass
         except (ValueError, OSError):
             pass
 
-    return jsonify(status)
+    return jsonify(_enrich_investigation_with_metadata(status))
 
 
 # =============================================================================
@@ -496,6 +522,15 @@ def _enrich_investigation_with_metadata(inv: dict) -> dict:
                 enriched["has_attachments"] = config.get("has_attachments", False)
                 enriched["attachment_count"] = config.get("attachment_count", 0)
                 enriched["attachments"] = config.get("attachments", [])
+                for key in (
+                    "max_subagents",
+                    "timeout_minutes",
+                    "deliverable_format",
+                    "enable_validation",
+                    "validation_filter_mode",
+                ):
+                    if key in config:
+                        enriched[key] = config[key]
             except Exception:
                 enriched["has_attachments"] = False
                 enriched["attachment_count"] = 0
@@ -509,8 +544,26 @@ def _enrich_investigation_with_metadata(inv: dict) -> dict:
         enriched["attachment_count"] = 0
         enriched["attachments"] = []
 
-    # Compute elapsed time in human-readable format
+    # Compute elapsed time in human-readable format. Older archived records may
+    # have lost completed_at/elapsed_seconds before those fields were allowlisted,
+    # so derive a best-effort duration from started_at -> last_updated.
     elapsed_seconds = inv.get("elapsed_seconds")
+    completed_at = inv.get("completed_at")
+    started_at = inv.get("started_at")
+    if elapsed_seconds is None and started_at and inv.get("status") in ("completed", "failed"):
+        end_at = completed_at or inv.get("last_updated")
+        try:
+            start_dt = datetime.fromisoformat(str(started_at).replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(str(end_at).replace('Z', '+00:00')) if end_at else None
+            if end_dt:
+                elapsed_seconds = max(0, (end_dt - start_dt).total_seconds())
+                enriched["elapsed_seconds"] = elapsed_seconds
+                if completed_at is None:
+                    completed_at = end_at
+                    enriched["completed_at"] = completed_at
+        except Exception:
+            pass
+
     if elapsed_seconds is not None:
         if elapsed_seconds < 60:
             enriched["elapsed_display"] = f"{int(elapsed_seconds)}s"
@@ -530,14 +583,14 @@ def _enrich_investigation_with_metadata(inv: dict) -> dict:
     enriched["query_truncated"] = query[:100] + "..." if len(query) > 100 else query
 
     # Format timestamp for display
-    completed_at = inv.get("completed_at") or inv.get("started_at")
-    if completed_at:
+    timestamp_at = completed_at or started_at
+    if timestamp_at:
         try:
-            dt = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(str(timestamp_at).replace('Z', '+00:00'))
             enriched["timestamp_display"] = dt.strftime("%Y-%m-%d %H:%M")
             enriched["timestamp_relative"] = _relative_time(dt)
         except Exception:
-            enriched["timestamp_display"] = completed_at[:16] if completed_at else "-"
+            enriched["timestamp_display"] = str(timestamp_at)[:16] if timestamp_at else "-"
             enriched["timestamp_relative"] = "-"
     else:
         enriched["timestamp_display"] = "-"

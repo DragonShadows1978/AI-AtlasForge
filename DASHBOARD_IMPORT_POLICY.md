@@ -26,7 +26,8 @@ The dashboard may import from the following sources:
 | **Third-Party Packages** | pip installed | `flask`, `flask_socketio`, `jinja2` |
 | **Top-Level Project Modules** | `<ATLASFORGE_ROOT>/*.py` | `mission_analytics`, `mission_knowledge_base`, `decision_graph` |
 | **Dashboard Modules** | `<ATLASFORGE_ROOT>/dashboard_modules/` | `from dashboard_modules.analytics import analytics_bp` |
-| **Shared Workspace Modules** | `<ATLASFORGE_ROOT>/workspace/` | `glassbox`, `investigation_validator` |
+| **Shared Workspace Modules** | `<ATLASFORGE_ROOT>/workspace/` | Mission-created helper modules only |
+| **Core Packages** | `<ATLASFORGE_ROOT>/` packages | `glassbox`, `investigation_validator` |
 | **Config Module** | `atlasforge_config.py` | `from atlasforge_config import BASE_DIR, WORKSPACE_DIR` |
 
 ### 1.2 Forbidden Import Sources
@@ -50,7 +51,7 @@ The following import sources are **NEVER** permitted:
 
 `sys.path.insert()` may be used when:
 
-1. **Shared workspace access** - Adding workspace directory to enable imports of glassbox, investigation_validator modules
+1. **Shared workspace access** - Adding workspace directory only for explicitly shared workspace modules
 2. **Project root access** - Adding project root for top-level module imports
 3. **Script self-reference** - Adding the script's own directory via `Path(__file__).parent`
 
@@ -115,23 +116,17 @@ from dashboard_modules.module import module_bp
 app.register_blueprint(module_bp)
 ```
 
-### 3.2 Workspace Module Registration
+### 3.2 Core Feature Package Registration
 
-Workspace modules (glassbox, etc.) require sys.path setup:
+Core feature packages such as GlassBox live under the AtlasForge root and do
+not require `workspace` path injection:
 
 ```python
 # In dashboard_v2.py
-import sys
-from pathlib import Path
-
-# Use relative path from script location
-sys.path.insert(0, str(Path(__file__).parent / "workspace"))
-
-# Then import
 from glassbox.dashboard_routes import glassbox_bp
 
 # Register blueprints
-app.register_blueprint(glassbox_bp, url_prefix='/api/glassbox')
+app.register_blueprint(glassbox_bp)
 ```
 
 ---
@@ -250,9 +245,9 @@ As of 2026-01-12, all dashboard infrastructure is **compliant**:
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| dashboard_v2.py | Compliant | sys.path only adds shared workspace |
+| dashboard_v2.py | Compliant | Imports core packages from AtlasForge root |
 | dashboard_modules/*.py | Compliant | All imports from allowed sources |
-| workspace/glassbox/ | Compliant | Relative imports with fallback |
+| glassbox/ | Compliant | Core introspection package with centralized paths |
 | atlasforge_config.py | Compliant | Centralized path configuration |
 
 ---
@@ -266,8 +261,8 @@ As of 2026-01-12, all dashboard infrastructure is **compliant**:
 │   └── All other modules import paths from here
 │
 ├── dashboard_v2.py              <- Main entry point
-│   ├── imports from: dashboard_modules/, top-level *.py, workspace/
-│   └── sys.path adds: /workspace (allowed)
+│   ├── imports from: dashboard_modules/, top-level *.py, core packages
+│   └── sys.path adds: none for GlassBox or validator
 │
 ├── dashboard_modules/           <- Blueprint modules
 │   ├── analytics.py             -> imports mission_analytics
@@ -277,9 +272,11 @@ As of 2026-01-12, all dashboard infrastructure is **compliant**:
 │   ├── investigation.py         -> imports investigation_engine
 │   └── ...
 │
-├── workspace/                   <- Shared workspace (OK to import)
-│   ├── glassbox/                -> Introspection system
-│   └── investigation_validator/ -> Fact-checking system
+├── workspace/                   <- Mission working area, not core imports
+│
+├── glassbox/                    <- Core introspection system
+│
+├── investigation_validator/      <- Core fact-checking system
 │
 ├── missions/                    <- NEVER import from here
 │   └── mission_*/workspace/     FORBIDDEN

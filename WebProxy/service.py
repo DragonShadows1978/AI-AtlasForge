@@ -63,8 +63,15 @@ CACHE_DIR = Path(
         str(Path(__file__).resolve().parent / "atlasforge_data" / "web_proxy_cache"),
     )
 )
+PAPER_ARTIFACT_DIR = Path(
+    os.environ.get(
+        "ATLASFORGE_WEB_PROXY_PAPER_DIR",
+        str(CACHE_DIR.parent / "paper_artifacts"),
+    )
+)
 SEARCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_SEARCH_TTL_S", 1800)
 FETCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_FETCH_TTL_S", 86400)
+PAPER_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_PAPER_TTL_S", 7 * 86400)
 USER_AGENT = os.environ.get(
     "ATLASFORGE_WEB_PROXY_USER_AGENT",
     (
@@ -81,6 +88,7 @@ REQUEST_HEADERS = {
 }
 
 MAX_FETCH_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_FETCH_BYTES", 5 * 1024 * 1024)
+MAX_PAPER_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_PAPER_BYTES", 50 * 1024 * 1024)
 MAX_URL_LENGTH = _int_env("ATLASFORGE_WEB_PROXY_MAX_URL_LENGTH", 2048)
 
 
@@ -474,6 +482,147 @@ def _stream_capped_body(response, *, chunk_size: int = 65536) -> Tuple[int, str,
     return status_code, content_type, b"".join(chunks)
 
 
+def _stream_capped_body_with_limit(
+    response,
+    max_bytes: int,
+    *,
+    chunk_size: int = 65536,
+) -> Tuple[int, str, bytes]:
+    """Stream ``response`` into memory with a caller-supplied byte cap."""
+    try:
+        response.raise_for_status()
+        status_code = response.status_code
+        content_type = response.headers.get("content-type", "")
+        chunks: List[bytes] = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"response body exceeds max_bytes ({max_bytes})")
+            chunks.append(chunk)
+    finally:
+        response.close()
+    return status_code, content_type, b"".join(chunks)
+
+
+def _paper_key(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def _normalize_arxiv_pdf_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    if host.endswith("arxiv.org") and path.startswith("/abs/"):
+        arxiv_id = path[len("/abs/"):].strip("/")
+        if arxiv_id:
+            return urlunparse(parsed._replace(path=f"/pdf/{arxiv_id}", query="", fragment=""))
+    return url
+
+
+def _extract_pdf_text_bytes(content: bytes) -> Tuple[str, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "extractor": None,
+        "page_count": None,
+        "pages_extracted": 0,
+        "extraction_error": None,
+    }
+    try:
+        try:
+            from pypdf import PdfReader  # type: ignore
+            meta["extractor"] = "pypdf"
+        except ImportError:
+            from PyPDF2 import PdfReader  # type: ignore
+            meta["extractor"] = "PyPDF2"
+    except ImportError:
+        meta["extraction_error"] = "PDF extraction unavailable: install pypdf or PyPDF2"
+        return "", meta
+
+    try:
+        import io
+        reader = PdfReader(io.BytesIO(content))
+        meta["page_count"] = len(reader.pages)
+        text_parts: List[str] = []
+        for idx, page in enumerate(reader.pages):
+            try:
+                page_text = page.extract_text() or ""
+            except Exception as exc:
+                logger.debug("paper fetch PDF page %d extraction failed: %s", idx + 1, exc)
+                page_text = ""
+            if page_text.strip():
+                text_parts.append(f"--- Page {idx + 1} ---\n{page_text.strip()}")
+            meta["pages_extracted"] = idx + 1
+        return "\n\n".join(text_parts), meta
+    except Exception as exc:
+        meta["extraction_error"] = str(exc)
+        return "", meta
+
+
+def fetch_paper(url: str, max_chars: int = -1, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
+    """Download a paper-like PDF as bytes and extract full text when possible."""
+    pdf_url = _normalize_arxiv_pdf_url(url)
+    parts, reason = _validate_url_structure(pdf_url)
+    if parts is None:
+        raise UnsafeUrlError(reason)
+    _scheme, hostname, port = parts
+    pinned_ip = _resolve_first_safe_ip(pdf_url)
+
+    with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
+        response = session.get(
+            pdf_url,
+            headers={**REQUEST_HEADERS, "Accept": "application/pdf,*/*;q=0.8"},
+            timeout=timeout_s,
+            stream=True,
+            allow_redirects=False,
+        )
+        status_code, content_type, body_bytes = _stream_capped_body_with_limit(
+            response,
+            MAX_PAPER_BYTES,
+        )
+
+    sha256 = hashlib.sha256(body_bytes).hexdigest()
+    artifact_id = _paper_key(f"{pdf_url}:{sha256}")
+    artifact_dir = PAPER_ARTIFACT_DIR / artifact_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = artifact_dir / "paper.pdf"
+    text_path = artifact_dir / "paper.txt"
+    meta_path = artifact_dir / "metadata.json"
+    pdf_path.write_bytes(body_bytes)
+
+    text, extraction_meta = _extract_pdf_text_bytes(body_bytes)
+    original_text_length = len(text)
+    truncated = False
+    if max_chars >= 0 and original_text_length > max_chars:
+        text = text[:max_chars]
+        truncated = True
+    text_path.write_text(text, encoding="utf-8")
+
+    payload = {
+        "type": "paper",
+        "url": url,
+        "pdf_url": pdf_url,
+        "status_code": status_code,
+        "content_type": content_type,
+        "fetched_at": _now_ts(),
+        "artifact_id": artifact_id,
+        "local_pdf_path": str(pdf_path),
+        "local_text_path": str(text_path),
+        "metadata_path": str(meta_path),
+        "sha256": sha256,
+        "byte_length": len(body_bytes),
+        "max_bytes": MAX_PAPER_BYTES,
+        "text": text,
+        "text_length": len(text),
+        "original_text_length": original_text_length,
+        "truncated": truncated,
+        **extraction_meta,
+    }
+    meta_path.write_text(json.dumps({k: v for k, v in payload.items() if k != "text"}, indent=2), encoding="utf-8")
+    return payload
+
+
 class FileCache:
     def __init__(self, root: Path):
         self.root = root
@@ -494,12 +643,16 @@ class FileCache:
         if fetched_at <= 0 or (_now_ts() - fetched_at) > ttl_s:
             return None
         data["_cache_hit"] = True
+        data["_cache_key"] = key
+        data["_cache_path"] = str(path)
         return data
 
     def put(self, key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         path = self._path_for(key)
         to_write = dict(payload)
         to_write["_cached_at"] = _now_ts()
+        to_write["_cache_key"] = key
+        to_write["_cache_path"] = str(path)
         fd, tmp_path = tempfile.mkstemp(
             dir=str(self.root), prefix=".cache_tmp_", suffix=".json"
         )
@@ -788,8 +941,11 @@ def _reddit_json_url(url: str) -> str:
         json_path = path.rstrip("/") + "/.json"
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     has_limit = any(k == "limit" for k, _ in pairs)
+    has_depth = any(k == "depth" for k, _ in pairs)
     if not has_limit:
-        pairs.append(("limit", "25"))
+        pairs.append(("limit", "500"))
+    if not has_depth:
+        pairs.append(("depth", "10"))
     query = urlencode(pairs, doseq=True)
     return f"https://{host}{json_path}?{query}" if query else f"https://{host}{json_path}"
 
@@ -865,7 +1021,9 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
         via the `or` short-circuit; anything else is str()'d."""
         return str(x or "")
 
-    def _collect_listing(listing: Any, target: List[Dict[str, Any]], kind: str) -> None:
+    more_ids: List[str] = []  # accumulates "more" node child IDs for morechildren fetch
+
+    def _collect_listing(listing: Any, target: List[Dict[str, Any]], kind: str, depth: int = 0) -> None:
         if not isinstance(listing, dict):
             return
         # B3: the inner "data" layer can be None (short-circuit handled by `or {}`)
@@ -909,8 +1067,18 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
                         "body": _as_str(cd.get("body"))[:2000],
                         "created_utc": _as_int(cd.get("created_utc")),
                         "permalink": "https://www.reddit.com" + _as_str(cd.get("permalink")),
+                        "depth": depth,
                     }
                 )
+                # Recurse into replies
+                replies = cd.get("replies")
+                if isinstance(replies, dict):
+                    _collect_listing(replies, target, kind, depth + 1)
+            elif kind == "comment" and child.get("kind") == "more":
+                # Collect IDs for morechildren expansion (skip empty sentinel nodes)
+                ids = cd.get("children") or []
+                if isinstance(ids, list):
+                    more_ids.extend(ids)
 
     if isinstance(data, list):
         if len(data) >= 1:
@@ -919,6 +1087,51 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
             _collect_listing(data[1], comments, "comment")
     else:
         _collect_listing(data, posts, "post")
+
+    # Expand "more" nodes via morechildren API (up to 100 IDs per call)
+    if more_ids and posts:
+        link_id = f"t3_{posts[0].get('id', '')}" if posts and posts[0].get("id") else None
+        # Derive link_id from json_url if not on post object
+        if not link_id or link_id == "t3_":
+            import re as _re
+            m = _re.search(r"/comments/([a-z0-9]+)", json_url)
+            link_id = f"t3_{m.group(1)}" if m else None
+        if link_id:
+            # Batch into chunks of 100
+            def _chunks(lst: List[str], n: int):
+                for i in range(0, len(lst), n):
+                    yield lst[i:i + n]
+            mc_headers = reddit_headers.copy()
+            mc_pinned_ip = _resolve_first_safe_ip("https://www.reddit.com/api/morechildren")
+            _, mc_hostname, mc_port = _validate_url_structure("https://www.reddit.com/api/morechildren")[0]
+            for chunk in _chunks(more_ids[:200], 100):  # cap at 200 IDs total
+                mc_url = (
+                    f"https://www.reddit.com/api/morechildren.json"
+                    f"?link_id={link_id}&children={','.join(chunk)}&api_type=json"
+                )
+                try:
+                    with _pinned_session(pinned_ip=mc_pinned_ip, hostname=mc_hostname, port=mc_port) as mc_session:
+                        mc_resp = mc_session.get(mc_url, headers=mc_headers, timeout=timeout_s, stream=True, allow_redirects=False)
+                        _, mc_ct, mc_body = _stream_capped_body(mc_resp)
+                    mc_ct_main = mc_ct.split(";")[0].strip().lower()
+                    if mc_body and (mc_ct_main in ("application/json", "text/json") or mc_ct_main.endswith("+json")):
+                        mc_data = json.loads(mc_body.decode("utf-8", errors="replace"))
+                        mc_things = mc_data.get("json", {}).get("data", {}).get("things", [])
+                        for thing in mc_things:
+                            if not isinstance(thing, dict):
+                                continue
+                            td = thing.get("data") or {}
+                            if thing.get("kind") == "t1" and isinstance(td, dict):
+                                comments.append({
+                                    "author": _as_str(td.get("author")),
+                                    "score": _as_int(td.get("score")),
+                                    "body": _as_str(td.get("body"))[:2000],
+                                    "created_utc": _as_int(td.get("created_utc")),
+                                    "permalink": "https://www.reddit.com" + _as_str(td.get("permalink")),
+                                    "depth": _as_int(td.get("depth")),
+                                })
+                except Exception:
+                    pass  # morechildren expansion is best-effort
 
     text_lines: List[str] = []
     for p in posts:
@@ -1233,14 +1446,18 @@ def create_app() -> Flask:
         if err is not None:
             return err
         url = str(payload.get("url", "")).strip()
-        max_chars = _coerce_count(
-            payload.get("max_chars", 12000), default=12000, min_value=0
-        )
-        if max_chars is None:
-            return (
-                jsonify({"error": "max_chars must be a non-negative integer"}),
-                400,
+        full_text = payload.get("full_text") is True
+        if full_text:
+            max_chars = -1
+        else:
+            max_chars = _coerce_count(
+                payload.get("max_chars", 12000), default=12000, min_value=0
             )
+            if max_chars is None:
+                return (
+                    jsonify({"error": "max_chars must be a non-negative integer"}),
+                    400,
+                )
         if not url:
             return jsonify({"error": "url is required"}), 400
 
@@ -1274,6 +1491,47 @@ def create_app() -> Flask:
                 jsonify(_error_body("fetch failed", cid, url=url)),
                 502,
             )
+
+        stored = cache.put(cache_key, result)
+        stored["_cache_hit"] = False
+        return jsonify(_apply_max_chars(stored, max_chars))
+
+    @app.post("/paper/fetch")
+    def paper_fetch_endpoint() -> Any:
+        payload, err = _require_json_body()
+        if err is not None:
+            return err
+        url = str(payload.get("url") or payload.get("pdf_url") or "").strip()
+        max_chars = _coerce_count(
+            payload.get("max_chars", -1), default=-1, min_value=-1
+        )
+        if max_chars is None:
+            return (
+                jsonify({"error": "max_chars must be an integer >= -1"}),
+                400,
+            )
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        parts, reason = _validate_url_structure(_normalize_arxiv_pdf_url(url))
+        if parts is None:
+            return jsonify({"error": f"unsafe url: {reason}", "url": url}), 400
+
+        cache_key = _cache_key("paper_fetch", {"url": url})
+        cached = cache.get(cache_key, PAPER_TTL_S)
+        if cached:
+            return jsonify(_apply_max_chars(cached, max_chars))
+
+        try:
+            result = fetch_paper(url=url, max_chars=max_chars)
+        except UnsafeUrlError:
+            cid = _new_correlation_id()
+            logger.exception("paper fetch rejected unsafe url cid=%s url=%r", cid, url)
+            return jsonify(_error_body("unsafe url", cid, url=url)), 400
+        except Exception:
+            cid = _new_correlation_id()
+            logger.exception("paper fetch failed cid=%s url=%r", cid, url)
+            return jsonify(_error_body("paper fetch failed", cid, url=url)), 502
 
         stored = cache.put(cache_key, result)
         stored["_cache_hit"] = False

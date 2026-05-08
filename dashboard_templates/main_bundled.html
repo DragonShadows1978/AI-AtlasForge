@@ -26,10 +26,10 @@
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-CTRDWDOF.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-YPPGGVOR.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/missionlogs-FBABQXGZ.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/investigation-history-2QMOMZX6.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-54FGZE3M.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-HIXBYTBE.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/missionlogs-KDVLL22N.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/investigation-history-PVTY256A.js" as="script">
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->
@@ -228,6 +228,50 @@
         .version-status.not-installed{color:var(--text-dim);font-style:italic}
         .version-status.dev-mode{color:#bc8cff;font-style:italic}
 
+        /* Update Manager Button & Panel */
+        .version-indicator-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border);cursor:pointer;color:inherit;font-family:inherit;transition:border-color 0.15s,background 0.15s;position:relative}
+        .version-indicator-btn:hover{background:var(--panel);border-color:var(--accent)}
+        .version-indicator-btn.panel-open{background:var(--panel);border-color:var(--accent)}
+        .version-chevron{font-size:0.85em;color:var(--text-dim);transition:transform 0.2s;display:inline-block}
+        .version-indicator-btn.panel-open .version-chevron{transform:rotate(180deg)}
+        #update-panel{display:none;position:absolute;top:calc(100% + 6px);right:0;width:400px;max-height:520px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,0.5);z-index:1100;overflow:hidden;flex-direction:column}
+        #update-panel.visible{display:flex}
+        .up-header{padding:14px 16px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .up-title{font-size:0.85em;font-weight:700;color:var(--text)}
+        .up-close{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1.1em;padding:2px 6px;border-radius:3px;line-height:1}
+        .up-close:hover{color:var(--text);background:var(--bg)}
+        .up-body{padding:14px 16px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px}
+        .up-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:0.8em}
+        .up-label{color:var(--text-dim);white-space:nowrap}
+        .up-value{color:var(--text);font-family:monospace;text-align:right;word-break:break-all}
+        .install-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;font-size:0.75em;font-weight:600;border:1px solid}
+        .install-badge.git{color:#58a6ff;border-color:#58a6ff44;background:#58a6ff11}
+        .install-badge.pip{color:#d29922;border-color:#d2992244;background:#d2992211}
+        .install-badge.unknown{color:var(--text-dim);border-color:var(--border);background:transparent}
+        .up-status-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:0.8em;border:1px solid}
+        .up-status-row.ok{background:#3fb95011;border-color:#3fb95033;color:var(--green)}
+        .up-status-row.warn{background:#d2992211;border-color:#d2992233;color:var(--yellow)}
+        .up-status-row.danger{background:#f8514911;border-color:#f8514933;color:var(--red)}
+        .up-status-row.info{background:#58a6ff11;border-color:#58a6ff33;color:#58a6ff}
+        .up-commits{font-size:0.75em;max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;background:var(--bg)}
+        .up-commit-item{padding:5px 10px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline}
+        .up-commit-item:last-child{border-bottom:none}
+        .up-commit-hash{color:var(--accent);font-family:monospace;flex-shrink:0;font-size:0.9em}
+        .up-commit-subject{color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .up-commit-date{color:var(--text-dim);flex-shrink:0;font-size:0.85em}
+        .up-actions{display:flex;gap:8px;flex-wrap:wrap;padding-top:4px}
+        .up-btn{padding:6px 14px;border-radius:5px;border:1px solid;font-size:0.8em;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity 0.15s,filter 0.15s}
+        .up-btn:disabled{opacity:0.5;cursor:not-allowed}
+        .up-btn:hover:not(:disabled){filter:brightness(1.15)}
+        .up-btn.primary{background:#3fb95022;border-color:#3fb95077;color:var(--green)}
+        .up-btn.warn{background:#d2992222;border-color:#d2992277;color:var(--yellow)}
+        .up-btn.danger{background:#f8514922;border-color:#f8514977;color:var(--red)}
+        .up-btn.neutral{background:var(--bg);border-color:var(--border);color:var(--text-dim)}
+        .up-output{font-family:monospace;font-size:0.72em;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px 10px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text);display:none}
+        .up-output.visible{display:block}
+        .up-spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:up-spin 0.6s linear infinite;margin-right:6px}
+        @keyframes up-spin{to{transform:rotate(360deg)}}
+
         /* Service Status Indicators (AtlasForge + Investigation) */
         .service-status-group{display:flex;align-items:center;gap:12px}
         .service-status{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:4px;font-size:0.75em;background:var(--bg);border:1px solid var(--border)}
@@ -337,11 +381,42 @@
                 </div>
                 <script>document.getElementById('dashboard-port').textContent = location.port || '80';</script>
                 <!-- Version Status Indicators -->
-                <div class="version-indicators" style="display: flex; align-items: center; gap: 12px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border);">
-                    <div id="atlasforge-version" class="version-indicator" title="AtlasForge version status">
+                <div class="version-indicators" style="display: flex; align-items: center; gap: 12px; margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border); position: relative;">
+                    <!-- AtlasForge version - interactive update manager button -->
+                    <button id="atlasforge-version" class="version-indicator-btn" title="Click to open Update Manager" onclick="toggleUpdatePanel()" aria-expanded="false" aria-controls="update-panel">
                         <span class="version-label">AtlasForge:</span>
                         <span id="atlasforge-version-status" class="version-status checking">Checking...</span>
+                        <span class="version-chevron">▾</span>
+                    </button>
+                    <!-- Update Manager Panel -->
+                    <div id="update-panel" role="dialog" aria-label="AtlasForge Update Manager">
+                        <div class="up-header">
+                            <span class="up-title">AtlasForge Update Manager</span>
+                            <button class="up-close" onclick="toggleUpdatePanel()" title="Close">✕</button>
+                        </div>
+                        <div class="up-body">
+                            <div class="up-row">
+                                <span class="up-label">Install method</span>
+                                <span id="up-install-badge"><span class="install-badge unknown">unknown</span></span>
+                            </div>
+                            <div class="up-row">
+                                <span class="up-label">Local version</span>
+                                <span id="up-local-version" class="up-value">—</span>
+                            </div>
+                            <div class="up-row">
+                                <span class="up-label">Remote commit</span>
+                                <span id="up-remote-commit" class="up-value">—</span>
+                            </div>
+                            <div id="up-status-box" class="up-status-row info" style="display:none"></div>
+                            <div id="up-commits-section" style="display:none">
+                                <div style="font-size:0.75em;color:var(--text-dim);margin-bottom:4px">Incoming commits</div>
+                                <div id="up-commits-list" class="up-commits"></div>
+                            </div>
+                            <div id="up-actions" class="up-actions"></div>
+                            <pre id="up-output" class="up-output"></pre>
+                        </div>
                     </div>
+                    <!-- AfterImage version (display-only, no update panel) -->
                     <div id="afterimage-version" class="version-indicator" title="AI-AfterImage version status" style="display: none;">
                         <span class="version-label">AI-AfterImage:</span>
                         <span id="afterimage-version-status" class="version-status checking">Checking...</span>
@@ -486,6 +561,10 @@
                             <span class="stat-label">Iteration</span>
                             <span class="stat-value" id="stat-iteration">-</span>
                         </div>
+                        <div class="stat-row" id="mission-type-row">
+                            <span class="stat-label">Type</span>
+                            <span class="stat-value" id="stat-mission-type">Full R&amp;D</span>
+                        </div>
                         <div class="stat-row">
                             <span class="stat-label">Mission Cycle</span>
                             <span class="stat-value highlight" id="stat-mission-cycle">1/1</span>
@@ -522,6 +601,30 @@
                 </div>
                 <input type="file" id="mission-file-input" accept=".txt,.md,text/*"
                        style="display:none;" onchange="handleMissionFileSelect(this)">
+                <div class="llm-model-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;">
+                    <label style="font-size:0.82em;color:var(--text-dim);">Provider</label>
+                    <select id="llm-provider-select" style="padding:5px 10px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text);">
+                        <option value="claude" selected>Claude</option>
+                        <option value="codex">Codex</option>
+                        <option value="gemini">Gemini</option>
+                    </select>
+                    <label style="font-size:0.82em;color:var(--text-dim);">Model</label>
+                    <select id="llm-model-select" style="padding:5px 10px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text);min-width:120px;"></select>
+                    <label style="font-size:0.82em;color:var(--text-dim);">Thinking</label>
+                    <select id="llm-thinking-select" style="padding:5px 10px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text);min-width:105px;"></select>
+                    <label style="font-size:0.82em;color:var(--text-dim);">Type</label>
+                    <select id="mission-type-select" style="padding:5px 10px;background:var(--panel);border:1px solid var(--border);border-radius:4px;color:var(--text);min-width:140px;" title="Mission execution profile — controls which stages run">
+                        <option value="full_rd" selected>Full R&amp;D</option>
+                        <option value="plan_only">Plan Only</option>
+                        <option value="build_only">Build Only</option>
+                        <option value="test_red_team">Test / Red Team</option>
+                        <option value="bug_hunt">Bug Hunt</option>
+                        <option value="research_only">Research Only</option>
+                        <option value="review_existing">Review Existing</option>
+                    </select>
+                    <button type="button" class="btn btn-small" onclick="openLlmSettingsModal()" title="Edit provider model menus">Settings</button>
+                </div>
+
                 <textarea id="mission-input" class="mission-input" placeholder="Enter new mission..."></textarea>
 
                 <!-- Investigation Mode Toggle -->
@@ -538,12 +641,6 @@
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Project:</label>
                         <input type="text" id="project-name-input" placeholder="Auto-detect from mission" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 180px; font-size: 0.85em;">
-                        <label style="font-size: 0.85em; color: var(--text-dim);">Provider:</label>
-                        <select id="llm-provider-select" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
-                            <option value="claude" selected>Claude</option>
-                            <option value="codex">Codex</option>
-                            <option value="gemini">Gemini</option>
-                        </select>
                         <label style="font-size: 0.85em; color: var(--text-dim);">Cycles:</label>
                         <select id="cycle-budget-input" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
                             <option value="1">1</option>
@@ -654,6 +751,15 @@
                     <!-- Quick-Add Form -->
                     <div class="rec-quick-add">
                         <input type="text" id="rec-quick-add-title" class="rec-quick-add-input" placeholder="Add new suggestion..." onkeypress="if(event.key==='Enter')submitQuickAdd()">
+                        <select id="rec-quick-add-type" class="rec-quick-add-type-select" title="Execution profile">
+                            <option value="full_rd" selected>Full R&amp;D</option>
+                            <option value="plan_only">Plan Only</option>
+                            <option value="build_only">Build Only</option>
+                            <option value="test_red_team">Test / Red Team</option>
+                            <option value="bug_hunt">Bug Hunt</option>
+                            <option value="research_only">Research Only</option>
+                            <option value="review_existing">Review Existing</option>
+                        </select>
                         <button class="btn btn-small primary" onclick="submitQuickAdd()">Add</button>
                     </div>
                     <!-- Sort and Filter Controls -->
@@ -2534,116 +2640,282 @@
         });
     </script>
 
-    <!-- Version Status Checker -->
+    <!-- Version Status Checker + Update Manager -->
     <script>
         (function() {
             'use strict';
 
             var VERSION_CHECK_INTERVAL = 300000; // 5 minutes
-            var versionCheckTimer = null;
+            var _latestAtlasforgeData = null;
+            var _panelOpen = false;
 
+            // ── Button status indicator ────────────────────────────────────────
             function updateVersionIndicator(project, data) {
                 var container = document.getElementById(project + '-version');
                 var statusEl = document.getElementById(project + '-version-status');
-
                 if (!statusEl) return;
-
-                // Remove all status classes
                 statusEl.className = 'version-status';
 
                 if (!data.installed) {
-                    // Project not installed - hide the indicator
                     if (container) container.style.display = 'none';
                     return;
                 }
+                if (container) container.style.display = '';
 
-                // Show the indicator
-                if (container) container.style.display = 'flex';
-
-                // Set the status class and text
-                if (data.status === 'dev_mode') {
-                    statusEl.classList.add('dev-mode');
-                    statusEl.textContent = 'Developer Mode';
-                    statusEl.title = 'Developer mode active - remote version check skipped. Version: ' + (data.version || 'dev');
-                } else if (data.status === 'up_to_date') {
-                    statusEl.classList.add('up-to-date');
-                    statusEl.textContent = 'Up To Date';
-                    if (data.version) {
-                        statusEl.title = 'Version: ' + data.version;
-                    }
-                } else if (data.status === 'update_available') {
-                    statusEl.classList.add('update-available');
-                    statusEl.textContent = data.message || 'Update Available';
-                    if (data.commits_behind) {
-                        statusEl.title = data.commits_behind + ' commits behind. Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
-                    }
-                } else if (data.status === 'ahead') {
-                    statusEl.classList.add('ahead');
-                    statusEl.textContent = data.message || 'Local Ahead';
-                    if (data.commits_ahead) {
-                        statusEl.title = data.commits_ahead + ' commits ahead (local customizations). Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
-                    }
-                } else if (data.status === 'diverged') {
-                    statusEl.classList.add('diverged');
-                    statusEl.textContent = data.message || 'Diverged';
-                    statusEl.title = 'Local and remote have diverged. ' + (data.commits_ahead || 0) + ' ahead, ' + (data.commits_behind || 0) + ' behind. Local: ' + data.local_commit + ', Remote: ' + data.remote_commit;
-                } else if (data.status === 'error') {
-                    statusEl.classList.add('error');
-                    statusEl.textContent = 'Error';
-                    statusEl.title = data.error || 'Unknown error';
+                var statusMap = {
+                    dev_mode:         ['dev-mode',      'Dev Mode'],
+                    up_to_date:       ['up-to-date',    'Up To Date'],
+                    offline:          ['checking',      'Offline'],
+                    update_available: ['update-available', data.message || 'Update Available'],
+                    ahead:            ['ahead',         data.message || 'Local Ahead'],
+                    diverged:         ['diverged',      data.message || 'Diverged'],
+                    error:            ['error',         'Error'],
+                };
+                var mapped = statusMap[data.status];
+                if (mapped) {
+                    statusEl.classList.add(mapped[0]);
+                    statusEl.textContent = mapped[1];
                 } else {
                     statusEl.classList.add('checking');
                     statusEl.textContent = 'Unknown';
                 }
+
+                if (project === 'atlasforge') {
+                    _latestAtlasforgeData = data;
+                    if (_panelOpen) _renderPanel(data);
+                }
             }
 
-            function checkVersions() {
-                fetch('/api/version/status')
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) {
-                        if (data.atlasforge) {
-                            updateVersionIndicator('atlasforge', data.atlasforge);
+            // ── Panel render ───────────────────────────────────────────────────
+            function _renderPanel(data) {
+                var installBadge = document.getElementById('up-install-badge');
+                var localVer = document.getElementById('up-local-version');
+                var remoteCommit = document.getElementById('up-remote-commit');
+                var statusBox = document.getElementById('up-status-box');
+                var commitsSection = document.getElementById('up-commits-section');
+                var commitsList = document.getElementById('up-commits-list');
+                var actionsDiv = document.getElementById('up-actions');
+
+                if (!installBadge) return;
+
+                var method = ['git', 'pip'].indexOf(data.install_method) !== -1 ? data.install_method : 'unknown';
+                var _badge = document.createElement('span');
+                _badge.className = 'install-badge ' + method;
+                _badge.textContent = method;
+                installBadge.textContent = '';
+                installBadge.appendChild(_badge);
+
+                if (localVer) localVer.textContent = data.version || data.local_commit || '—';
+                if (remoteCommit) remoteCommit.textContent = data.remote_commit || (data.remote_check === false ? 'offline' : '—');
+
+                if (statusBox) {
+                    var boxClass = 'info', boxMsg = '';
+                    if (data.status === 'up_to_date') {
+                        boxClass = 'ok'; boxMsg = '✓ You are up to date.';
+                    } else if (data.status === 'update_available') {
+                        boxClass = 'danger'; boxMsg = '↓ ' + (data.commits_behind || '?') + ' new commit(s) available.';
+                    } else if (data.status === 'ahead') {
+                        boxClass = 'warn'; boxMsg = '↑ ' + (data.commits_ahead || '?') + ' local commit(s) not on remote.';
+                    } else if (data.status === 'diverged') {
+                        boxClass = 'warn'; boxMsg = '⚡ Diverged: ' + (data.commits_ahead || 0) + ' ahead, ' + (data.commits_behind || 0) + ' behind.';
+                    } else if (data.status === 'offline') {
+                        boxClass = 'warn'; boxMsg = '⚡ Remote unreachable — could not check for updates.';
+                    } else if (data.status === 'dev_mode') {
+                        boxClass = 'info'; boxMsg = '🛠 Developer mode — remote check skipped.';
+                    } else if (data.status === 'error') {
+                        boxClass = 'danger'; boxMsg = '✗ ' + (data.error || 'Version check error.');
+                    }
+                    statusBox.className = 'up-status-row ' + boxClass;
+                    statusBox.textContent = boxMsg;
+                    statusBox.style.display = boxMsg ? '' : 'none';
+                }
+
+                if (commitsSection && commitsList) {
+                    var commits = data.recent_commits || [];
+                    if (commits.length > 0) {
+                        var html = commits.map(function(c) {
+                            return '<div class="up-commit-item">' +
+                                '<span class="up-commit-hash">' + _esc(c.hash) + '</span>' +
+                                '<span class="up-commit-subject">' + _esc(c.subject) + '</span>' +
+                                '<span class="up-commit-date">' + _esc(c.date) + '</span>' +
+                                '</div>';
+                        }).join('');
+                        commitsList.innerHTML = html;
+                        commitsSection.style.display = '';
+                    } else {
+                        commitsSection.style.display = 'none';
+                    }
+                }
+
+                if (actionsDiv) {
+                    var buttons = '';
+                    var s = data.status;
+                    if (s === 'update_available') {
+                        if (method === 'git') {
+                            buttons += _btn('primary', 'up-run-update-btn', 'runUpdate(\'git\')', '↓ git pull');
+                        } else if (method === 'pip') {
+                            buttons += _btn('primary', 'up-run-update-btn', 'runUpdate(\'pip\')', '↓ pip upgrade');
+                        } else {
+                            buttons += _btn('neutral', '', null, 'Manual update required');
                         }
-                        if (data.afterimage) {
-                            updateVersionIndicator('afterimage', data.afterimage);
-                        }
-                    })
-                    .catch(function(err) {
-                        console.error('[VersionCheck] Failed to check versions:', err);
-                        // Show error state
-                        var atlasforgeStatus = document.getElementById('atlasforge-version-status');
-                        if (atlasforgeStatus) {
-                            atlasforgeStatus.className = 'version-status error';
-                            atlasforgeStatus.textContent = 'Error';
-                        }
-                    });
+                        buttons += _btn('warn', '', 'runCompatibilityCheck()', '🔍 Compatibility Check');
+                    } else if (s === 'diverged') {
+                        buttons += _btn('warn', '', 'runCompatibilityCheck()', '🔍 Compatibility Check');
+                        if (method === 'git') buttons += _btn('danger', 'up-run-update-btn', 'runUpdate(\'git\')', '↓ git pull (risky)');
+                    } else if (s === 'ahead') {
+                        buttons += _btn('warn', '', 'runCompatibilityCheck()', '🔍 Compatibility Check');
+                    } else if (s === 'up_to_date' || s === 'dev_mode' || s === 'offline') {
+                        buttons += _btn('neutral', '', 'checkVersionNow()', '↺ Check Now');
+                    } else if (s === 'error') {
+                        buttons += _btn('neutral', '', 'checkVersionNow()', '↺ Retry');
+                    }
+                    actionsDiv.innerHTML = buttons;
+                }
             }
 
-            // Initial check on page load
-            document.addEventListener('DOMContentLoaded', function() {
-                // Delay initial check slightly to not block page load
-                setTimeout(checkVersions, 1000);
+            function _btn(cls, id, onclick, label) {
+                return '<button class="up-btn ' + cls + '"' +
+                    (id ? ' id="' + _esc(id) + '"' : '') +
+                    (onclick ? ' onclick="' + onclick + '"' : ' disabled') +
+                    '>' + _esc(label) + '</button>';
+            }
 
-                // Set up periodic checks
-                versionCheckTimer = setInterval(checkVersions, VERSION_CHECK_INTERVAL);
+            function _esc(s) {
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+            }
+
+            // ── Panel toggle ───────────────────────────────────────────────────
+            window.toggleUpdatePanel = function() {
+                var panel = document.getElementById('update-panel');
+                var btn = document.getElementById('atlasforge-version');
+                if (!panel) return;
+                _panelOpen = !_panelOpen;
+                if (_panelOpen) {
+                    panel.classList.add('visible');
+                    if (btn) { btn.classList.add('panel-open'); btn.setAttribute('aria-expanded','true'); }
+                    if (_latestAtlasforgeData) _renderPanel(_latestAtlasforgeData);
+                } else {
+                    panel.classList.remove('visible');
+                    if (btn) { btn.classList.remove('panel-open'); btn.setAttribute('aria-expanded','false'); }
+                }
+            };
+
+            document.addEventListener('click', function(e) {
+                if (!_panelOpen) return;
+                var panel = document.getElementById('update-panel');
+                var btn = document.getElementById('atlasforge-version');
+                if (panel && !panel.contains(e.target) && btn && !btn.contains(e.target)) {
+                    _panelOpen = false;
+                    panel.classList.remove('visible');
+                    btn.classList.remove('panel-open');
+                    btn.setAttribute('aria-expanded','false');
+                }
             });
 
-            // Expose refresh function globally for manual refresh
-            window.refreshVersionStatus = function() {
-                fetch('/api/version/refresh', { method: 'POST' })
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && _panelOpen) window.toggleUpdatePanel();
+            });
+
+            // ── Update runner (streaming) ──────────────────────────────────────
+            window.runUpdate = function(method) {
+                var output = document.getElementById('up-output');
+                var runBtn = document.getElementById('up-run-update-btn');
+                if (!output) return;
+                output.textContent = '';
+                output.classList.add('visible');
+                if (runBtn) runBtn.disabled = true;
+
+                fetch('/api/version/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({method: method})
+                }).then(function(resp) {
+                    var reader = resp.body.getReader();
+                    var decoder = new TextDecoder();
+                    function read() {
+                        reader.read().then(function(r) {
+                            if (r.done) {
+                                if (runBtn) runBtn.disabled = false;
+                                setTimeout(function() { _checkVersions(true); }, 1000);
+                                return;
+                            }
+                            output.textContent += decoder.decode(r.value, {stream: true});
+                            output.scrollTop = output.scrollHeight;
+                            read();
+                        }).catch(function(e) {
+                            output.textContent += '\n[Stream interrupted: ' + e.message + ']';
+                            if (runBtn) runBtn.disabled = false;
+                        });
+                    }
+                    read();
+                }).catch(function(e) {
+                    output.textContent += '\nError: ' + e.message;
+                    if (runBtn) runBtn.disabled = false;
+                });
+            };
+
+            // ── Compatibility check ────────────────────────────────────────────
+            window.runCompatibilityCheck = function() {
+                var output = document.getElementById('up-output');
+                if (output) { output.textContent = 'Launching compatibility investigation...\n'; output.classList.add('visible'); }
+                fetch('/api/version/compatibility-check', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
-                        if (data.atlasforge) {
-                            updateVersionIndicator('atlasforge', data.atlasforge);
-                        }
-                        if (data.afterimage) {
-                            updateVersionIndicator('afterimage', data.afterimage);
+                        if (data.success && data.investigation_id) {
+                            if (output) output.textContent += 'Investigation started: ' + data.investigation_id + '\nNavigating to Investigations tab...';
+                            setTimeout(function() {
+                                var invTab = document.querySelector('[data-tab="investigations"], [onclick*="investigations"]');
+                                if (invTab) invTab.click();
+                                window.toggleUpdatePanel();
+                            }, 800);
+                        } else {
+                            if (output) output.textContent += 'Failed: ' + (data.error || 'Unknown error');
                         }
                     })
-                    .catch(function(err) {
-                        console.error('[VersionCheck] Failed to refresh versions:', err);
+                    .catch(function(e) {
+                        if (output) output.textContent += 'Error: ' + e.message;
                     });
             };
+
+            // ── Manual refresh ─────────────────────────────────────────────────
+            window.checkVersionNow = function() {
+                var output = document.getElementById('up-output');
+                if (output) { output.textContent = 'Checking...'; output.classList.add('visible'); }
+                fetch('/api/version/refresh', {method: 'POST'})
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (output) { output.textContent = ''; output.classList.remove('visible'); }
+                        if (data.atlasforge) updateVersionIndicator('atlasforge', data.atlasforge);
+                        if (data.afterimage) updateVersionIndicator('afterimage', data.afterimage);
+                    })
+                    .catch(function(e) {
+                        if (output) output.textContent = 'Error: ' + e.message;
+                    });
+            };
+
+            // ── Polling ────────────────────────────────────────────────────────
+            function _checkVersions(force) {
+                var url = force ? '/api/version/refresh' : '/api/version/status';
+                var opts = force ? {method: 'POST'} : {};
+                fetch(url, opts)
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.atlasforge) updateVersionIndicator('atlasforge', data.atlasforge);
+                        if (data.afterimage) updateVersionIndicator('afterimage', data.afterimage);
+                    })
+                    .catch(function(err) {
+                        console.error('[VersionCheck] Failed:', err);
+                        var el = document.getElementById('atlasforge-version-status');
+                        if (el) { el.className = 'version-status error'; el.textContent = 'Error'; }
+                    });
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(_checkVersions, 1000);
+                setInterval(_checkVersions, VERSION_CHECK_INTERVAL);
+            });
+
+            window.refreshVersionStatus = function() { _checkVersions(true); };
         })();
     </script>
 
@@ -3061,6 +3333,28 @@
                         <option value="100">100 cycles</option>
                     </select>
                 </div>
+                <div class="rec-detail">
+                    <label>Category:</label>
+                    <select id="rec-modal-mission-type" class="mission-input" style="min-height: auto; padding: 8px; width: auto;">
+                        <option value="EXPANSION">Expansion (New Feature)</option>
+                        <option value="BUGFIX">Bug Fix</option>
+                        <option value="TECH_DEBT">Tech Debt</option>
+                        <option value="COMPLETION">Completion</option>
+                        <option value="MANUAL">Manual</option>
+                    </select>
+                </div>
+                <div class="rec-detail">
+                    <label>Mission Type:</label>
+                    <select id="rec-modal-type" class="mission-input" style="min-height: auto; padding: 8px; width: auto;">
+                        <option value="full_rd" selected>Full R&amp;D</option>
+                        <option value="plan_only">Plan Only</option>
+                        <option value="build_only">Build Only</option>
+                        <option value="test_red_team">Test / Red Team</option>
+                        <option value="bug_hunt">Bug Hunt</option>
+                        <option value="research_only">Research Only</option>
+                        <option value="review_existing">Review Existing</option>
+                    </select>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" id="rec-edit-toggle-btn" onclick="toggleEditMode()">Edit</button>
@@ -3068,6 +3362,48 @@
                 <button class="btn danger" onclick="deleteRecommendation()">Delete</button>
                 <button class="btn" onclick="queueMissionSuggestion()">Add to Queue</button>
                 <button class="btn primary" onclick="setMissionFromRec()">Set Mission</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LLM Model Menu Settings Modal -->
+    <div id="llm-settings-modal" class="modal" role="dialog" aria-modal="true" style="display: none;">
+        <div class="modal-content" style="max-width: 780px;">
+            <div class="modal-header">
+                <h3>Model Menu Settings</h3>
+                <button class="modal-close" onclick="closeLlmSettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="display: grid; gap: 14px;">
+                <div style="font-size: 0.82em; color: var(--text-dim);">
+                    One option per line. Use <code>value | Label</code>.
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;">
+                    <div>
+                        <h4 style="margin: 0 0 8px 0;">Claude</h4>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Models</label>
+                        <textarea id="llm-settings-claude-models" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Thinking</label>
+                        <textarea id="llm-settings-claude-thinking" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                    </div>
+                    <div>
+                        <h4 style="margin: 0 0 8px 0;">Codex</h4>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Models</label>
+                        <textarea id="llm-settings-codex-models" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Thinking</label>
+                        <textarea id="llm-settings-codex-thinking" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                    </div>
+                    <div>
+                        <h4 style="margin: 0 0 8px 0;">Gemini</h4>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Models</label>
+                        <textarea id="llm-settings-gemini-models" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                        <label style="font-size: 0.8em; color: var(--text-dim);">Thinking</label>
+                        <textarea id="llm-settings-gemini-thinking" class="mission-input" style="min-height: 92px; font-family: monospace; font-size: 0.82em;"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeLlmSettingsModal()">Cancel</button>
+                <button class="btn primary" onclick="saveLlmSettingsModal()">Save</button>
             </div>
         </div>
     </div>

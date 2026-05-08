@@ -65,6 +65,49 @@ PROPOSALS_PATH = STATE_DIR / "proposals.json"
 RECOMMENDATIONS_PATH = STATE_DIR / "recommendations.json"
 MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
+LLM_MODEL_CONFIG_DEFAULTS = {
+    "selected": {
+        "claude": {"model": "sonnet", "thinking": "high"},
+        "codex": {"model": "gpt-5.5", "thinking": "high"},
+        "gemini": {"model": "gemini-2.5-pro", "thinking": "default"},
+    },
+    "options": {
+        "claude": {
+            "models": [
+                {"value": "haiku", "label": "Haiku"},
+                {"value": "sonnet", "label": "Sonnet"},
+                {"value": "opus", "label": "Opus"},
+            ],
+            "thinking": [
+                {"value": "low", "label": "Low"},
+                {"value": "medium", "label": "Medium"},
+                {"value": "high", "label": "High"},
+                {"value": "xhigh", "label": "XHigh"},
+                {"value": "max", "label": "Max"},
+            ],
+        },
+        "codex": {
+            "models": [
+                {"value": "gpt-5.5", "label": "Best available"},
+            ],
+            "thinking": [
+                {"value": "low", "label": "Low"},
+                {"value": "medium", "label": "Medium"},
+                {"value": "high", "label": "High"},
+                {"value": "xhigh", "label": "XHigh"},
+            ],
+        },
+        "gemini": {
+            "models": [
+                {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+                {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+            ],
+            "thinking": [
+                {"value": "default", "label": "Default"},
+            ],
+        },
+    },
+}
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 
 # Ensure directories exist
@@ -291,26 +334,114 @@ def _normalize_provider(provider: str | None) -> str:
     return "claude"
 
 
-def get_llm_provider() -> str:
-    """Get the persisted LLM provider selection."""
+def _clean_option_value(value) -> str:
+    raw = str(value or "").strip()
+    return raw[:80] if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", raw) else ""
+
+
+def _clean_option_label(label, fallback: str) -> str:
+    raw = str(label or "").strip()
+    if not raw:
+        raw = fallback
+    return raw[:80]
+
+
+def _normalize_option_list(raw_options, default_options: list[dict]) -> list[dict]:
+    if not isinstance(raw_options, list):
+        raw_options = []
+    cleaned = []
+    seen = set()
+    for item in raw_options:
+        if isinstance(item, dict):
+            value = _clean_option_value(item.get("value"))
+            label = _clean_option_label(item.get("label"), value)
+        else:
+            value = _clean_option_value(item)
+            label = value
+        if not value or value in seen:
+            continue
+        cleaned.append({"value": value, "label": label})
+        seen.add(value)
+    return cleaned or [dict(opt) for opt in default_options]
+
+
+def _normalize_llm_config(data: dict | None) -> dict:
+    data = data if isinstance(data, dict) else {}
+    provider = _normalize_provider(data.get("provider"))
+    if provider not in LLM_MODEL_CONFIG_DEFAULTS["selected"]:
+        provider = "claude"
+    selected_raw = data.get("selected") if isinstance(data.get("selected"), dict) else {}
+    options_raw = data.get("options") if isinstance(data.get("options"), dict) else {}
+
+    options = {}
+    selected = {}
+    for provider_key, defaults in LLM_MODEL_CONFIG_DEFAULTS["options"].items():
+        raw_provider_options = options_raw.get(provider_key) if isinstance(options_raw.get(provider_key), dict) else {}
+        models = _normalize_option_list(raw_provider_options.get("models"), defaults["models"])
+        thinking = _normalize_option_list(raw_provider_options.get("thinking"), defaults["thinking"])
+        options[provider_key] = {"models": models, "thinking": thinking}
+
+        raw_selected = selected_raw.get(provider_key) if isinstance(selected_raw.get(provider_key), dict) else {}
+        default_selected = LLM_MODEL_CONFIG_DEFAULTS["selected"][provider_key]
+        model = _clean_option_value(raw_selected.get("model")) or default_selected["model"]
+        effort = _clean_option_value(raw_selected.get("thinking")) or default_selected["thinking"]
+        model_values = {opt["value"] for opt in models}
+        effort_values = {opt["value"] for opt in thinking}
+        if model not in model_values:
+            model = models[0]["value"]
+        if effort not in effort_values:
+            effort = thinking[0]["value"]
+        selected[provider_key] = {"model": model, "thinking": effort}
+
+    return {
+        "provider": provider,
+        "selected": selected,
+        "options": options,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+def get_llm_config() -> dict:
+    """Get provider/model/thinking configuration for AtlasForge starts."""
     data = io_utils.atomic_read_json(LLM_PROVIDER_PATH, {})
-    provider = data.get("provider")
-    normalized = _normalize_provider(provider)
-
-    # Self-heal invalid persisted values to prevent repeated fallback ambiguity.
-    if provider != normalized:
-        set_llm_provider(normalized)
-
+    normalized = _normalize_llm_config(data)
+    if data != normalized:
+        normalized["updated_at"] = datetime.now().isoformat()
+        io_utils.atomic_write_json(LLM_PROVIDER_PATH, normalized)
     return normalized
 
 
-def set_llm_provider(provider: str) -> str:
-    """Persist the LLM provider selection and return normalized value."""
+def get_llm_provider() -> str:
+    """Get the persisted LLM provider selection."""
+    return get_llm_config()["provider"]
+
+
+def set_llm_provider(provider: str, model: str | None = None, thinking: str | None = None, options: dict | None = None) -> str:
+    """Persist the LLM provider/model selection and return normalized provider."""
+    current = get_llm_config()
     normalized = _normalize_provider(provider)
-    io_utils.atomic_write_json(LLM_PROVIDER_PATH, {
-        "provider": normalized,
-        "updated_at": datetime.now().isoformat()
-    })
+    if normalized not in LLM_MODEL_CONFIG_DEFAULTS["selected"]:
+        normalized = "claude"
+    current["provider"] = normalized
+    if isinstance(options, dict):
+        current["options"] = _normalize_llm_config({
+            **current,
+            "options": options,
+        })["options"]
+    selected = current.setdefault("selected", {})
+    provider_selected = selected.setdefault(normalized, dict(LLM_MODEL_CONFIG_DEFAULTS["selected"][normalized]))
+    if model is not None:
+        cleaned_model = _clean_option_value(model)
+        model_values = {opt["value"] for opt in current["options"][normalized]["models"]}
+        if cleaned_model and cleaned_model in model_values:
+            provider_selected["model"] = cleaned_model
+    if thinking is not None:
+        cleaned_thinking = _clean_option_value(thinking)
+        thinking_values = {opt["value"] for opt in current["options"][normalized]["thinking"]}
+        if cleaned_thinking and cleaned_thinking in thinking_values:
+            provider_selected["thinking"] = cleaned_thinking
+    current["updated_at"] = datetime.now().isoformat()
+    io_utils.atomic_write_json(LLM_PROVIDER_PATH, _normalize_llm_config(current))
     return normalized
 
 
@@ -403,7 +534,13 @@ def get_claude_status() -> dict:
         "cycle_budget": mission.get("cycle_budget", 1),
         "original_mission": mission.get("original_problem_statement", ""),
         "project_name": mission.get("project_name", ""),
-        "project_workspace": mission.get("project_workspace", "")
+        "project_workspace": mission.get("project_workspace", ""),
+        # Mission-type profile fields (cycle 2). Default to full_rd for
+        # pre-profile missions so the dashboard always shows something useful.
+        "mission_type": mission.get("mission_type", "full_rd"),
+        "mission_type_label": mission.get("mission_type_label", "Full R&D"),
+        "enabled_stages": mission.get("enabled_stages", []),
+        "stop_after_profile_complete": mission.get("stop_after_profile_complete", False),
     }
 
 
@@ -538,16 +675,14 @@ def get_ssl_context():
 # =============================================================================
 
 # GlassBox introspection system
-import sys
-sys.path.insert(0, str(Path(__file__).parent / "workspace"))
 try:
     from glassbox.dashboard_routes import glassbox_bp
     GLASSBOX_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     GLASSBOX_AVAILABLE = False
-    print("Warning: GlassBox not available")
+    print(f"Warning: GlassBox not available: {e}")
 
-# Register workspace blueprints
+# Register external blueprints
 if GLASSBOX_AVAILABLE:
     app.register_blueprint(glassbox_bp)
 
@@ -568,9 +703,11 @@ from dashboard_modules import (
     semantic_bp, init_semantic_blueprint,
     version_bp, init_version_blueprint,
     get_bundle_version, init_bundle_version,
+    ensure_bundle_fresh,
     artifact_health_bp, init_artifact_health_blueprint,
     mission_params_bp, init_mission_params_blueprint, get_mission_params,
     pool_manager_bp, init_pool_manager_blueprint,
+    conductor_status_bp, init_conductor_status_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -589,6 +726,7 @@ init_core_blueprint(
     journal_fn=get_recent_journal,
     get_provider_fn=get_llm_provider,
     set_provider_fn=set_llm_provider,
+    get_provider_config_fn=get_llm_config,
     narrative_status_fn=None,
     narrative_start_fn=None,
     narrative_stop_fn=None,
@@ -622,10 +760,28 @@ except Exception as e:
     logger.warning("Failed to resolve mission workspace: %s", e)
 init_semantic_blueprint(mission_workspace=current_mission_workspace, socketio=socketio, io_utils=io_utils)
 init_version_blueprint(BASE_DIR)
+# Auto-rebuild the JS/CSS bundle if any source file is newer than the dist
+# bundle. Runs synchronously before bundle_version reads the file hash so
+# cache-busting picks up the fresh build. Set ATLASFORGE_SKIP_BUNDLE_BUILD=1
+# to disable (CI / packaged installs).
+_bundle_build_result = ensure_bundle_fresh(STATIC_DIR, BASE_DIR)
+if _bundle_build_result.get('status') == 'rebuilt':
+    logger.info(
+        "Dashboard bundle rebuilt at startup (%.0fms): %s",
+        _bundle_build_result.get('duration_ms', 0),
+        _bundle_build_result.get('reason', ''),
+    )
+elif _bundle_build_result.get('status') in ('no_npm', 'build_failed', 'no_dist', 'no_package_json'):
+    logger.warning(
+        "Dashboard bundle may be stale (status=%s, reason=%s). Run 'npm run build' manually.",
+        _bundle_build_result.get('status'),
+        _bundle_build_result.get('reason'),
+    )
 init_bundle_version(STATIC_DIR, BASE_DIR)
 init_artifact_health_blueprint(WORKSPACE_DIR / "artifacts")
 init_mission_params_blueprint(MISSION_PATH, BASE_DIR / "missions", io_utils, emit_callback=lambda room, data: emit_widget_update(room, data))
 init_pool_manager_blueprint(socketio)
+init_conductor_status_blueprint(BASE_DIR, STATE_DIR, LOG_DIR)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -643,6 +799,7 @@ app.register_blueprint(version_bp)
 app.register_blueprint(artifact_health_bp)
 app.register_blueprint(mission_params_bp)
 app.register_blueprint(pool_manager_bp)
+app.register_blueprint(conductor_status_bp)
 print("[Dashboard] pool_manager_bp registered successfully at /api/pool/*")
 
 # SSE transport for agent activity streams (replaces flask-socketio rooms
@@ -654,17 +811,7 @@ try:
 except Exception as _agent_sse_err:
     print(f"[Dashboard] agent_sse_bp registration failed: {_agent_sse_err}")
 
-# Conductor status and control API (enhanced singleton with takeover support)
-try:
-    # Add ConductorTakeover to path so its internal imports resolve
-    _conductor_path = str(Path(__file__).parent / "workspace" / "ConductorTakeover")
-    if _conductor_path not in sys.path:
-        sys.path.insert(0, _conductor_path)
-    from workspace.ConductorTakeover.conductor_dashboard_api import conductor_bp
-    app.register_blueprint(conductor_bp)
-    print("[Conductor] API endpoints registered (/api/conductor/*)")
-except ImportError as e:
-    print(f"[Conductor] API not available: {e}")
+print("[Conductor] API endpoints registered (/api/conductor/*)")
 
 # Register non-prefixed routes
 register_archival_routes(app)
@@ -806,8 +953,12 @@ def queue_auto_start_watcher():
                             io_utils.atomic_write_json(QUEUE_AUTO_START_SIGNAL_PATH, signal_data)
                             continue
 
-                    # Start the queued mission with the provider captured at queue time.
-                    set_llm_provider(signal_provider)
+                    # Start the queued mission with the model selection captured at queue time.
+                    set_llm_provider(
+                        signal_provider,
+                        model=signal_data.get("llm_model"),
+                        thinking=signal_data.get("llm_thinking"),
+                    )
                     print(f"[QueueWatcher] Starting {signal_provider} in RD mode for: {mission_title}")
                     success, msg = start_claude(mode="rd")
 
@@ -1363,11 +1514,14 @@ def get_glassbox_summary() -> dict:
             if archive:
                 return {
                     'mission_id': mission_id,
-                    'agent_count': archive.get_agent_count(),
-                    'total_events': archive.get_total_events()
+                    'agent_count': len(getattr(archive, 'all_agents', []) or []),
+                    'total_events': len(getattr(archive, 'decision_log', []) or []),
+                    'total_tokens': getattr(archive, 'total_tokens', 0),
                 }
     except ImportError:
         pass
+    except Exception as e:
+        logger.debug(f'get_glassbox_summary error: {e}')
     return {}
 
 

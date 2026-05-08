@@ -394,6 +394,50 @@ All components are integrated and the application runs end-to-end.'''
         assert result["blockers"] == []
 
 
+class TestTestingWaitFallback:
+    """Regression tests for TESTING monitor/wakeup non-JSON responses."""
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_detects_testing_monitor_wait_response(self):
+        import atlasforge_conductor as conductor
+
+        text = "Red team processes started, waiting for results. The wakeup is set."
+        failed_mission_text = "The Monitor is already armed. I'll wait for it to fire."
+
+        assert conductor._looks_like_testing_wait_response(text) is True
+        assert conductor._looks_like_testing_wait_response(failed_mission_text) is True
+        assert conductor._looks_like_testing_wait_response("All done") is False
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_testing_wait_fallback_returns_tests_error(self, tmp_path):
+        import atlasforge_conductor as conductor
+
+        artifacts_dir = tmp_path / "artifacts"
+        artifacts_dir.mkdir()
+        (artifacts_dir / "test_results.md").write_text(
+            "# Test Results\n\nSelf tests passed; red team still needs analysis.",
+            encoding="utf-8",
+        )
+
+        class Controller:
+            mission = {
+                "mission_id": "mission_wait_fallback",
+                "mission_workspace": str(tmp_path),
+            }
+
+        response = conductor.construct_testing_wait_fallback_response(
+            "The Monitor is already armed. I'll wait for it to fire.",
+            Controller(),
+        )
+
+        assert response["status"] == "tests_error"
+        assert response["adversarial_testing"]["rigor_level"] == "insufficient"
+        assert "test_results.md" in response["summary"]
+        assert "strict JSON" in response["success_criteria_failed"][0]
+
+
 # ===========================================================================
 # Test _find_balanced_json helper
 # ===========================================================================

@@ -54,6 +54,29 @@ def _normalize_llm_provider(provider) -> Optional[str]:
     return None
 
 
+def _safe_llm_option(value) -> Optional[str]:
+    option = str(value or "").strip()
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", option):
+        return option
+    return None
+
+
+def _load_active_llm_selection(provider: str) -> Dict[str, Optional[str]]:
+    try:
+        if LLM_PROVIDER_PATH.exists():
+            with open(LLM_PROVIDER_PATH, 'r') as f:
+                data = json.load(f) or {}
+            selected = data.get("selected") if isinstance(data.get("selected"), dict) else {}
+            provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
+            return {
+                "model": _safe_llm_option(provider_selected.get("model")),
+                "thinking": _safe_llm_option(provider_selected.get("thinking")),
+            }
+    except Exception as exc:
+        logger.debug("Unable to read active LLM model selection: %s", exc)
+    return {"model": None, "thinking": None}
+
+
 def _load_active_llm_provider() -> str:
     try:
         if LLM_PROVIDER_PATH.exists():
@@ -72,6 +95,24 @@ def _resolve_queue_llm_provider(data: Dict[str, Any]) -> str:
         _normalize_llm_provider(data.get("llm_provider"))
         or _normalize_llm_provider(data.get("provider"))
         or _load_active_llm_provider()
+    )
+
+
+def _resolve_queue_llm_model(data: Dict[str, Any]) -> Optional[str]:
+    provider = _resolve_queue_llm_provider(data)
+    return (
+        _safe_llm_option(data.get("llm_model"))
+        or _safe_llm_option(data.get("model"))
+        or _load_active_llm_selection(provider).get("model")
+    )
+
+
+def _resolve_queue_llm_thinking(data: Dict[str, Any]) -> Optional[str]:
+    provider = _resolve_queue_llm_provider(data)
+    return (
+        _safe_llm_option(data.get("llm_thinking"))
+        or _safe_llm_option(data.get("thinking"))
+        or _load_active_llm_selection(provider).get("thinking")
     )
 
 
@@ -369,6 +410,22 @@ def add_to_queue():
                 priority = max(0, min(100, int(data.get("priority", 0))))
             except (ValueError, TypeError, OverflowError):
                 priority = 0
+            # Accept either `mission_type` (canonical for queue) or
+            # `execution_profile` (alias used by the suggestions UI). Treat
+            # None/empty/non-string in the canonical key as "fall through to
+            # alias" so callers sending `false` or `""` still get the intended
+            # profile.
+            _mt = data.get("mission_type")
+            if not isinstance(_mt, str) or not _mt:
+                _mt = data.get("execution_profile")
+            if not isinstance(_mt, str) or not _mt:
+                _mt = None
+            try:
+                from af_engine.mission_profiles import is_valid_mission_type
+                if _mt is not None and not is_valid_mission_type(_mt):
+                    return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
+            except ImportError:
+                pass
             entry = {
                 "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
                 "problem_statement": problem_statement,
@@ -376,6 +433,9 @@ def add_to_queue():
                 "max_iterations": max_iterations,
                 "priority": priority,  # clamped to [0, 100]
                 "llm_provider": _resolve_queue_llm_provider(data),
+                "llm_model": _resolve_queue_llm_model(data),
+                "llm_thinking": _resolve_queue_llm_thinking(data),
+                "mission_type": _mt if _mt is not None else "full_rd",
                 "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
                 "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
                 "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
@@ -575,12 +635,20 @@ def start_next_mission():
             "mission_dir": str(BASE_DIR / "missions" / mission_id),
             "project_name": project_name,  # Preserve project name in mission
             "llm_provider": _resolve_queue_llm_provider(next_mission),
+            "llm_model": _resolve_queue_llm_model(next_mission),
+            "llm_thinking": _resolve_queue_llm_thinking(next_mission),
             "metadata": {
                 "source": next_mission.get("source", "queue"),
                 "source_id": next_mission.get("source_id"),
                 "queue_id": next_mission.get("id")
             }
         }
+        # Apply mission type profile (sets current_stage, enabled_stages, etc.)
+        try:
+            from af_engine.mission_profiles import apply_mission_type_profile
+            apply_mission_type_profile(new_mission, next_mission.get("mission_type"))
+        except ImportError:
+            pass
 
         # Create mission directory
         mission_dir = Path(new_mission["mission_dir"])
@@ -590,9 +658,33 @@ def start_next_mission():
         (workspace_dir / "research").mkdir(exist_ok=True)
         (workspace_dir / "tests").mkdir(exist_ok=True)
 
-        # Save mission
+        # Save mission. If this fails, the queue item we popped above is lost
+        # forever — restore it under the queue lock before re-raising. The
+        # restoration re-loads the queue inside the lock so we don't clobber
+        # any unrelated item that was added concurrently.
         from io_utils import atomic_write_json
-        atomic_write_json(STATE_DIR / "mission.json", new_mission)
+        try:
+            atomic_write_json(STATE_DIR / "mission.json", new_mission)
+        except Exception:
+            try:
+                with _queue_lock:
+                    rolled_back = _load_queue()
+                    rolled_back["missions"] = [next_mission] + (rolled_back.get("missions") or [])
+                    _save_queue(rolled_back)
+                logger.warning(
+                    "queue_scheduler: mission.json write failed; restored queue item "
+                    "%s to head of queue",
+                    next_mission.get("id"),
+                )
+            except Exception as restore_err:
+                # Restoration itself failed — log loudly but do not mask the
+                # original write error.
+                logger.error(
+                    "queue_scheduler: failed to restore queue item after mission.json "
+                    "write error: %s",
+                    restore_err,
+                )
+            raise
 
         # Write auto-start signal so dashboard's queue_auto_start_watcher starts Claude
         signal_path = STATE_DIR / "queue_auto_start_signal.json"
@@ -603,6 +695,8 @@ def start_next_mission():
             "mission_id": mission_id,
             "mission_title": mission_title,
             "llm_provider": _resolve_queue_llm_provider(next_mission),
+            "llm_model": _resolve_queue_llm_model(next_mission),
+            "llm_thinking": _resolve_queue_llm_thinking(next_mission),
             "signaled_at": datetime.now().isoformat(),
             "source": "queue_next_button"
         })
@@ -754,6 +848,15 @@ def add_from_kb_recommendation():
         except (TypeError, ValueError, OverflowError):
             priority_val = 1
 
+        # Validate mission_type if provided
+        try:
+            from af_engine.mission_profiles import is_valid_mission_type
+            _mt = data.get("mission_type")
+            if _mt is not None and not is_valid_mission_type(_mt):
+                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
+        except ImportError:
+            pass
+
         # Add to queue
         entry = {
             "id": f"queue_kbrec_{str(recommendation_id)[:8]}_{datetime.now().strftime('%H%M%S')}",
@@ -763,6 +866,9 @@ def add_from_kb_recommendation():
             "cycle_budget": cycle_budget,
             "priority": priority_val,
             "llm_provider": _resolve_queue_llm_provider(data),
+            "llm_model": _resolve_queue_llm_model(data),
+            "llm_thinking": _resolve_queue_llm_thinking(data),
+            "mission_type": data.get("mission_type", "full_rd"),
             "source": "kb_recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -827,6 +933,15 @@ def add_from_recommendation():
         except (TypeError, ValueError, OverflowError):
             priority_val = 1
 
+        # Validate mission_type if provided
+        try:
+            from af_engine.mission_profiles import is_valid_mission_type
+            _mt = data.get("mission_type")
+            if _mt is not None and not is_valid_mission_type(_mt):
+                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
+        except ImportError:
+            pass
+
         # Add to queue
         entry = {
             "id": f"queue_rec_{recommendation_id}_{uuid.uuid4().hex[:8]}",
@@ -834,6 +949,9 @@ def add_from_recommendation():
             "cycle_budget": cycle_budget,
             "priority": priority_val,
             "llm_provider": _resolve_queue_llm_provider(data),
+            "llm_model": _resolve_queue_llm_model(data),
+            "llm_thinking": _resolve_queue_llm_thinking(data),
+            "mission_type": data.get("mission_type", "full_rd"),
             "source": "recommendation",
             "source_id": recommendation_id,
             "added_at": datetime.now().isoformat(),
@@ -1093,6 +1211,14 @@ def add_to_queue_enhanced():
         scheduler = get_scheduler()
         estimated_minutes = scheduler.estimate_duration_from_history(problem_statement, cycle_budget)
 
+        # Validate mission_type if provided
+        try:
+            from af_engine.mission_profiles import is_valid_mission_type
+            _mt = data.get("mission_type")
+            if _mt is not None and not is_valid_mission_type(_mt):
+                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
+        except ImportError:
+            pass
         # Create enhanced queue entry
         entry = {
             "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
@@ -1106,6 +1232,9 @@ def add_to_queue_enhanced():
             "depends_on": data.get("depends_on"),  # mission_id
             "estimated_minutes": estimated_minutes,
             "llm_provider": _resolve_queue_llm_provider(data),
+            "llm_model": _resolve_queue_llm_model(data),
+            "llm_thinking": _resolve_queue_llm_thinking(data),
+            "mission_type": data.get("mission_type", "full_rd"),
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),
             "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal

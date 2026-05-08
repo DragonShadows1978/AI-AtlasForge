@@ -69,9 +69,11 @@ from .queue_scheduler import queue_scheduler_bp, init_queue_scheduler_blueprint
 from .semantic import semantic_bp, init_semantic_blueprint
 from .version_checker import version_bp, init_version_blueprint
 from .bundle_version import get_bundle_version, init_bundle_version
+from .bundle_builder import ensure_bundle_fresh
 from .artifact_health import artifact_health_bp, init_artifact_health_blueprint
 from .mission_params import mission_params_bp, init_mission_params_blueprint, get_mission_params
 from .pool_manager import pool_manager_bp, init_pool_manager_blueprint
+from .conductor_status import conductor_status_bp, init_conductor_status_blueprint
 
 __all__ = [
     # Blueprints
@@ -98,6 +100,8 @@ __all__ = [
     # Bundle version (cache-busting)
     'get_bundle_version',
     'init_bundle_version',
+    # Bundle builder (auto-rebuild stale dist on dashboard start)
+    'ensure_bundle_fresh',
     # Artifact health
     'artifact_health_bp',
     'init_artifact_health_blueprint',
@@ -107,7 +111,9 @@ __all__ = [
     'get_mission_params',
     # Pool manager blueprint
     'pool_manager_bp',
+    'conductor_status_bp',
     'init_pool_manager_blueprint',
+    'init_conductor_status_blueprint',
     # Non-blueprint route registrations
     'register_archival_routes',
 ]

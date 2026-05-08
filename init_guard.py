@@ -170,6 +170,11 @@ ALL_KNOWN_TOOLS: FrozenSet[str] = frozenset({
     "mcp__atlasforge-web-proxy__WebFetch",
     "mcp__atlasforge-web-proxy__WebResearch",
     "mcp__atlasforge-web-proxy__ImageSearch",
+    "mcp__atlasforge-web-proxy__AtlasForgeGetStagePolicy",
+    "mcp__atlasforge-web-proxy__AtlasForgeSubmitPlan",
+    "mcp__atlasforge-web-proxy__AtlasForgeWriteStageNote",
+    "mcp__atlasforge-web-proxy__AtlasForgeSubmitReview",
+    "mcp__atlasforge-web-proxy__AtlasForgeSubmitPatchSummary",
     # Iter-6 H1: Gemini-style tool aliases referenced in STAGE_POLICIES. Must
     # appear here so the fail-closed disallow set actually contains the
     # destructive ones (write_file, replace, run_shell_command). Without them,
@@ -388,6 +393,9 @@ STAGE_POLICIES: Mapping[RDStage, StageToolPolicy] = types.MappingProxyType({
             "Grep", "search_file_content",
             "WebFetch",
             "WebSearch",
+            "mcp__atlasforge-web-proxy__AtlasForgeGetStagePolicy",
+            "mcp__atlasforge-web-proxy__AtlasForgeSubmitPlan",
+            "mcp__atlasforge-web-proxy__AtlasForgeWriteStageNote",
             "Task",  # For research subagents
             "Write", "write_file",  # Only for artifacts
             "Edit", "replace",   # Only for artifacts
@@ -424,6 +432,9 @@ STAGE_POLICIES: Mapping[RDStage, StageToolPolicy] = types.MappingProxyType({
             "Grep", "search_file_content",
             "WebFetch",
             "WebSearch",
+            "mcp__atlasforge-web-proxy__AtlasForgeGetStagePolicy",
+            "mcp__atlasforge-web-proxy__AtlasForgeWriteStageNote",
+            "mcp__atlasforge-web-proxy__AtlasForgeSubmitReview",
             "Task",
             "Write", "write_file",  # Only for reports
             "Edit", "replace",   # Only for reports
@@ -452,6 +463,9 @@ STAGE_POLICIES: Mapping[RDStage, StageToolPolicy] = types.MappingProxyType({
             "Write", "write_file",  # Only for reports and continuation prompts
             "Edit", "replace",   # Only for reports
             "Task",   # For research subagents if needed
+            "mcp__atlasforge-web-proxy__AtlasForgeGetStagePolicy",
+            "mcp__atlasforge-web-proxy__AtlasForgeWriteStageNote",
+            "mcp__atlasforge-web-proxy__AtlasForgeSubmitReview",
         }),
         blocked_tools=frozenset(),  # Path restrictions handle write blocking
         write_paths_allowed=(
@@ -467,6 +481,7 @@ STAGE_POLICIES: Mapping[RDStage, StageToolPolicy] = types.MappingProxyType({
             "Read", "read_file",
             "Glob", "list_directory",
             "Grep", "search_file_content",
+            "mcp__atlasforge-web-proxy__AtlasForgeGetStagePolicy",
         }),
         blocked_tools=frozenset({
             "Edit", "replace",
@@ -635,7 +650,7 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
         return ""
 
     @staticmethod
-    def get_disallowed_tools_for_cli(stage: str) -> str:
+    def get_disallowed_tools_for_cli(stage: str, mission: Any = None) -> str:
         """Get comma-separated disallowed tools string for Claude CLI --disallowedTools flag.
 
         This is the PRIMARY enforcement mechanism. The Claude CLI will refuse to invoke
@@ -646,11 +661,33 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
         the stage_gate_hook.py PreToolUse hook as defense-in-depth.
 
         Args:
-            stage: Current R&D stage name
+            stage:   Current R&D stage name
+            mission: Optional mission dict. When provided and the active profile says
+                     `allow_code_writes is False`, the stage is treated as PLANNING-
+                     equivalent for tool blocking (path enforcement still allows
+                     writes to artifacts/research). Backwards-compat: mission=None
+                     produces identical behavior to the pre-cycle-2 path.
 
         Returns:
             Comma-separated string of tool names to block (for --disallowedTools flag)
         """
+        # Profile flag overlay: if the profile bans code writes, treat the stage
+        # as PLANNING for tool blocking (Write/Edit stay allowed for artifacts/
+        # research via path enforcement, but the agent has the same general
+        # surface as PLANNING — no destructive shell, etc.).
+        # We DO NOT downgrade for stages that are already MORE restrictive than
+        # PLANNING (ANALYZING, CYCLE_END, COMPLETE).
+        effective_stage = stage
+        try:
+            if mission is not None and isinstance(mission, dict):
+                from af_engine.mission_profiles import allow_code_writes as _acw
+                if _acw(mission) is False:
+                    less_restrictive = {"BUILDING", "TESTING"}
+                    if stage in less_restrictive:
+                        effective_stage = "PLANNING"
+        except Exception:
+            # Never let profile lookup break the security gate.
+            effective_stage = stage
         # Always block plan mode tools regardless of stage.
         # WebSearch/WebFetch are always blocked too — they route through the
         # AtlasForge web proxy MCP server instead (see af_engine/web_proxy_cli.py).
@@ -669,9 +706,9 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
         def _fail_closed() -> str:
             return ",".join(sorted(base_blocked | (all_known_tools - read_only_tools)))
 
-        stage_repr = _safe_stage_repr(stage)
+        stage_repr = _safe_stage_repr(effective_stage)
         try:
-            rd_stage = RDStage(stage)
+            rd_stage = RDStage(effective_stage)
             policy = STAGE_POLICIES.get(rd_stage)
 
             if not policy:
@@ -745,16 +782,30 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
             return False, f"Unknown stage: {stage_repr}"
 
     @staticmethod
-    def validate_write_path(stage: str, path: str) -> tuple[bool, str]:
+    def validate_write_path(
+        stage: str,
+        path: str,
+        mission: Any = None,
+        added_lines: Any = None,
+    ) -> tuple[bool, str]:
         """
         Validate if writing to a path is allowed in a stage.
 
         Args:
-            stage: Current R&D stage
-            path: Path being written to
+            stage:       Current R&D stage
+            path:        Path being written to
+            mission:     Optional mission dict. When provided, profile flags
+                         (`allow_code_writes`, `allow_implementation`) overlay
+                         additional restrictions on top of stage policy.
+            added_lines: Optional integer count of new lines being added (used
+                         by the `optional_patch_if_small` profile flag).
 
         Returns:
             Tuple of (is_allowed, reason)
+
+        Backwards-compat: mission=None produces identical behavior to today.
+        Profile overlay can only NARROW (never widen) what stage policy permits;
+        stage policy denial always wins.
         """
         if not isinstance(path, str):
             logger.warning(
@@ -775,8 +826,47 @@ You are in the CYCLE_END stage. This stage generates cycle reports and continuat
                 )
                 return False, f"Unknown stage: {stage_repr}"
 
+            # Stage policy gate (always applies first; this is the security invariant).
             if not policy.can_write_path(path):
                 return False, f"Writing to '{path}' not allowed in {stage_repr} stage"
+
+            # Profile overlay (only narrows). Skip silently for missing/invalid mission.
+            if mission is not None and isinstance(mission, dict):
+                try:
+                    from af_engine.mission_profiles import (
+                        effective_write_paths,
+                        enforce_profile_implementation,
+                    )
+
+                    # allow_code_writes=False → restrict to artifacts/research-only.
+                    profile_paths = effective_write_paths(mission, stage)
+                    if profile_paths is not None:
+                        # Build an ad-hoc policy that uses the profile-restricted
+                        # patterns + the same workspace gating as the stage policy.
+                        narrow_policy = StageToolPolicy(
+                            stage=rd_stage,
+                            allowed_tools=policy.allowed_tools,
+                            blocked_tools=policy.blocked_tools,
+                            write_paths_allowed=profile_paths,
+                        )
+                        if not narrow_policy.can_write_path(path):
+                            return False, (
+                                f"Profile (allow_code_writes=False) blocks write to "
+                                f"'{path}' in {stage_repr} stage"
+                            )
+
+                    # allow_implementation flag (False or "optional_patch_if_small").
+                    impl_added: Any = None
+                    if isinstance(added_lines, int) and added_lines >= 0:
+                        impl_added = added_lines
+                    impl_ok, impl_reason = enforce_profile_implementation(
+                        mission, stage, path, added_lines=impl_added
+                    )
+                    if not impl_ok:
+                        return False, impl_reason
+                except Exception as e:
+                    # Fail open on lookup error so the stage policy stays authoritative.
+                    logger.debug("validate_write_path profile overlay error: %s", e)
 
             return True, "Allowed"
 

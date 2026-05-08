@@ -239,6 +239,33 @@ function renderRecommendations() {
             }
         })();
 
+        // Execution profile badge — visible indicator of which mission profile the
+        // suggestion will run under (full_rd, plan_only, build_only, test_red_team,
+        // bug_hunt, research_only, review_existing). Defaults to 'full_rd' for legacy
+        // rows where the column is NULL.
+        const profileBadge = (() => {
+            const labels = {
+                full_rd:        'Full R&D',
+                plan_only:      'Plan Only',
+                build_only:     'Build Only',
+                test_red_team:  'Test/Red Team',
+                bug_hunt:       'Bug Hunt',
+                research_only:  'Research',
+                review_existing:'Review',
+            };
+            // Use Object.prototype.hasOwnProperty.call to avoid prototype-pollution
+            // lookups (e.g. labels["constructor"]) and to avoid the truthiness
+            // fallback that would let data-profile carry an unrecognised key while
+            // the visible label silently shifts to "Full R&D".
+            const raw = rec.execution_profile;
+            const profile = (typeof raw === 'string'
+                && Object.prototype.hasOwnProperty.call(labels, raw))
+                ? raw
+                : 'full_rd';
+            const label = labels[profile];
+            return `<span class="rec-profile-badge" data-profile="${escapeHtml(profile)}">${escapeHtml(label)}</span>`;
+        })();
+
         // Auto-tags badges — use data-tag attribute to avoid CSS class injection
         // (a tag containing spaces would inject extra CSS classes if used in class attr)
         const tagBadges = (rec.auto_tags || []).slice(0, 3).map(tag =>
@@ -262,7 +289,7 @@ function renderRecommendations() {
             <div class="${itemClass}" data-rec-id="${escapeHtml(rec.id)}">
                 <div class="rec-item-content">
                     <div class="rec-item-title">
-                        ${missionTypeBadge}${escapeHtml(rec.mission_title)}
+                        ${missionTypeBadge}${profileBadge}${escapeHtml(rec.mission_title)}
                         ${sourceBadge}
                         ${healthBadge}
                     </div>
@@ -371,6 +398,23 @@ export async function openRecModal(recId) {
     const cyclesSelect = document.getElementById('rec-modal-cycles');
     const suggestedCycles = rec.suggested_cycles || 3;
     if (cyclesSelect) cyclesSelect.value = suggestedCycles;
+
+    const missionCatSelect = document.getElementById('rec-modal-mission-type');
+    if (missionCatSelect) {
+        missionCatSelect.value = (rec.mission_type || 'EXPANSION').toUpperCase();
+    }
+
+    const typeSelect = document.getElementById('rec-modal-type');
+    if (typeSelect) {
+        const _MTYPE_PROFILE = { BUGFIX: 'bug_hunt', TECH_DEBT: 'build_only' };
+        const storedProfile = rec.execution_profile || 'full_rd';
+        const missionType = (rec.mission_type || '').toUpperCase();
+        // If the stored profile is still the generic default, apply smart mapping from mission_type
+        const effectiveProfile = (storedProfile === 'full_rd' && _MTYPE_PROFILE[missionType])
+            ? _MTYPE_PROFILE[missionType]
+            : storedProfile;
+        typeSelect.value = effectiveProfile;
+    }
 
     // Reset project name field and trigger async auto-suggestion
     const projectInput = document.getElementById('rec-project-name-input');
@@ -494,7 +538,19 @@ export async function setMissionFromRec() {
             ? (projectInputS.value.trim() || projectInputS.dataset.suggested || '')
             : '';
 
-        const setPayload = { cycle_budget: cycleBudget };
+        const typeSelectS = document.getElementById('rec-modal-type');
+        const executionProfileS = typeSelectS ? typeSelectS.value : 'full_rd';
+        const catSelectS = document.getElementById('rec-modal-mission-type');
+        const missionCatS = catSelectS ? catSelectS.value : null;
+
+        // Persist chosen execution_profile and mission_type back to the suggestion before set-mission deletes it
+        try {
+            const _putS = { execution_profile: executionProfileS };
+            if (missionCatS) _putS.mission_type = missionCatS;
+            await api('/api/recommendations/' + selectedRecId, 'PUT', _putS);
+        } catch (_e) { /* non-blocking — main action proceeds regardless */ }
+
+        const setPayload = { cycle_budget: cycleBudget, execution_profile: executionProfileS };
         if (projectNameS) setPayload.project_name = projectNameS;
 
         const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', setPayload);
@@ -582,11 +638,15 @@ export async function saveRecChanges() {
     const _ratEl = document.getElementById('rec-edit-rationale');
     if (!_titleEl || !_descEl || !_ratEl) return;
 
+    const _typeEl = document.getElementById('rec-modal-type');
+    const _catEl = document.getElementById('rec-modal-mission-type');
     const data = {
         mission_title: _titleEl.value,
         mission_description: _descEl.value,
         rationale: _ratEl.value,
-        suggested_cycles: (() => { const _el = document.getElementById('rec-modal-cycles'); if (!_el) return null; const v = parseInt(_el.value, 10); return isNaN(v) ? null : v; })()
+        suggested_cycles: (() => { const _el = document.getElementById('rec-modal-cycles'); if (!_el) return null; const v = parseInt(_el.value, 10); return isNaN(v) ? null : v; })(),
+        ...(_typeEl ? { execution_profile: _typeEl.value } : {}),
+        ...(_catEl ? { mission_type: _catEl.value } : {})
     };
 
     try {
@@ -972,11 +1032,24 @@ export async function queueMissionSuggestion() {
             ? (projectInputQ.value.trim() || projectInputQ.dataset.suggested || '')
             : '';
 
+        const typeSelectQ = document.getElementById('rec-modal-type');
+        const executionProfileQ = typeSelectQ ? typeSelectQ.value : 'full_rd';
+        const catSelectQ = document.getElementById('rec-modal-mission-type');
+        const missionCatQ = catSelectQ ? catSelectQ.value : null;
+
+        // Persist chosen execution_profile and mission_type back to the suggestion record
+        try {
+            const _putPayload = { execution_profile: executionProfileQ };
+            if (missionCatQ) _putPayload.mission_type = missionCatQ;
+            await api('/api/recommendations/' + selectedRecId, 'PUT', _putPayload);
+        } catch (_e) { /* non-blocking */ }
+
         const queuePayload = {
             problem_statement: rec.mission_description || rec.mission_title,
             cycle_budget: cycleBudget,
             priority: 0,
-            source: 'recommendation'
+            source: 'recommendation',
+            mission_type: executionProfileQ,
         };
         if (projectNameQ) queuePayload.project_name = projectNameQ;
         const data = await api('/api/queue/add', 'POST', queuePayload);
@@ -1211,12 +1284,13 @@ export function proceedToMerge() {
 /**
  * Add a new suggestion via API and check for merge candidates
  */
-export async function addNewSuggestion(title, description = '') {
+export async function addNewSuggestion(title, description = '', executionProfile = 'full_rd') {
     try {
         const result = await api('/api/recommendations', 'POST', {
             mission_title: title,
             mission_description: description || title,
-            suggested_cycles: 3
+            suggested_cycles: 3,
+            execution_profile: executionProfile,
         });
 
         if (result.success) {
@@ -1402,7 +1476,9 @@ export function submitQuickAdd() {
         showToast('Please enter a suggestion title', 'error');
         return;
     }
-    addNewSuggestion(input.value.trim());
+    const typeSelect = document.getElementById('rec-quick-add-type');
+    const executionProfile = typeSelect ? typeSelect.value : 'full_rd';
+    addNewSuggestion(input.value.trim(), '', executionProfile);
     input.value = '';
 }
 

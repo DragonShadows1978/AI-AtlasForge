@@ -206,6 +206,6 @@ breakdown live.
 ## Override with `WEB_PROXY_URL`
 
 Downstream consumers (e.g. the investigation validator at
-`/mnt/xwing/investigation_validator/source_fetcher.py`) check
+`investigation_validator/source_fetcher.py`) check
 `WEB_PROXY_URL` first and fall back to direct HTTP. Override if you're
 running the proxy on a non-default host/port.

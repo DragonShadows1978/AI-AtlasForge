@@ -127,6 +127,76 @@ class TestHostMatching:
         assert _host_matches(None, "reddit.com") is False
 
 
+class TestWebFetchProxyContract:
+    """Regression: MCP WebFetch must not request max_chars=0, which means empty text."""
+
+    def test_webfetch_requests_content_from_proxy(self, monkeypatch):
+        from WebProxy import mcp_server
+
+        captured = {}
+
+        def fake_proxy_post(path, payload):
+            captured["path"] = path
+            captured["payload"] = payload
+            return {
+                "url": payload["url"],
+                "title": "Example",
+                "text": "full page text",
+                "links": [],
+                "_cache_hit": False,
+            }
+
+        monkeypatch.setattr(mcp_server, "_proxy_post", fake_proxy_post)
+
+        result = mcp_server.handle_tool_call(
+            "WebFetch",
+            {"url": "https://example.com/story", "prompt": "ignored"},
+        )
+
+        assert captured["path"] == "/fetch"
+        assert captured["payload"]["max_chars"] == mcp_server.MAX_MAX_CHARS
+        assert "full page text" in result
+
+
+class TestPaperFetchProxyContract:
+    def test_paperfetch_uses_paper_endpoint(self, monkeypatch):
+        from WebProxy import mcp_server
+
+        captured = {}
+
+        def fake_proxy_post(path, payload):
+            captured["path"] = path
+            captured["payload"] = payload
+            return {
+                "type": "paper",
+                "url": payload["url"],
+                "pdf_url": payload["url"],
+                "local_pdf_path": "/tmp/paper.pdf",
+                "local_text_path": "/tmp/paper.txt",
+                "sha256": "abc123",
+                "byte_length": 10,
+                "pages_extracted": 1,
+                "page_count": 1,
+                "text": "paper text",
+                "truncated": False,
+            }
+
+        monkeypatch.setattr(mcp_server, "_proxy_post", fake_proxy_post)
+
+        result = mcp_server.handle_tool_call(
+            "PaperFetch",
+            {"url": "https://arxiv.org/pdf/2305.14627", "max_chars": 5000},
+        )
+
+        assert captured["path"] == "/paper/fetch"
+        assert captured["payload"] == {
+            "url": "https://arxiv.org/pdf/2305.14627",
+            "max_chars": 5000,
+        }
+        assert "Paper fetched:" in result
+        assert "paper text" in result
+
+
 class TestRequireUrlSchemeWhitelist:
     """Tests for the URL scheme whitelist in _require_url."""
 
@@ -343,7 +413,9 @@ class TestMcpProtocol:
             tools_resp = _read_response(proc, timeout=3.0)
             assert tools_resp["id"] == 2
             names = {t["name"] for t in tools_resp["result"]["tools"]}
-            assert names == {"WebSearch", "WebFetch", "WebResearch", "ImageSearch"}
+            assert {"WebSearch", "WebFetch", "WebResearch", "ImageSearch"}.issubset(names)
+            assert "AtlasForgeSubmitPlan" in names
+            assert "AtlasForgeGetStagePolicy" in names
         finally:
             _close(proc)
 

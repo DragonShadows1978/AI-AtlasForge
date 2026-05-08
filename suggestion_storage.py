@@ -45,7 +45,7 @@ STATE_DIR = BASE_DIR / "state"
 DB_PATH = STATE_DIR / "mission_suggestions.db"
 
 # Current schema version
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # SQLite INTEGER max (2^63 - 1); values beyond this overflow
 SQLITE_MAX_INT = (2 ** 63) - 1
@@ -58,6 +58,7 @@ ALLOWED_COLUMNS = frozenset({
     'merged_source_descriptions', 'drift_context', 'original_mission_title',
     'original_mission_description', 'original_rationale', 'original_suggested_cycles',
     'mission_type', 'bug_references', 'scope_context',
+    'execution_profile',
 })
 
 # C2-2: defense-in-depth identifier safety. Column names must consist solely of
@@ -153,6 +154,24 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 conn.execute("PRAGMA user_version = 2")
                 logger.info("Database schema migrated to version 2 (mission_type, bug_references, scope_context)")
 
+            if version < 3:
+                self._migrate_v2_to_v3(conn)
+                conn.execute("PRAGMA user_version = 3")
+                logger.info("Database schema migrated to version 3 (execution_profile)")
+
+            # Idempotent backfill: even on DBs already at v3, sweep any rows
+            # whose execution_profile is NULL or empty. Cheap (single UPDATE
+            # filtered to NULL/'') and protects the UI from blank badges.
+            try:
+                conn.execute(
+                    "UPDATE mission_suggestions SET execution_profile = 'full_rd' "
+                    "WHERE execution_profile IS NULL OR execution_profile = ''"
+                )
+            except sqlite3.OperationalError:
+                # Column missing on a pre-v3 DB that failed migration — let
+                # the migration error above surface; this is purely defensive.
+                pass
+
     def _create_schema(self, conn: sqlite3.Connection) -> None:
         """Create the database schema."""
         conn.executescript("""
@@ -222,6 +241,24 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         )
         conn.execute(
             "UPDATE mission_suggestions SET mission_type = 'EXPANSION' WHERE source_type = 'successful_completion' AND mission_type IS NULL"
+        )
+
+    def _migrate_v2_to_v3(self, conn: sqlite3.Connection) -> None:
+        """Add execution_profile column (v2 → v3). Existing rows default to 'full_rd'."""
+        try:
+            conn.execute(
+                "ALTER TABLE mission_suggestions ADD COLUMN execution_profile TEXT DEFAULT 'full_rd'"
+            )
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e):
+                logger.warning("_migrate_v2_to_v3: unexpected error: %s", e)
+                raise
+        # SQLite's ALTER TABLE ADD COLUMN ... DEFAULT only applies to inserts after
+        # the migration; rows that pre-date the column may end up NULL on some
+        # SQLite versions. Idempotent backfill so the UI never sees a blank profile.
+        conn.execute(
+            "UPDATE mission_suggestions SET execution_profile = 'full_rd' "
+            "WHERE execution_profile IS NULL OR execution_profile = ''"
         )
 
     def _row_to_dict(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
@@ -335,6 +372,30 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     f"Must be one of: {', '.join(valid_mission_types)}"
                 )
 
+        # execution_profile enum
+        _VALID_EXEC_PROFILES = frozenset({
+            'full_rd', 'plan_only', 'build_only', 'test_red_team',
+            'bug_hunt', 'research_only', 'review_existing',
+        })
+        if 'execution_profile' in suggestion:
+            ep = suggestion.get('execution_profile')
+            # Both partial updates AND full-row inserts must reject explicit
+            # falsy values. Absence of the key is the only "use default" signal.
+            if ep is None or ep == "":
+                raise ValueError(
+                    "execution_profile cannot be None/empty; "
+                    "pass a valid profile or omit the key to use the default"
+                )
+            try:
+                valid = ep in _VALID_EXEC_PROFILES
+            except TypeError:
+                valid = False
+            if not valid:
+                raise ValueError(
+                    f"Invalid execution_profile {ep!r}. "
+                    f"Must be one of: {', '.join(sorted(_VALID_EXEC_PROFILES))}"
+                )
+
         # priority_score: numeric, no NaN/inf, bounded range
         if 'priority_score' in suggestion or not partial:
             priority_score = suggestion.get('priority_score', 50.0)
@@ -388,6 +449,22 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             ValueError: If mission_title is explicitly None or empty string
             sqlite3.IntegrityError: If duplicate ID is provided
         """
+        # Normalize execution_profile: missing key OR explicit None/"" → auto-map from mission_type
+        # before validation. Other non-string types (False, 0, [], {}) fall through
+        # to _validate_row, which raises a typed ValueError.
+        _MISSION_TYPE_TO_PROFILE = {
+            'BUGFIX': 'bug_hunt',
+            'TECH_DEBT': 'build_only',
+        }
+        if (
+            'execution_profile' not in suggestion
+            or suggestion.get('execution_profile') is None
+            or suggestion.get('execution_profile') == ""
+        ):
+            suggestion = dict(suggestion)
+            mt = suggestion.get('mission_type', '')
+            suggestion['execution_profile'] = _MISSION_TYPE_TO_PROFILE.get(mt, 'full_rd')
+
         # Validate all fields via shared helper (also used by upsert)
         self._validate_row(suggestion)
 
@@ -428,6 +505,8 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'mission_type': mission_type,
             'bug_references': suggestion.get('bug_references', []),
             'scope_context': suggestion.get('scope_context'),
+            # v3 columns — normalize None → 'full_rd' so NULL is never stored
+            'execution_profile': suggestion.get('execution_profile') or 'full_rd',
         }
 
         row = self._dict_to_row(suggestion)
@@ -763,6 +842,15 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         """
         suggestion = dict(suggestion)  # don't mutate caller's dict
 
+        # Normalize execution_profile: missing key OR explicit None/"" → 'full_rd'
+        # (mirrors add()). Other non-string types fall through to _validate_row.
+        if (
+            'execution_profile' not in suggestion
+            or suggestion.get('execution_profile') is None
+            or suggestion.get('execution_profile') == ""
+        ):
+            suggestion['execution_profile'] = 'full_rd'
+
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
         suggestion['id'] = suggestion_id
@@ -821,6 +909,15 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             for i, orig in enumerate(suggestions):
                 try:
                     suggestion = dict(orig)  # don't mutate caller's list items
+
+                    # Normalize execution_profile: missing key OR explicit None/"" → 'full_rd'
+                    # (mirrors add()). Other non-string types fall through to _validate_row.
+                    if (
+                        'execution_profile' not in suggestion
+                        or suggestion.get('execution_profile') is None
+                        or suggestion.get('execution_profile') == ""
+                    ):
+                        suggestion['execution_profile'] = 'full_rd'
 
                     if 'id' not in suggestion:
                         suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
@@ -1062,7 +1159,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                         'original_mission_title': item.get('original_mission_title'),
                         'original_mission_description': item.get('original_mission_description'),
                         'original_rationale': item.get('original_rationale'),
-                        'original_suggested_cycles': item.get('original_suggested_cycles')
+                        'original_suggested_cycles': item.get('original_suggested_cycles'),
+                        # Normalize JSON null/false/empty/non-str → 'full_rd'.
+                        # Mirrors the alias normalization in core.py and queue_scheduler.py.
+                        'execution_profile': (
+                            item.get('execution_profile')
+                            if isinstance(item.get('execution_profile'), str)
+                            and item.get('execution_profile')
+                            else 'full_rd'
+                        ),
+                        'mission_type': item.get('mission_type', 'EXPANSION'),
                     }
 
                     # S3: validate field values before insertion

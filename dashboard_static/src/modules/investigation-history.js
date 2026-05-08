@@ -1317,17 +1317,34 @@ window.rerunInvestigation = async function(investigationId) {
         }
 
         const query = status.query;
-        const subagentCount = status.subagent_count || 5;
+        if (!query) {
+            showToast('Cannot re-run: original investigation query is missing', 'error');
+            return;
+        }
+
+        const subagentCount = status.max_subagents || status.subagent_count || 5;
+        const timeoutSelect = document.getElementById('investigation-timeout');
+        const timeoutMinutes = status.timeout_minutes || parseInt(timeoutSelect?.value || '10', 10) || 10;
 
         // Close the detail modal if open
         closeInvestigationDetailModal();
 
-        // Switch to AtlasForge tab
+        const result = await api('/api/investigation/start', 'POST', {
+            query,
+            max_subagents: subagentCount,
+            timeout_minutes: timeoutMinutes,
+            deliverable_format: status.deliverable_format || undefined
+        });
+
+        if (!result.success) {
+            showToast(result.message || 'Failed to re-run investigation', 'error');
+            return;
+        }
+
         if (typeof window.switchTab === 'function') {
             window.switchTab('atlasforge');
         }
 
-        // Enable investigation mode and populate the form
         const checkbox = document.getElementById('investigation-mode-checkbox');
         if (checkbox && !checkbox.checked) {
             checkbox.checked = true;
@@ -1336,34 +1353,20 @@ window.rerunInvestigation = async function(investigationId) {
             }
         }
 
-        // Set the query in the mission input
-        const missionInput = document.getElementById('mission-input');
-        if (missionInput) {
-            missionInput.value = query;
+        if (typeof window.adoptStartedInvestigation === 'function') {
+            window.adoptStartedInvestigation(
+                result,
+                `Re-running investigation: ${result.investigation_id}`
+            );
+        } else {
+            showToast(`Re-running investigation: ${result.investigation_id}`);
         }
 
-        // Set the subagent count
-        const subagentSelect = document.getElementById('investigation-subagents');
-        if (subagentSelect) {
-            const standardOptions = Array.from(subagentSelect.options).filter(o => o.value !== 'custom');
-            const exactMatch = standardOptions.find(o => parseInt(o.value) === subagentCount);
-            if (exactMatch) {
-                subagentSelect.value = exactMatch.value;
-                const customInput = document.getElementById('investigation-subagents-custom');
-                if (customInput) customInput.style.display = 'none';
-            } else {
-                subagentSelect.value = 'custom';
-                const customInput = document.getElementById('investigation-subagents-custom');
-                if (customInput) {
-                    customInput.style.display = 'inline-block';
-                    customInput.value = subagentCount;
-                }
-            }
+        if (typeof window.refreshInvestigationHistory === 'function') {
+            window.refreshInvestigationHistory();
         }
-
-        showToast('Investigation query loaded. Click "Start Investigation" to run.');
     } catch (e) {
-        showToast('Error preparing re-run: ' + e.message);
+        showToast('Error starting re-run: ' + e.message, 'error');
     }
 };
 

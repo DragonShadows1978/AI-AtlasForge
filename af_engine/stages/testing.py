@@ -18,6 +18,26 @@ from ..integrations.base import Event, StageEvent
 
 logger = logging.getLogger(__name__)
 
+CODEX_REQUIRED_RED_TEAM_AGENT_COUNT = 3
+CODEX_OFFICIAL_RED_TEAM_TIMEOUT_SECONDS = 2700
+
+
+def _coerce_nonnegative_int(value: Any) -> int:
+    """Convert simple numeric payloads to a non-negative int."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "complete", "completed"}
+    return bool(value)
+
 
 class TestingStageHandler(BaseStageHandler):
     """
@@ -32,6 +52,15 @@ class TestingStageHandler(BaseStageHandler):
 
     stage_name = "TESTING"
     valid_from_stages = ["BUILDING"]
+
+    @staticmethod
+    def _is_codex_context(context: StageContext) -> bool:
+        provider = str(
+            (context.mission or {}).get("llm_provider")
+            or (context.mission or {}).get("provider")
+            or ""
+        ).strip().lower()
+        return provider == "codex"
 
     def get_prompt(self, context: StageContext) -> str:
         """Generate the TESTING stage prompt."""
@@ -110,6 +139,19 @@ aggregated into a single RedTeamResult.
 If result.total_issues == 0 AND result.duration_ms < 10000, the agents likely
 timed out — check result.error for details.
 
+=== NON-INTERACTIVE COMPLETION CONTRACT ===
+
+AtlasForge invokes this TESTING stage as a one-shot non-interactive process.
+Do not use ScheduleWakeup, Monitor, notification waits, or any other "I'll wait"
+handoff as your final answer. If you launch background or parallel red-team
+processes, wait synchronously in this invocation until they finish, then read
+their result files and produce the JSON response below.
+
+Every TESTING invocation must end with the strict JSON object requested below.
+If a subprocess is still running and cannot be waited on safely, return
+`"status": "tests_error"` with the partial results and the blocker instead of
+returning prose about waiting.
+
 === PHASE 3: ADDITIONAL ADVERSARIAL CHECKS ===
 
 2. **Property Testing**: Generate edge cases automatically
@@ -169,6 +211,7 @@ Respond with JSON:
         Always transitions to ANALYZING regardless of test outcome.
         """
         # Normalize status for case-insensitive matching
+        response = dict(response)
         raw_status = response.get("status", "")
         status = raw_status.lower().strip() if isinstance(raw_status, str) else ""
 
@@ -176,6 +219,71 @@ Respond with JSON:
         valid_statuses = ["tests_passed", "tests_failed", "tests_error"]
         if status and status not in valid_statuses:
             logger.warning(f"TESTING: Unrecognized status '{raw_status}' (normalized: '{status}')")
+
+        adversarial = response.get("adversarial_testing", {})
+        if not isinstance(adversarial, dict):
+            adversarial = {}
+            response["adversarial_testing"] = adversarial
+        red_team_agent_count = _coerce_nonnegative_int(
+            adversarial.get("red_team_agent_count")
+        )
+        completion = adversarial.get("red_team_completion")
+        if not isinstance(completion, dict):
+            completion = {}
+        reports_collected = _coerce_nonnegative_int(
+            completion.get("agent_reports_collected")
+        )
+        agents_reached_report_phase = _coerce_nonnegative_int(
+            completion.get("agents_reached_report_phase")
+        )
+        timed_out_agents = completion.get("timed_out_agents")
+        if not isinstance(timed_out_agents, list):
+            timed_out_agents = []
+        has_completion_metadata = bool(completion)
+        official_red_team_complete = red_team_agent_count >= CODEX_REQUIRED_RED_TEAM_AGENT_COUNT
+        if has_completion_metadata:
+            official_red_team_complete = (
+                official_red_team_complete
+                and reports_collected >= CODEX_REQUIRED_RED_TEAM_AGENT_COUNT
+                and agents_reached_report_phase >= CODEX_REQUIRED_RED_TEAM_AGENT_COUNT
+                and _coerce_bool(completion.get("all_agents_completed"))
+                and not timed_out_agents
+            )
+
+        if self._is_codex_context(context) and status == "tests_passed" and not official_red_team_complete:
+            logger.warning(
+                "TESTING: Downgrading tests_passed to tests_error because "
+                "red_team_agent_count=%s is below required %s",
+                red_team_agent_count,
+                CODEX_REQUIRED_RED_TEAM_AGENT_COUNT,
+            )
+            status = "tests_error"
+            response["status"] = "tests_error"
+            adversarial["red_team_agent_count"] = red_team_agent_count
+            adversarial.setdefault("rigor_level", "insufficient")
+            adversarial.setdefault("epistemic_score", 0.0)
+            missing_msg = (
+                "Official TESTING red-team gate incomplete: expected at least "
+                f"{CODEX_REQUIRED_RED_TEAM_AGENT_COUNT} completed blind agents with "
+                "collected reports. "
+                f"agents={red_team_agent_count}, reports={reports_collected}, "
+                f"report_phase={agents_reached_report_phase}, "
+                f"timed_out={timed_out_agents}. BUILDING self-validation does "
+                "not satisfy TESTING."
+            )
+            failed = response.get("success_criteria_failed")
+            if not isinstance(failed, list):
+                failed = []
+            if missing_msg not in failed:
+                failed.append(missing_msg)
+            response["success_criteria_failed"] = failed
+            issues = response.get("issues_to_fix")
+            if not isinstance(issues, list):
+                issues = []
+            if missing_msg not in issues:
+                issues.append(missing_msg)
+            response["issues_to_fix"] = issues
+            response["message_to_human"] = missing_msg
 
         events = [
             Event(
@@ -185,6 +293,12 @@ Respond with JSON:
                 data={
                     "status": status,
                     "tests_passed": status == "tests_passed",
+                    "official_red_team_complete": official_red_team_complete,
+                    "required_red_team_agent_count": CODEX_REQUIRED_RED_TEAM_AGENT_COUNT,
+                    "red_team_agent_count": red_team_agent_count,
+                    "red_team_reports_collected": reports_collected,
+                    "red_team_agents_reached_report_phase": agents_reached_report_phase,
+                    "red_team_timed_out_agents": timed_out_agents,
                     "adversarial_testing": response.get("adversarial_testing", {}),
                 }
             )

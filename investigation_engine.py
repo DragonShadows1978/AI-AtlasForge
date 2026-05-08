@@ -146,6 +146,7 @@ class InvestigationConfig:
     timeout_minutes: int = 10
     lead_model: ModelType = ModelType.CLAUDE_SONNET
     subagent_model: ModelType = ModelType.CLAUDE_HAIKU
+    synthesis_model: ModelType = ModelType.CLAUDE_OPUS
     workspace_dir: Optional[Path] = None
     deliverable_format: Optional[str] = None  # e.g., "HTML", "JSON", "markdown", "PDF"
     source: str = "dashboard"  # "dashboard" | "email" | "api" - tracks origin of investigation
@@ -173,6 +174,7 @@ class InvestigationConfig:
             "timeout_minutes": self.timeout_minutes,
             "lead_model": self.lead_model.value,
             "subagent_model": self.subagent_model.value,
+            "synthesis_model": self.synthesis_model.value,
             "workspace_dir": str(self.workspace_dir),
             "deliverable_format": self.deliverable_format,
             "source": self.source,
@@ -435,7 +437,20 @@ def save_investigation_state(state: dict):
         logger.error(f"Failed to save investigation state: {e}")
 
 
-ALLOWED_STATUS_EXTRA_KEYS = {"progress", "error", "report_path", "workspace_dir", "provider", "model", "findings_count", "lead_agent_id", "subagent_count", "stage"}
+ALLOWED_STATUS_EXTRA_KEYS = {
+    "progress",
+    "error",
+    "report_path",
+    "workspace_dir",
+    "provider",
+    "model",
+    "findings_count",
+    "lead_agent_id",
+    "subagent_count",
+    "stage",
+    "completed_at",
+    "elapsed_seconds",
+}
 
 
 def update_investigation_status(investigation_id: str, status: InvestigationStatus, extra: dict = None):
@@ -456,6 +471,68 @@ def update_investigation_status(investigation_id: str, status: InvestigationStat
                 save_investigation_state(state)
         finally:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write a text artifact owned by the investigation runner."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.tmp.{os.getpid()}.{_threading.get_ident()}")
+    tmp_path.write_text(text, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _normalize_source_url(url: Optional[str]) -> str:
+    if not isinstance(url, str):
+        return ""
+    normalized = url.strip()
+    if not normalized:
+        return ""
+    normalized = normalized.split("#", 1)[0].rstrip("/")
+    if normalized.startswith("http://"):
+        normalized = "https://" + normalized[len("http://"):]
+    return normalized.lower()
+
+
+def _safe_read_json(path: Path) -> Optional[dict]:
+    try:
+        if not path.exists() or path.is_symlink():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _text_from_webproxy_payload(payload: dict) -> str:
+    text = payload.get("text") or payload.get("content") or ""
+    if text:
+        return str(text)
+    local_text_path = payload.get("local_text_path")
+    if isinstance(local_text_path, str) and local_text_path:
+        try:
+            path = Path(local_text_path).resolve()
+            allowed_roots = [
+                (BASE_DIR / "WebProxy").resolve(),
+                (BASE_DIR / "atlasforge_data").resolve(),
+                Path("/mnt/ForgeRealm/AI-AtlasForge/WebProxy").resolve(),
+                Path("/home/vader/AI-AtlasForge/WebProxy").resolve(),
+            ]
+            if any(_is_relative_to(path, root) for root in allowed_roots) and path.exists() and not path.is_symlink():
+                return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+    return ""
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
 
 
 def archive_current_investigation():
@@ -629,7 +706,10 @@ def invoke_claude(
     model: ModelType = ModelType.CLAUDE_SONNET,
     system_prompt: Optional[str] = None,
     timeout: int = 120,
-    cwd: Optional[Path] = None
+    cwd: Optional[Path] = None,
+    artifact_event_file: Optional[Path] = None,
+    artifact_sources_file: Optional[Path] = None,
+    artifact_label: Optional[str] = None,
 ) -> tuple[str, float]:
     """
     Invoke Claude CLI with the given prompt.
@@ -767,7 +847,14 @@ def invoke_claude(
                 _upd_pid(_agent_id, proc.pid)
                 t = _threading.Thread(
                     target=_stream_fn,
-                    args=(proc, _stream_file, _agent_id),
+                    args=(
+                        proc,
+                        _stream_file,
+                        _agent_id,
+                        artifact_event_file,
+                        artifact_sources_file,
+                        artifact_label,
+                    ),
                     daemon=True,
                     name=f"stream-{_agent_id}"
                 )
@@ -997,11 +1084,12 @@ def build_subagent_prompt(focus_area: str, base_prompt: str, investigation_query
 ## Research Guidelines
 
 1. **Use WebSearch and WebFetch tools** to find authoritative sources on this topic
-2. Search for recent information, guides, documentation, and expert opinions
-3. Cross-reference multiple sources for accuracy
-4. Focus on finding practical, actionable information
-5. Document your sources with URLs where possible
-6. Provide clear, well-researched insights
+2. **Use PaperFetch for paper/PDF sources before quoting a paper** (arXiv, direct PDFs, open-access papers). WebFetch is for webpages; PaperFetch downloads the paper artifact and extracts paper text.
+3. Search for recent information, guides, documentation, and expert opinions
+4. Cross-reference multiple sources for accuracy
+5. Focus on finding practical, actionable information
+6. Document your sources with URLs where possible
+7. Provide clear, well-researched insights
 """
     elif research_type == "local":
         research_guidelines = """
@@ -1019,6 +1107,7 @@ def build_subagent_prompt(focus_area: str, base_prompt: str, investigation_query
 
 1. **Use ALL available tools** as appropriate for this topic:
    - WebSearch/WebFetch for external information, guides, and documentation
+   - PaperFetch for arXiv/direct PDF/open-access paper sources before quoting papers
    - Read/Glob/Grep for local codebase or file exploration
 2. Combine web research with local exploration when relevant
 3. Cross-reference sources for accuracy
@@ -1067,7 +1156,14 @@ Respond with a JSON object:
 """
 
 
-def build_synthesis_prompt(query: str, subagent_results: List[SubagentResult], deliverable_format: str = None, source: str = "dashboard", ground_rules: str = "") -> str:
+def build_synthesis_prompt(
+    query: str,
+    subagent_results: List[SubagentResult],
+    deliverable_format: str = None,
+    source: str = "dashboard",
+    ground_rules: str = "",
+    evidence_index: str = "",
+) -> str:
     """Build the prompt for synthesizing subagent findings.
 
     Args:
@@ -1077,6 +1173,7 @@ def build_synthesis_prompt(query: str, subagent_results: List[SubagentResult], d
         source: Origin of investigation - "dashboard", "email", or "api"
                When "email", removes mission-style language (phases, timelines, next steps)
         ground_rules: Investigation ground rules to include in prompt
+        evidence_index: Compact index of investigation-owned source payloads
     """
     # Include ground rules at the top of the prompt if provided
     ground_rules_section = ""
@@ -1242,6 +1339,10 @@ DELIVER what the user asked for.
 
 {findings_text}
 
+## Investigation-Owned Source Evidence
+
+{evidence_index or "No runner-pinned WebProxy source payloads were captured for this investigation."}
+
 ## Your Task
 
 Synthesize these findings into a comprehensive deliverable that fully addresses the original query.
@@ -1252,6 +1353,8 @@ Include specific, actionable information - not just suggestions to "consult othe
 - Include CONCRETE information from the research, not just pointers to other resources
 - If the query asks for a specific build, config, or setup - PROVIDE IT based on research
 - If information is incomplete, note what's missing but still provide the best answer possible
+- Use the Investigation-Owned Source Evidence index as the audit trail for fetched sources.
+- Do not quote a source unless the quoted material is present in subagent findings or validated findings and traceable to a listed evidence payload.
 - Do NOT tell the user "this is outside my scope" - that is NEVER true for this system
 - Do NOT suggest the user use a different tool - YOU are the research tool
 """
@@ -1263,7 +1366,8 @@ def build_synthesis_prompt_validated(
     validation_stats: dict,
     deliverable_format: str = None,
     source: str = "dashboard",
-    ground_rules: str = ""
+    ground_rules: str = "",
+    evidence_index: str = "",
 ) -> str:
     """Build the prompt for synthesizing VALIDATED subagent findings.
 
@@ -1277,6 +1381,7 @@ def build_synthesis_prompt_validated(
         deliverable_format: Optional format (HTML, JSON, markdown)
         source: Origin of investigation - "dashboard", "email", or "api"
         ground_rules: Investigation ground rules to include in prompt
+        evidence_index: Compact index of investigation-owned source payloads
     """
     # Include ground rules at the top of the prompt if provided
     ground_rules_section = ""
@@ -1379,6 +1484,10 @@ that answers the original query based on VERIFIED information.
 
 {validated_findings_text}
 
+## Investigation-Owned Source Evidence
+
+{evidence_index or "No runner-pinned WebProxy source payloads were captured for this investigation."}
+
 ## Your Task
 
 Synthesize these VALIDATED findings into a comprehensive deliverable.
@@ -1390,6 +1499,8 @@ Prioritize verified information. Note confidence levels where relevant.
 - Do NOT include disputed/unsupported claims in your synthesis
 - If critical information is unverified, note this caveat
 - The validation ensures you're working with fact-checked information
+- Use the Investigation-Owned Source Evidence index as the audit trail for fetched sources.
+- Do not quote a source unless the quoted material is present in validated findings and traceable to a listed evidence payload.
 """
 
 
@@ -1861,6 +1972,9 @@ class InvestigationRunner:
         self.ground_rules = load_investigation_ground_rules()
         # URL metadata extracted from query (GitHub repos, GitLab projects, docs, etc.)
         self.url_metadata: List[Dict[str, Any]] = []
+        # Runner-owned WebProxy evidence loaded from subagent source_payloads.
+        self.pinned_evidence_sources: Dict[str, Any] = {}
+        self.pinned_evidence_records: List[Dict[str, Any]] = []
         # Check validator availability at startup (non-fatal warning if missing)
         self._validator_available = self._check_validator_health()
 
@@ -1871,21 +1985,16 @@ class InvestigationRunner:
         Logs a warning (non-fatal) if not available.
         """
         try:
-            import sys
             import importlib
-            from atlasforge_config import WORKSPACE_DIR
-            validator_path = WORKSPACE_DIR / "investigation_validator"
+            validator_path = BASE_DIR / "investigation_validator"
             if not validator_path.exists() or not validator_path.is_dir():
                 logger.warning(
                     f"investigation_validator not found at {validator_path}. "
                     "Validation will be skipped. To fix: ensure the directory exists and is accessible."
                 )
                 return False
-            validator_path_str = str(validator_path)
-            if validator_path_str not in sys.path:
-                sys.path.insert(0, validator_path_str)
-            importlib.import_module("orchestrator")
-            importlib.import_module("models")
+            importlib.import_module("investigation_validator.orchestrator")
+            importlib.import_module("investigation_validator.models")
             return True
         except ImportError as e:
             logger.warning(f"investigation_validator import check failed: {e}")
@@ -1961,6 +2070,11 @@ class InvestigationRunner:
             if not self.config.skip_global_state:
                 update_investigation_status(self.config.investigation_id, InvestigationStatus.EXPLORING)
             self.subagent_results = self._run_subagents(research_directions)
+            self.pinned_evidence_sources, self.pinned_evidence_records = self._load_pinned_webproxy_evidence()
+            if self.pinned_evidence_records:
+                self._log(
+                    f"Loaded {len(self.pinned_evidence_records)} runner-pinned WebProxy source payloads"
+                )
 
             # Step 3.5: Adversarial validation (fact-check citations before synthesis)
             validated_findings = None
@@ -1997,10 +2111,22 @@ class InvestigationRunner:
                 "investigation_id": self.config.investigation_id,
                 "query": self.config.query,
                 "subagent_results": [r.to_dict() for r in self.subagent_results],
+                "subagent_artifacts": [
+                    {
+                        "subagent_id": r.subagent_id,
+                        "artifact_dir": str(artifacts_dir / "subagents" / r.subagent_id),
+                        "events_path": str(artifacts_dir / "subagents" / r.subagent_id / "events.jsonl"),
+                        "sources_path": str(artifacts_dir / "subagents" / r.subagent_id / "sources.jsonl"),
+                        "final_path": str(artifacts_dir / "subagents" / r.subagent_id / "final.md"),
+                        "result_path": str(artifacts_dir / "subagents" / r.subagent_id / "result.json"),
+                    }
+                    for r in self.subagent_results
+                ],
                 "validation": {
                     "enabled": self.config.enable_validation,
                     "filter_mode": self.config.validation_filter_mode,
                 },
+                "pinned_source_evidence": self.pinned_evidence_records,
                 # Include URL handler metadata for rich reports
                 "url_metadata": self.url_metadata if self.url_metadata else [],
             }
@@ -2075,7 +2201,11 @@ class InvestigationRunner:
                 update_investigation_status(
                     self.config.investigation_id,
                     InvestigationStatus.FAILED,
-                    {"error": "Investigation failed due to an internal error"}
+                    {
+                        "error": "Investigation failed due to an internal error",
+                        "completed_at": datetime.now().isoformat(),
+                        "elapsed_seconds": elapsed,
+                    }
                 )
                 # Archive failed investigation to history (for persistence)
                 archive_current_investigation()
@@ -2122,7 +2252,12 @@ class InvestigationRunner:
                 else:
                     prompt = f"{prompt}\n\n{metadata_section}"
 
-        timeout = max(60, int(self.config.timeout_minutes * 60 * 0.25))  # 25% of budget for lead
+        timeout = max(
+            300,
+            int(self.config.timeout_minutes * 60 * 0.75),
+            self.config.max_subagents * 20,
+            len(self.config.query) // 60,
+        )
 
         response, elapsed = invoke_claude(
             prompt=prompt,
@@ -2196,11 +2331,9 @@ class InvestigationRunner:
         results = []
 
         # Since subagents run in PARALLEL, each agent gets the full time budget
-        # (not divided by agent count). We use 50% of total budget for subagent work,
-        # leaving 50% for lead agent coordination and synthesis.
+        # (not divided by agent count). Use 45% of total budget for each
+        # subagent invocation; high requested counts are handled in waves below.
         timeout_per_agent = max(60, int(self.config.timeout_minutes * 60 * 0.45))  # 45% of budget for subagents
-        # Cap at 5 minutes to prevent runaway agents
-        timeout_per_agent = min(timeout_per_agent, 300)
 
         requested = len(research_directions)
         inv_id = self.config.investigation_id
@@ -2229,71 +2362,101 @@ class InvestigationRunner:
         except Exception as pool_exc:
             logger.warning(f"[Pool] Pool manager unavailable, running unconstrained: {pool_exc}")
 
-        # Only run as many subagents as granted by the pool
-        active_directions = research_directions[:max(1, granted)]
-        skipped_directions = research_directions[max(1, granted):]
+        pending = list(enumerate(research_directions))
+        wave = 0
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(active_directions)) as executor:
-            futures = {}
-
-            for i, direction in enumerate(active_directions):
-                focus_area = direction.get("focus_area", f"Area {i+1}")
-                base_prompt = direction.get("prompt", "Explore this area")
-                research_type = direction.get("research_type", "both")
-
-                subagent_id = f"{inv_id}_sub_{i}"
-                full_prompt = build_subagent_prompt(
-                    focus_area,
-                    base_prompt,
-                    self.config.query,
-                    research_type,
-                    self.ground_rules
-                )
-
-                future = executor.submit(
-                    self._run_single_subagent,
-                    subagent_id,
-                    focus_area,
-                    full_prompt,
-                    timeout_per_agent
-                )
-                futures[future] = (subagent_id, focus_area)
-
-            for future in concurrent.futures.as_completed(futures):
-                subagent_id, focus_area = futures[future]
+        while pending:
+            wave += 1
+            if wave == 1:
+                current_grant = granted
+            elif pool is None:
+                current_grant = len(pending)
+            else:
                 try:
-                    result = future.result()
-                    results.append(result)
-                    self._log(f"Subagent '{focus_area}' completed")
-                except Exception as e:
-                    logger.error(f"Subagent {subagent_id} failed: {e}")
-                    results.append(SubagentResult(
-                        subagent_id=subagent_id,
-                        focus_area=focus_area,
-                        findings="",
-                        elapsed_seconds=0,
-                        status="failed",
-                        error=str(e)
-                    ))
-                finally:
-                    # Release one slot per completed subagent
-                    if pool is not None:
-                        try:
-                            pool.release_slots(inv_id, 1)
-                        except Exception:
-                            pass
+                    slot_req = pool.request_slots(
+                        inv_id=inv_id,
+                        count=len(pending),
+                        priority=10,
+                        query=self.config.query,
+                    )
+                    current_grant = slot_req.granted
+                    if current_grant < len(pending):
+                        self._log(
+                            f"[Pool] Wave {wave}: granted {current_grant}/{len(pending)} slots "
+                            f"(quota={slot_req.quota_limit}, reason={slot_req.reason})"
+                        )
+                    else:
+                        self._log(f"[Pool] Wave {wave}: granted all {current_grant} remaining slots")
+                except Exception as pool_exc:
+                    logger.warning(f"[Pool] Pool manager unavailable mid-run, running remaining unconstrained: {pool_exc}")
+                    pool = None
+                    current_grant = len(pending)
 
-        # Stub results for pool-rate-limited directions
-        for i, direction in enumerate(skipped_directions):
-            focus_area = direction.get("focus_area", f"Area {granted + i + 1}")
-            results.append(SubagentResult(
-                subagent_id=f"{inv_id}_sub_{granted + i}_skipped",
-                focus_area=focus_area,
-                findings="[Skipped: pool rate-limit applied, insufficient quota]",
-                elapsed_seconds=0,
-                status="skipped",
-                error="pool_rate_limited",
-            ))
+            if current_grant <= 0:
+                self._log(f"[Pool] Wave {wave}: no slots available; waiting for pool capacity")
+                time.sleep(5)
+                continue
+
+            active_items = pending[:current_grant]
+            pending = pending[current_grant:]
+
+            if pending:
+                self._log(
+                    f"Running subagent wave {wave}: {len(active_items)} active, "
+                    f"{len(pending)} queued"
+                )
+            elif wave > 1:
+                self._log(f"Running final subagent wave {wave}: {len(active_items)} active")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(active_items)) as executor:
+                futures = {}
+
+                for i, direction in active_items:
+                    focus_area = direction.get("focus_area", f"Area {i+1}")
+                    base_prompt = direction.get("prompt", "Explore this area")
+                    research_type = direction.get("research_type", "both")
+
+                    subagent_id = f"{inv_id}_sub_{i}"
+                    full_prompt = build_subagent_prompt(
+                        focus_area,
+                        base_prompt,
+                        self.config.query,
+                        research_type,
+                        self.ground_rules
+                    )
+
+                    future = executor.submit(
+                        self._run_single_subagent,
+                        subagent_id,
+                        focus_area,
+                        full_prompt,
+                        timeout_per_agent
+                    )
+                    futures[future] = (subagent_id, focus_area)
+
+                for future in concurrent.futures.as_completed(futures):
+                    subagent_id, focus_area = futures[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        self._log(f"Subagent '{focus_area}' completed")
+                    except Exception as e:
+                        logger.error(f"Subagent {subagent_id} failed: {e}")
+                        results.append(SubagentResult(
+                            subagent_id=subagent_id,
+                            focus_area=focus_area,
+                            findings="",
+                            elapsed_seconds=0,
+                            status="failed",
+                            error=str(e)
+                        ))
+                    finally:
+                        # Release one slot per completed subagent so queued waves can start.
+                        if pool is not None:
+                            try:
+                                pool.release_slots(inv_id, 1)
+                            except Exception:
+                                pass
 
         # Notify pool manager that investigation is done
         if pool is not None:
@@ -2315,18 +2478,43 @@ class InvestigationRunner:
     ) -> SubagentResult:
         """Run a single subagent."""
         start_time = time.time()
+        subagent_dir = self.config.workspace_dir / "artifacts" / "subagents" / subagent_id
+        events_path = subagent_dir / "events.jsonl"
+        sources_path = subagent_dir / "sources.jsonl"
+        final_path = subagent_dir / "final.md"
+        result_path = subagent_dir / "result.json"
+        metadata_path = subagent_dir / "metadata.json"
+
+        _atomic_write_json(metadata_path, {
+            "investigation_id": self.config.investigation_id,
+            "subagent_id": subagent_id,
+            "focus_area": focus_area,
+            "model": self.config.subagent_model.value if isinstance(self.config.subagent_model, ModelType) else str(self.config.subagent_model),
+            "timeout_seconds": timeout,
+            "started_at": datetime.now().isoformat(),
+            "artifact_schema": "runner-owned-subagent-v1",
+            "files": {
+                "events": str(events_path),
+                "sources": str(sources_path),
+                "final": str(final_path),
+                "result": str(result_path),
+            },
+        })
 
         response, _ = invoke_claude(
             prompt=prompt,
             model=self.config.subagent_model,
             timeout=timeout,
-            cwd=self.config.workspace_dir
+            cwd=self.config.workspace_dir,
+            artifact_event_file=events_path,
+            artifact_sources_file=sources_path,
+            artifact_label=subagent_id,
         )
 
         elapsed = time.time() - start_time
 
         if response and response.startswith("ERROR:"):
-            return SubagentResult(
+            result = SubagentResult(
                 subagent_id=subagent_id,
                 focus_area=focus_area,
                 findings="",
@@ -2334,14 +2522,166 @@ class InvestigationRunner:
                 status="failed",
                 error=response
             )
+            _atomic_write_text(final_path, "")
+            _atomic_write_json(result_path, result.to_dict())
+            return result
 
-        return SubagentResult(
+        result = SubagentResult(
             subagent_id=subagent_id,
             focus_area=focus_area,
             findings=response,
             elapsed_seconds=elapsed,
             status="completed"
         )
+        _atomic_write_text(final_path, response or "")
+        _atomic_write_json(result_path, result.to_dict())
+        return result
+
+    def _load_pinned_webproxy_evidence(self) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Load investigation-owned WebProxy JSON payloads captured from subagent
+        tool results.
+
+        Returns:
+            (sources_by_url, evidence_records). `sources_by_url` maps source URL
+            to FetchedSource objects for the validator. `evidence_records` is a
+            compact audit index for findings.json and synthesis prompts.
+        """
+        try:
+            from investigation_validator.models import FetchedSource
+        except Exception as exc:
+            logger.warning("Unable to import FetchedSource for pinned evidence: %s", exc)
+            return {}, []
+
+        artifacts_dir = self.config.workspace_dir / "artifacts" / "subagents"
+        if not artifacts_dir.exists():
+            return {}, []
+
+        sources_by_url: Dict[str, Any] = {}
+        records: List[Dict[str, Any]] = []
+        seen_evidence_paths: set[str] = set()
+
+        for sources_path in sorted(artifacts_dir.glob("*/sources.jsonl")):
+            subagent_id = sources_path.parent.name
+            try:
+                lines = sources_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("artifact_type") != "web_proxy_cache_json":
+                    continue
+
+                evidence_json_path = record.get("evidence_json_path")
+                if not isinstance(evidence_json_path, str) or not evidence_json_path:
+                    continue
+                evidence_path = Path(evidence_json_path).resolve()
+                if str(evidence_path) in seen_evidence_paths:
+                    continue
+                if not _is_relative_to(evidence_path, self.config.workspace_dir.resolve()):
+                    logger.warning("Ignoring pinned evidence outside investigation workspace: %s", evidence_path)
+                    continue
+                payload = _safe_read_json(evidence_path)
+                if not isinstance(payload, dict):
+                    continue
+
+                seen_evidence_paths.add(str(evidence_path))
+                url = str(payload.get("url") or payload.get("pdf_url") or record.get("source_url") or "").strip()
+                if not url:
+                    continue
+                text = _text_from_webproxy_payload(payload)
+                original_length = int(
+                    payload.get("original_text_length")
+                    or payload.get("text_length")
+                    or payload.get("original_length")
+                    or len(text)
+                )
+                content_type = str(
+                    payload.get("content_type")
+                    or ("application/pdf" if payload.get("type") == "paper" else "text/html")
+                )
+                fetched = FetchedSource(
+                    url=url,
+                    content=text,
+                    accessible=bool(text),
+                    error=None if text else "Pinned WebProxy JSON did not contain extracted text",
+                    content_type=content_type,
+                    truncated=bool(payload.get("truncated", False)),
+                    original_length=original_length,
+                )
+                sources_by_url[url] = fetched
+                normalized = _normalize_source_url(url)
+                if normalized and normalized not in sources_by_url:
+                    sources_by_url[normalized] = fetched
+
+                pdf_url = payload.get("pdf_url")
+                if isinstance(pdf_url, str) and pdf_url and pdf_url != url:
+                    sources_by_url[pdf_url] = fetched
+                    normalized_pdf = _normalize_source_url(pdf_url)
+                    if normalized_pdf and normalized_pdf not in sources_by_url:
+                        sources_by_url[normalized_pdf] = fetched
+
+                title = payload.get("title") or payload.get("paper_title") or ""
+                records.append({
+                    "subagent_id": subagent_id,
+                    "url": url,
+                    "pdf_url": pdf_url if isinstance(pdf_url, str) else None,
+                    "title": str(title)[:200] if title else "",
+                    "type": payload.get("type") or "fetch",
+                    "content_type": content_type,
+                    "text_length": len(text),
+                    "original_text_length": original_length,
+                    "truncated": bool(payload.get("truncated", False)),
+                    "sha256": record.get("sha256") or payload.get("sha256"),
+                    "byte_length": record.get("byte_length"),
+                    "cache_json_path": record.get("cache_json_path"),
+                    "evidence_json_path": str(evidence_path),
+                    "local_pdf_path": payload.get("local_pdf_path"),
+                    "local_text_path": payload.get("local_text_path"),
+                })
+
+        return sources_by_url, records
+
+    def _build_pinned_evidence_index(self, max_records: int = 80) -> str:
+        """Return a compact text index of pinned source payloads for synthesis."""
+        records = getattr(self, "pinned_evidence_records", []) or []
+        if not records:
+            return ""
+
+        lines = [
+            "The runner captured the following full WebProxy source JSON payloads for this investigation.",
+            "Use these as the audit trail for URLs, papers, and source text used by the subagents.",
+            "",
+        ]
+        for idx, record in enumerate(records[:max_records], start=1):
+            url = record.get("url") or ""
+            title = record.get("title") or ""
+            evidence_path = record.get("evidence_json_path") or ""
+            source_type = record.get("type") or "fetch"
+            text_length = record.get("text_length") or 0
+            original_length = record.get("original_text_length") or text_length
+            truncated = " truncated" if record.get("truncated") else ""
+            label = f"{idx}. [{source_type}] {url}"
+            if title:
+                label += f" — {title}"
+            lines.append(label)
+            lines.append(
+                f"   evidence_json: {evidence_path}; text_length={text_length}; "
+                f"original_text_length={original_length}{truncated}"
+            )
+            if record.get("local_pdf_path"):
+                lines.append(f"   local_pdf: {record.get('local_pdf_path')}")
+            if record.get("local_text_path"):
+                lines.append(f"   local_text: {record.get('local_text_path')}")
+        if len(records) > max_records:
+            lines.append(f"... {len(records) - max_records} additional pinned source payloads omitted from prompt index.")
+        return "\n".join(lines)
 
     def _validate_findings(self):
         """
@@ -2352,14 +2692,8 @@ class InvestigationRunner:
         """
         try:
             # Import the validator (deferred to avoid circular imports)
-            import sys
-            from atlasforge_config import WORKSPACE_DIR
-            validator_path = str(WORKSPACE_DIR / "investigation_validator")
-            if validator_path not in sys.path:
-                sys.path.insert(0, validator_path)
-
-            from orchestrator import ValidationOrchestrator
-            from models import ValidationConfig, FilterMode
+            from investigation_validator.orchestrator import ValidationOrchestrator
+            from investigation_validator.models import ValidationConfig, FilterMode
 
             # Create validation config from investigation config
             filter_mode_map = {
@@ -2383,6 +2717,7 @@ class InvestigationRunner:
             orchestrator = ValidationOrchestrator(val_config)
             validated = orchestrator.validate(
                 self.subagent_results,
+                evidence_sources=getattr(self, "pinned_evidence_sources", {}) or {},
                 progress_callback=self.progress_callback
             )
 
@@ -2413,6 +2748,7 @@ class InvestigationRunner:
             executive_summaries = format_url_executive_summaries(self.url_metadata, raw_findings)
 
         for attempt in range(MAX_RETRIES + 1):
+            evidence_index = self._build_pinned_evidence_index()
             # Use validated findings text if available, otherwise use raw findings
             if validated_findings and validated_findings.filtered_findings_text:
                 prompt = build_synthesis_prompt_validated(
@@ -2421,7 +2757,8 @@ class InvestigationRunner:
                     validated_findings.to_dict(),
                     self.config.deliverable_format,
                     self.config.source,
-                    self.ground_rules
+                    self.ground_rules,
+                    evidence_index
                 )
             else:
                 prompt = build_synthesis_prompt(
@@ -2429,7 +2766,8 @@ class InvestigationRunner:
                     self.subagent_results,
                     self.config.deliverable_format,
                     self.config.source,  # Pass source to control mission-style language
-                    self.ground_rules
+                    self.ground_rules,
+                    evidence_index
                 )
 
             # Inject executive summaries from URL handlers
@@ -2462,7 +2800,7 @@ Previous attempt errors: {previous_issues}
 
             response, elapsed = invoke_claude(
                 prompt=prompt,
-                model=self.config.lead_model,
+                model=self.config.synthesis_model,
                 timeout=timeout,
                 cwd=self.config.workspace_dir
             )

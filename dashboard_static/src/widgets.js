@@ -356,16 +356,147 @@ function getSelectedProvider() {
     return normalizeProvider(selectEl?.value || 'claude');
 }
 
+const DEFAULT_LLM_PROVIDER_CONFIG = {
+    provider: 'claude',
+    selected: {
+        claude: { model: 'sonnet', thinking: 'high' },
+        codex: { model: 'gpt-5.5', thinking: 'high' },
+        gemini: { model: 'gemini-2.5-pro', thinking: 'default' }
+    },
+    options: {
+        claude: {
+            models: [
+                { value: 'haiku', label: 'Haiku' },
+                { value: 'sonnet', label: 'Sonnet' },
+                { value: 'opus', label: 'Opus' }
+            ],
+            thinking: [
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'xhigh', label: 'XHigh' },
+                { value: 'max', label: 'Max' }
+            ]
+        },
+        codex: {
+            models: [{ value: 'gpt-5.5', label: 'Best available' }],
+            thinking: [
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'xhigh', label: 'XHigh' }
+            ]
+        },
+        gemini: {
+            models: [
+                { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+                { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }
+            ],
+            thinking: [{ value: 'default', label: 'Default' }]
+        }
+    }
+};
+
+let llmProviderConfig = JSON.parse(JSON.stringify(DEFAULT_LLM_PROVIDER_CONFIG));
+
+function getModelSelectElement() {
+    return document.getElementById('llm-model-select');
+}
+
+function getThinkingSelectElement() {
+    return document.getElementById('llm-thinking-select');
+}
+
+function normalizeOptionList(options, fallback) {
+    const seen = new Set();
+    const cleaned = [];
+    if (Array.isArray(options)) {
+        options.forEach((option) => {
+            const value = (option?.value || option || '').toString().trim();
+            if (!value || seen.has(value)) return;
+            const label = (option?.label || value).toString().trim() || value;
+            cleaned.push({ value, label });
+            seen.add(value);
+        });
+    }
+    return cleaned.length ? cleaned : fallback;
+}
+
+function normalizeLlmConfig(config) {
+    const next = JSON.parse(JSON.stringify(DEFAULT_LLM_PROVIDER_CONFIG));
+    if (!config || typeof config !== 'object') return next;
+    next.provider = normalizeProvider(config.provider);
+    ['claude', 'codex', 'gemini'].forEach((provider) => {
+        const incomingOptions = config.options?.[provider] || {};
+        next.options[provider].models = normalizeOptionList(incomingOptions.models, next.options[provider].models);
+        next.options[provider].thinking = normalizeOptionList(incomingOptions.thinking, next.options[provider].thinking);
+
+        const selected = config.selected?.[provider] || {};
+        const modelValues = new Set(next.options[provider].models.map((option) => option.value));
+        const thinkingValues = new Set(next.options[provider].thinking.map((option) => option.value));
+        if (modelValues.has(selected.model)) {
+            next.selected[provider].model = selected.model;
+        } else {
+            next.selected[provider].model = next.options[provider].models[0]?.value || '';
+        }
+        if (thinkingValues.has(selected.thinking)) {
+            next.selected[provider].thinking = selected.thinking;
+        } else {
+            next.selected[provider].thinking = next.options[provider].thinking[0]?.value || '';
+        }
+    });
+    return next;
+}
+
+function fillSelect(selectEl, options, selectedValue) {
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+    options.forEach((option) => {
+        const optEl = document.createElement('option');
+        optEl.value = option.value;
+        optEl.textContent = option.label || option.value;
+        selectEl.appendChild(optEl);
+    });
+    if (selectedValue && options.some((option) => option.value === selectedValue)) {
+        selectEl.value = selectedValue;
+    } else if (options[0]) {
+        selectEl.value = options[0].value;
+    }
+}
+
+function renderLlmModelControls(providerOverride = null) {
+    const provider = normalizeProvider(providerOverride || getSelectedProvider());
+    const modelSelect = getModelSelectElement();
+    const thinkingSelect = getThinkingSelectElement();
+    const providerConfig = llmProviderConfig.options?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.options[provider];
+    const selected = llmProviderConfig.selected?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.selected[provider];
+    fillSelect(modelSelect, providerConfig.models, selected.model);
+    fillSelect(thinkingSelect, providerConfig.thinking, selected.thinking);
+}
+
+function getSelectedLlmSettings(providerOverride = null) {
+    const provider = normalizeProvider(providerOverride || getSelectedProvider());
+    const modelSelect = getModelSelectElement();
+    const thinkingSelect = getThinkingSelectElement();
+    const selected = llmProviderConfig.selected?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.selected[provider];
+    const model = modelSelect?.value || selected.model;
+    const thinking = thinkingSelect?.value || selected.thinking;
+    return { provider, model, thinking };
+}
+
 async function persistSelectedProvider(showSuccessToast = false) {
-    const provider = getSelectedProvider();
-    const savedProvider = await setLlmProvider(provider, showSuccessToast, false);
+    const settings = getSelectedLlmSettings();
+    const savedProvider = await setLlmProvider(settings.provider, showSuccessToast, false, {
+        model: settings.model,
+        thinking: settings.thinking
+    });
     if (!savedProvider) {
         throw new Error('Failed to persist selected LLM provider');
     }
     return savedProvider;
 }
 
-export async function setLlmProvider(provider, showSuccessToast = true, refreshAfter = true) {
+export async function setLlmProvider(provider, showSuccessToast = true, refreshAfter = true, settings = {}) {
     const selectEls = getProviderSelectElements();
     const normalized = normalizeProvider(provider);
 
@@ -373,11 +504,24 @@ export async function setLlmProvider(provider, showSuccessToast = true, refreshA
         selectEls.forEach((selectEl) => {
             selectEl.disabled = true;
         });
-        const result = await api('/api/llm-provider', 'POST', { provider: normalized });
+        const payload = { provider: normalized };
+        if (settings.model) payload.model = settings.model;
+        if (settings.thinking) payload.thinking = settings.thinking;
+        if (settings.options) payload.options = settings.options;
+        const result = await api('/api/llm-provider', 'POST', payload);
         if (!result.success) {
             showToast(result.message || 'Failed to set provider', 'error');
             return null;
         }
+        llmProviderConfig = normalizeLlmConfig({
+            provider: result.provider || normalized,
+            selected: result.selected || llmProviderConfig.selected,
+            options: result.options || llmProviderConfig.options
+        });
+        selectEls.forEach((selectEl) => {
+            selectEl.value = llmProviderConfig.provider;
+        });
+        renderLlmModelControls(llmProviderConfig.provider);
         if (showSuccessToast) {
             showToast(result.message || `Provider set to ${result.provider}`, 'success');
         }
@@ -399,24 +543,48 @@ export async function setLlmProvider(provider, showSuccessToast = true, refreshA
 async function syncProviderControls(statusProvider) {
     const selectEls = getProviderSelectElements();
     if (selectEls.length === 0) return;
+    const modelSelect = getModelSelectElement();
+    const thinkingSelect = getThinkingSelectElement();
 
     selectEls.forEach((selectEl) => {
         if (!selectEl.dataset.wired) {
             selectEl.dataset.wired = '1';
             selectEl.addEventListener('change', async (event) => {
-                await setLlmProvider(event.target.value, true);
+                const provider = normalizeProvider(event.target.value);
+                selectEls.forEach((el) => {
+                    el.value = provider;
+                });
+                renderLlmModelControls(provider);
+                const settings = getSelectedLlmSettings(provider);
+                await setLlmProvider(provider, true, true, {
+                    model: settings.model,
+                    thinking: settings.thinking
+                });
+            });
+        }
+    });
+    [modelSelect, thinkingSelect].filter(Boolean).forEach((selectEl) => {
+        if (!selectEl.dataset.wired) {
+            selectEl.dataset.wired = '1';
+            selectEl.addEventListener('change', async () => {
+                const settings = getSelectedLlmSettings();
+                llmProviderConfig.selected[settings.provider] = {
+                    model: settings.model,
+                    thinking: settings.thinking
+                };
+                await setLlmProvider(settings.provider, false, false, settings);
             });
         }
     });
 
     let provider = statusProvider;
-    if (!provider) {
-        try {
-            const providerData = await api('/api/llm-provider');
-            provider = providerData?.provider;
-        } catch (e) {
-            provider = 'claude';
-        }
+    try {
+        const providerData = await api('/api/llm-provider');
+        llmProviderConfig = normalizeLlmConfig(providerData);
+        provider = providerData?.provider || provider;
+    } catch (e) {
+        llmProviderConfig = normalizeLlmConfig(llmProviderConfig);
+        provider = provider || 'claude';
     }
 
     const normalized = normalizeProvider(provider);
@@ -425,6 +593,75 @@ async function syncProviderControls(statusProvider) {
             selectEl.value = normalized;
         }
     });
+    renderLlmModelControls(normalized);
+}
+
+function optionsToLines(options) {
+    return (options || []).map((option) => {
+        if (!option?.label || option.label === option.value) return option.value;
+        return `${option.value} | ${option.label}`;
+    }).join('\n');
+}
+
+function linesToOptions(value) {
+    const seen = new Set();
+    return (value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+            const [rawValue, ...labelParts] = line.split('|');
+            const optionValue = rawValue.trim();
+            if (!optionValue || seen.has(optionValue)) return null;
+            seen.add(optionValue);
+            const label = labelParts.join('|').trim() || optionValue;
+            return { value: optionValue, label };
+        })
+        .filter(Boolean);
+}
+
+function setSettingsTextarea(provider, kind, value) {
+    const el = document.getElementById(`llm-settings-${provider}-${kind}`);
+    if (el) el.value = value;
+}
+
+function getSettingsTextarea(provider, kind) {
+    return document.getElementById(`llm-settings-${provider}-${kind}`)?.value || '';
+}
+
+export function openLlmSettingsModal() {
+    llmProviderConfig = normalizeLlmConfig(llmProviderConfig);
+    ['claude', 'codex', 'gemini'].forEach((provider) => {
+        setSettingsTextarea(provider, 'models', optionsToLines(llmProviderConfig.options[provider].models));
+        setSettingsTextarea(provider, 'thinking', optionsToLines(llmProviderConfig.options[provider].thinking));
+    });
+    const modal = document.getElementById('llm-settings-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+export function closeLlmSettingsModal() {
+    const modal = document.getElementById('llm-settings-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+export async function saveLlmSettingsModal() {
+    const options = {};
+    ['claude', 'codex', 'gemini'].forEach((provider) => {
+        options[provider] = {
+            models: linesToOptions(getSettingsTextarea(provider, 'models')),
+            thinking: linesToOptions(getSettingsTextarea(provider, 'thinking'))
+        };
+    });
+    const settings = getSelectedLlmSettings();
+    const savedProvider = await setLlmProvider(settings.provider, true, false, {
+        model: settings.model,
+        thinking: settings.thinking,
+        options
+    });
+    if (savedProvider) {
+        closeLlmSettingsModal();
+        await syncProviderControls(savedProvider);
+    }
 }
 
 export async function startClaude(mode) {
@@ -470,12 +707,17 @@ export async function startClaude(mode) {
 
         // Create the new mission
         const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
+        const selectedSettings = getSelectedLlmSettings();
         const savedProvider = await persistSelectedProvider(false);
+        const missionType = document.getElementById('mission-type-select')?.value || 'full_rd';
         const payload = {
             mission: missionText.substring(0, 5000),
             cycle_budget: cycleBudget,
             max_iterations: maxIterations,
-            llm_provider: savedProvider
+            llm_provider: savedProvider,
+            llm_model: selectedSettings.model,
+            llm_thinking: selectedSettings.thinking,
+            mission_type: missionType
         };
         if (projectName) payload.project_name = projectName;
 
@@ -490,7 +732,11 @@ export async function startClaude(mode) {
         if (projectNameInput) projectNameInput.value = '';
 
         // Now start the selected provider
-        const startResult = await api(`/api/start/${mode}`, 'POST', { provider: savedProvider });
+        const startResult = await api(`/api/start/${mode}`, 'POST', {
+            provider: savedProvider,
+            model: selectedSettings.model,
+            thinking: selectedSettings.thinking
+        });
         showToast(`Mission set and started: ${startResult.message}`, 'success');
         refresh();
 
@@ -503,8 +749,13 @@ export async function startClaude(mode) {
 
     } else if (!isComplete) {
         // Case 2: Empty text box, mission in progress - restart/resume
+        const selectedSettings = getSelectedLlmSettings(selectedProvider);
         const savedProvider = await persistSelectedProvider(false);
-        const data = await api(`/api/start/${mode}`, 'POST', { provider: savedProvider || selectedProvider });
+        const data = await api(`/api/start/${mode}`, 'POST', {
+            provider: savedProvider || selectedProvider,
+            model: selectedSettings.model,
+            thinking: selectedSettings.thinking
+        });
         showToast(data.message);
         refresh();
 
@@ -560,12 +811,17 @@ export async function setMission() {
     }
 
     const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
+    const selectedSettings = getSelectedLlmSettings();
     const savedProvider = await persistSelectedProvider(false);
+    const missionType = document.getElementById('mission-type-select')?.value || 'full_rd';
     const payload = {
         mission: mission.substring(0, 5000),
         cycle_budget: cycleBudget,
         max_iterations: maxIterations,
-        llm_provider: savedProvider
+        llm_provider: savedProvider,
+        llm_model: selectedSettings.model,
+        llm_thinking: selectedSettings.thinking,
+        mission_type: missionType
     };
     if (projectName) {
         payload.project_name = projectName;
@@ -609,14 +865,19 @@ export async function queueMission() {
 
     // Add to queue via API
     try {
+        const selectedSettings = getSelectedLlmSettings();
         const savedProvider = await persistSelectedProvider(false);
+        const missionType = document.getElementById('mission-type-select')?.value || 'full_rd';
         const payload = {
             problem_statement: missionText.substring(0, 5000),
             cycle_budget: cycleBudget,
             max_iterations: maxIterations,
             priority: 0,
             source: 'dashboard',
-            llm_provider: savedProvider
+            llm_provider: savedProvider,
+            llm_model: selectedSettings.model,
+            llm_thinking: selectedSettings.thinking,
+            mission_type: missionType
         };
         if (projectName) payload.project_name = projectName;
 
@@ -650,25 +911,163 @@ export function uploadMissionFile() {
     fileInput.click();
 }
 
+const MISSION_FILE_MAX_BYTES = 500_000;
+const MISSION_FILE_ALLOWED_MIME_PREFIXES = [
+    'text/plain',
+    'text/markdown',
+    'text/x-markdown',
+    'text/csv',
+    'text/yaml',
+    'application/json',
+    'application/xml'
+];
+const MISSION_FILE_ALLOWED_EXT_RE = /\.(txt|md|markdown|rst|csv|log|yaml|yml|json|xml|html|htm|js|ts|py|sh|css)$/i;
+
+function isMissionTextFile(file) {
+    const mimeOk = file.type === ''
+        ? false
+        : MISSION_FILE_ALLOWED_MIME_PREFIXES.some(m => file.type.startsWith(m));
+    const nameOk = MISSION_FILE_ALLOWED_EXT_RE.test(file.name);
+    return mimeOk || nameOk;
+}
+
+function validateMissionTextFile(file) {
+    if (file.size > MISSION_FILE_MAX_BYTES) {
+        return `File too large (max 500 KB): ${file.name}`;
+    }
+    if (!isMissionTextFile(file)) {
+        return `Only text files are supported (.txt, .md, etc.): ${file.name}`;
+    }
+    return '';
+}
+
+function readMissionTextFile(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            resolve(String(e.target.result || ''));
+        };
+        reader.onerror = function() {
+            reject(new Error(`Failed to read file: ${file.name}`));
+        };
+        reader.onabort = function() {
+            reject(new Error(`File read cancelled: ${file.name}`));
+        };
+        reader.readAsText(file);
+    });
+}
+
+function insertTextAtTextareaCursor(textarea, text) {
+    const start = Number.isFinite(textarea.selectionStart) ? textarea.selectionStart : textarea.value.length;
+    const end = Number.isFinite(textarea.selectionEnd) ? textarea.selectionEnd : start;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const prefix = before && !before.endsWith('\n') ? '\n\n' : '';
+    const suffix = after && !text.endsWith('\n') ? '\n\n' : '';
+    textarea.value = `${before}${prefix}${text}${suffix}${after}`;
+    const cursor = before.length + prefix.length + text.length;
+    textarea.selectionStart = cursor;
+    textarea.selectionEnd = cursor;
+    textarea.focus();
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function formatDroppedMissionFileContent(fileName, content, includeHeading) {
+    const trimmed = content.trim();
+    if (!includeHeading) return trimmed;
+    return `--- ${fileName} ---\n${trimmed}`;
+}
+
+export function initMissionInputFileDrop() {
+    const missionInput = document.getElementById('mission-input');
+    if (!missionInput || missionInput.dataset.fileDropWired) return;
+    missionInput.dataset.fileDropWired = '1';
+    const missionCard = document.getElementById('mission-card');
+    const dropZone = missionCard || missionInput;
+
+    const setDragState = (enabled) => {
+        missionInput.classList.toggle('mission-input-file-over', enabled);
+    };
+    const hasDraggedFiles = (event) => Boolean(
+        event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files')
+    );
+
+    dropZone.addEventListener('dragenter', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragState(true);
+    }, true);
+
+    dropZone.addEventListener('dragover', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        setDragState(true);
+    }, true);
+
+    dropZone.addEventListener('dragleave', (e) => {
+        if (!hasDraggedFiles(e)) return;
+        if (!dropZone.contains(e.relatedTarget)) {
+            e.stopPropagation();
+            setDragState(false);
+        }
+    }, true);
+
+    dropZone.addEventListener('drop', async (e) => {
+        if (!hasDraggedFiles(e)) return;
+        const files = Array.from(e.dataTransfer?.files || []);
+        if (!files.length) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        setDragState(false);
+
+        const textFiles = [];
+        for (const file of files) {
+            const error = validateMissionTextFile(file);
+            if (error) {
+                showToast(error, 'error');
+                continue;
+            }
+            textFiles.push(file);
+        }
+
+        if (!textFiles.length) return;
+
+        const parts = [];
+        const insertedNames = [];
+        for (const file of textFiles) {
+            try {
+                const content = await readMissionTextFile(file);
+                if (!content.trim()) {
+                    showToast(`"${file.name}" appears empty or whitespace-only`, 'warning');
+                    continue;
+                }
+                parts.push(formatDroppedMissionFileContent(file.name, content, textFiles.length > 1));
+                insertedNames.push(file.name);
+            } catch (err) {
+                showToast(err.message || `Failed to read file: ${file.name}`, 'error');
+            }
+        }
+
+        if (!parts.length) return;
+
+        insertTextAtTextareaCursor(missionInput, parts.join('\n\n'));
+
+        const countText = parts.length === 1 ? `"${insertedNames[0]}"` : `${parts.length} files`;
+        showToast(`Inserted ${countText} into prompt`, 'success');
+    });
+}
+
 export function handleMissionFileSelect(input) {
     const file = input.files[0];
     if (!file) return;
 
-    // BUG-2: Enforce 500 KB size limit to prevent memory/DoS issues
-    if (file.size > 500_000) {
-        showToast('File too large (max 500 KB)', 'error');
-        input.value = '';
-        return;
-    }
-
-    // BUG-3 (hardened): Allowlist MIME types — empty MIME ('') also rejected to prevent bypass
-    // Explicit allowlist — no trailing 'text/' catch-all to prevent text/html from matching.
-    const ALLOWED_MIME_PREFIXES = ['text/plain', 'text/markdown', 'text/x-markdown', 'text/csv', 'text/yaml'];
-    const mimeOk = file.type === '' ? false : ALLOWED_MIME_PREFIXES.some(m => file.type.startsWith(m));
-    // Empty MIME (unknown extension) — allow only if extension is .txt or .md
-    const nameOk = /\.(txt|md|markdown|rst|csv|log|yaml|yml|json|xml|html|htm|js|ts|py|sh|css)$/i.test(file.name);
-    if (!mimeOk && !nameOk) {
-        showToast('Only text files are supported (.txt, .md, etc.)', 'error');
+    const validationError = validateMissionTextFile(file);
+    if (validationError) {
+        showToast(validationError, 'error');
         input.value = '';
         return;
     }
@@ -678,34 +1077,29 @@ export function handleMissionFileSelect(input) {
                       document.querySelector('button[onclick="uploadMissionFile()"]');
     if (uploadBtn) uploadBtn.disabled = true;
 
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const content = e.target.result;
-        // BUG-4 (fixed order): Check whitespace BEFORE populating textarea
-        if (!content.trim()) {
-            showToast(`"${file.name}" appears empty or whitespace-only`, 'warning');
+    readMissionTextFile(file)
+        .then((content) => {
+            // BUG-4 (fixed order): Check whitespace BEFORE populating textarea
+            if (!content.trim()) {
+                showToast(`"${file.name}" appears empty or whitespace-only`, 'warning');
+                input.value = '';
+                if (uploadBtn) uploadBtn.disabled = false;
+                return;
+            }
+            const missionInput = document.getElementById('mission-input');
+            if (missionInput) {
+                missionInput.value = content;
+                missionInput.dispatchEvent(new Event('input')); // trigger project name suggestion
+            }
+            showToast(`Loaded "${file.name}" (${content.length} chars)`, 'success');
+            input.value = ''; // reset so same file can be re-uploaded
+            if (uploadBtn) uploadBtn.disabled = false;
+        })
+        .catch((err) => {
+            showToast(err.message || `Failed to read file: ${file.name}`, 'error');
             input.value = '';
             if (uploadBtn) uploadBtn.disabled = false;
-            return;
-        }
-        const missionInput = document.getElementById('mission-input');
-        if (missionInput) {
-            missionInput.value = content;
-            missionInput.dispatchEvent(new Event('input')); // trigger project name suggestion
-        }
-        showToast(`Loaded "${file.name}" (${content.length} chars)`, 'success');
-        input.value = ''; // reset so same file can be re-uploaded
-        if (uploadBtn) uploadBtn.disabled = false;
-    };
-    reader.onabort = function() {
-        if (uploadBtn) uploadBtn.disabled = false;
-    };
-    reader.onerror = function() {
-        showToast(`Failed to read file: ${file.name}`, 'error');
-        input.value = '';
-        if (uploadBtn) uploadBtn.disabled = false;
-    };
-    reader.readAsText(file);
+        });
 }
 
 // =============================================================================
@@ -1030,6 +1424,7 @@ export function updateStatusBar(data) {
     setEl('stat-project-name', data.project_name || '-');
     setEl('stat-provider', normalizeProvider(data.provider));
     setEl('stat-iteration', data.rd_iteration);
+    setEl('stat-mission-type', data.mission_type_label || 'Full R&D');
     setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
     setEl('stat-cycles', data.total_cycles);
     setEl('stat-boots', data.boot_count);
@@ -1268,6 +1663,7 @@ export async function refresh() {
         setEl('stat-project-name', data.project_name || '-');
         setEl('stat-provider', normalizeProvider(data.provider));
         setEl('stat-iteration', data.rd_iteration);
+        setEl('stat-mission-type', data.mission_type_label || 'Full R&D');
         setEl('stat-mission-cycle', `${data.current_cycle || 1}/${data.cycle_budget || 1}`);
         setEl('stat-cycles', data.total_cycles);
         setEl('stat-boots', data.boot_count);
@@ -2792,6 +3188,11 @@ export function handleMissionStatusEvent(data) {
     if (data.current_cycle && data.cycle_budget) {
         const cycleEl = document.getElementById('stat-mission-cycle');
         if (cycleEl) cycleEl.textContent = `${data.current_cycle}/${data.cycle_budget}`;
+    }
+
+    if (data.mission_type_label !== undefined) {
+        const typeEl = document.getElementById('stat-mission-type');
+        if (typeEl) typeEl.textContent = data.mission_type_label || 'Full R&D';
     }
 
     if (data.project_name !== undefined) {

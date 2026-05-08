@@ -158,6 +158,7 @@ class MissionConfig:
     cycle_budget: int = DEFAULT_CYCLE_BUDGET
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     llm_provider: str = DEFAULT_LLM_PROVIDER
+    mission_type: str = "full_rd"
 
     # Optional
     project_name: Optional[str] = None
@@ -204,6 +205,23 @@ class MissionConfig:
                 f"got {self.llm_provider!r}"
             )
 
+        # --- mission_type ---
+        try:
+            from af_engine.mission_profiles import MISSION_TYPE_PROFILES
+        except ImportError:
+            MISSION_TYPE_PROFILES = {"full_rd": {}}
+        if not isinstance(self.mission_type, str):
+            errors.append(
+                f"mission_type must be a string, got {type(self.mission_type).__name__}"
+            )
+        else:
+            self.mission_type = self.mission_type.strip()
+            if self.mission_type not in MISSION_TYPE_PROFILES:
+                errors.append(
+                    f"mission_type must be one of {sorted(MISSION_TYPE_PROFILES.keys())}, "
+                    f"got {self.mission_type!r}"
+                )
+
         # --- project_name ---
         if self.project_name is not None:
             pn = str(self.project_name).strip()
@@ -223,7 +241,30 @@ class MissionConfig:
         if not isinstance(self.preferences, dict):
             self.preferences = {}
         if not isinstance(self.success_criteria, list):
-            self.success_criteria = list(self.success_criteria) if self.success_criteria else []
+            # int/float/bool are not iterable but list(...) accepts strings/bytes
+            # silently and explodes them character-by-character. Reject all
+            # non-iterable / scalar types via MissionValidationError instead of
+            # letting list() raise TypeError or producing nonsense data.
+            sc = self.success_criteria
+            if sc is None or sc == "":
+                self.success_criteria = []
+            elif isinstance(sc, (int, float, bool, bytes)):
+                errors.append(
+                    f"success_criteria must be a list, got {type(sc).__name__}: {sc!r}"
+                )
+                self.success_criteria = []
+            elif isinstance(sc, str):
+                # A bare string is almost certainly a single criterion, not a
+                # sequence of single-character criteria.
+                self.success_criteria = [sc]
+            else:
+                try:
+                    self.success_criteria = list(sc)
+                except TypeError:
+                    errors.append(
+                        f"success_criteria must be a list, got {type(sc).__name__}"
+                    )
+                    self.success_criteria = []
         if not isinstance(self.metadata, dict):
             self.metadata = {}
 
@@ -239,11 +280,14 @@ class MissionConfig:
         errors: List[str],
     ) -> int:
         """Validate an integer range field. Records error for hard failures, clamps for range."""
-        # Type coercion
+        # Type coercion. Note: bool is a subclass of int — we accept that
+        # silently for backwards-compat (cycle_budget=True == 1). int(float('inf'))
+        # raises OverflowError which (ValueError, TypeError) does NOT catch,
+        # so OverflowError must be in the except tuple.
         if not isinstance(value, int):
             try:
                 value = int(value)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 errors.append(f"{name} must be an integer, got {value!r}")
                 return min_val  # Placeholder; error will prevent construction
 
@@ -282,6 +326,10 @@ class MissionConfig:
         -------
         (config, audit) tuple. Raises MissionValidationError on hard failure.
         """
+        if not isinstance(data, dict):
+            raise MissionValidationError(
+                [f"from_request() requires a dict, got {type(data).__name__}: {data!r}"]
+            )
         submitted = dict(data)
 
         # Normalise problem statement key
@@ -313,7 +361,7 @@ class MissionConfig:
                         "applied_value": cb_value,
                         "reason": REASON_TYPE_COERCION,
                     })
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 cb_value = cb_raw  # Let __post_init__ catch this
 
         # --- max_iterations ---
@@ -336,7 +384,7 @@ class MissionConfig:
                         "applied_value": mi_value,
                         "reason": REASON_TYPE_COERCION,
                     })
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 mi_value = mi_raw
 
         # --- llm_provider ---
@@ -353,6 +401,19 @@ class MissionConfig:
         else:
             llm_value = llm_raw
 
+        # --- mission_type ---
+        mt_raw = data.get("mission_type")
+        if mt_raw is None:
+            mt_value = "full_rd"
+            overrides.append({
+                "param": "mission_type",
+                "submitted_value": None,
+                "applied_value": mt_value,
+                "reason": REASON_DEFAULT_APPLIED,
+            })
+        else:
+            mt_value = mt_raw
+
         # Pre-clamp values for detecting range clamping after construction
         pre_clamp_cb = cb_value if isinstance(cb_value, int) else None
         pre_clamp_mi = mi_value if isinstance(mi_value, int) else None
@@ -362,6 +423,7 @@ class MissionConfig:
             cycle_budget=cb_value,
             max_iterations=mi_value,
             llm_provider=llm_value,
+            mission_type=mt_value,
             project_name=data.get("project_name"),
             preferences=data.get("preferences", {}),
             success_criteria=data.get("success_criteria", []),
@@ -409,6 +471,10 @@ class MissionConfig:
         Queue items use different key names (mission_description, mission_title)
         but the validation rules are identical.
         """
+        if not isinstance(queue_item, dict):
+            raise MissionValidationError([
+                f"from_queue_item() requires a dict, got {type(queue_item).__name__}: {queue_item!r}"
+            ])
         # Normalise to standard keys
         problem_statement = (
             queue_item.get("mission_description") or
@@ -420,8 +486,13 @@ class MissionConfig:
         normalised = dict(queue_item)
         normalised["problem_statement"] = problem_statement
 
-        # Propagate metadata about queue origin
-        metadata = dict(normalised.get("metadata", {}) or {})
+        # Propagate metadata about queue origin. Coerce non-dict metadata
+        # (string, list, int, ...) to {} rather than letting dict() blow up
+        # with ValueError. __post_init__ will set metadata={} for non-dicts
+        # in from_request, but the `dict(metadata)` call here happens before
+        # construction.
+        _md_raw = normalised.get("metadata")
+        metadata = dict(_md_raw) if isinstance(_md_raw, dict) else {}
         metadata["queued"] = True
         if queue_item.get("queued_at"):
             metadata["queued_at"] = queue_item["queued_at"]
@@ -442,6 +513,7 @@ class MissionConfig:
             "cycle_budget": self.cycle_budget,
             "max_iterations": self.max_iterations,
             "llm_provider": self.llm_provider,
+            "mission_type": self.mission_type,
             "project_name": self.project_name,
         }
 
@@ -501,6 +573,15 @@ class MissionConfig:
         if audit:
             mission["parameter_audit_summary"] = audit.summary()
 
+        # Apply mission type profile (sets current_stage, enabled_stages,
+        # stop_after_profile_complete, mission_profile, mission_type_label).
+        # full_rd profile sets current_stage="PLANNING" — identical to today.
+        try:
+            from af_engine.mission_profiles import apply_mission_type_profile
+            apply_mission_type_profile(mission, self.mission_type)
+        except ImportError:
+            logger.debug("mission_profiles not available — skipping profile injection")
+
         return mission
 
     def to_config_dict(
@@ -521,6 +602,7 @@ class MissionConfig:
             "cycle_budget": self.cycle_budget,
             "max_iterations": self.max_iterations,
             "llm_provider": self.llm_provider,
+            "mission_type": self.mission_type,
             "created_at": created_at or datetime.now().isoformat(),
             "config_version": CONFIG_SCHEMA_VERSION,
         }
@@ -700,6 +782,9 @@ def migrate_config(data: dict) -> dict:
     # v0 -> v2: fill fields missing from pre-Cycle-2 configs
     data.setdefault("max_iterations", DEFAULT_MAX_ITERATIONS)
     data.setdefault("llm_provider", DEFAULT_LLM_PROVIDER)
+    # Cycle 2: pre-cycle-2 configs lack mission_type. Code paths that read
+    # data["mission_type"] directly (e.g. dashboard surfacing) would KeyError.
+    data.setdefault("mission_type", "full_rd")
     data["config_version"] = CONFIG_SCHEMA_VERSION
     return data
 
@@ -731,6 +816,19 @@ def prune_old_audit_logs(
     missions_dir = Path(missions_dir)
     if not missions_dir.exists():
         return []
+
+    # Defensive coercion: a negative max_missions is meaningless and used to
+    # let `len(candidates) > max_missions` evaluate to True for *every*
+    # candidate, then `candidates.pop(0)` IndexError'd when the list ran dry
+    # only after deleting everything. Same for negative size budgets.
+    try:
+        max_missions = max(0, int(max_missions))
+    except (TypeError, ValueError):
+        max_missions = 200
+    try:
+        max_total_mb = max(0.0, float(max_total_mb))
+    except (TypeError, ValueError):
+        max_total_mb = 500.0
 
     # Collect only dirs that have mission_config.json
     candidates: List[Tuple[float, str, Path]] = []

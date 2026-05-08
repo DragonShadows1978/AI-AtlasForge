@@ -50,6 +50,12 @@ class StageContext:
     recovery_context: Optional[str] = None
     resumption_file: Optional[str] = None
 
+    # Research phase results (populated by orchestrator after PLANNING research phase)
+    research_findings_summary: Optional[str] = None
+    research_topics_investigated: List[str] = field(default_factory=list)
+    research_synthesis_confidence: Optional[str] = None
+    research_phase_elapsed_seconds: Optional[float] = None
+
     # Stage-specific data
     stage_data: Dict[str, Any] = field(default_factory=dict)
 

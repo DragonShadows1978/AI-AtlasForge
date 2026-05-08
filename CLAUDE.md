@@ -44,7 +44,7 @@ stalling on web calls.
 
 ## Validator Source Fetching
 
-The investigation validator at `/mnt/xwing/investigation_validator/source_fetcher.py`
+The investigation validator at `investigation_validator/source_fetcher.py`
 tries the local web proxy first (via `POST /fetch`) before falling back to
 httpx/requests/curl. This is how the validator reaches Reddit and other
 filtered domains at the source-verification layer.

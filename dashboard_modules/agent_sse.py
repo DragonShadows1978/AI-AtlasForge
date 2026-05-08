@@ -145,15 +145,16 @@ def agents_fanin_stream():
         else _asm.AgentStreamManager.INVESTIGATION_KEY
     )
     last_seq = _resolve_last_seq()
-    snapshot_prelude = []
-    if last_seq == 0:
-        # First connect — give the client an immediate state snapshot so panels
-        # don't blank-screen waiting for the next live event.
-        snapshot_prelude.append({
-            'event': 'agent_state_snapshot',
-            'context': context,
-            'agents': _asm._manager.get_active_agent_snapshot(context=context),
-        })
+    # Always send the active-agent snapshot for fan-in streams. EventSource may
+    # reconnect with a persisted Last-Event-ID, but fan-in seq values are
+    # per-agent rather than globally monotonic, so `subscribe()` intentionally
+    # replays from 0. Keeping the snapshot tied to last_seq caused refreshed
+    # dashboards to miss disk-hydrated agents until their next stream line.
+    snapshot_prelude = [{
+        'event': 'agent_state_snapshot',
+        'context': context,
+        'agents': _asm._manager.get_active_agent_snapshot(context=context),
+    }]
     return Response(
         stream_with_context(_event_stream(key, last_seq, snapshot_prelude=snapshot_prelude)),
         mimetype='text/event-stream',

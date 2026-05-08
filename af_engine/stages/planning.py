@@ -6,6 +6,8 @@ It injects KB context and AfterImage code memory for informed planning.
 """
 
 import logging
+import re as _re
+import unicodedata as _unicodedata
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -18,6 +20,53 @@ from .base import (
 from ..integrations.base import Event, StageEvent
 
 logger = logging.getLogger(__name__)
+
+_INJECTION_PREFIXES = (
+    "IGNORE", "<system>", "[INST]", "[/INST]", "###OVERRIDE", "SYSTEM:", "</s>",
+    "<|im_start|>", "<|im_end|>", "<!--", "ASSISTANT:", "USER:", "HUMAN:",
+)
+
+
+def _sanitize_resumption_content(text: str, max_len: int = 8000) -> str:
+    """Strip prompt-injection attempts from resumption file content before LLM embedding."""
+    if not text:
+        return ""
+    if not isinstance(text, str):
+        text = repr(text)
+    # NFKC normalization converts fullwidth/halfwidth variants to canonical ASCII.
+    text = _unicodedata.normalize('NFKC', text)
+    # Delete ZWNJ (U+200C) and ZWJ (U+200D) — they survive NFKC and can be
+    # inserted between prefix letters to bypass prefix detection.
+    text = text.replace('‌', '').replace('‍', '')
+    # Strip combining diacritics, variation selectors (U+FE00–FE1F), AND Unicode
+    # tag characters (U+E0000–U+E01EF) — all survive NFKC and can camouflage tokens.
+    text = _re.sub(r'[̀-ͯ᷀-᷿⃐-⃿︀-︟︠-︯\U000E0000-\U000E01EF]', '', text)
+    # Replace control chars with spaces to prevent token concatenation.
+    text = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', ' ', text)
+    clean_lines = []
+    _prefixes_upper = tuple(p.upper() for p in _INJECTION_PREFIXES)
+    for line in text.splitlines():
+        # Remove Unicode invisible/format chars and collapse whitespace
+        stripped = _re.sub(r'[­͏؜ᅟᅠ឴឵'
+                           r'᠋-᠎​-‏‪-‮'
+                           r'⁠-⁯ㅤ﻿ﾠ]', ' ', line.lstrip())
+        stripped = _re.sub(r'  +', ' ', stripped).strip()
+        upper = stripped.upper()
+        # Drop lines where an injection prefix appears at start-of-line
+        # (case-insensitive) OR anywhere mid-line (case-insensitive, word boundary).
+        if any(upper.startswith(p) for p in _prefixes_upper):
+            continue
+        if any(
+            bool(_re.search(r'(?<![a-zA-Z0-9])' + _re.escape(p), stripped, _re.IGNORECASE))
+            for p in _INJECTION_PREFIXES
+        ):
+            continue
+        clean_lines.append(stripped)
+    try:
+        limit = max(0, int(max_len))
+    except (TypeError, ValueError, OverflowError):
+        limit = 8000
+    return "\n".join(clean_lines)[:limit]
 
 
 class PlanningStageHandler(BaseStageHandler):
@@ -39,13 +88,15 @@ class PlanningStageHandler(BaseStageHandler):
         """Generate the PLANNING stage prompt."""
         # Build prompt components
         guard_prompt = self._get_guard_prompt()
-        kb_context = context.kb_context or ""
-        afterimage_context = context.afterimage_context or ""
+        # Sanitize KB/AfterImage context before embedding — these fields originate from
+        # external systems and may contain adversarial prompt-injection tokens.
+        kb_context = _sanitize_resumption_content(context.kb_context or "", max_len=16000)
+        afterimage_context = _sanitize_resumption_content(context.afterimage_context or "", max_len=8000)
         resumption_content = self._get_resumption_content(context)
 
-        workspace_dir = context.workspace_dir
-        artifacts_dir = context.artifacts_dir
-        research_dir = context.research_dir
+        workspace_dir = _sanitize_resumption_content(context.workspace_dir or "", max_len=500)
+        artifacts_dir = _sanitize_resumption_content(context.artifacts_dir or "", max_len=500)
+        research_dir = _sanitize_resumption_content(context.research_dir or "", max_len=500)
 
         return f"""
 {guard_prompt}
@@ -139,9 +190,41 @@ Respond with JSON:
 
         Transitions to BUILDING when plan is complete.
         """
-        status = response.get("status", "")
+        if not isinstance(response, dict):
+            response = {}
+        status = str(response.get("status") or "")
 
         if status.lower().strip() == "plan_complete":
+            # Enforce two-phase completion: both artifacts must exist before BUILDING
+            missing = []
+            if not context.research_dir:
+                missing.append("research/research_findings.md (research_dir not set in context)")
+            else:
+                findings_path = Path(context.research_dir) / "research_findings.md"
+                if not findings_path.exists():
+                    missing.append("research/research_findings.md (research phase not complete)")
+                elif findings_path.stat().st_size < 500:
+                    missing.append(f"research/research_findings.md too small ({findings_path.stat().st_size} bytes, need ≥500)")
+            if not context.artifacts_dir:
+                missing.append("artifacts/implementation_plan.md (artifacts_dir not set in context)")
+            else:
+                plan_path = Path(context.artifacts_dir) / "implementation_plan.md"
+                if not plan_path.exists():
+                    missing.append("artifacts/implementation_plan.md (implementation plan not written)")
+                elif plan_path.stat().st_size < 200:
+                    missing.append(f"artifacts/implementation_plan.md too small ({plan_path.stat().st_size} bytes, need ≥200)")
+
+            if missing:
+                msg = "Cannot advance to BUILDING — missing required artifacts:\n" + "\n".join(f"  - {m}" for m in missing)
+                logger.warning("PLANNING two-phase gate: %s", msg)
+                return StageResult(
+                    success=False,
+                    next_stage="PLANNING",
+                    status="artifacts_missing",
+                    output_data=response,
+                    message=msg,
+                )
+
             # Create events for stage completion
             events = [
                 Event(
@@ -151,7 +234,7 @@ Respond with JSON:
                     data={
                         "status": status,
                         "kb_learnings": response.get("kb_learnings_applied", []),
-                        "steps_planned": len(response.get("steps", [])),
+                        "steps_planned": len(response.get("steps") or []) if isinstance(response.get("steps") or [], (list, tuple)) else 0,
                         "research_summary": response.get("research_summary", {}),
                     }
                 )
@@ -210,9 +293,47 @@ Respond with JSON:
         """Get resumption instructions if available."""
         if context.resumption_file:
             try:
-                resumption_path = Path(context.resumption_file)
-                if resumption_path.exists():
+                resumption_path = Path(context.resumption_file).resolve()
+                # BUG-SEC-4: enforce workspace boundary to prevent path traversal.
+                # If workspace_dir is None/empty we MUST reject — skipping the check
+                # when workspace is falsy would allow arbitrary filesystem reads.
+                workspace = getattr(context, 'workspace_dir', None)
+                if not workspace:
+                    logger.warning(
+                        "resumption_file rejected: workspace_dir is unset, cannot validate boundary"
+                    )
+                    return ""
+                resolved_workspace = Path(workspace).resolve()
+                # Reject workspace_dir='/' — every path resolves inside /, making the
+                # boundary check meaningless and allowing arbitrary file reads.
+                if str(resolved_workspace) == '/':
+                    logger.warning(
+                        "resumption_file rejected: workspace_dir resolves to filesystem root"
+                    )
+                    return ""
+                # Guard against symlink-based workspace_dir pointing outside the
+                # AtlasForge workspace root.  Path.resolve() follows symlinks, so a
+                # symlink workspace_dir → /etc would make any /etc/… file appear
+                # inside the boundary.  Anchor to this module's parent tree instead.
+                _module_root = Path(__file__).resolve().parent.parent.parent  # af_engine/../.. = repo root
+                if not resolved_workspace.is_relative_to(_module_root):
+                    logger.warning(
+                        "resumption_file rejected: workspace_dir '%s' resolves outside module root '%s'",
+                        workspace, _module_root,
+                    )
+                    return ""
+                try:
+                    resumption_path.relative_to(resolved_workspace)
+                except ValueError:
+                    logger.warning(
+                        "resumption_file outside mission workspace rejected: %s",
+                        context.resumption_file,
+                    )
+                    return ""
+                if resumption_path.exists() and resumption_path.is_file():
                     content = resumption_path.read_text()
+                    # BUG-SEC-4: sanitize content before embedding in LLM prompt
+                    content = _sanitize_resumption_content(content, max_len=8000)
                     return f"""
 === RESUMPTION INSTRUCTIONS ===
 {content}

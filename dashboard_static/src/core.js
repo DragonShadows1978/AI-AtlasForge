@@ -343,6 +343,7 @@ export const ALL_PREFERENCE_KEYS = [
     'atlasforgeTilesLocked',
     'atlasforgeWidgetVisibility',
     'queue_notifications',
+    'atlasforge_investigation_form_v1',
     'inv_filter_state',
     'analytics_filter_state',
     'kb_custom_dates_state',

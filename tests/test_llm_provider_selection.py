@@ -16,6 +16,17 @@ def test_conductor_prefers_active_mission_provider(monkeypatch, tmp_path):
     assert conductor.get_llm_provider() == "codex"
 
 
+def test_conductor_prefers_in_memory_mission_provider(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.setattr(conductor, "MISSION_PATH", tmp_path / "missing_mission.json")
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({"provider": "claude"}))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+
+    assert conductor.resolve_llm_provider({"llm_provider": "codex"}) == "codex"
+
+
 def test_conductor_falls_back_to_persisted_provider(monkeypatch, tmp_path):
     import atlasforge_conductor as conductor
 
@@ -28,9 +39,10 @@ def test_conductor_falls_back_to_persisted_provider(monkeypatch, tmp_path):
     assert conductor.get_llm_provider() == "codex"
 
 
-def test_codex_model_env_reaches_command(monkeypatch):
+def test_codex_model_env_reaches_command(monkeypatch, tmp_path):
     import atlasforge_conductor as conductor
 
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", tmp_path / "missing_llm_provider.json")
     monkeypatch.setenv("ATLASFORGE_CODEX_MODEL", "gpt-5.4-codex")
     monkeypatch.delenv("CODEX_MODEL", raising=False)
     monkeypatch.delenv("ATLASFORGE_CODEX_WEB_SEARCH", raising=False)
@@ -42,6 +54,90 @@ def test_codex_model_env_reaches_command(monkeypatch):
     assert any("mcp_servers.atlasforge-web-proxy.args=" in item for item in command)
     assert "--model" in command
     assert "gpt-5.4-codex" in command
+
+
+def test_codex_planning_uses_read_only_stage_sandbox(monkeypatch):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.delenv("ATLASFORGE_CODEX_STAGE_GUARD", raising=False)
+    monkeypatch.setenv("ATLASFORGE_CODEX_AUTONOMOUS", "1")
+
+    command = conductor.build_llm_command("codex", stage="PLANNING")
+
+    assert "--sandbox" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in command
+
+
+def test_codex_building_keeps_full_send_by_default(monkeypatch):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.delenv("ATLASFORGE_CODEX_STAGE_GUARD", raising=False)
+    monkeypatch.setenv("ATLASFORGE_CODEX_AUTONOMOUS", "1")
+
+    command = conductor.build_llm_command("codex", stage="BUILDING")
+
+    assert "--sandbox" not in command
+    assert "--dangerously-bypass-approvals-and-sandbox" in command
+
+
+def test_codex_stage_guard_can_be_disabled(monkeypatch):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.setenv("ATLASFORGE_CODEX_STAGE_GUARD", "0")
+    monkeypatch.setenv("ATLASFORGE_CODEX_AUTONOMOUS", "1")
+
+    command = conductor.build_llm_command("codex", stage="PLANNING")
+
+    assert "--sandbox" not in command
+    assert "--dangerously-bypass-approvals-and-sandbox" in command
+
+
+def test_invoke_llm_codex_mission_sets_stage_guard_context(monkeypatch, tmp_path):
+    import subprocess
+    from unittest.mock import MagicMock, patch
+    import atlasforge_conductor as conductor
+
+    monkeypatch.setattr(conductor, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(conductor, "CODEX_STAGE_GUARD_CONTEXT_PATH", tmp_path / "state" / "codex_stage_guard_context.json")
+    monkeypatch.setattr(conductor, "MISSION_PATH", tmp_path / "missing_mission.json")
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({"provider": "claude"}))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+    monkeypatch.delenv("ATLASFORGE_CODEX_STAGE_GUARD", raising=False)
+
+    captured = {}
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env", {})
+        proc = MagicMock()
+        proc.pid = 12345
+        proc.returncode = 0
+        proc.communicate.return_value = ('{"status":"ok"}', "")
+        return proc
+
+    with patch.object(subprocess, "Popen", side_effect=fake_popen):
+        result, error = conductor.invoke_llm(
+            "test prompt",
+            timeout=5,
+            cwd=tmp_path,
+            stage="PLANNING",
+            mission={"mission_id": "mission_codex", "llm_provider": "codex"},
+        )
+
+    assert result == '{"status":"ok"}'
+    assert error is None
+    assert captured["command"][0] == "codex"
+    assert "--sandbox" in captured["command"]
+    assert captured["command"][captured["command"].index("--sandbox") + 1] == "read-only"
+    assert captured["env"]["ATLASFORGE_ACTIVE_PROVIDER"] == "codex"
+    assert captured["env"]["ATLASFORGE_ACTIVE_STAGE"] == "PLANNING"
+    assert captured["env"]["ATLASFORGE_ACTIVE_MISSION_ID"] == "mission_codex"
+    context = json.loads((tmp_path / "state" / "codex_stage_guard_context.json").read_text())
+    assert context["provider"] == "codex"
+    assert context["stage"] == "PLANNING"
+    assert context["mission_id"] == "mission_codex"
 
 
 def test_queue_provider_explicit_value_wins(monkeypatch, tmp_path):

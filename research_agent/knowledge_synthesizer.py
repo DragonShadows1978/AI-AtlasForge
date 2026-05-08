@@ -15,17 +15,126 @@ based on training corpora knowledge.
 import sys
 import json
 import re
+import unicodedata
+import importlib.util
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as _dc_replace
+import copy as _copy
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 
-# Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from experiment_framework import invoke_fresh_llm, ModelType
+# Import investigation_engine without permanently mutating sys.path.
+if "investigation_engine" not in sys.modules:
+    _IE_PATH = Path(__file__).parent.parent / "investigation_engine.py"
+    _ie_spec = importlib.util.spec_from_file_location("investigation_engine", str(_IE_PATH))
+    _ie_mod = importlib.util.module_from_spec(_ie_spec)
+    sys.modules["investigation_engine"] = _ie_mod
+    _ie_spec.loader.exec_module(_ie_mod)
+from investigation_engine import invoke_claude, ModelType
 from .web_researcher import WebResearchResult, SearchResult
+
+_INJECTION_PREFIXES = (
+    "IGNORE", "<system>", "[INST]", "[/INST]", "###OVERRIDE", "SYSTEM:", "</s>",
+    "<|im_start|>", "<|im_end|>", "<!--", "ASSISTANT:", "USER:", "HUMAN:",
+)
+
+
+def _extract_json_object(text: str):
+    """Find the first balanced {...} block in text that contains a 'summary' key.
+
+    Walks string counting brace depth, correctly skipping braces inside string
+    literals so that {"summary": "has } inside"} is parsed correctly.
+    Returns the raw JSON string on success, or None if nothing suitable is found.
+    """
+    if not text:
+        return None
+    # Limit input length to prevent O(N^2) worst case on adversarial inputs
+    text = text[:200_000]
+    start = text.find('{')
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape_next = False
+        end = None
+        for i, ch in enumerate(text[start:], start):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end is None:
+            # No closing brace found from here to end-of-string; no later '{' can
+            # have a matching '}' either, so stop scanning.
+            break
+        candidate = text[start:end + 1]
+        if '"summary"' in candidate:
+            return candidate
+        start = text.find('{', end + 1)
+    return None
+
+
+def _sanitize_field(text: str, max_len: int = 500) -> str:
+    """Sanitize a web-search result field before embedding in an LLM prompt."""
+    if not text:
+        return ""
+    # Coerce non-str to repr() so bytes/int inputs don't bypass prefix detection
+    if not isinstance(text, str):
+        text = repr(text)
+    # NFKC normalization converts fullwidth/halfwidth variants (e.g. ＳＹＳＴＥＭ)
+    # to their canonical ASCII equivalents.
+    text = unicodedata.normalize('NFKC', text)
+    # Delete ZWNJ (U+200C) and ZWJ (U+200D) — they survive NFKC and can be
+    # inserted between prefix letters to produce "SYSTEM‌:" → "SYSTEM:" after deletion.
+    # These chars have no legitimate use inside LLM prompt fields.
+    text = text.replace('‌', '').replace('‍', '')
+    # Strip combining diacritics (U+0300–U+036F and related blocks), variation
+    # selectors (U+FE00–U+FE1F), AND Unicode tag characters (U+E0000–U+E01EF) —
+    # all survive NFKC and can be inserted between prefix letters to camouflage
+    # injection tokens. Tags are especially dangerous: U+E0100 between S and Y
+    # produces "SYST\U000E0100EM:" which bypasses startswith checks.
+    text = re.sub(r'[̀-ͯ᷀-᷿⃐-⃿︀-︟︠-︯\U000E0000-\U000E01EF]', '', text)
+    # Strip ASCII control chars (including form-feed/VT which would otherwise
+    # concatenate adjacent tokens and bypass prefix detection)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', ' ', text)
+    clean_lines = []
+    _prefixes_upper = tuple(p.upper() for p in _INJECTION_PREFIXES)
+    for line in text.splitlines():
+        # Remove Unicode invisible/format chars and collapse whitespace
+        stripped = re.sub(r'[­͏؜ᅟᅠ឴឵'
+                          r'᠋-᠎​-‏‪-‮'
+                          r'⁠-⁯ㅤ﻿ﾠ]', ' ', line.lstrip())
+        stripped = re.sub(r'  +', ' ', stripped).strip()
+        upper = stripped.upper()
+        # Drop lines where an injection prefix appears at start-of-line
+        # (case-insensitive) OR anywhere mid-line (case-insensitive, word boundary).
+        if any(upper.startswith(p) for p in _prefixes_upper):
+            continue
+        if any(
+            bool(re.search(r'(?<![a-zA-Z0-9])' + re.escape(p), stripped, re.IGNORECASE))
+            for p in _INJECTION_PREFIXES
+        ):
+            continue
+        clean_lines.append(stripped)
+    # Guard: None, NaN, and inf all cause TypeError/OverflowError in int().
+    try:
+        limit = max(0, int(max_len))
+    except (TypeError, ValueError, OverflowError):
+        limit = 500
+    return "\n".join(clean_lines)[:limit]
 
 
 class ConfidenceLevel(Enum):
@@ -91,14 +200,14 @@ class SynthesisResult:
                 {
                     "title": r.title,
                     "description": r.description,
-                    "type": r.recommendation_type.value,
-                    "confidence": r.confidence.value,
+                    "type": r.recommendation_type.value if isinstance(r.recommendation_type, RecommendationType) else str(r.recommendation_type or ""),
+                    "confidence": r.confidence.value if isinstance(r.confidence, ConfidenceLevel) else str(r.confidence or ""),
                     "rationale": r.rationale,
                     "sources": r.sources,
                     "alternatives": r.alternatives,
                     "caveats": r.caveats
                 }
-                for r in self.recommendations
+                for r in (self.recommendations or []) if r is not None
             ],
             "knowledge_gaps": [
                 {
@@ -107,14 +216,14 @@ class SynthesisResult:
                     "importance": g.importance,
                     "suggested_research": g.suggested_research
                 }
-                for g in self.knowledge_gaps
+                for g in (self.knowledge_gaps or []) if g is not None
             ],
             "sources": {
                 "total": self.total_sources,
                 "primary": self.primary_sources,
                 "urls": self.sources_used
             },
-            "confidence": self.synthesis_confidence.value,
+            "confidence": self.synthesis_confidence.value if isinstance(self.synthesis_confidence, ConfidenceLevel) else str(self.synthesis_confidence or ""),
             "timestamp": self.timestamp,
             "success": self.success,
             "error": self.error
@@ -124,7 +233,7 @@ class SynthesisResult:
         """Convert synthesis to markdown for documentation."""
         md = f"# Research Synthesis: {self.topic}\n\n"
         md += f"*Generated: {self.timestamp}*\n"
-        md += f"*Confidence: {self.synthesis_confidence.value}*\n\n"
+        md += f"*Confidence: {self.synthesis_confidence.value if isinstance(self.synthesis_confidence, ConfidenceLevel) else str(self.synthesis_confidence or '')}*\n\n"
 
         md += "## Summary\n\n"
         md += f"{self.summary}\n\n"
@@ -133,8 +242,8 @@ class SynthesisResult:
             md += "## Recommendations\n\n"
             for i, rec in enumerate(self.recommendations, 1):
                 md += f"### {i}. {rec.title}\n\n"
-                md += f"**Type:** {rec.recommendation_type.value} | "
-                md += f"**Confidence:** {rec.confidence.value}\n\n"
+                md += f"**Type:** {rec.recommendation_type.value if isinstance(rec.recommendation_type, RecommendationType) else str(rec.recommendation_type or '')} | "
+                md += f"**Confidence:** {rec.confidence.value if isinstance(rec.confidence, ConfidenceLevel) else str(rec.confidence or '')}\n\n"
                 md += f"{rec.description}\n\n"
                 md += f"**Rationale:** {rec.rationale}\n\n"
                 if rec.sources:
@@ -228,7 +337,7 @@ Respond in JSON:
 
     def __init__(
         self,
-        model: ModelType = ModelType.BALANCED,
+        model: ModelType = ModelType.CLAUDE_SONNET,
         timeout_seconds: int = 120
     ):
         """
@@ -268,8 +377,10 @@ Respond in JSON:
         all_sources = []
         primary_count = 0
 
-        for research in research_results:
-            for r in research.results:
+        for research in (research_results or []):
+            if research is None:
+                continue
+            for r in (research.results or []):
                 all_results.append(r)
                 if r.url:
                     all_sources.append(r.url)
@@ -291,12 +402,12 @@ Respond in JSON:
         # Run synthesis
         import string as _string
         prompt = _string.Template(self.SYNTHESIS_PROMPT).safe_substitute(
-            topic=topic,
-            context=context or "General research",
+            topic=_sanitize_field(topic, max_len=500),
+            context=_sanitize_field(context or "General research", max_len=500),
             findings=findings_text
         )
 
-        response, _ = invoke_fresh_llm(
+        response, _ = invoke_claude(
             prompt=prompt,
             model=self.model,
             timeout=self.timeout_seconds
@@ -305,6 +416,9 @@ Respond in JSON:
         # Parse synthesis response
         try:
             parsed = self._extract_json(response)
+            if not parsed:
+                result.error = "Failed to parse synthesis response: no valid JSON returned by LLM"
+                result.synthesis_confidence = ConfidenceLevel.SPECULATIVE
             if parsed:
                 result.summary = parsed.get("summary", "")
 
@@ -353,8 +467,8 @@ Respond in JSON:
 
         # Adjust confidence based on source quality
         if primary_count >= 3:
-            # Multiple primary sources increase confidence
-            pass
+            if result.synthesis_confidence == ConfidenceLevel.MEDIUM:
+                result.synthesis_confidence = ConfidenceLevel.HIGH
         elif primary_count == 0:
             # No primary sources decrease confidence
             if result.synthesis_confidence == ConfidenceLevel.HIGH:
@@ -366,14 +480,25 @@ Respond in JSON:
         """Format search results for synthesis prompt."""
         findings = []
         for i, r in enumerate(results[:15], 1):  # Limit to 15 results
-            finding = f"{i}. {r.title}\n"
-            finding += f"   Source: {r.source}"
+            if r is None:
+                continue
+            # BUG-SEC-6: sanitize all web-search fields before prompt embedding
+            # BUG-COR-2: guard r.snippet against None before slicing
+            title = _sanitize_field(r.title or '', 200)
+            source = _sanitize_field(r.source or '', 100)
+            url = _sanitize_field(r.url or '', 300)
+            snippet = _sanitize_field((r.snippet or '')[:300], 300)
+            finding = f"{i}. {title}\n"
+            finding += f"   Source: {source}"
             if r.is_primary_source:
                 finding += " (PRIMARY SOURCE)"
-            finding += f"\n   URL: {r.url}\n"
-            finding += f"   Snippet: {r.snippet[:300]}\n"
-            if r.extracted_insights:
-                finding += f"   Insights: {', '.join(r.extracted_insights[:3])}\n"
+            finding += f"\n   URL: {url}\n"
+            finding += f"   Snippet: {snippet}\n"
+            if isinstance(r.extracted_insights, list) and r.extracted_insights:
+                safe_insights = [_sanitize_field(str(ins), 200) for ins in r.extracted_insights[:3]]
+                non_empty = [s for s in safe_insights if s]
+                if non_empty:
+                    finding += f"   Insights: {', '.join(non_empty)}\n"
             findings.append(finding)
 
         return "\n".join(findings)
@@ -412,6 +537,7 @@ Respond in JSON:
         Returns:
             Combined SynthesisResult
         """
+        syntheses = [s for s in (syntheses or []) if s is not None]
         if not syntheses:
             return SynthesisResult(
                 topic="No topic",
@@ -428,27 +554,36 @@ Respond in JSON:
         merged.summary = " ".join(summaries)
 
         # Combine recommendations (deduplicate by title)
+        # Use deep-copy-of-list-fields so merged recs don't alias the originals.
         seen_titles = set()
         for synthesis in syntheses:
-            for rec in synthesis.recommendations:
+            for rec in (synthesis.recommendations or []):
                 if rec.title not in seen_titles:
                     seen_titles.add(rec.title)
-                    merged.recommendations.append(rec)
+                    merged.recommendations.append(_dc_replace(
+                        rec,
+                        sources=list(rec.sources),
+                        alternatives=list(rec.alternatives),
+                        caveats=list(rec.caveats),
+                    ))
 
         # Combine knowledge gaps
         seen_gaps = set()
         for synthesis in syntheses:
-            for gap in synthesis.knowledge_gaps:
+            for gap in (synthesis.knowledge_gaps or []):
                 if gap.topic not in seen_gaps:
                     seen_gaps.add(gap.topic)
-                    merged.knowledge_gaps.append(gap)
+                    merged.knowledge_gaps.append(_dc_replace(
+                        gap,
+                        suggested_research=str(gap.suggested_research),
+                    ))
 
         # Combine sources
         all_sources = []
         total = 0
         primary = 0
         for synthesis in syntheses:
-            all_sources.extend(synthesis.sources_used)
+            all_sources.extend(synthesis.sources_used or [])
             total += synthesis.total_sources
             primary += synthesis.primary_sources
 
@@ -456,42 +591,58 @@ Respond in JSON:
         merged.total_sources = total
         merged.primary_sources = primary
 
-        # Determine overall confidence (lowest of all)
+        # Determine overall confidence (lowest of all valid confidences)
         confidence_order = [
             ConfidenceLevel.SPECULATIVE,
             ConfidenceLevel.LOW,
             ConfidenceLevel.MEDIUM,
             ConfidenceLevel.HIGH
         ]
-        min_conf_idx = min(
-            confidence_order.index(s.synthesis_confidence)
-            for s in syntheses
-        )
-        merged.synthesis_confidence = confidence_order[min_conf_idx]
+        valid_confidences = [
+            s.synthesis_confidence for s in syntheses
+            if s.synthesis_confidence in confidence_order
+        ]
+        if not valid_confidences:
+            merged.synthesis_confidence = ConfidenceLevel.MEDIUM
+        else:
+            min_conf_idx = min(confidence_order.index(c) for c in valid_confidences)
+            merged.synthesis_confidence = confidence_order[min_conf_idx]
 
         return merged
 
     def _extract_json(self, text: str) -> Optional[dict]:
         """Extract JSON from response text."""
+        if not text:
+            return None
+        if not isinstance(text, str):
+            return None
         # Try direct parse
         try:
-            return json.loads(text)
+            result = json.loads(text)
+            return result if isinstance(result, dict) else None
         except json.JSONDecodeError:
             pass
 
-        # Try to find JSON in code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        # Try to find JSON in code blocks; cap at 10 KB to prevent ReDoS.
+        # Use greedy {.*} so nested objects like {"a": {"b": 1}} aren't truncated
+        # at the first inner '}' (which the non-greedy {.*?} would do).
+        json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text[:10_000], re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group(1))
+                result = json.loads(json_match.group(1))
+                if isinstance(result, dict):
+                    return result
             except json.JSONDecodeError:
                 pass
 
-        # Try to find raw JSON object
-        json_match = re.search(r'\{[^{}]*"summary".*?\}', text, re.DOTALL)
-        if json_match:
+        # TD-MOD-3: use a balanced-brace extractor so nested objects before the
+        # 'summary' key are handled correctly instead of matching too eagerly.
+        _candidate = _extract_json_object(text)
+        if _candidate:
             try:
-                return json.loads(json_match.group(0))
+                result = json.loads(_candidate)
+                if isinstance(result, dict):
+                    return result
             except json.JSONDecodeError:
                 pass
 
@@ -535,7 +686,7 @@ if __name__ == "__main__":
     )
 
     print("Synthesizing mock research results...")
-    synthesizer = KnowledgeSynthesizer(model=ModelType.FAST)
+    synthesizer = KnowledgeSynthesizer(model=ModelType.CLAUDE_HAIKU)
     result = synthesizer.synthesize_single(
         topic="mutation testing Python",
         research=mock_research,

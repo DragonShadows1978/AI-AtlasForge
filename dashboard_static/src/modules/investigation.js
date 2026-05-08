@@ -6,7 +6,7 @@
  */
 
 import { api } from '../api.js';
-import { showToast } from '../core.js';
+import { formatDuration, showToast } from '../core.js';
 
 // Track current investigation
 let currentInvestigationId = null;
@@ -26,28 +26,199 @@ let investigationSettings = {
     auto_archive_delay_seconds: 5
 };
 
+const INVESTIGATION_FORM_STATE_KEY = 'atlasforge_investigation_form_v1';
+
+function getInvestigationElapsedSeconds(status) {
+    const direct = Number(status?.elapsed_seconds);
+    if (Number.isFinite(direct) && direct >= 0) return direct;
+
+    const startedAt = status?.started_at ? Date.parse(status.started_at) : NaN;
+    const completedAt = status?.completed_at
+        ? Date.parse(status.completed_at)
+        : (status?.last_updated ? Date.parse(status.last_updated) : NaN);
+    if (Number.isFinite(startedAt) && Number.isFinite(completedAt) && completedAt >= startedAt) {
+        return (completedAt - startedAt) / 1000;
+    }
+    return null;
+}
+
+function formatCompletedProgress(status) {
+    const elapsed = getInvestigationElapsedSeconds(status);
+    const duration = status?.elapsed_display && status.elapsed_display !== '-'
+        ? status.elapsed_display
+        : (elapsed != null ? formatDuration(elapsed) : null);
+    const completedAt = status?.completed_at || status?.last_updated || null;
+    let completedTime = '';
+    if (completedAt) {
+        const parsed = new Date(completedAt);
+        if (!Number.isNaN(parsed.getTime())) {
+            completedTime = ` at ${parsed.toLocaleTimeString()}`;
+        }
+    }
+    return duration ? `Completed in ${duration}${completedTime}` : `Completed${completedTime}`;
+}
+
+function getInvestigationFormEls() {
+    return {
+        checkbox: document.getElementById('investigation-mode-checkbox'),
+        rdControls: document.getElementById('rd-mode-controls'),
+        investigationControls: document.getElementById('investigation-mode-controls'),
+        hint: document.getElementById('investigation-mode-hint'),
+        regularModelBar: document.querySelector('.llm-model-bar'),
+        subagentsSelect: document.getElementById('investigation-subagents'),
+        customSubagentsInput: document.getElementById('investigation-subagents-custom'),
+        timeoutSelect: document.getElementById('investigation-timeout')
+    };
+}
+
+function normalizeSubagentCount(value, fallback = 5) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(1, Math.min(50, parsed));
+}
+
+function syncSubagentCustomInputVisibility() {
+    const { subagentsSelect, customSubagentsInput } = getInvestigationFormEls();
+    if (!subagentsSelect || !customSubagentsInput) return;
+    customSubagentsInput.style.display = subagentsSelect.value === 'custom'
+        ? 'inline-block'
+        : 'none';
+}
+
+function saveInvestigationFormState() {
+    const {
+        checkbox,
+        subagentsSelect,
+        customSubagentsInput,
+        timeoutSelect
+    } = getInvestigationFormEls();
+
+    const state = {
+        investigationMode: Boolean(checkbox?.checked),
+        subagents: subagentsSelect?.value || '5',
+        customSubagents: normalizeSubagentCount(customSubagentsInput?.value, 15),
+        timeoutMinutes: timeoutSelect?.value || '10'
+    };
+
+    try {
+        localStorage.setItem(INVESTIGATION_FORM_STATE_KEY, JSON.stringify(state));
+    } catch (_) {
+        // localStorage may be unavailable in private/locked-down contexts.
+    }
+}
+
+function loadInvestigationFormState() {
+    const {
+        checkbox,
+        subagentsSelect,
+        customSubagentsInput,
+        timeoutSelect
+    } = getInvestigationFormEls();
+
+    let state = null;
+    try {
+        state = JSON.parse(localStorage.getItem(INVESTIGATION_FORM_STATE_KEY) || 'null');
+    } catch (_) {
+        state = null;
+    }
+    if (!state || typeof state !== 'object') return;
+
+    if (checkbox && typeof state.investigationMode === 'boolean') {
+        checkbox.checked = state.investigationMode;
+    }
+    if (subagentsSelect && typeof state.subagents === 'string') {
+        const hasOption = Array.from(subagentsSelect.options).some((opt) => opt.value === state.subagents);
+        if (hasOption) subagentsSelect.value = state.subagents;
+    }
+    if (customSubagentsInput && state.customSubagents != null) {
+        customSubagentsInput.value = normalizeSubagentCount(state.customSubagents, 15);
+    }
+    if (timeoutSelect && typeof state.timeoutMinutes === 'string') {
+        const hasTimeout = Array.from(timeoutSelect.options).some((opt) => opt.value === state.timeoutMinutes);
+        if (hasTimeout) timeoutSelect.value = state.timeoutMinutes;
+    }
+}
+
+function syncInvestigationModeVisibility() {
+    const {
+        checkbox,
+        rdControls,
+        investigationControls,
+        hint,
+        regularModelBar
+    } = getInvestigationFormEls();
+    const enabled = Boolean(checkbox?.checked);
+
+    if (regularModelBar) {
+        regularModelBar.style.display = enabled ? 'none' : 'flex';
+    }
+
+    if (enabled) {
+        // Investigation mode ON
+        if (rdControls) rdControls.style.display = 'none';
+        if (investigationControls) investigationControls.style.display = 'block';
+        if (hint) {
+            hint.textContent = 'Single-cycle deep dive research with parallel subagents';
+            hint.style.color = 'var(--accent)';
+        }
+    } else {
+        // Standard R&D mode
+        if (rdControls) rdControls.style.display = 'block';
+        if (investigationControls) investigationControls.style.display = 'none';
+        if (hint) {
+            hint.textContent = 'Single-cycle deep dive research';
+            hint.style.color = 'var(--text-dim)';
+        }
+    }
+
+    syncSubagentCustomInputVisibility();
+}
+
+/**
+ * Initialize investigation controls after the dashboard DOM is ready.
+ */
+export function initInvestigationControls() {
+    loadInvestigationFormState();
+    syncInvestigationModeVisibility();
+
+    const {
+        checkbox,
+        subagentsSelect,
+        customSubagentsInput,
+        timeoutSelect
+    } = getInvestigationFormEls();
+
+    if (checkbox && !checkbox.dataset.investigationWired) {
+        checkbox.dataset.investigationWired = '1';
+        checkbox.addEventListener('change', () => {
+            syncInvestigationModeVisibility();
+            saveInvestigationFormState();
+        });
+    }
+    if (subagentsSelect && !subagentsSelect.dataset.investigationWired) {
+        subagentsSelect.dataset.investigationWired = '1';
+        subagentsSelect.addEventListener('change', () => {
+            syncSubagentCustomInputVisibility();
+            saveInvestigationFormState();
+        });
+    }
+    if (customSubagentsInput && !customSubagentsInput.dataset.investigationWired) {
+        customSubagentsInput.dataset.investigationWired = '1';
+        customSubagentsInput.addEventListener('input', saveInvestigationFormState);
+        customSubagentsInput.addEventListener('change', saveInvestigationFormState);
+    }
+    if (timeoutSelect && !timeoutSelect.dataset.investigationWired) {
+        timeoutSelect.dataset.investigationWired = '1';
+        timeoutSelect.addEventListener('change', saveInvestigationFormState);
+    }
+}
+
 /**
  * Toggle between R&D mode and Investigation mode
  */
 export function toggleInvestigationMode() {
-    const checkbox = document.getElementById('investigation-mode-checkbox');
-    const rdControls = document.getElementById('rd-mode-controls');
-    const investigationControls = document.getElementById('investigation-mode-controls');
-    const hint = document.getElementById('investigation-mode-hint');
-
-    if (checkbox.checked) {
-        // Investigation mode ON
-        rdControls.style.display = 'none';
-        investigationControls.style.display = 'block';
-        hint.textContent = 'Single-cycle deep dive research with parallel subagents';
-        hint.style.color = 'var(--accent)';
-    } else {
-        // Standard R&D mode
-        rdControls.style.display = 'block';
-        investigationControls.style.display = 'none';
-        hint.textContent = 'Single-cycle deep dive research';
-        hint.style.color = 'var(--text-dim)';
-    }
+    syncInvestigationModeVisibility();
+    saveInvestigationFormState();
 }
 
 /**
@@ -72,9 +243,9 @@ export async function startInvestigation() {
     let subagents;
     if (subagentsSelect && subagentsSelect.value === 'custom') {
         const customInput = document.getElementById('investigation-subagents-custom');
-        subagents = parseInt(customInput ? customInput.value : 5) || 5;
+        subagents = normalizeSubagentCount(customInput ? customInput.value : 5, 5);
     } else {
-        subagents = parseInt(subagentsSelect ? subagentsSelect.value : '5') || 5;
+        subagents = normalizeSubagentCount(subagentsSelect ? subagentsSelect.value : '5', 5);
     }
     const timeout = parseInt(document.getElementById('investigation-timeout').value) || 10;
 
@@ -86,31 +257,10 @@ export async function startInvestigation() {
         });
 
         if (result.success) {
-            currentInvestigationId = result.investigation_id;
-            isInvestigationRunning = true;
-
             // Clear the input field on successful start
             queryInput.value = '';
 
-            showToast(`Investigation started: ${result.investigation_id}`);
-
-            // Show status card and banner
-            showInvestigationStatus(result.investigation_id);
-            showInvestigationBanner(result.investigation_id, 'Starting...');
-
-            // Update header service status indicator
-            if (typeof window.updateInvestigationServiceStatus === 'function') {
-                window.updateInvestigationServiceStatus(true, 'pending');
-            }
-
-            // Start polling for updates
-            startInvestigationPolling(result.investigation_id);
-
-            // Update button states
-            document.getElementById('stop-investigation-btn').style.display = 'inline-block';
-
-            // Disable the start button to prevent double-starts
-            updateInvestigationControlsState(true);
+            adoptStartedInvestigation(result);
         } else {
             showToast(result.message || 'Failed to start investigation', 'error');
         }
@@ -118,6 +268,40 @@ export async function startInvestigation() {
         console.error('Failed to start investigation:', err);
         showToast('Failed to start investigation: ' + err.message, 'error');
     }
+}
+
+/**
+ * Adopt a newly started investigation into this page's active UI state.
+ *
+ * This is used by both the main Start Investigation button and direct reruns
+ * from the investigation history tab.
+ */
+export function adoptStartedInvestigation(result, message = null) {
+    if (!result || !result.investigation_id) return;
+
+    currentInvestigationId = result.investigation_id;
+    isInvestigationRunning = true;
+
+    showToast(message || `Investigation started: ${result.investigation_id}`);
+
+    // Show status card and banner
+    showInvestigationStatus(result.investigation_id);
+    showInvestigationBanner(result.investigation_id, 'Starting...');
+
+    // Update header service status indicator
+    if (typeof window.updateInvestigationServiceStatus === 'function') {
+        window.updateInvestigationServiceStatus(true, 'pending');
+    }
+
+    // Start polling for updates
+    startInvestigationPolling(result.investigation_id);
+
+    // Update button states
+    const stopBtn = document.getElementById('stop-investigation-btn');
+    if (stopBtn) stopBtn.style.display = 'inline-block';
+
+    // Disable the start button to prevent double-starts
+    updateInvestigationControlsState(true);
 }
 
 /**
@@ -264,8 +448,7 @@ function updateInvestigationUI(status) {
             progressText = 'Synthesizing findings...';
             break;
         case 'completed':
-            const elapsed = status.elapsed_seconds ? status.elapsed_seconds.toFixed(1) : '?';
-            progressText = `Completed in ${elapsed}s`;
+            progressText = formatCompletedProgress(status);
             break;
         case 'failed':
             progressText = status.error || 'Failed';

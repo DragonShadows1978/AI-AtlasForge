@@ -156,6 +156,7 @@ CLAUDE_PROMPT_PATH = STATE_DIR / "claude_prompt.json"
 CHAT_HISTORY_PATH = STATE_DIR / "chat_history.json"
 MISSION_PATH = STATE_DIR / "mission.json"
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
+CODEX_STAGE_GUARD_CONTEXT_PATH = STATE_DIR / "codex_stage_guard_context.json"
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 CONDUCTOR_LOCK_PATH = BASE_DIR / "atlasforge_conductor.lock"
 
@@ -264,6 +265,37 @@ def _codex_autonomous_enabled() -> bool:
     return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
 
 
+def _codex_stage_guard_enabled() -> bool:
+    """Use stage-aware Codex sandboxing for non-implementation stages."""
+    return _env_flag_enabled("ATLASFORGE_CODEX_STAGE_GUARD", default=True)
+
+
+_CODEX_READ_ONLY_STAGES = frozenset({
+    "PLANNING",
+    "ANALYZING",
+    "CYCLE_END",
+    "COMPLETE",
+    "REVIEW",
+})
+_CODEX_FULL_SEND_STAGES = frozenset({"BUILDING", "TESTING"})
+CODEX_TESTING_RED_TEAM_AGENTS = 3
+CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS = 2700
+
+
+def get_codex_stage_sandbox(stage: Optional[str]) -> Optional[str]:
+    """Return Codex sandbox mode for an AtlasForge stage, or None for full-send."""
+    if not _codex_stage_guard_enabled() or not stage:
+        return None
+    normalized = str(stage).strip().upper()
+    if normalized in _CODEX_FULL_SEND_STAGES:
+        return None
+    if normalized in _CODEX_READ_ONLY_STAGES:
+        return "read-only"
+    # Unknown stage names fail conservative. Disable with
+    # ATLASFORGE_CODEX_STAGE_GUARD=0 for intentional custom stages.
+    return "read-only"
+
+
 def _gemini_autonomous_enabled() -> bool:
     """Run Gemini with auto-approvals by default."""
     return _env_flag_enabled("ATLASFORGE_GEMINI_AUTONOMOUS", default=True)
@@ -289,6 +321,30 @@ def _read_provider_from_json(path: Path) -> Optional[str]:
     return _normalize_llm_provider(data.get("llm_provider") or data.get("provider"))
 
 
+def _read_llm_state() -> dict:
+    """Read persisted dashboard LLM provider/model state."""
+    try:
+        with open(LLM_PROVIDER_PATH, 'r') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _safe_model_name(value: Any) -> Optional[str]:
+    model = str(value or "").strip()
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", model):
+        return model
+    return None
+
+
+def _safe_thinking_effort(value: Any) -> Optional[str]:
+    effort = str(value or "").strip().lower()
+    if effort in {"low", "medium", "high", "xhigh", "max"}:
+        return effort
+    return None
+
+
 def get_llm_provider() -> str:
     """Resolve the active LLM provider from mission, env, persisted state, then default."""
     mission_provider = _read_provider_from_json(MISSION_PATH)
@@ -312,8 +368,52 @@ def get_llm_provider() -> str:
     return DEFAULT_LLM_PROVIDER
 
 
+def resolve_llm_provider(mission: Optional[dict] = None) -> str:
+    """Resolve the LLM provider, preferring the in-memory active mission.
+
+    The dashboard can persist provider state separately from the mission file.
+    During a running mission, the mission object is the authority; otherwise a
+    mission-selected Codex run can accidentally fall back to the dashboard's
+    previous Claude selection and miss Codex-only stage-guard wiring.
+    """
+    if isinstance(mission, dict):
+        mission_provider = _normalize_llm_provider(
+            mission.get("llm_provider") or mission.get("provider")
+        )
+        if mission_provider:
+            return mission_provider
+    return get_llm_provider()
+
+
+def _write_codex_stage_guard_context(stage: Optional[str], mission: Optional[dict]) -> None:
+    """Persist Codex stage context for MCP stage-guard enforcement.
+
+    Codex also receives this context in its subprocess environment, but a small
+    AtlasForge-owned state file keeps the MCP guard independent of client env
+    inheritance. This is written only for Codex launches.
+    """
+    mission = mission if isinstance(mission, dict) else {}
+    payload = {
+        "provider": "codex",
+        "stage": str(stage or mission.get("current_stage") or "PLANNING").strip().upper(),
+        "mission_id": str(mission.get("mission_id") or ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        if not io_utils.atomic_write_json(CODEX_STAGE_GUARD_CONTEXT_PATH, payload):
+            logger.warning("Failed to write Codex stage-guard context")
+    except Exception as exc:
+        logger.warning("Failed to write Codex stage-guard context: %s", exc)
+
+
 def get_llm_model(provider: str) -> Optional[str]:
     """Resolve provider-specific model override for CLI invocation."""
+    state = _read_llm_state()
+    selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
+    provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
+    persisted_model = _safe_model_name(provider_selected.get("model"))
+    if persisted_model:
+        return persisted_model
     if provider == "codex":
         model = os.environ.get("ATLASFORGE_CODEX_MODEL") or os.environ.get("CODEX_MODEL")
         return model.strip() if model and model.strip() else None
@@ -324,19 +424,149 @@ def get_llm_model(provider: str) -> Optional[str]:
     return model.strip() if model and model.strip() else None
 
 
-def build_llm_command(provider: str, model: Optional[str] = None, stage: Optional[str] = None) -> List[str]:
+def get_llm_thinking_effort(provider: str) -> Optional[str]:
+    """Resolve provider-specific thinking/reasoning effort."""
+    state = _read_llm_state()
+    selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
+    provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
+    persisted = _safe_thinking_effort(provider_selected.get("thinking"))
+    if persisted:
+        return persisted
+    env_key = {
+        "claude": "ATLASFORGE_CLAUDE_THINKING",
+        "codex": "ATLASFORGE_CODEX_THINKING",
+        "gemini": "ATLASFORGE_GEMINI_THINKING",
+    }.get(provider)
+    return _safe_thinking_effort(os.environ.get(env_key)) if env_key else None
+
+
+def codex_stage_guard_prompt(stage: str, mission: Optional[dict] = None) -> str:
+    """Provider-specific prompt addendum for AtlasForge MCP stage-guard tools."""
+    stage_name = str(stage or "PLANNING").strip().upper()
+    mission = mission if isinstance(mission, dict) else {}
+    mission_id = mission.get("mission_id", "current mission")
+    if stage_name == "PLANNING":
+        return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+AtlasForge is the conductor. Use the AtlasForge MCP stage-guard tools for
+stage artifacts:
+
+- Call `AtlasForgeGetStagePolicy` if you need the current MCP write policy.
+- During PLANNING, submit structured planning artifacts with
+  `AtlasForgeSubmitPlan`.
+- Do not implement source changes during PLANNING.
+- If a planning note is needed, use `AtlasForgeWriteStageNote`.
+
+AtlasForge launches Codex PLANNING with a read-only workspace sandbox, so MCP
+stage-guard tools are the intended write path for planning artifacts.
+These MCP tools enforce AtlasForge's stage/path/extension policy. If a write is
+rejected, report the rejection and stop expanding scope.
+"""
+    if stage_name in {"ANALYZING", "CYCLE_END"}:
+        return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+Use `AtlasForgeGetStagePolicy` to inspect allowed stage artifact paths.
+Submit analysis/review artifacts with `AtlasForgeSubmitReview`, and use
+`AtlasForgeWriteStageNote` for Markdown notes. Do not make implementation
+changes from this stage; recommend BUILDING-stage work instead.
+AtlasForge launches this stage with a read-only workspace sandbox for Codex.
+"""
+    if stage_name in {"BUILDING", "TESTING"}:
+        if stage_name == "BUILDING":
+            return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+AtlasForge owns the stage lifecycle. BUILDING includes implementation and
+builder self-validation: run focused tests, lint, type checks, or build commands
+needed to prove the patch is ready.
+
+Do not collapse AtlasForge TESTING into BUILDING. Any tests you run here are
+self-validation only. The official TESTING stage must still run the configured
+blind red-team gate before the mission can be considered verified.
+
+At the end of BUILDING, include `self_validation` in your JSON response with
+commands run, result, and notes. Submit a concise structured patch summary
+through `AtlasForgeSubmitPatchSummary` when useful.
+"""
+        if stage_name == "TESTING":
+            return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+AtlasForge owns the TESTING pipeline for Codex. Before this tester pass,
+AtlasForge automatically launches {CODEX_TESTING_RED_TEAM_AGENTS} blind
+red-team agents with a {CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS} second
+(45 minute) timeout and collects their artifacts.
+
+Your role in this Codex TESTING pass:
+- Read the appended Codex red-team preflight summary and the referenced files.
+- Reproduce or refute the red-team findings.
+- Run your own targeted verification after reviewing red-team output.
+- Run a quick mutation check where practical, or explicitly report why it is
+  unavailable for this workspace/language/test command.
+- Return strict TESTING JSON. Include `adversarial_testing.red_team_completion`
+  and mutation-test evidence.
+
+BUILDING self-validation does not satisfy TESTING. TESTING can pass early only
+when all required red-team agents completed and their reports were collected.
+Submit a concise structured test summary through `AtlasForgeSubmitPatchSummary`
+when useful.
+"""
+        return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+AtlasForge owns the stage lifecycle. Keep BUILDING/TESTING work scoped to the
+approved mission task. TESTING is the official verification gate: run the
+configured blind red-team agents and report their results. Builder self-tests
+from BUILDING do not satisfy TESTING. At the end of the stage, submit a concise
+structured summary through `AtlasForgeSubmitPatchSummary` when useful.
+"""
+    return f"""
+
+## CODEX + ATLASFORGE MCP STAGE GUARD
+
+You are running under AtlasForge as Codex for mission `{mission_id}`.
+Use `AtlasForgeGetStagePolicy` before writing any stage artifact through MCP.
+"""
+
+
+def build_llm_command(
+    provider: str,
+    model: Optional[str] = None,
+    stage: Optional[str] = None,
+    mission: Optional[dict] = None,
+) -> List[str]:
     """Build subprocess CLI command for the selected provider.
 
     Args:
         provider: LLM provider name (claude, codex, gemini)
         model: Optional model override
         stage: Current R&D stage - used to compute --disallowedTools for Claude CLI
+        mission: Optional mission dict — when set, profile flags
+                 (allow_code_writes, allow_implementation) overlay extra tool
+                 restrictions on top of stage policy. Backwards-compat: omit to
+                 retain pre-cycle-2 behavior.
     """
     logger.info(f"Building command for provider: {provider}, model: {model}, stage: {stage}")
+    thinking = get_llm_thinking_effort(provider)
     if provider == "codex":
         from WebProxy import codex_proxy_cli_args
         cmd = ["codex"]
         cmd.extend(codex_proxy_cli_args())
+        codex_sandbox = get_codex_stage_sandbox(stage)
+        if thinking:
+            cmd.extend(["-c", f'model_reasoning_effort="{thinking}"'])
         if _codex_web_search_enabled():
             # Native Responses web_search. Off by default so proxy MCP is authoritative.
             cmd.append("--search")
@@ -344,7 +574,9 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
             "exec",
             "--color", "never",
         ])
-        if _codex_autonomous_enabled():
+        if codex_sandbox:
+            cmd.extend(["--sandbox", codex_sandbox])
+        elif _codex_autonomous_enabled():
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if model:
             cmd.extend(["--model", model])
@@ -370,7 +602,7 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
     # Default provider: Claude CLI
     from init_guard import InitGuard
     from WebProxy import proxy_cli_args
-    disallowed = InitGuard.get_disallowed_tools_for_cli(stage or "BUILDING")
+    disallowed = InitGuard.get_disallowed_tools_for_cli(stage or "BUILDING", mission=mission)
     # Sanitize disallowed tools string — only allow safe characters to prevent CLI injection
     # if a stage handler somehow returns shell metacharacters.
     import re as _re
@@ -383,6 +615,8 @@ def build_llm_command(provider: str, model: Optional[str] = None, stage: Optiona
     cmd.extend(proxy_cli_args(disallowed))
     if model:
         cmd[2:2] = ["--model", model]
+    if thinking:
+        cmd.extend(["--effort", thinking])
     return cmd
 
 
@@ -809,7 +1043,13 @@ def _run_hierarchical_building(
         return None, f"exception:{e}"
 
 
-def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = None) -> tuple[Optional[str], Optional[str]]:
+def invoke_llm(
+    prompt: str,
+    timeout: int = 1200,
+    cwd: Path = None,
+    stage: str = None,
+    mission: Optional[dict] = None,
+) -> tuple[Optional[str], Optional[str]]:
     """
     Invoke configured LLM and get response.
 
@@ -821,6 +1061,9 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         timeout: Timeout in seconds (default 20 min, must be > 0)
         cwd: Working directory (default BASE_DIR)
         stage: Current R&D stage (passed to build_llm_command for tool restrictions)
+        mission: Optional mission dict (forwarded to build_llm_command for
+                 profile-driven tool restrictions). Backwards-compat: omit to
+                 retain pre-cycle-2 behavior.
 
     Returns:
         Tuple of (response_text, error_info):
@@ -843,12 +1086,22 @@ def invoke_llm(prompt: str, timeout: int = 1200, cwd: Path = None, stage: str = 
         cwd = BASE_DIR
 
     try:
-        provider = get_llm_provider()
+        provider = resolve_llm_provider(mission)
         model = get_llm_model(provider)
-        command = build_llm_command(provider, model=model, stage=stage)
+        command = build_llm_command(provider, model=model, stage=stage, mission=mission)
         env = {k: v for k, v in os.environ.items()
                if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
         env.pop("CLAUDECODE", None)  # Prevent "nested session" error when spawning Claude CLI
+        if provider == "codex":
+            # Give the MCP stage-guard server explicit runtime context. This is
+            # Codex-only and leaves Claude's native InitGuard/tool path alone.
+            _write_codex_stage_guard_context(stage, mission)
+            env["ATLASFORGE_ROOT"] = str(BASE_DIR)
+            env["ATLASFORGE_ACTIVE_PROVIDER"] = "codex"
+            if stage:
+                env["ATLASFORGE_ACTIVE_STAGE"] = str(stage).strip().upper()
+            if isinstance(mission, dict) and mission.get("mission_id"):
+                env["ATLASFORGE_ACTIVE_MISSION_ID"] = str(mission.get("mission_id"))
         if provider == "gemini":
             # Gemini CLI is more reliable in headless mode when both HOME and
             # GEMINI_API_KEY are explicit in the spawned environment.
@@ -1900,6 +2153,247 @@ def _log_parse_failure(stage: str, raw_text: str, attempt: int, controller) -> N
     )
 
 
+def _looks_like_testing_wait_response(text: str) -> bool:
+    """Return True when TESTING exited with a monitor/wakeup wait message."""
+    if not isinstance(text, str) or not text.strip():
+        return False
+    lower = text.lower()
+    has_wait = any(term in lower for term in ("wait", "waiting", "i'll wait", "i will wait"))
+    has_async_marker = any(
+        term in lower
+        for term in ("monitor", "wakeup", "schedulewakeup", "notification")
+    )
+    return has_wait and has_async_marker
+
+
+def _testing_artifact_preview(controller, max_chars: int = 1000) -> str:
+    """Read a short preview of artifacts/test_results.md for fallback context."""
+    try:
+        workspace = get_mission_workspace(controller)
+        results_path = workspace / "artifacts" / "test_results.md"
+        if not results_path.exists():
+            return ""
+        preview = results_path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+        return f"Latest test_results.md exists at {results_path}. Preview:\n{preview}"
+    except Exception as e:
+        logger.debug("Could not read TESTING artifact preview: %s", e)
+        return ""
+
+
+def construct_testing_wait_fallback_response(response_text: str, controller) -> Dict[str, Any]:
+    """Convert TESTING wait/prose output into a structured stage response.
+
+    The conductor runs each stage as a one-shot process. If an agent exits after
+    saying it will wait for Monitor/ScheduleWakeup, retrying usually repeats the
+    same prose and exhausts JSON parse retries. This fallback keeps the mission
+    alive by moving to ANALYZING with a clear tests_error payload.
+    """
+    artifact_preview = _testing_artifact_preview(controller)
+    raw_preview = (response_text or "")[:500]
+    summary = (
+        "TESTING returned a monitor/wakeup wait message instead of the required "
+        "JSON response. AtlasForge converted it to tests_error so ANALYZING can "
+        "decide whether to accept existing artifacts or request another testing pass."
+    )
+    if artifact_preview:
+        summary = f"{summary}\n\n{artifact_preview}"
+
+    return {
+        "status": "tests_error",
+        "self_tests": [],
+        "adversarial_testing": {
+            "red_team_issues": [],
+            "red_team_agent_count": 0,
+            "red_team_duration_seconds": 0,
+            "property_violations": [],
+            "mutation_score": None,
+            "spec_alignment": None,
+            "epistemic_score": 0.0,
+            "rigor_level": "insufficient",
+        },
+        "summary": summary,
+        "success_criteria_met": [],
+        "success_criteria_failed": [
+            "TESTING stage did not return strict JSON to the conductor"
+        ],
+        "issues_to_fix": [
+            "Do not finish TESTING with Monitor/ScheduleWakeup waiting prose; "
+            "wait synchronously and return the required JSON object."
+        ],
+        "message_to_human": (
+            "TESTING produced a wait/monitor message instead of JSON; "
+            "converted to tests_error for analysis. Preview: "
+            f"{raw_preview}"
+        ),
+    }
+
+
+def _red_team_report_count(workspace: Path) -> int:
+    """Count non-empty red-team report artifacts in a mission workspace."""
+    try:
+        tests_dir = Path(workspace) / "tests"
+        json_reports = [
+            p for p in tests_dir.glob("red_team_agent_*.json")
+            if p.is_file() and p.stat().st_size > 0
+        ]
+        md_reports = [
+            p for p in (tests_dir / "Red_Team").glob("agent*_findings.md")
+            if p.is_file() and p.stat().st_size > 0
+        ]
+        # Use the larger count because the runner may produce either format
+        # depending on streaming/timeout path.
+        return max(len(json_reports), len(md_reports))
+    except Exception as exc:
+        logger.debug("Could not count red-team reports: %s", exc)
+        return 0
+
+
+def _codex_red_team_payload(result: Any, workspace: Path, error: Optional[str] = None) -> Dict[str, Any]:
+    """Normalize BlindAgentRedTeam output into TESTING JSON metadata."""
+    stop_reasons = getattr(result, "stop_reasons", {}) if result is not None else {}
+    if not isinstance(stop_reasons, dict):
+        stop_reasons = {}
+    timed_out_agents = [
+        agent for agent, reason in stop_reasons.items()
+        if "timeout" in str(reason).lower() or "error" in str(reason).lower()
+    ]
+    report_count = _red_team_report_count(workspace)
+    agent_count = max(len(stop_reasons), report_count)
+    duration_seconds = 0.0
+    if result is not None:
+        try:
+            duration_seconds = round(float(getattr(result, "duration_ms", 0) or 0) / 1000, 1)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+    issues = []
+    if result is not None:
+        for finding in getattr(result, "findings", []) or []:
+            title = getattr(finding, "title", None) or str(finding)
+            severity = getattr(finding, "severity", "")
+            affected = getattr(finding, "affected_code", "")
+            issues.append(
+                " ".join(part for part in [f"[{severity}]" if severity else "", title, affected] if part)
+            )
+    all_completed = (
+        agent_count >= CODEX_TESTING_RED_TEAM_AGENTS
+        and report_count >= CODEX_TESTING_RED_TEAM_AGENTS
+        and len(timed_out_agents) == 0
+        and not error
+    )
+    completion = {
+        "agent_reports_collected": report_count,
+        "all_agents_completed": all_completed,
+        "agents_reached_report_phase": report_count,
+        "timed_out_agents": timed_out_agents,
+        "stop_reasons": stop_reasons,
+    }
+    return {
+        "red_team_issues": issues,
+        "red_team_agent_count": agent_count,
+        "red_team_duration_seconds": duration_seconds,
+        "red_team_completion": completion,
+        "red_team_error": error,
+    }
+
+
+def _write_codex_red_team_artifact(workspace: Path, payload: Dict[str, Any]) -> Optional[Path]:
+    try:
+        artifacts_dir = Path(workspace) / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        path = artifacts_dir / "codex_red_team_preflight.json"
+        path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+        return path
+    except Exception as exc:
+        logger.warning("Failed to write Codex red-team preflight artifact: %s", exc)
+        return None
+
+
+def run_codex_testing_red_team_preflight(controller, workspace: Path) -> Dict[str, Any]:
+    """Run the Codex-only official red-team preflight before the tester pass."""
+    mission = controller.mission if hasattr(controller, "mission") else {}
+    mission_desc = str(
+        mission.get("problem_statement")
+        or mission.get("original_problem_statement")
+        or "AtlasForge mission"
+    )
+    send_to_chat(
+        "[CODEX TESTING] Launching 3-agent red-team preflight "
+        f"({CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS // 60}m timeout, early close on completion)"
+    )
+    try:
+        from adversarial_testing.blind_agent_runner import BlindAgentRedTeam
+        team = BlindAgentRedTeam(
+            n_agents=CODEX_TESTING_RED_TEAM_AGENTS,
+            timeout=CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS,
+            safety_timeout=CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS,
+        )
+        result = team.launch_parallel_team(
+            workspace_dir=Path(workspace),
+            mission_desc=mission_desc,
+            n_agents=CODEX_TESTING_RED_TEAM_AGENTS,
+            timeout=CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS,
+            safety_timeout=CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS,
+        )
+        payload = _codex_red_team_payload(result, workspace)
+    except Exception as exc:
+        logger.warning("Codex red-team preflight failed: %s", exc, exc_info=True)
+        payload = _codex_red_team_payload(None, workspace, error=str(exc))
+
+    artifact_path = _write_codex_red_team_artifact(workspace, payload)
+    if artifact_path:
+        payload["artifact_path"] = str(artifact_path)
+    send_to_chat(
+        "[CODEX TESTING] Red-team preflight complete: "
+        f"agents={payload.get('red_team_agent_count', 0)} "
+        f"reports={payload.get('red_team_completion', {}).get('agent_reports_collected', 0)} "
+        f"issues={len(payload.get('red_team_issues', []))}"
+    )
+    return payload
+
+
+def codex_testing_preflight_prompt(payload: Dict[str, Any]) -> str:
+    """Prompt addendum for Codex tester after AtlasForge red-team preflight."""
+    return f"""
+
+## CODEX TESTING PREFLIGHT RESULTS
+
+AtlasForge already ran the official Codex red-team preflight before launching
+this tester pass. Use these results as mandatory input before running your own
+verification.
+
+```json
+{json.dumps(payload, indent=2, default=str)}
+```
+
+Required next actions:
+- Read the referenced red-team artifacts.
+- Reproduce/refute the findings.
+- Run your own targeted tests after reviewing the red-team output.
+- Run a quick mutation check where practical. If mutation testing is not
+  practical, include a concrete `mutation_unavailable_reason`.
+- Include `adversarial_testing.red_team_completion` in your final JSON.
+"""
+
+
+def merge_codex_red_team_payload(response: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure Codex TESTING response carries AtlasForge red-team metadata."""
+    if not isinstance(response, dict) or not payload:
+        return response
+    merged = dict(response)
+    adversarial = merged.get("adversarial_testing")
+    if not isinstance(adversarial, dict):
+        adversarial = {}
+    for key, value in payload.items():
+        if key in {"artifact_path"}:
+            continue
+        if key not in adversarial or adversarial.get(key) in (None, "", [], {}):
+            adversarial[key] = value
+    if payload.get("artifact_path"):
+        adversarial.setdefault("red_team_artifact_path", payload["artifact_path"])
+    merged["adversarial_testing"] = adversarial
+    return merged
+
+
 def run_rd_mode(takeover: bool = False, force: bool = False):
     """
     Run Claude in directed R&D mode.
@@ -1987,6 +2481,35 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
             current_stage = (controller.mission.get("current_stage", "PLANNING") or "PLANNING").upper()
 
+            # Mission-type profile stage gate: if the current stage is not enabled
+            # for this mission, advance to the next enabled stage or stop.
+            try:
+                from af_engine.mission_profiles import (
+                    stage_allowed_for_mission, next_enabled_stage
+                )
+                if (current_stage != "COMPLETE"
+                        and not stage_allowed_for_mission(controller.mission, current_stage)):
+                    nxt = next_enabled_stage(controller.mission, current_stage)
+                    if nxt:
+                        logger.info(
+                            "[mission_profile] Stage %s not enabled — advancing to %s",
+                            current_stage, nxt,
+                        )
+                        controller.update_stage(nxt)
+                        continue
+                    # No later enabled stage: complete the mission rather than
+                    # silently running a disabled stage. (Reach here even if
+                    # stop_after_profile_complete is False — running a stage
+                    # the profile excluded would violate the profile contract.)
+                    logger.warning(
+                        "[mission_profile] Stage %s not enabled and no later enabled stage exists — marking COMPLETE",
+                        current_stage,
+                    )
+                    controller.update_stage("COMPLETE")
+                    continue
+            except ImportError:
+                pass
+
             # Sync live-editable params from disk (picks up dashboard PATCH changes)
             try:
                 controller.sync_live_params()
@@ -1998,8 +2521,45 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             if _current_mission_id and _current_mission_id != _announced_mission_id:
                 _cb = controller.mission.get("cycle_budget", 1)
                 _mi = controller.mission.get("max_iterations", 10)
-                send_to_chat(f"[MISSION] {_current_mission_id} | cycle_budget={_cb} cycles | max_iterations={_mi} per cycle")
+                _mt_label = controller.mission.get("mission_type_label") or "Full R&D"
+                _enabled = controller.mission.get("enabled_stages") or [
+                    "PLANNING", "BUILDING", "TESTING", "ANALYZING", "CYCLE_END",
+                ]
+                _stages_str = ",".join(_enabled) if isinstance(_enabled, list) else str(_enabled)
+                send_to_chat(
+                    f"[MISSION] {_current_mission_id} | type={_mt_label} | "
+                    f"enabled_stages={_stages_str} | cycle_budget={_cb} cycles | "
+                    f"max_iterations={_mi} per cycle"
+                )
                 _announced_mission_id = _current_mission_id
+
+            # build_only / requires_existing_plan pre-flight: if the active
+            # profile demands an existing plan and we're entering BUILDING for
+            # the first iteration, abort cleanly when the plan is missing.
+            try:
+                from af_engine.mission_profiles import requires_existing_plan as _req_plan
+                if (
+                    current_stage == "BUILDING"
+                    and _req_plan(controller.mission)
+                    and int(controller.mission.get("iteration", 0) or 0) == 0
+                ):
+                    _ws = controller.mission.get("mission_workspace") or controller.mission.get("project_workspace")
+                    _plan_ok = False
+                    if _ws:
+                        _plan_path = Path(_ws) / "artifacts" / "implementation_plan.md"
+                        _plan_ok = _plan_path.exists()
+                    if not _plan_ok:
+                        send_to_chat(
+                            "[PROFILE] build_only requires existing artifacts/implementation_plan.md; "
+                            "not found — completing mission."
+                        )
+                        controller.update_stage("COMPLETE")
+                        continue
+            except ImportError:
+                pass
+            except Exception as _e_pre:
+                logger.warning("requires_existing_plan preflight error: %s", _e_pre)
+
             logger.info(f"=== R&D Cycle {cycle_count} | Stage: {current_stage} ===")
 
             # Check for graceful shutdown request (takeover in progress)
@@ -2103,9 +2663,35 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # Build prompt for current stage
             prompt = controller.build_rd_prompt()
 
+            # Inject mission-type profile prompt modifier under a clear header.
+            # Done before any provider-specific append so all providers see it.
+            mission_profile = controller.mission.get("mission_profile")
+            modifier = (
+                mission_profile.get("prompt_modifier")
+                if isinstance(mission_profile, dict)
+                else None
+            )
+            if modifier:
+                prompt = f"{prompt.rstrip()}\n\n## MISSION TYPE INSTRUCTIONS\n{modifier}\n"
+
+            if resolve_llm_provider(controller.mission) == "codex":
+                prompt = f"{prompt.rstrip()}\n{codex_stage_guard_prompt(current_stage, controller.mission)}"
+
             # Get the appropriate workspace for this mission
             workspace = get_mission_workspace(controller)
             logger.info(f"Using workspace: {workspace}")
+
+            stage_provider = resolve_llm_provider(controller.mission)
+            codex_red_team_payload: Optional[Dict[str, Any]] = None
+            if stage_provider == "codex" and current_stage == "TESTING":
+                codex_red_team_payload = run_codex_testing_red_team_preflight(
+                    controller,
+                    workspace,
+                )
+                prompt = (
+                    f"{prompt.rstrip()}\n"
+                    f"{codex_testing_preflight_prompt(codex_red_team_payload)}"
+                )
 
             # Invoke Claude with ContextWatcher monitoring
             # Timeout is 3600s (1 hour) safety net - ContextWatcher handles normal handoffs
@@ -2214,7 +2800,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             _work_budget_mgr: Optional["WorkBudgetManager"] = None
             if HAS_WORK_BUDGET_MANAGER and _watcher_policy == "token_first":
                 try:
-                    _detected_provider = get_llm_provider()
+                    _detected_provider = resolve_llm_provider(controller.mission)
                     _detected_model = get_llm_model(_detected_provider) or ""
                     _work_budget_mgr = WorkBudgetManager(model=_detected_model)
                     logger.info(
@@ -2243,9 +2829,9 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                     logger.info("[Parallel] Hierarchical building succeeded — using aggregated response")
                 else:
                     logger.info(f"[Parallel] Falling back to single agent ({parallel_error})")
-                    response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
+                    response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage, mission=controller.mission)
             else:
-                response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage)
+                response_text, error_info = invoke_llm(prompt, timeout=llm_timeout, cwd=workspace, stage=current_stage, mission=controller.mission)
 
             # WorkBudgetManager check: determine if session should continue or stop.
             # Context pressure (ContextWatcher) takes precedence and has already
@@ -2526,6 +3112,27 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
             # Parse response - hardened with fallback adapter
             response = extract_json_from_response(response_text)
+            if (
+                response
+                and current_stage == "TESTING"
+                and codex_red_team_payload
+                and stage_provider == "codex"
+            ):
+                response = merge_codex_red_team_payload(response, codex_red_team_payload)
+
+            if (not response
+                    and current_stage == "TESTING"
+                    and _looks_like_testing_wait_response(response_text)):
+                response = construct_testing_wait_fallback_response(response_text, controller)
+                append_journal({
+                    "type": "testing_wait_fallback",
+                    "stage": current_stage,
+                    "mission_id": controller.mission.get("mission_id"),
+                    "raw_response_preview": (response_text or "")[:500],
+                })
+                logger.warning(
+                    "TESTING returned monitor/wakeup wait prose; using structured tests_error fallback"
+                )
 
             if not response and HAS_RESPONSE_ADAPTER:
                 # Layer 1 failed - try format correction re-prompt (one shot)
@@ -2618,6 +3225,35 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
             # Process response and get next stage
             next_stage = controller.process_response(response)
+
+            # Mission-type profile: if the handler picked a stage outside the
+            # profile's enabled_stages, short-circuit to the next enabled stage
+            # (or COMPLETE) BEFORE update_stage fires events for the disabled stage.
+            try:
+                from af_engine.mission_profiles import (
+                    stage_allowed_for_mission as _stage_allowed,
+                    next_enabled_stage as _next_enabled,
+                )
+                if (next_stage and next_stage != "COMPLETE"
+                        and not _stage_allowed(controller.mission, next_stage)):
+                    redirected = _next_enabled(controller.mission, next_stage)
+                    if redirected is None and not _stage_allowed(controller.mission, current_stage):
+                        # Walk forward from current_stage too
+                        redirected = _next_enabled(controller.mission, current_stage)
+                    if redirected:
+                        logger.info(
+                            "[mission_profile] Handler picked disabled stage %s — redirecting to %s",
+                            next_stage, redirected,
+                        )
+                        next_stage = redirected
+                    elif controller.mission.get("stop_after_profile_complete"):
+                        logger.info(
+                            "[mission_profile] Handler picked disabled stage %s and no later enabled stage — completing",
+                            next_stage,
+                        )
+                        next_stage = "COMPLETE"
+            except ImportError:
+                pass
 
             # Update stage if changed
             if next_stage != current_stage:

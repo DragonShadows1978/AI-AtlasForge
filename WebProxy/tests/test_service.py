@@ -1093,6 +1093,102 @@ class TestApplyMaxCharsContract:
         assert result["text"] == "hello"
 
 
+class TestFetchEndpointFullTextContract:
+    """Regression: external callers need a full-text path without abusing max_chars=0."""
+
+    def test_full_text_flag_returns_untruncated_cached_text(self, monkeypatch):
+        app = create_app()
+        client = app.test_client()
+        url = "https://full-text-contract.example/story"
+
+        def fake_fetch_page(url, max_chars=12000, timeout_s=20):
+            return {
+                "url": url,
+                "status_code": 200,
+                "content_type": "text/html",
+                "title": "Example",
+                "text": "abcdefghij",
+                "text_length": 10,
+                "links": [],
+                "headings": [],
+            }
+
+        monkeypatch.setattr(web_proxy_service, "fetch_page", fake_fetch_page)
+
+        truncated = client.post("/fetch", json={"url": url, "max_chars": 3})
+        assert truncated.status_code == 200
+        assert truncated.get_json()["text"] == "abc"
+
+        full = client.post("/fetch", json={"url": url, "full_text": True})
+        assert full.status_code == 200
+        payload = full.get_json()
+        assert payload["text"] == "abcdefghij"
+        assert payload["text_length"] == 10
+        assert payload["_cache_key"].startswith("fetch_")
+        assert payload["_cache_path"].endswith(".json")
+
+
+class TestPaperFetch:
+    def test_arxiv_abs_url_normalizes_to_pdf_url(self):
+        from WebProxy.service import _normalize_arxiv_pdf_url
+
+        assert (
+            _normalize_arxiv_pdf_url("https://arxiv.org/abs/2305.14627")
+            == "https://arxiv.org/pdf/2305.14627"
+        )
+
+    def test_paper_fetch_endpoint_writes_artifacts(self, monkeypatch, tmp_path):
+        app = create_app()
+        client = app.test_client()
+
+        monkeypatch.setattr(web_proxy_service, "PAPER_ARTIFACT_DIR", tmp_path)
+
+        def fake_fetch_paper(url, max_chars=-1, timeout_s=20):
+            artifact_dir = tmp_path / "paper123"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = artifact_dir / "paper.pdf"
+            text_path = artifact_dir / "paper.txt"
+            meta_path = artifact_dir / "metadata.json"
+            pdf_path.write_bytes(b"%PDF fake")
+            text_path.write_text("paper extracted text", encoding="utf-8")
+            return {
+                "type": "paper",
+                "url": url,
+                "pdf_url": "https://arxiv.org/pdf/2305.14627",
+                "status_code": 200,
+                "content_type": "application/pdf",
+                "fetched_at": 1,
+                "artifact_id": "paper123",
+                "local_pdf_path": str(pdf_path),
+                "local_text_path": str(text_path),
+                "metadata_path": str(meta_path),
+                "sha256": "abc123",
+                "byte_length": 9,
+                "text": "paper extracted text",
+                "text_length": 20,
+                "original_text_length": 20,
+                "truncated": False,
+                "extractor": "fake",
+                "page_count": 1,
+                "pages_extracted": 1,
+                "extraction_error": None,
+            }
+
+        monkeypatch.setattr(web_proxy_service, "fetch_paper", fake_fetch_paper)
+
+        response = client.post(
+            "/paper/fetch",
+            json={"url": "https://arxiv.org/abs/2305.14627", "max_chars": -1},
+        )
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["type"] == "paper"
+        assert payload["pdf_url"] == "https://arxiv.org/pdf/2305.14627"
+        assert payload["local_pdf_path"].endswith("paper.pdf")
+        assert payload["text"] == "paper extracted text"
+
+
 class TestCoerceCountMinValue:
     def test_default_min_value_rejects_zero(self):
         assert _mod_coerce_count(0) is None

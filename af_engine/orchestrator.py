@@ -16,6 +16,7 @@ The StageOrchestrator:
 import json
 import logging
 import os
+import sys
 import uuid
 import time
 from datetime import datetime
@@ -44,6 +45,35 @@ def _sanitize_for_log(value: str) -> str:
     as line endings.
     """
     return _re.sub(r'[\x00-\x1f\x7f\u2028\u2029]', '', str(value))
+
+
+# Prefixes used by prompt-injection attacks to override LLM instructions.
+_INJECTION_PREFIXES = (
+    "IGNORE", "<system>", "[INST]", "###OVERRIDE", "SYSTEM:", "</s>", "<|im_start|>",
+    "<!--", "ASSISTANT:", "USER:", "HUMAN:",
+)
+
+
+def _sanitize_prompt_input(text: str, max_len: int = 4000) -> str:
+    """Sanitize user/mission-supplied text before embedding in an LLM prompt.
+
+    Strips ASCII control characters (except newline and tab), removes lines that
+    start with known prompt-injection prefixes, and truncates to max_len chars.
+    """
+    if not text:
+        return ""
+    text = str(text)
+    # Remove ASCII control chars except \n and \t
+    text = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    # Drop lines that look like injection attempts
+    clean_lines = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if any(stripped.upper().startswith(p.upper()) for p in _INJECTION_PREFIXES):
+            continue
+        clean_lines.append(line)
+    text = "\n".join(clean_lines)
+    return text[:max_len]
 
 
 def _format_research_context(findings, prior_found: bool = False) -> str:
@@ -480,7 +510,7 @@ class StageOrchestrator:
                 )
 
         # Emit events from result
-        for event in result.events_to_emit:
+        for event in (result.events_to_emit or []):
             self.integrations.emit(event)
 
         # Log result with handler decision
@@ -495,7 +525,7 @@ class StageOrchestrator:
         # Check if stage handler requests iteration increment
         # Only increment on ANALYZING -> BUILDING or ANALYZING -> PLANNING transitions
         # (i.e., when needs_revision or needs_replanning)
-        if result.output_data.get("_increment_iteration"):
+        if (result.output_data or {}).get("_increment_iteration"):
             self.state.increment_iteration()
             logger.info(f"Iteration incremented to {self.state.iteration}")
 
@@ -504,7 +534,7 @@ class StageOrchestrator:
         # COMPLETE if cycle budget is exhausted (handled by the pre-logging block above),
         # so this branch only fires when continuation is actually allowed.
         if stage == "CYCLE_END" and result.next_stage == "PLANNING":
-            continuation_prompt = result.output_data.get("continuation_prompt", "")
+            continuation_prompt = (result.output_data or {}).get("continuation_prompt", "")
             if not continuation_prompt:
                 # Generate default continuation if Claude didn't provide one
                 continuation_prompt = self._generate_default_continuation()
@@ -560,19 +590,20 @@ class StageOrchestrator:
             has the warning prepended. Fails open on any error.
         """
         try:
-            import sys as _sys
-            root_str = str(self.root)
-            if not _sys.path or _sys.path[0] != root_str:
-                _sys.path.insert(0, root_str)
-            from adversarial_testing.mission_drift_validator import (
-                MissionDriftValidator,
-                DriftTrackingState,
-                DriftDecision,
-                load_tracking_state,
-                save_tracking_state,
-                save_validation_result,
-            )
-        except ImportError as e:
+            import importlib.util as _ilu
+            _drift_path = Path(self.root) / "adversarial_testing" / "mission_drift_validator.py"
+            _spec = _ilu.spec_from_file_location("adversarial_testing.mission_drift_validator", str(_drift_path))
+            if _spec is None or _spec.loader is None:
+                raise ImportError(f"Cannot locate mission_drift_validator at {_drift_path}")
+            _drift_mod = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_drift_mod)
+            MissionDriftValidator = _drift_mod.MissionDriftValidator
+            DriftTrackingState = _drift_mod.DriftTrackingState
+            DriftDecision = _drift_mod.DriftDecision
+            load_tracking_state = _drift_mod.load_tracking_state
+            save_tracking_state = _drift_mod.save_tracking_state
+            save_validation_result = _drift_mod.save_validation_result
+        except (ImportError, FileNotFoundError, AttributeError) as e:
             logger.debug(f"Drift validation not available (import failed: {e}) - skipping")
             return continuation_prompt, False
 
@@ -681,13 +712,17 @@ class StageOrchestrator:
         existing findings rather than starting fresh.
         """
         try:
-            import sys as _sys
-            root_str = str(self.root)
-            # Check position 0: path elsewhere still allows module shadowing
-            if not _sys.path or _sys.path[0] != root_str:
-                _sys.path.insert(0, root_str)
-            from research_agent import ResearchOrchestrator, ResearchConfig
-        except ImportError as e:
+            import importlib.util as _ilu
+            _ro_init = Path(self.root) / "research_agent" / "__init__.py"
+            _ro_spec = _ilu.spec_from_file_location("research_agent", str(_ro_init),
+                submodule_search_locations=[str(Path(self.root) / "research_agent")])
+            if _ro_spec is None or _ro_spec.loader is None:
+                raise ImportError(f"Cannot locate research_agent at {_ro_init}")
+            _ro_mod = _ilu.module_from_spec(_ro_spec)
+            _ro_spec.loader.exec_module(_ro_mod)
+            ResearchOrchestrator = _ro_mod.ResearchOrchestrator
+            ResearchConfig = _ro_mod.ResearchConfig
+        except (ImportError, FileNotFoundError, AttributeError) as e:
             logger.warning(f"[Planning] ResearchOrchestrator not available: {e}")
             return None
 
@@ -700,7 +735,7 @@ class StageOrchestrator:
         # Check for prior cycle findings (multi-cycle continuity)
         prior_findings_text = None
         prior_found = False
-        if prior_findings_path.exists() and stage_context.cycle_number > 1:
+        if prior_findings_path.exists() and (stage_context.cycle_number or 0) > 1:
             try:
                 prior_findings_text = prior_findings_path.read_text(encoding="utf-8")
                 prior_found = True
@@ -718,8 +753,11 @@ class StageOrchestrator:
         # research_agent/web_researcher.py), which is the isolation boundary that
         # prevents recursive subprocess spawning. The previous ATLASFORGE_ENABLE_WEB_SEARCH
         # env-var gate is no longer needed.
+        from investigation_engine import ModelType as _ModelType
         config = ResearchConfig(
-            max_topics=5,
+            orchestrator_model=_ModelType.CLAUDE_SONNET,
+            researcher_model=_ModelType.CLAUDE_HAIKU,
+            max_topics=10,
             max_queries_per_topic=3,
             timeout_seconds=120,
             use_web_search=True,
@@ -752,16 +790,20 @@ class StageOrchestrator:
         _stream_file = None
         _complete_fn = None
         try:
-            import sys as _sys2
-            _root_str2 = str(self.root)
-            if not _sys2.path or _sys2.path[0] != _root_str2:
-                _sys2.path.insert(0, _root_str2)
+            import importlib.util as _ilu2
+            _asm_path = Path(self.root) / "agent_stream_manager.py"
+            if "agent_stream_manager" not in sys.modules:
+                _asm_spec = _ilu2.spec_from_file_location("agent_stream_manager", str(_asm_path))
+                if _asm_spec and _asm_spec.loader:
+                    _asm_mod = _ilu2.module_from_spec(_asm_spec)
+                    sys.modules["agent_stream_manager"] = _asm_mod
+                    _asm_spec.loader.exec_module(_asm_mod)
             from agent_stream_manager import register_agent as _reg, complete_agent as _cmp
             _stream_file = _reg(context='mission', agent_id=_research_agent_id,
                                 label='Researcher Agent', pid=0)
             _complete_fn = _cmp
         except Exception as _e:
-            logger.debug("[Planning] agent_stream_manager unavailable: %s", _e)
+            logger.warning("[Planning] agent_stream_manager unavailable: %s", _e)
 
         def _stream_write(msg: str) -> None:
             if not _stream_file:
@@ -795,6 +837,11 @@ class StageOrchestrator:
         )
         _research_start = time.time()
 
+        # BUG-COR-4: use two events to separate "primary window ended" from
+        # "hard discard". discard_event fires only AFTER the 2-second cleanup
+        # join, so the thread can still write during the cleanup window.
+        discard_event = threading.Event()
+
         def _run() -> None:
             try:
                 findings = orchestrator.research_for_planning(
@@ -803,8 +850,8 @@ class StageOrchestrator:
                     context=research_context_str,
                     progress_callback=_progress_callback,
                 )
-                # Skip save and result assignment if caller already timed out
-                if not cancel_event.is_set():
+                # Skip save only if hard discard has fired (cleanup window also expired)
+                if not discard_event.is_set():
                     try:
                         research_dir.mkdir(parents=True, exist_ok=True)
                         findings.save_report(prior_findings_path)
@@ -816,21 +863,32 @@ class StageOrchestrator:
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
-        thread.join(timeout=120)
+        thread.join(timeout=config.timeout_seconds)
 
-        # Signal cancellation on timeout — daemon thread checks cancel_event before writing
+        # Signal soft cancellation, give a 2-second cleanup window, then hard discard
         if thread.is_alive():
             cancel_event.set()
-            if _complete_fn:
-                try:
-                    _complete_fn(_research_agent_id, error='timeout')
-                except Exception:
-                    pass
-            logger.warning(
-                "[Planning] Research phase timed out after 120s — "
-                "planning will proceed without pre-computed research findings."
-            )
-            return None
+            thread.join(timeout=2)  # brief cleanup window; thread may still complete
+            discard_event.set()     # hard discard: thread must not write after this
+            # BUG-COR-4: re-check result_holder after the cleanup window; the thread
+            # may have completed and written a result during the 2-second window.
+            if result_holder[0] is not None:
+                logger.info(
+                    "[Planning] Research completed during cleanup window — using result"
+                )
+                # fall through to normal result processing below
+            else:
+                if _complete_fn:
+                    try:
+                        _complete_fn(_research_agent_id, error='timeout')
+                    except Exception:
+                        pass
+                logger.warning(
+                    "[Planning] Research phase timed out after %ds — "
+                    "planning will proceed without pre-computed research findings.",
+                    config.timeout_seconds,
+                )
+                return None
 
         if error_holder[0]:
             if _complete_fn:
@@ -924,6 +982,8 @@ class StageOrchestrator:
         doesn't include a continuation_prompt field.
         """
         original_mission = self.state.get_field("original_problem_statement") or self.state.get_field("problem_statement", "Continue the mission")
+        # BUG-SEC-5: sanitize before embedding in LLM prompt to prevent prompt injection
+        original_mission = _sanitize_prompt_input(str(original_mission), max_len=2000)
         current_cycle = self.cycles.current_cycle
         cycle_budget = self.cycles.cycle_budget
 
@@ -1028,6 +1088,19 @@ Continue the mission from where the previous cycle left off.
             True if successfully loaded, False otherwise
         """
         from datetime import datetime
+        # BUG-SEC-1: reject paths that escape the AtlasForge root. Fail-closed:
+        # if root is unknown/None we cannot validate the boundary, so reject.
+        _root = getattr(self, 'root', None)
+        if not _root:
+            logger.warning("load_mission_from_file: root is unset, cannot validate boundary — rejecting")
+            return False
+        try:
+            resolved = Path(filepath).resolve()
+            resolved.relative_to(Path(_root).resolve())
+        except ValueError:
+            logger.warning("load_mission_from_file: path outside AtlasForge root rejected: %r", str(filepath))
+            return False
+
         try:
             import io_utils
         except ImportError:
@@ -1081,7 +1154,8 @@ Continue the mission from where the previous cycle left off.
         success_criteria: list = None,
         mission_id: str = None,
         cycle_budget: int = MissionConfig.DEFAULT_CYCLE_BUDGET,
-        project_name: str = None
+        project_name: str = None,
+        mission_type: str = "full_rd"
     ) -> None:
         """Set a new mission with optional cycle budget for multi-cycle execution.
 
@@ -1119,6 +1193,7 @@ Continue the mission from where the previous cycle left off.
             "preferences": preferences or {},
             "success_criteria": success_criteria or [],
             "project_name": project_name,
+            "mission_type": mission_type,
         }
         config, audit = MissionConfig.from_request(raw_params, mission_id=mid)
         # from_request resolves llm_provider from env automatically
@@ -1219,8 +1294,9 @@ Continue the mission from where the previous cycle left off.
             from mission_analytics import get_analytics
             analytics = get_analytics()
             analytics.start_mission(mid, problem_statement)
-            # Also track the initial PLANNING stage start
-            analytics.start_stage(mid, "PLANNING", iteration=0, cycle=1)
+            # Track the actual starting stage (may differ from PLANNING per mission profile)
+            start_stage = new_mission.get("current_stage", "PLANNING")
+            analytics.start_stage(mid, start_stage, iteration=0, cycle=1)
             logger.info(f"Analytics: Started tracking mission {mid}")
         except Exception as e:
             logger.debug(f"Analytics not available: {e}")
@@ -1229,7 +1305,8 @@ Continue the mission from where the previous cycle left off.
         try:
             from realtime_token_watcher import start_watching_mission
             workspace = self.mission.get('mission_workspace')
-            success = start_watching_mission(mid, workspace, stage="PLANNING")
+            tw_stage = new_mission.get("current_stage", "PLANNING")
+            success = start_watching_mission(mid, workspace, stage=tw_stage)
             if success:
                 logger.info(f"Token watcher: Started real-time monitoring for {mid}")
             else:
@@ -1249,11 +1326,12 @@ Continue the mission from where the previous cycle left off.
         )
 
     def reset_mission(self) -> None:
-        """Reset mission to initial state (keeps problem statement)."""
+        """Reset mission to initial state (keeps problem statement and profile)."""
         problem = self.mission.get("problem_statement", "No mission defined.")
         prefs = self.mission.get("preferences", {})
+        mission_type = self.mission.get("mission_type", "full_rd")
 
-        self.state.mission = {
+        new_mission = {
             "problem_statement": problem,
             "preferences": prefs,
             "current_stage": "PLANNING",
@@ -1263,8 +1341,16 @@ Continue the mission from where the previous cycle left off.
             "reset_at": datetime.now().isoformat(),
             "llm_provider": self.mission.get("llm_provider", "claude"),
         }
+
+        try:
+            from af_engine.mission_profiles import apply_mission_type_profile
+            apply_mission_type_profile(new_mission, mission_type)
+        except ImportError:
+            pass
+
+        self.state.mission = new_mission
         self.save_mission()
-        logger.info("Mission reset to PLANNING")
+        logger.info("Mission reset to %s (profile=%s)", new_mission.get("current_stage", "PLANNING"), mission_type)
 
     # =========================================================================
     # Mission Queue Processing (ported from legacy af_engine)
@@ -1623,14 +1709,22 @@ Continue the mission from where the previous cycle left off.
             # Small delay to ensure filesystem sync before verification
             time.sleep(0.01)  # 10ms
 
-            # Verify mission was created successfully
+            # Verify mission was created successfully. Profiles other than full_rd
+            # start at non-PLANNING stages (build_only=BUILDING, bug_hunt=TESTING,
+            # review_existing=ANALYZING, ...), so we check that the mission_id
+            # matches and the current_stage is a known non-COMPLETE stage rather
+            # than hard-coding PLANNING. The previous PLANNING-only check caused
+            # an infinite retry loop for any profiled queue item.
             verify_mission = io_utils.atomic_read_json(MISSION_PATH, {})
-            if verify_mission.get("mission_id") == mission_id and verify_mission.get("current_stage") == "PLANNING":
-                logger.info(f"Verified mission {mission_id} created with PLANNING stage")
+            valid_start_stages = {"PLANNING", "BUILDING", "TESTING", "ANALYZING", "CYCLE_END"}
+            verified_id = verify_mission.get("mission_id")
+            verified_stage = verify_mission.get("current_stage")
+            if verified_id == mission_id and verified_stage in valid_start_stages:
+                logger.info(f"Verified mission {mission_id} created with {verified_stage} stage")
                 return True
             else:
-                logger.error(f"Mission verification failed: expected {mission_id} in PLANNING stage, "
-                           f"got {verify_mission.get('mission_id')} in {verify_mission.get('current_stage')}")
+                logger.error(f"Mission verification failed: expected {mission_id} in a valid start stage, "
+                           f"got {verified_id} in {verified_stage}")
                 return False
 
         except Exception as e:

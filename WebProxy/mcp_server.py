@@ -23,6 +23,9 @@ import os
 import re
 import socket
 import sys
+from datetime import datetime, timezone
+from fnmatch import fnmatch
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,6 +46,122 @@ MAX_COUNT = 50
 # above any legitimate JSON-RPC request and protects against OOM on an
 # adversarial peer that streams an unbounded line.
 MAX_LINE_LENGTH = 1_000_000
+MAX_STAGE_ARTIFACT_CHARS = 200_000
+MAX_STAGE_FIELD_CHARS = 40_000
+
+_VALID_ATLASFORGE_STAGES = frozenset({
+    "PLANNING",
+    "BUILDING",
+    "TESTING",
+    "ANALYZING",
+    "CYCLE_END",
+    "COMPLETE",
+    "REVIEW",
+})
+
+_STAGE_GUARD_POLICIES = {
+    "PLANNING": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeSubmitPlan",
+            "AtlasForgeWriteStageNote",
+        },
+        "allowed_write_paths": [
+            "state/plans/*.json",
+            "missions/*/planning/*.json",
+            "missions/*/planning/*.md",
+            "workspace/*/artifacts/*.json",
+            "workspace/*/artifacts/*.md",
+            "workspace/*/research/*.json",
+            "workspace/*/research/*.md",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+    "BUILDING": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeWriteStageNote",
+            "AtlasForgeSubmitPatchSummary",
+        },
+        "allowed_write_paths": [
+            "missions/*/build/*.json",
+            "missions/*/build/*.md",
+            "state/build_reports/*.json",
+            "workspace/*/artifacts/*.json",
+            "workspace/*/artifacts/*.md",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+    "TESTING": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeWriteStageNote",
+            "AtlasForgeSubmitPatchSummary",
+        },
+        "allowed_write_paths": [
+            "missions/*/testing/*.json",
+            "missions/*/testing/*.md",
+            "state/test_reports/*.json",
+            "workspace/*/artifacts/*.json",
+            "workspace/*/artifacts/*.md",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+    "ANALYZING": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeWriteStageNote",
+            "AtlasForgeSubmitReview",
+        },
+        "allowed_write_paths": [
+            "missions/*/analysis/*.json",
+            "missions/*/analysis/*.md",
+            "missions/*/review/*.json",
+            "missions/*/review/*.md",
+            "state/reviews/*.json",
+            "workspace/*/research/*.json",
+            "workspace/*/research/*.md",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+    "CYCLE_END": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeWriteStageNote",
+            "AtlasForgeSubmitReview",
+        },
+        "allowed_write_paths": [
+            "missions/*/cycle_end/*.json",
+            "missions/*/cycle_end/*.md",
+            "missions/*/reports/*.json",
+            "missions/*/reports/*.md",
+            "state/reviews/*.json",
+            "workspace/*/artifacts/*.json",
+            "workspace/*/artifacts/*.md",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+    "COMPLETE": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+        },
+        "allowed_write_paths": [],
+        "allowed_extensions": set(),
+    },
+    "REVIEW": {
+        "allowed_tools": {
+            "AtlasForgeGetStagePolicy",
+            "AtlasForgeWriteStageNote",
+            "AtlasForgeSubmitReview",
+        },
+        "allowed_write_paths": [
+            "missions/*/review/*.json",
+            "missions/*/review/*.md",
+            "state/reviews/*.json",
+        ],
+        "allowed_extensions": {".json", ".md"},
+    },
+}
 
 # Only `http` and `https` URLs are allowed through the fetch surface.
 # `file://`, `javascript:`, `data:`, `gopher://`, `ftp://`, etc. are blocked
@@ -443,6 +562,32 @@ TOOLS = [
         },
     },
     {
+        "name": "PaperFetch",
+        "description": (
+            "Download an open-access paper PDF directly and extract full paper text "
+            "when possible. Use this for arXiv/PDF paper sources before quoting a "
+            "paper. Returns local artifact paths, SHA-256, page extraction metadata, "
+            "and extracted text. This is separate from webpage WebFetch."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Paper landing URL or direct PDF URL",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Max extracted text chars to return; -1 for all extracted text",
+                    "default": -1,
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "ImageSearch",
         "description": (
             "Search for images. Uses Brave API if configured, otherwise DuckDuckGo. "
@@ -479,6 +624,115 @@ TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "AtlasForgeGetStagePolicy",
+        "description": (
+            "Return the AtlasForge MCP stage-guard policy for the active or requested "
+            "stage. Use this before submitting stage artifacts."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "stage": {
+                    "type": "string",
+                    "description": "Optional AtlasForge stage such as PLANNING, BUILDING, ANALYZING.",
+                },
+            },
+        },
+    },
+    {
+        "name": "AtlasForgeSubmitPlan",
+        "description": (
+            "Submit a structured AtlasForge planning artifact through the stage guard. "
+            "The MCP server validates the active stage, target path, and extension before writing."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mission_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "plan": {
+                    "type": "object",
+                    "description": "Structured plan JSON to persist.",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "Optional repo-relative path. Defaults to state/plans/<mission_id>.json.",
+                },
+            },
+            "required": ["plan"],
+        },
+    },
+    {
+        "name": "AtlasForgeWriteStageNote",
+        "description": (
+            "Write a Markdown stage note through the AtlasForge stage guard. "
+            "Allowed paths depend on the active stage."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mission_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "target_path": {
+                    "type": "string",
+                    "description": "Optional repo-relative .md path.",
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "AtlasForgeSubmitReview",
+        "description": (
+            "Submit a structured review or analysis artifact through the AtlasForge stage guard."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mission_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "review": {
+                    "type": "object",
+                    "description": "Structured review JSON to persist.",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "Optional repo-relative path. Defaults to state/reviews/<mission_id>.json.",
+                },
+            },
+            "required": ["review"],
+        },
+    },
+    {
+        "name": "AtlasForgeSubmitPatchSummary",
+        "description": (
+            "Submit a structured build/test patch summary through the AtlasForge stage guard."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mission_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "summary": {
+                    "type": "object",
+                    "description": "Structured build/test summary JSON to persist.",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "Optional repo-relative path. Defaults by stage.",
+                },
+            },
+            "required": ["summary"],
+        },
+    },
 ]
 
 
@@ -497,6 +751,25 @@ def _format_search_results(data: dict) -> str:
 
 
 def _format_fetch_results(data: dict) -> str:
+    if data.get("type") == "paper":
+        lines = [
+            f"Paper fetched: {data.get('pdf_url') or data.get('url', '')}",
+            f"Saved PDF: {data.get('local_pdf_path', '')}",
+            f"Saved text: {data.get('local_text_path', '')}",
+            f"Cache JSON: {data.get('_cache_path', '')}",
+            f"SHA-256: {data.get('sha256', '')}",
+            f"Size: {data.get('byte_length', 0)} bytes",
+            f"Pages extracted: {data.get('pages_extracted', 0)}/{data.get('page_count', '?')}",
+            f"Extractor: {data.get('extractor') or 'unavailable'}",
+            f"Truncated: {data.get('truncated', False)}",
+            "",
+        ]
+        if data.get("extraction_error"):
+            lines.append(f"Extraction error: {data.get('extraction_error')}")
+            lines.append("")
+        lines.append(data.get("text", ""))
+        return "\n".join(lines)
+
     if data.get("type") == "image":
         lines = [
             f"Image fetched: {data.get('url', '')}",
@@ -525,6 +798,7 @@ def _format_fetch_results(data: dict) -> str:
         f"URL: {data.get('url', '')}",
         f"Title: {data.get('title', '')}",
         f"Cache hit: {data.get('_cache_hit', False)}",
+        f"Cache JSON: {data.get('_cache_path', '')}",
         "",
     ]
     if data.get("headings"):
@@ -539,6 +813,300 @@ def _format_fetch_results(data: dict) -> str:
             if lnk.get("text"):
                 lines.append(f"  [{lnk['text']}]({lnk['url']})")
     return "\n".join(lines)
+
+
+def _atlasforge_root() -> Path:
+    raw = os.environ.get("ATLASFORGE_ROOT", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path(__file__).resolve().parents[1]
+
+
+def _read_json_file(path: Path, default: Any) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _current_mission() -> dict:
+    data = _read_json_file(_atlasforge_root() / "state" / "mission.json", {})
+    return data if isinstance(data, dict) else {}
+
+
+def _stage_guard_context() -> dict:
+    data = _read_json_file(
+        _atlasforge_root() / "state" / "codex_stage_guard_context.json",
+        {},
+    )
+    if not isinstance(data, dict):
+        return {}
+    provider = str(data.get("provider") or "").strip().lower()
+    stage = str(data.get("stage") or "").strip().upper()
+    if provider not in {"claude", "codex", "gemini"} or stage not in _VALID_ATLASFORGE_STAGES:
+        return {}
+    current = _current_mission()
+    current_provider = str(
+        current.get("llm_provider") or current.get("provider") or ""
+    ).strip().lower()
+    if not current_provider:
+        provider_state = _read_json_file(_atlasforge_root() / "state" / "llm_provider.json", {})
+        current_provider = str(
+            (provider_state or {}).get("provider")
+            or (provider_state or {}).get("llm_provider")
+            or ""
+        ).strip().lower()
+    if current_provider and current_provider != provider:
+        return {}
+    current_mission_id = str(current.get("mission_id") or "").strip()
+    context_mission_id = str(data.get("mission_id") or "").strip()
+    if current_mission_id and context_mission_id and current_mission_id != context_mission_id:
+        return {}
+    return data
+
+
+def _env_provider() -> str:
+    provider = str(os.environ.get("ATLASFORGE_ACTIVE_PROVIDER") or "").strip().lower()
+    if provider in {"claude", "codex", "gemini"}:
+        return provider
+    return ""
+
+
+def _active_provider() -> str:
+    env_provider = _env_provider()
+    if env_provider:
+        return env_provider
+    mission = _current_mission()
+    mission_provider = str(
+        mission.get("llm_provider") or mission.get("provider") or ""
+    ).strip().lower()
+    if mission_provider in {"claude", "codex", "gemini"}:
+        return mission_provider
+    context_provider = str(_stage_guard_context().get("provider") or "").strip().lower()
+    if context_provider in {"claude", "codex", "gemini"}:
+        return context_provider
+    data = _read_json_file(_atlasforge_root() / "state" / "llm_provider.json", {})
+    provider = str((data or {}).get("provider") or "").strip().lower()
+    if provider in {"claude", "codex", "gemini"}:
+        return provider
+    return "unknown"
+
+
+def _clean_identifier(value: Any, fallback: str, max_len: int = 80) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raw = fallback
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw).strip("._-")
+    return (cleaned or fallback)[:max_len]
+
+
+def _active_stage() -> str:
+    env_stage = str(os.environ.get("ATLASFORGE_ACTIVE_STAGE") or "").strip().upper()
+    if env_stage in _VALID_ATLASFORGE_STAGES:
+        return env_stage
+    context = _stage_guard_context()
+    context_stage = str(context.get("stage") or "").strip().upper()
+    if context_stage in _VALID_ATLASFORGE_STAGES and _active_provider() == "codex":
+        return context_stage
+    raw = str(_current_mission().get("current_stage") or "PLANNING").strip().upper()
+    if raw not in _VALID_ATLASFORGE_STAGES:
+        return "PLANNING"
+    return raw
+
+
+def _resolve_stage(arguments: dict, allow_override: bool = False) -> str:
+    active = _active_stage()
+    requested = str(arguments.get("stage") or "").strip().upper()
+    if not requested:
+        return active
+    if requested not in _VALID_ATLASFORGE_STAGES:
+        raise ValueError(f"unsupported AtlasForge stage: {requested or '<empty>'}")
+    if not allow_override and requested != active:
+        raise ValueError(
+            f"requested stage {requested} does not match active mission stage {active}"
+        )
+    return requested
+
+
+def _resolve_mission_id(arguments: dict) -> str:
+    mission_id = (
+        arguments.get("mission_id")
+        or os.environ.get("ATLASFORGE_ACTIVE_MISSION_ID")
+        or (_stage_guard_context().get("mission_id") if _active_provider() == "codex" else None)
+        or _current_mission().get("mission_id")
+    )
+    return _clean_identifier(mission_id, "manual")
+
+
+def _stage_policy(stage: str) -> dict:
+    return _STAGE_GUARD_POLICIES.get(stage) or _STAGE_GUARD_POLICIES["COMPLETE"]
+
+
+def _policy_public_view(stage: str) -> dict:
+    policy = _stage_policy(stage)
+    return {
+        "provider": _active_provider(),
+        "stage": stage,
+        "allowed_tools": sorted(policy["allowed_tools"]),
+        "allowed_write_paths": list(policy["allowed_write_paths"]),
+        "allowed_extensions": sorted(policy["allowed_extensions"]),
+        "atlasforge_root": str(_atlasforge_root()),
+    }
+
+
+def _normalize_repo_relative_path(raw_path: Any) -> str:
+    if not isinstance(raw_path, str):
+        raise ValueError("target_path must be a string")
+    path = raw_path.strip()
+    if not path:
+        raise ValueError("target_path is required")
+    if len(path) > 260:
+        raise ValueError("target_path is too long")
+    if "\x00" in path or any(ord(ch) < 0x20 for ch in path):
+        raise ValueError("target_path contains control characters")
+    p = Path(path)
+    if p.is_absolute():
+        raise ValueError("target_path must be repo-relative")
+    if ".." in p.parts:
+        raise ValueError("target_path must not contain '..'")
+    normalized = Path(*[part for part in p.parts if part not in ("", ".")]).as_posix()
+    if not normalized:
+        raise ValueError("target_path is empty after normalization")
+    return normalized
+
+
+def _path_under_root(rel_path: str) -> Path:
+    root = _atlasforge_root()
+    target = (root / rel_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError("target_path escapes ATLASFORGE_ROOT")
+    return target
+
+
+def _enforce_stage_artifact_policy(tool_name: str, stage: str, target_path: str) -> tuple[str, Path]:
+    policy = _stage_policy(stage)
+    if tool_name not in policy["allowed_tools"]:
+        raise ValueError(f"{tool_name} is not allowed during {stage}")
+
+    rel_path = _normalize_repo_relative_path(target_path)
+    suffix = Path(rel_path).suffix.lower()
+    if suffix not in policy["allowed_extensions"]:
+        raise ValueError(f"{stage} cannot write files with extension {suffix or '<none>'}")
+    if not any(fnmatch(rel_path, pattern) for pattern in policy["allowed_write_paths"]):
+        raise ValueError(f"{stage} cannot write target_path {rel_path}")
+    return rel_path, _path_under_root(rel_path)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp.{os.getpid()}")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    if len(text) > MAX_STAGE_ARTIFACT_CHARS:
+        raise ValueError(f"artifact exceeds {MAX_STAGE_ARTIFACT_CHARS} chars")
+    _atomic_write_text(path, text + "\n")
+
+
+def _bounded_string(value: Any, field_name: str, max_len: int = MAX_STAGE_FIELD_CHARS) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{field_name} is required")
+    if len(text) > max_len:
+        raise ValueError(f"{field_name} exceeds {max_len} chars")
+    return text
+
+
+def _stage_artifact_envelope(kind: str, stage: str, mission_id: str, payload: dict) -> dict:
+    return {
+        "kind": kind,
+        "mission_id": mission_id,
+        "stage": stage,
+        "provider": _active_provider(),
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "payload": payload,
+    }
+
+
+def _default_stage_artifact_path(tool_name: str, stage: str, mission_id: str) -> str:
+    if tool_name == "AtlasForgeSubmitPlan":
+        return f"state/plans/{mission_id}.json"
+    if tool_name == "AtlasForgeSubmitReview":
+        if stage in {"ANALYZING", "CYCLE_END", "REVIEW"}:
+            return f"state/reviews/{mission_id}.json"
+        return f"missions/{mission_id}/review/review.json"
+    if tool_name == "AtlasForgeSubmitPatchSummary":
+        if stage == "TESTING":
+            return f"state/test_reports/{mission_id}.json"
+        return f"state/build_reports/{mission_id}.json"
+    directory = stage.lower()
+    return f"missions/{mission_id}/{directory}/note.md"
+
+
+def _handle_atlasforge_get_stage_policy(arguments: dict) -> str:
+    stage = _resolve_stage(arguments, allow_override=True)
+    return json.dumps(_policy_public_view(stage), indent=2, sort_keys=True)
+
+
+def _handle_atlasforge_submit_json_artifact(
+    tool_name: str,
+    arguments: dict,
+    payload_key: str,
+    kind: str,
+) -> str:
+    payload = arguments.get(payload_key)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{payload_key} must be an object")
+    mission_id = _resolve_mission_id(arguments)
+    stage = _resolve_stage(arguments)
+    target = arguments.get("target_path") or _default_stage_artifact_path(tool_name, stage, mission_id)
+    rel_path, abs_path = _enforce_stage_artifact_policy(tool_name, stage, target)
+    envelope = _stage_artifact_envelope(kind, stage, mission_id, payload)
+    _atomic_write_json(abs_path, envelope)
+    return json.dumps({
+        "ok": True,
+        "path": rel_path,
+        "stage": stage,
+        "provider": _active_provider(),
+        "message": f"{kind} accepted by AtlasForge MCP stage guard.",
+    }, indent=2, sort_keys=True)
+
+
+def _handle_atlasforge_write_stage_note(arguments: dict) -> str:
+    content = _bounded_string(arguments.get("content"), "content")
+    title = str(arguments.get("title") or "").strip()[:160]
+    mission_id = _resolve_mission_id(arguments)
+    stage = _resolve_stage(arguments)
+    target = arguments.get("target_path") or _default_stage_artifact_path(
+        "AtlasForgeWriteStageNote", stage, mission_id
+    )
+    rel_path, abs_path = _enforce_stage_artifact_policy("AtlasForgeWriteStageNote", stage, target)
+    heading = f"# {title}\n\n" if title else ""
+    metadata = (
+        f"Stage: {stage}\n"
+        f"Provider: {_active_provider()}\n"
+        f"Submitted: {datetime.now(timezone.utc).isoformat()}\n\n"
+    )
+    text = heading + metadata + content.rstrip() + "\n"
+    if len(text) > MAX_STAGE_ARTIFACT_CHARS:
+        raise ValueError(f"artifact exceeds {MAX_STAGE_ARTIFACT_CHARS} chars")
+    _atomic_write_text(abs_path, text)
+    return json.dumps({
+        "ok": True,
+        "path": rel_path,
+        "stage": stage,
+        "provider": _active_provider(),
+        "message": "stage note accepted by AtlasForge MCP stage guard.",
+    }, indent=2, sort_keys=True)
 
 
 def handle_tool_call(name: str, arguments: dict) -> str:
@@ -591,7 +1159,7 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             url = _require_url(arguments)
         except ValueError as exc:
             return f"Error: {exc}"
-        data = _proxy_post("/fetch", {"url": url, "max_chars": 0})
+        data = _proxy_post("/fetch", {"url": url, "max_chars": MAX_MAX_CHARS})
         return _format_fetch_results(data)
 
     elif name == "WebResearch":
@@ -616,6 +1184,15 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             else:
                 lines.append(_format_fetch_results(page))
         return "\n".join(lines)
+
+    elif name == "PaperFetch":
+        try:
+            url = _require_url(arguments)
+            max_chars = _clamp_int(arguments.get("max_chars"), -1, MAX_MAX_CHARS, -1)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        data = _proxy_post("/paper/fetch", {"url": url, "max_chars": max_chars})
+        return _format_fetch_results(data)
 
     elif name == "ImageSearch":
         try:
@@ -645,6 +1222,36 @@ def handle_tool_call(name: str, arguments: dict) -> str:
                 else:
                     lines.append(f"  Saved: {img.get('local_path', '')} ({img.get('byte_length', 0)} bytes)")
         return "\n".join(lines)
+
+    elif name == "AtlasForgeGetStagePolicy":
+        return _handle_atlasforge_get_stage_policy(arguments)
+
+    elif name == "AtlasForgeSubmitPlan":
+        return _handle_atlasforge_submit_json_artifact(
+            "AtlasForgeSubmitPlan",
+            arguments,
+            payload_key="plan",
+            kind="plan",
+        )
+
+    elif name == "AtlasForgeWriteStageNote":
+        return _handle_atlasforge_write_stage_note(arguments)
+
+    elif name == "AtlasForgeSubmitReview":
+        return _handle_atlasforge_submit_json_artifact(
+            "AtlasForgeSubmitReview",
+            arguments,
+            payload_key="review",
+            kind="review",
+        )
+
+    elif name == "AtlasForgeSubmitPatchSummary":
+        return _handle_atlasforge_submit_json_artifact(
+            "AtlasForgeSubmitPatchSummary",
+            arguments,
+            payload_key="summary",
+            kind="patch_summary",
+        )
 
     raise ValueError(f"Unknown tool: {name}")
 
