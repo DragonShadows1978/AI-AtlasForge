@@ -140,6 +140,7 @@ investigation_validator/.source_cache/
 
 # Stale lock files
 tmp*.lock
+atlasforge_conductor.lock
 .af_archives/
 .af_snapshots/
 

@@ -609,8 +609,9 @@ class SuggestionAnalyzer:
     def _save_recommendations(self, items: List[Dict[str, Any]]) -> bool:
         """Save recommendations to SQLite storage (single source of truth).
 
-        Uses upsert_batch() to safely update existing records without
-        wiping out concurrent inserts (fixes race condition bug).
+        Only writes analyzer-owned fields. Recommendation lifecycle fields can
+        change while analysis is running; replacing whole rows from an older
+        analysis snapshot can reopen a just-queued suggestion.
         """
         storage = _get_storage()
         if not storage:
@@ -618,9 +619,16 @@ class SuggestionAnalyzer:
             return False
 
         try:
-            # Use upsert_batch instead of update_all to avoid race condition
-            # where concurrent add() calls could have their data wiped
-            storage.upsert_batch(items)
+            for item in items:
+                suggestion_id = item.get("id")
+                if not suggestion_id:
+                    continue
+                storage.update(suggestion_id, {
+                    "auto_tags": item.get("auto_tags", []),
+                    "priority_score": item.get("priority_score", 50.0),
+                    "health_status": item.get("health_status", "healthy"),
+                    "last_analyzed_at": item.get("last_analyzed_at"),
+                })
             return True
         except Exception as e:
             logger.error(f"SQLite save failed: {e}")

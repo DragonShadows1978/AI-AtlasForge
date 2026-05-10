@@ -42,6 +42,93 @@ function readCycleBudget(selectEl) {
     return Math.min(10, parsed);
 }
 
+async function loadActiveMissionIntoControlPanel(seedMission = null) {
+    const mission = seedMission || await api('/api/mission', 'GET');
+    if (!mission || typeof mission !== 'object') return;
+
+    const missionInput = document.getElementById('mission-input');
+    if (missionInput) {
+        missionInput.value = mission.problem_statement || mission.original_problem_statement || '';
+        missionInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const cycleSelect = document.getElementById('cycle-budget-input');
+    if (cycleSelect && mission.cycle_budget !== undefined && mission.cycle_budget !== null) {
+        const cycleValue = String(normalizeCycleBudget(mission.cycle_budget, 1));
+        cycleSelect.value = cycleValue;
+        if (cycleSelect.value !== cycleValue) {
+            const option = document.createElement('option');
+            option.value = cycleValue;
+            option.textContent = cycleValue;
+            cycleSelect.appendChild(option);
+            cycleSelect.value = cycleValue;
+        }
+    }
+
+    const maxIterationsInput = document.getElementById('max-iterations-input');
+    if (maxIterationsInput && mission.max_iterations !== undefined && mission.max_iterations !== null) {
+        maxIterationsInput.value = String(mission.max_iterations);
+    }
+
+    const projectInput = document.getElementById('project-name-input');
+    if (projectInput) {
+        const projectName = mission.project_name || '';
+        projectInput.value = projectName;
+        if (projectName) {
+            projectInput.dataset.suggested = projectName;
+            projectInput.placeholder = projectName;
+        }
+    }
+
+    const typeSelect = document.getElementById('mission-type-select');
+    if (typeSelect && mission.mission_type) {
+        typeSelect.value = mission.mission_type;
+    }
+}
+
+function clearMissionControlDraft() {
+    const missionInput = document.getElementById('mission-input');
+    if (missionInput) {
+        missionInput.value = '';
+        missionInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+function loadMissionIntoStatusPanel(mission) {
+    if (!mission || typeof mission !== 'object') return;
+
+    const problemStatement = mission.problem_statement || mission.original_problem_statement || 'No mission set';
+    setFullMissionText(problemStatement);
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    setText('stat-stage', mission.current_stage || '-');
+    setText('stat-project-name', mission.project_name || '-');
+    setText('stat-mission-type', mission.mission_type_label || mission.mission_type || 'Full R&D');
+    setText('stat-mission-cycle', `${mission.current_cycle || 1}/${mission.cycle_budget || 1}`);
+
+    const missionEl = document.getElementById('current-mission');
+    if (!missionEl) return;
+    missionEl.textContent = '';
+
+    const span = document.createElement('span');
+    span.onclick = () => window.openMissionModal();
+    span.style.cursor = 'pointer';
+    span.title = 'Click to view full mission';
+    span.textContent = problemStatement.length > 100
+        ? problemStatement.substring(0, 100) + '...'
+        : problemStatement;
+    if (problemStatement.length > 100) {
+        const expandSpan = document.createElement('span');
+        expandSpan.style.color = 'var(--accent)';
+        expandSpan.textContent = ' [expand]';
+        span.appendChild(expandSpan);
+    }
+    missionEl.appendChild(span);
+}
+
 // Store scroll position when modal opens (for mobile)
 let savedScrollX = 0;
 let savedScrollY = 0;
@@ -620,10 +707,14 @@ export async function setMissionFromRec() {
         if (data.success) {
             showToast(data.message);
             closeRecModal();
-            await loadRecommendations();
+            clearMissionControlDraft();
+            loadMissionIntoStatusPanel(data.mission);
             if (typeof window.refresh === 'function') {
-                window.refresh();
+                window.refresh({ forceStatus: true })
+                    .catch(e => console.warn('Mission status refresh failed after set-mission:', e));
             }
+            loadRecommendations()
+                .catch(e => console.warn('Recommendation reload failed after set-mission:', e));
         } else {
             showToast('Error: ' + (data.error || 'Failed to set mission'));
         }

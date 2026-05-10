@@ -10,7 +10,7 @@
  * - Background sync for failed requests
  */
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const CACHE_NAME = `atlasforge-dashboard-${CACHE_VERSION}`;
 const STATIC_CACHE = `atlasforge-static-${CACHE_VERSION}`;
 const API_CACHE = `atlasforge-api-${CACHE_VERSION}`;
@@ -140,8 +140,8 @@ self.addEventListener('fetch', (event) => {
         // API requests: Network first, cache fallback (for offline support)
         event.respondWith(handleApiRequest(event.request));
     } else if (url.pathname.startsWith('/static/dist/')) {
-        // Bundled assets: Stale-while-revalidate (fast + fresh)
-        event.respondWith(handleStaleWhileRevalidate(event.request, STATIC_CACHE));
+        // Bundled assets: network first so refreshed tabs do not run stale chunk graphs.
+        event.respondWith(handleBundledAssetRequest(event.request));
     } else if (url.pathname.startsWith('/static/')) {
         // Other static assets: Cache first, network fallback
         event.respondWith(handleStaticRequest(event.request));
@@ -192,6 +192,28 @@ async function handleApiRequest(request) {
                 headers: { 'Content-Type': 'application/json' }
             }
         );
+    }
+}
+
+/**
+ * Handle bundled assets - Network first, cache fallback
+ */
+async function handleBundledAssetRequest(request) {
+    const cache = await caches.open(STATIC_CACHE);
+
+    try {
+        const response = await fetch(request);
+        if (response.ok) {
+            cache.put(request, response.clone());
+        }
+        return response;
+    } catch (error) {
+        console.log('[SW] Network failed for bundled asset, trying cache:', request.url);
+        const cachedResponse = await cache.match(request);
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+        return new Response('', { status: 503 });
     }
 }
 

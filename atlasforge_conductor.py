@@ -52,6 +52,13 @@ _SAFE_ENV_PREFIXES = ('LC_', 'XDG_')
 import io_utils
 import af_engine as atlasforge_engine
 
+
+def _sanitize_for_log(value: Any) -> str:
+    """Strip control/bidi characters before writing user-controlled text to logs."""
+    text = "" if value is None else str(value)
+    return re.sub(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]", "", text)
+
+
 # Import error classification module for categorized error handling
 from atlasforge_conductor_errors import (
     RestartReason,

@@ -786,6 +786,11 @@ export async function startClaude(mode) {
             thinking: selectedSettings.thinking,
             fast: selectedSettings.fast
         });
+        if (!startResult.success) {
+            showToast(`Failed to start mission: ${startResult.message || 'Unknown error'}`, 'error');
+            await refresh({ forceStatus: true });
+            return;
+        }
         showToast(`Mission set and started: ${startResult.message}`, 'success');
         refresh();
 
@@ -806,6 +811,11 @@ export async function startClaude(mode) {
             thinking: selectedSettings.thinking,
             fast: selectedSettings.fast
         });
+        if (!data.success) {
+            showToast(`Failed to start mission: ${data.message || 'Unknown error'}`, 'error');
+            await refresh({ forceStatus: true });
+            return;
+        }
         showToast(data.message);
         refresh();
 
@@ -1673,10 +1683,11 @@ export async function confirmRestart() {
 // MAIN REFRESH
 // =============================================================================
 
-export async function refresh() {
+export async function refresh(options = {}) {
     try {
+        const forceStatus = options === true || !!(options && options.forceStatus);
         // Skip REST calls for data already received via WebSocket initial_data
-        const wsHasStatus = _wsInitialReceived.has('mission_status');
+        const wsHasStatus = !forceStatus && _wsInitialReceived.has('mission_status');
 
         // Only fetch what WebSocket hasn't already provided
         const [data, invStatus, journal, files, atlasData] = await Promise.all([

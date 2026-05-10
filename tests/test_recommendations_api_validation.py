@@ -584,6 +584,74 @@ class TestSetMissionBuildApprovalGate(_RecommendationsApiTestBase):
             "build_approval_status": "pending",
         })
 
+    def test_tech_debt_build_only_set_mission_loads_active_mission(self):
+        from dashboard_modules.cache import get_dashboard_cache
+
+        cache = get_dashboard_cache()
+        cache.set("api_status", {"mission": "stale"}, ttl_seconds=30)
+        rec_id = self.storage.add({
+            "mission_title": "Debt cleanup mission",
+            "mission_description": "Clean up the dashboard recommendation handoff.",
+            "classification": "TECH_DEBT",
+            "mission_type": "build_only",
+            "execution_profile": "build_only",
+        })
+
+        resp = self._post_set_mission(rec_id, {
+            "cycle_budget": 2,
+            "execution_profile": "build_only",
+        })
+
+        self.assertEqual(resp.status_code, 200)
+        response_data = resp.get_json()
+        mission = json.loads(Path(self.core_mod.MISSION_PATH).read_text())
+        self.assertEqual(mission["problem_statement"], "Clean up the dashboard recommendation handoff.")
+        self.assertEqual(mission["original_problem_statement"], "Clean up the dashboard recommendation handoff.")
+        self.assertEqual(mission["mission_type"], "build_only")
+        self.assertEqual(mission["mission_type_label"], "Build Only")
+        self.assertEqual(mission["current_stage"], "BUILDING")
+        self.assertEqual(mission["cycle_budget"], 2)
+        self.assertEqual(mission["source_recommendation_id"], rec_id)
+        self.assertEqual(response_data["mission"]["problem_statement"], mission["problem_statement"])
+        self.assertEqual(response_data["mission"]["mission_type"], "build_only")
+        self.assertEqual(response_data["mission"]["cycle_budget"], 2)
+        self.assertEqual(response_data["mission"]["source_recommendation_id"], rec_id)
+        plan_path = Path(mission["mission_workspace"]) / "artifacts" / "implementation_plan.md"
+        self.assertTrue(plan_path.exists())
+        self.assertIn("Clean up the dashboard recommendation handoff.", plan_path.read_text())
+        stored = self.storage.get_by_id(rec_id)
+        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["accepted_mission_id"], mission["mission_id"])
+        self.assertIsNone(cache.get("api_status"))
+
+    def test_set_mission_sanitizes_display_project_name_for_mission_config(self):
+        rec_id = self.storage.add({
+            "mission_title": "Stick Figure Fighter debt",
+            "mission_description": "Harden renderer and sprite loading.",
+            "classification": "TECH_DEBT",
+            "mission_type": "build_only",
+            "execution_profile": "build_only",
+            "project_name": "Stick Figure Fighter",
+            "project_slug": "stick-figure-fighter",
+        })
+
+        resp = self._post_set_mission(rec_id, {
+            "cycle_budget": 3,
+            "execution_profile": "build_only",
+            "project_name": "Stick Figure Fighter",
+        })
+
+        self.assertEqual(resp.status_code, 200)
+        response_data = resp.get_json()
+        mission = json.loads(Path(self.core_mod.MISSION_PATH).read_text())
+        self.assertEqual(mission["project_name"], "Stick_Figure_Fighter")
+        self.assertEqual(response_data["mission"]["project_name"], "Stick_Figure_Fighter")
+        self.assertEqual(mission["mission_type"], "build_only")
+        self.assertEqual(mission["problem_statement"], "Harden renderer and sprite loading.")
+        plan_path = Path(mission["mission_workspace"]) / "artifacts" / "implementation_plan.md"
+        self.assertTrue(plan_path.exists())
+        self.assertIn("Harden renderer and sprite loading.", plan_path.read_text())
+
     def test_gated_build_requires_explicit_action(self):
         rec_id = self._build_gated_rec()
 

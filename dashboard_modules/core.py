@@ -34,6 +34,40 @@ def _get_ttl_cache():
         logger.debug("TTL cache unavailable: %s", e)
         return None
 
+
+def _invalidate_ttl_cache_key(key: str) -> None:
+    cache = _get_ttl_cache()
+    if cache:
+        try:
+            cache.invalidate(key)
+        except Exception:
+            logger.debug("TTL cache invalidate failed for %s", key, exc_info=True)
+
+
+def _ensure_build_only_implementation_plan(mission: dict, problem_statement: str) -> None:
+    """Create the plan artifact Build Only expects when the mission came from direct instructions."""
+    if not isinstance(mission, dict):
+        return
+    if mission.get("mission_type") != "build_only":
+        return
+    workspace = mission.get("mission_workspace")
+    if not workspace:
+        return
+
+    plan_path = Path(workspace) / "artifacts" / "implementation_plan.md"
+    if plan_path.exists() and plan_path.stat().st_size > 0:
+        return
+
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        "# Build Instructions\n\n"
+        "This Build Only mission was set directly from Mission Control or a mission recommendation. "
+        "Use the mission statement below as the implementation plan.\n\n"
+        "## Mission\n\n"
+        f"{problem_statement.strip()}\n",
+        encoding="utf-8",
+    )
+
 # Create Blueprint
 core_bp = Blueprint('core', __name__)
 
@@ -910,7 +944,9 @@ def api_mission():
                     new_mission["llm_thinking"] = active_thinking
                 if active_provider == "codex":
                     new_mission["llm_fast"] = active_fast
+                _ensure_build_only_implementation_plan(new_mission, problem_statement)
                 io_utils.atomic_write_json(MISSION_PATH, new_mission)
+                _invalidate_ttl_cache_key('api_status')
                 mission_config_path = mission_dir / "mission_config.json"
                 with open(mission_config_path, 'w') as f:
                     json.dump(config.to_config_dict(
@@ -955,7 +991,9 @@ def api_mission():
                     apply_mission_type_profile(new_mission, data.get('mission_type'))
                 except ImportError:
                     pass
+                _ensure_build_only_implementation_plan(new_mission, problem_statement)
                 io_utils.atomic_write_json(MISSION_PATH, new_mission)
+                _invalidate_ttl_cache_key('api_status')
                 applied_cycle_budget = cycle_budget
 
             try:
@@ -1841,6 +1879,11 @@ def api_set_mission_from_recommendation(rec_id):
         _req_r["problem_statement"] = problem_statement
         # execution_profile from the suggestion modal always takes precedence as mission_type
         _req_r["mission_type"] = execution_profile
+        if resolved_project_name:
+            # The modal may send a human display name ("Stick Figure Fighter").
+            # MissionConfig validates filesystem-safe project ids, so pass the
+            # resolver output used for the workspace path.
+            _req_r["project_name"] = resolved_project_name
         if active_provider and "llm_provider" not in _req_r:
             _req_r["llm_provider"] = active_provider
         _cfg_r, _aud_r = _MCR.from_request(_req_r, mission_id=mission_id)
@@ -1857,7 +1900,9 @@ def api_set_mission_from_recommendation(rec_id):
             new_mission["llm_thinking"] = active_thinking
         if active_provider == "codex":
             new_mission["llm_fast"] = active_fast
+        _ensure_build_only_implementation_plan(new_mission, problem_statement)
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
+        _invalidate_ttl_cache_key('api_status')
         with open(mission_dir / "mission_config.json", 'w') as _f:
             json.dump(_cfg_r.to_config_dict(
                 mission_id=mission_id, mission_workspace=mission_workspace,
@@ -1889,6 +1934,7 @@ def api_set_mission_from_recommendation(rec_id):
         if active_provider == "codex":
             new_mission["llm_fast"] = active_fast
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
+        _invalidate_ttl_cache_key('api_status')
         applied_cycle_budget = cycle_budget
 
     try:
@@ -1939,7 +1985,21 @@ def api_set_mission_from_recommendation(rec_id):
         "message": response_msg,
         "mission_id": mission_id,
         "mission_workspace": str(mission_workspace),
-        "project_name": resolved_project_name
+        "project_name": resolved_project_name,
+        "mission": {
+            "mission_id": mission_id,
+            "problem_statement": new_mission.get("problem_statement"),
+            "original_problem_statement": new_mission.get("original_problem_statement"),
+            "cycle_budget": new_mission.get("cycle_budget"),
+            "current_cycle": new_mission.get("current_cycle"),
+            "current_stage": new_mission.get("current_stage"),
+            "max_iterations": new_mission.get("max_iterations"),
+            "mission_type": new_mission.get("mission_type") or execution_profile,
+            "mission_type_label": new_mission.get("mission_type_label"),
+            "project_name": resolved_project_name or new_mission.get("project_name"),
+            "mission_workspace": str(mission_workspace),
+            "source_recommendation_id": rec_id,
+        },
     })
 
 
