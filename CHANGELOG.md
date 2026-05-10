@@ -1,5 +1,74 @@
 # Changelog
 
+## [2.6.0] - 2026-05-10
+
+### Major Changes
+
+- **Architecture Overhaul**: Refactored mission system with new testing runner (`testing_runner.py`), project registry, and glassbox archival framework
+- **Dashboard Redesign**: Complete widget system rewrite with improved responsive layout, column management, and mission parameter validation
+- **Testing Infrastructure**: New integrated testing runner with comprehensive bug fixes and security hardening
+- **Knowledge Base Integration**: Enhanced knowledge synthesizer with tech debt fixes and validation improvements
+- **Suggestion System**: Major lifecycle and storage improvements with status tracking and comprehensive validation
+
+### Features
+
+- feat: integrated glassbox archival system with mission reconstruction and transcript parsing
+- feat: project registry for managing mission metadata and relationships
+- feat: testing runner with Codex context and validator integration
+- feat: exploration memory hook for knowledge base learning patterns
+- feat: enhanced suggestion lifecycle with comprehensive status tracking
+- feat: mission parameter live validation with security checks
+- feat: queue scheduler validation with comprehensive test coverage
+
+### Bug Fixes & Hardening
+
+- fix: conductor workspace validation and error recovery
+- fix: agent stream codex context handling and JSON parsing
+- fix: archival system path handling and mission reconstruction
+- fix: blind agent markdown parsing and JSON scanning
+- fix: knowledge synthesizer tech debt and provider selection
+- fix: property testing and red team security validation
+- fix: queue scheduler state management
+- fix: work budget manager validation
+- fix: dashboard security endpoints
+
+### Code Changes
+
+- **Added** `glassbox/` — archival framework with dashboard routes, mission archiver, reconstructor, and transcript parser
+- **Added** `Mission_Manager/project_registry.py` — mission metadata and relationship management
+- **Added** `af_engine/stages/testing_runner.py` — integrated testing pipeline with Codex context
+- **Added** `suggestion_lifecycle.py` — comprehensive suggestion state management
+- **Added** `.claude/hooks/exploration-memory-hook.py` — knowledge base integration hook
+- **Added** 15+ new test files for comprehensive coverage of bug fixes and edge cases
+- **Modified** `WebProxy/service.py` — expanded fetch capabilities with full text support and paper extraction
+- **Modified** `WebProxy/mcp_server.py` — enhanced stage guard integration and context handling
+- **Modified** `atlasforge_conductor.py` — major refactoring with improved mission handling and error recovery
+- **Modified** `agent_stream_manager.py` — enhanced codex context support and cache handling
+- **Modified** `dashboard_modules/core.py` — complete widget system overhaul
+- **Modified** `dashboard_modules/knowledge_base.py` — KB analytics and visualization improvements
+- **Modified** `dashboard_modules/queue_scheduler.py` — comprehensive queue validation and error handling
+- **Modified** `dashboard_static/css/main.css` — responsive layout fixes and column tightening
+- **Modified** `af_engine/mission_config.py` — validation improvements and profile enforcement
+- **Modified** `af_engine/orchestrator.py` — path component handling and sanitization
+- **Modified** `suggestion_storage.py` — major refactoring with validation and tech debt fixes
+- **Modified** `mission_knowledge_base.py` — enhanced synthesizer integration
+
+### Stats
+
+```
+ 92 files changed, 11465 insertions(+), 1217 deletions(-)
+ 
+ Key additions:
+ - glassbox/ (4 new modules)
+ - Mission_Manager/ (1 new module)
+ - af_engine/stages/testing_runner.py (702 lines)
+ - 15+ new comprehensive test files (2000+ lines)
+ - dashboard redesign (637 lines in core.py alone)
+ - suggestion lifecycle management (249 lines)
+```
+
+_Full diff: `git diff v2.5.0..v2.6.0`_
+
 ## [2.5.0] - 2026-05-07
 
 ### Other
