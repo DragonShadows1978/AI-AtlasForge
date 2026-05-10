@@ -119,6 +119,19 @@ def test_codex_building_keeps_full_send_by_default(monkeypatch):
     assert "--dangerously-bypass-approvals-and-sandbox" in command
 
 
+def test_codex_testing_uses_read_only_stage_sandbox(monkeypatch):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.delenv("ATLASFORGE_CODEX_STAGE_GUARD", raising=False)
+    monkeypatch.setenv("ATLASFORGE_CODEX_AUTONOMOUS", "1")
+
+    command = conductor.build_llm_command("codex", stage="TESTING")
+
+    assert "--sandbox" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in command
+
+
 def test_codex_stage_guard_can_be_disabled(monkeypatch):
     import atlasforge_conductor as conductor
 

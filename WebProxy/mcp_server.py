@@ -100,15 +100,32 @@ _STAGE_GUARD_POLICIES = {
             "AtlasForgeGetStagePolicy",
             "AtlasForgeWriteStageNote",
             "AtlasForgeSubmitPatchSummary",
+            "AtlasForgeWriteMutationArtifact",
         },
         "allowed_write_paths": [
-            "missions/*/testing/*.json",
-            "missions/*/testing/*.md",
-            "state/test_reports/*.json",
-            "workspace/*/artifacts/*.json",
-            "workspace/*/artifacts/*.md",
+            "workspace/*/artifacts/test_results.md",
+            "workspace/*/artifacts/testing/*.json",
+            "workspace/*/artifacts/testing/*.md",
+            "workspace/*/artifacts/testing/agents/*/*.json",
+            "workspace/*/artifacts/testing/agents/*/*.jsonl",
+            "workspace/*/artifacts/testing/agents/*/*.md",
+            "workspace/*/tests/Red_Team/*.json",
+            "workspace/*/tests/Red_Team/*.md",
         ],
-        "allowed_extensions": {".json", ".md"},
+        "tool_write_paths": {
+            "AtlasForgeWriteMutationArtifact": [
+                "workspace/*/artifacts/testing/mutation/*",
+                "workspace/*/artifacts/testing/agents/*/mutation/*",
+            ],
+        },
+        "allowed_extensions": {".json", ".jsonl", ".md"},
+        "tool_allowed_extensions": {
+            "AtlasForgeWriteMutationArtifact": {
+                ".json", ".jsonl", ".md", ".txt",
+                ".py", ".js", ".ts", ".tsx", ".jsx",
+                ".html", ".css", ".yml", ".yaml", ".toml",
+            },
+        },
     },
     "ANALYZING": {
         "allowed_tools": {
@@ -736,6 +753,28 @@ TOOLS = [
             "required": ["summary"],
         },
     },
+    {
+        "name": "AtlasForgeWriteMutationArtifact",
+        "description": (
+            "Write a controlled TESTING-stage mutation artifact. This is only for "
+            "mutant copies, mutation scripts, and mutation evidence under "
+            "artifacts/testing/mutation/; it must not modify production files."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "mission_id": {"type": "string"},
+                "stage": {"type": "string"},
+                "content": {"type": "string"},
+                "target_path": {
+                    "type": "string",
+                    "description": "Repo-relative path under workspace/<mission>/artifacts/testing/mutation/.",
+                },
+            },
+            "required": ["content", "target_path"],
+        },
+    },
 ]
 
 
@@ -958,6 +997,10 @@ def _policy_public_view(stage: str) -> dict:
             for tool, paths in policy.get("tool_write_paths", {}).items()
         },
         "allowed_extensions": sorted(policy["allowed_extensions"]),
+        "tool_allowed_extensions": {
+            tool: sorted(extensions)
+            for tool, extensions in policy.get("tool_allowed_extensions", {}).items()
+        },
         "atlasforge_root": str(_atlasforge_root()),
     }
 
@@ -1029,7 +1072,11 @@ def _enforce_stage_artifact_policy(tool_name: str, stage: str, target_path: str)
 
     rel_path = _normalize_repo_relative_path(target_path)
     suffix = Path(rel_path).suffix.lower()
-    if suffix not in policy["allowed_extensions"]:
+    allowed_extensions = policy.get("tool_allowed_extensions", {}).get(
+        tool_name,
+        policy["allowed_extensions"],
+    )
+    if suffix not in allowed_extensions:
         raise ValueError(f"{stage} cannot write files with extension {suffix or '<none>'}")
     tool_paths = policy.get("tool_write_paths", {}).get(tool_name)
     allowed_paths = tool_paths or policy["allowed_write_paths"]
@@ -1139,7 +1186,7 @@ def _default_stage_artifact_path(tool_name: str, stage: str, mission_id: str) ->
         return f"missions/{mission_id}/review/review.json"
     if tool_name == "AtlasForgeSubmitPatchSummary":
         if stage == "TESTING":
-            return f"state/test_reports/{mission_id}.json"
+            return f"{_mission_workspace_relative(mission_id)}/artifacts/testing/summary.json"
         return f"state/build_reports/{mission_id}.json"
     directory = stage.lower()
     if tool_name == "AtlasForgeWriteStageNote" and stage == "PLANNING":
@@ -1210,6 +1257,27 @@ def _handle_atlasforge_write_stage_note(arguments: dict) -> str:
         "stage": stage,
         "provider": _active_provider(),
         "message": "stage note accepted by AtlasForge MCP stage guard.",
+    }, indent=2, sort_keys=True)
+
+
+def _handle_atlasforge_write_mutation_artifact(arguments: dict) -> str:
+    content = _bounded_string(arguments.get("content"), "content", max_len=MAX_STAGE_ARTIFACT_CHARS)
+    mission_id = _resolve_mission_id(arguments)
+    stage = _resolve_stage(arguments)
+    target = arguments.get("target_path")
+    rel_path, abs_path = _enforce_stage_artifact_policy(
+        "AtlasForgeWriteMutationArtifact",
+        stage,
+        target,
+    )
+    _atomic_write_text(abs_path, content.rstrip() + "\n")
+    return json.dumps({
+        "ok": True,
+        "path": rel_path,
+        "stage": stage,
+        "provider": _active_provider(),
+        "message": "mutation artifact accepted by AtlasForge MCP stage guard.",
+        "mission_id": mission_id,
     }, indent=2, sort_keys=True)
 
 
@@ -1356,6 +1424,9 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             payload_key="summary",
             kind="patch_summary",
         )
+
+    elif name == "AtlasForgeWriteMutationArtifact":
+        return _handle_atlasforge_write_mutation_artifact(arguments)
 
     raise ValueError(f"Unknown tool: {name}")
 

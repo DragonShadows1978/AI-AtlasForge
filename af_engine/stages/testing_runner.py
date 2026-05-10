@@ -514,7 +514,11 @@ Rules:
 - Work independently from the builder. Inspect files and run commands as needed.
 - Report evidence. Do not claim a test passed unless you actually ran or directly inspected the evidence.
 - You may create temporary testing artifacts, but do not make production fixes.
-- For mutation testing, restore any intentional mutation before finishing.
+- Codex TESTING runs with a read-only source workspace. Write test evidence only
+  through AtlasForge MCP stage-guard tools under artifacts/testing/.
+- For mutation testing, do not mutate production/source files. Write controlled
+  mutant copies, scripts, and evidence under artifacts/testing/mutation/ with
+  AtlasForgeWriteMutationArtifact.
 
 Return strict JSON only:
 {{

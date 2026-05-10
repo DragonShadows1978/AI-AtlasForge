@@ -272,12 +272,13 @@ def _codex_stage_guard_enabled() -> bool:
 
 _CODEX_READ_ONLY_STAGES = frozenset({
     "PLANNING",
+    "TESTING",
     "ANALYZING",
     "CYCLE_END",
     "COMPLETE",
     "REVIEW",
 })
-_CODEX_FULL_SEND_STAGES = frozenset({"BUILDING", "TESTING"})
+_CODEX_FULL_SEND_STAGES = frozenset({"BUILDING"})
 CODEX_TESTING_RED_TEAM_AGENTS = 3
 CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS = 2700
 ATLASFORGE_TESTING_RUNNER_DEFAULT_MAX_LANES = 6
@@ -556,6 +557,11 @@ Your role in this Codex TESTING pass:
   unavailable for this workspace/language/test command.
 - Return strict TESTING JSON. Include `adversarial_testing.red_team_completion`
   and mutation-test evidence.
+- AtlasForge launches Codex TESTING with a read-only workspace sandbox. Do not
+  edit production/source files. Use MCP stage-guard tools for test artifacts.
+- Mutation testing may write controlled mutant copies, scripts, and evidence
+  only under `artifacts/testing/mutation/` through
+  `AtlasForgeWriteMutationArtifact`.
 
 BUILDING self-validation does not satisfy TESTING. TESTING can pass early only
 when all required red-team agents completed and their reports were collected.

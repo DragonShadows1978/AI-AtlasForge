@@ -266,3 +266,76 @@ def test_stage_guard_rejects_embedded_dotdot_segment(tmp_path, monkeypatch):
             "target_path": "missions/mission_test/planning/safe..evil.md",
         })
     assert not (tmp_path / "missions" / "mission_test" / "planning" / "safe..evil.md").exists()
+
+
+def test_testing_allows_testrunner_summary_artifact(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="TESTING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    result = json.loads(handle_tool_call("AtlasForgeSubmitPatchSummary", {
+        "summary": {"status": "tests_passed"},
+        "target_path": "workspace/mission_test/artifacts/testing/result.json",
+    }))
+
+    assert result["ok"] is True
+    assert result["path"] == "workspace/mission_test/artifacts/testing/result.json"
+    assert (tmp_path / "workspace" / "mission_test" / "artifacts" / "testing" / "result.json").exists()
+
+
+def test_testing_rejects_source_write_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="TESTING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="TESTING cannot write target_path"):
+        handle_tool_call("AtlasForgeSubmitPatchSummary", {
+            "summary": {"status": "tests_passed"},
+            "target_path": "workspace/mission_test/src/app.json",
+        })
+    assert not (tmp_path / "workspace" / "mission_test" / "src" / "app.json").exists()
+
+
+def test_testing_allows_mutation_artifact_code_copy(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="TESTING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    result = json.loads(handle_tool_call("AtlasForgeWriteMutationArtifact", {
+        "content": "def mutant():\n    return False\n",
+        "target_path": "workspace/mission_test/artifacts/testing/mutation/mutant_example.py",
+    }))
+
+    assert result["ok"] is True
+    target = tmp_path / "workspace" / "mission_test" / "artifacts" / "testing" / "mutation" / "mutant_example.py"
+    assert target.read_text() == "def mutant():\n    return False\n"
+
+
+def test_testing_mutation_artifact_rejects_outside_mutation_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="TESTING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="TESTING cannot write target_path"):
+        handle_tool_call("AtlasForgeWriteMutationArtifact", {
+            "content": "def mutant():\n    return False\n",
+            "target_path": "workspace/mission_test/src/mutant_example.py",
+        })
+    assert not (tmp_path / "workspace" / "mission_test" / "src" / "mutant_example.py").exists()
+
+
+def test_planning_rejects_mutation_artifact_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="AtlasForgeWriteMutationArtifact is not allowed during PLANNING"):
+        handle_tool_call("AtlasForgeWriteMutationArtifact", {
+            "content": "def mutant():\n    return False\n",
+            "target_path": "workspace/mission_test/artifacts/testing/mutation/mutant_example.py",
+        })
