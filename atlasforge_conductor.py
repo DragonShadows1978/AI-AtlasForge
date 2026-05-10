@@ -342,11 +342,19 @@ def _safe_model_name(value: Any) -> Optional[str]:
 def _safe_thinking_effort(value: Any, provider: Optional[str] = None) -> Optional[str]:
     effort = str(value or "").strip().lower()
     allowed = {"low", "medium", "high", "xhigh", "max"}
-    if provider == "codex":
-        allowed.add("fast")
     if effort in allowed:
         return effort
     return None
+
+
+def _safe_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 def get_llm_provider() -> str:
@@ -433,8 +441,13 @@ def get_llm_model(provider: str, mission: Optional[dict] = None) -> Optional[str
     return model.strip() if model and model.strip() else None
 
 
-def get_llm_thinking_effort(provider: str) -> Optional[str]:
+def get_llm_thinking_effort(provider: str, mission: Optional[dict] = None) -> Optional[str]:
     """Resolve provider-specific thinking/reasoning effort."""
+    if isinstance(mission, dict):
+        mission_effort = _safe_thinking_effort(mission.get("llm_thinking") or mission.get("thinking"), provider)
+        if mission_effort:
+            return mission_effort
+
     state = _read_llm_state()
     selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
     provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
@@ -447,6 +460,23 @@ def get_llm_thinking_effort(provider: str) -> Optional[str]:
         "gemini": "ATLASFORGE_GEMINI_THINKING",
     }.get(provider)
     return _safe_thinking_effort(os.environ.get(env_key), provider) if env_key else None
+
+
+def get_llm_fast_enabled(provider: str, mission: Optional[dict] = None) -> bool:
+    """Resolve Codex fast service tier separately from reasoning effort."""
+    if provider != "codex":
+        return False
+    if isinstance(mission, dict) and "llm_fast" in mission:
+        return _safe_bool(mission.get("llm_fast"))
+
+    state = _read_llm_state()
+    selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
+    provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
+    return (
+        _safe_bool(provider_selected.get("fast"))
+        or str(provider_selected.get("thinking") or "").strip().lower() == "fast"
+        or _env_flag_enabled("ATLASFORGE_CODEX_FAST", default=False)
+    )
 
 
 def codex_stage_guard_prompt(stage: str, mission: Optional[dict] = None) -> str:
@@ -570,16 +600,16 @@ def build_llm_command(
                  retain pre-cycle-2 behavior.
     """
     logger.info(f"Building command for provider: {provider}, model: {model}, stage: {stage}")
-    thinking = get_llm_thinking_effort(provider)
+    thinking = get_llm_thinking_effort(provider, mission=mission)
     if provider == "codex":
         from WebProxy import codex_proxy_cli_args
         cmd = ["codex"]
         cmd.extend(codex_proxy_cli_args())
         codex_sandbox = get_codex_stage_sandbox(stage)
-        if thinking == "fast":
+        if get_llm_fast_enabled(provider, mission=mission):
             cmd.extend(["--enable", "fast_mode"])
             cmd.extend(["-c", 'service_tier="fast"'])
-        elif thinking:
+        if thinking:
             cmd.extend(["-c", f'model_reasoning_effort="{thinking}"'])
         if _codex_web_search_enabled():
             # Native Responses web_search. Off by default so proxy MCP is authoritative.

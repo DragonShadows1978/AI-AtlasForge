@@ -279,7 +279,17 @@ def _clean_llm_option(value):
     return None
 
 
-def _update_active_mission_provider(provider, model=None, thinking=None):
+def _coerce_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _update_active_mission_provider(provider, model=None, thinking=None, fast=None):
     """Keep mission metadata aligned with the model selection used for start/resume."""
     if not provider or not io_utils or not MISSION_PATH:
         return
@@ -294,6 +304,8 @@ def _update_active_mission_provider(provider, model=None, thinking=None):
             mission["llm_model"] = cleaned_model
         if cleaned_thinking:
             mission["llm_thinking"] = cleaned_thinking
+        if provider == "codex" and fast is not None:
+            mission["llm_fast"] = _coerce_bool(fast)
         mission["last_updated"] = datetime.now(timezone.utc).isoformat()
         io_utils.atomic_write_json(MISSION_PATH, mission)
     except Exception:
@@ -542,11 +554,13 @@ def api_start(mode):
                 normalized_provider,
                 model=data.get("model"),
                 thinking=data.get("thinking"),
+                fast=data.get("fast"),
             )
         _update_active_mission_provider(
             normalized_provider,
             model=data.get("model"),
             thinking=data.get("thinking"),
+            fast=data.get("fast"),
         )
     success, message = start_claude(mode)
     return jsonify({"success": success, "message": message, "provider": normalized_provider})
@@ -588,6 +602,7 @@ def api_llm_provider():
         model=data.get("model"),
         thinking=data.get("thinking"),
         options=data.get("options"),
+        fast=data.get("fast"),
     )
     config = get_llm_config() if get_llm_config else {"provider": normalized}
     return jsonify({
@@ -873,6 +888,9 @@ def api_mission():
             )
             active_model = _clean_llm_option(data.get("llm_model") or data.get("model"))
             active_thinking = _clean_llm_option(data.get("llm_thinking") or data.get("thinking"))
+            active_fast = (
+                _coerce_bool(data.get("llm_fast")) if "llm_fast" in data else _coerce_bool(data.get("fast"))
+            ) if active_provider == "codex" else False
             if _mc_available:
                 req = dict(data)
                 req["problem_statement"] = problem_statement
@@ -890,6 +908,8 @@ def api_mission():
                     new_mission["llm_model"] = active_model
                 if active_thinking:
                     new_mission["llm_thinking"] = active_thinking
+                if active_provider == "codex":
+                    new_mission["llm_fast"] = active_fast
                 io_utils.atomic_write_json(MISSION_PATH, new_mission)
                 mission_config_path = mission_dir / "mission_config.json"
                 with open(mission_config_path, 'w') as f:
@@ -926,6 +946,8 @@ def api_mission():
                     new_mission["llm_model"] = active_model
                 if active_thinking:
                     new_mission["llm_thinking"] = active_thinking
+                if active_provider == "codex":
+                    new_mission["llm_fast"] = active_fast
                 # Apply mission type profile (sets current_stage, enabled_stages,
                 # stop_after_profile_complete, mission_profile, mission_type_label).
                 try:
@@ -1774,6 +1796,9 @@ def api_set_mission_from_recommendation(rec_id):
     )
     active_model = _clean_llm_option(data.get("llm_model") or data.get("model"))
     active_thinking = _clean_llm_option(data.get("llm_thinking") or data.get("thinking"))
+    active_fast = (
+        _coerce_bool(data.get("llm_fast")) if "llm_fast" in data else _coerce_bool(data.get("fast"))
+    ) if active_provider == "codex" else False
     if _mcr_ok:
         _req_r = dict(data)
         _req_r["problem_statement"] = problem_statement
@@ -1793,6 +1818,8 @@ def api_set_mission_from_recommendation(rec_id):
             new_mission["llm_model"] = active_model
         if active_thinking:
             new_mission["llm_thinking"] = active_thinking
+        if active_provider == "codex":
+            new_mission["llm_fast"] = active_fast
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
         with open(mission_dir / "mission_config.json", 'w') as _f:
             json.dump(_cfg_r.to_config_dict(
@@ -1822,6 +1849,8 @@ def api_set_mission_from_recommendation(rec_id):
             new_mission["llm_model"] = active_model
         if active_thinking:
             new_mission["llm_thinking"] = active_thinking
+        if active_provider == "codex":
+            new_mission["llm_fast"] = active_fast
         io_utils.atomic_write_json(MISSION_PATH, new_mission)
         applied_cycle_budget = cycle_budget
 

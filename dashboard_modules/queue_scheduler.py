@@ -118,6 +118,16 @@ def _safe_llm_option(value) -> Optional[str]:
     return None
 
 
+def _safe_llm_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _load_active_llm_selection(provider: str) -> Dict[str, Optional[str]]:
     try:
         if LLM_PROVIDER_PATH.exists():
@@ -128,10 +138,11 @@ def _load_active_llm_selection(provider: str) -> Dict[str, Optional[str]]:
             return {
                 "model": _safe_llm_option(provider_selected.get("model")),
                 "thinking": _safe_llm_option(provider_selected.get("thinking")),
+                "fast": _safe_llm_bool(provider_selected.get("fast")) if provider == "codex" else False,
             }
     except Exception as exc:
         logger.debug("Unable to read active LLM model selection: %s", exc)
-    return {"model": None, "thinking": None}
+    return {"model": None, "thinking": None, "fast": False}
 
 
 def _load_active_llm_provider() -> str:
@@ -171,6 +182,17 @@ def _resolve_queue_llm_thinking(data: Dict[str, Any]) -> Optional[str]:
         or _safe_llm_option(data.get("thinking"))
         or _load_active_llm_selection(provider).get("thinking")
     )
+
+
+def _resolve_queue_llm_fast(data: Dict[str, Any]) -> bool:
+    provider = _resolve_queue_llm_provider(data)
+    if provider != "codex":
+        return False
+    if "llm_fast" in data:
+        return _safe_llm_bool(data.get("llm_fast"))
+    if "fast" in data:
+        return _safe_llm_bool(data.get("fast"))
+    return bool(_load_active_llm_selection(provider).get("fast"))
 
 
 def _resolve_queue_mission_type(data: Dict[str, Any]) -> str:
@@ -501,6 +523,7 @@ def add_to_queue():
                 "llm_provider": _resolve_queue_llm_provider(data),
                 "llm_model": _resolve_queue_llm_model(data),
                 "llm_thinking": _resolve_queue_llm_thinking(data),
+                "llm_fast": _resolve_queue_llm_fast(data),
                 "mission_type": mission_type,
                 "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
                 "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
@@ -725,6 +748,7 @@ def start_next_mission():
             "llm_provider": _resolve_queue_llm_provider(next_mission),
             "llm_model": _resolve_queue_llm_model(next_mission),
             "llm_thinking": _resolve_queue_llm_thinking(next_mission),
+            "llm_fast": _resolve_queue_llm_fast(next_mission),
             "metadata": {
                 "source": next_mission.get("source", "queue"),
                 "source_id": next_mission.get("source_id"),
@@ -794,6 +818,7 @@ def start_next_mission():
             "llm_provider": _resolve_queue_llm_provider(next_mission),
             "llm_model": _resolve_queue_llm_model(next_mission),
             "llm_thinking": _resolve_queue_llm_thinking(next_mission),
+            "llm_fast": _resolve_queue_llm_fast(next_mission),
             "signaled_at": _utc_now_iso(),
             "source": "queue_next_button"
         })
@@ -966,6 +991,7 @@ def add_from_kb_recommendation():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
+            "llm_fast": _resolve_queue_llm_fast(data),
             "mission_type": mission_type,
             "source": "kb_recommendation",
             "source_id": recommendation_id,
@@ -1045,6 +1071,7 @@ def add_from_recommendation():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
+            "llm_fast": _resolve_queue_llm_fast(data),
             "mission_type": mission_type,
             "source": "recommendation",
             "source_id": recommendation_id,
@@ -1324,6 +1351,7 @@ def add_to_queue_enhanced():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
+            "llm_fast": _resolve_queue_llm_fast(data),
             "mission_type": mission_type,
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),

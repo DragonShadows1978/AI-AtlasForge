@@ -360,7 +360,7 @@ const DEFAULT_LLM_PROVIDER_CONFIG = {
     provider: 'claude',
     selected: {
         claude: { model: 'claude-opus-4-6[1m]', thinking: 'high' },
-        codex: { model: 'gpt-5.5', thinking: 'high' },
+        codex: { model: 'gpt-5.5', thinking: 'high', fast: false },
         gemini: { model: 'gemini-2.5-pro', thinking: 'default' }
     },
     options: {
@@ -382,7 +382,6 @@ const DEFAULT_LLM_PROVIDER_CONFIG = {
         codex: {
             models: [{ value: 'gpt-5.5', label: 'Best available' }],
             thinking: [
-                { value: 'fast', label: 'Fast' },
                 { value: 'low', label: 'Low' },
                 { value: 'medium', label: 'Medium' },
                 { value: 'high', label: 'High' },
@@ -403,11 +402,6 @@ const REQUIRED_LLM_MODEL_OPTIONS = {
         { value: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6' }
     ]
 };
-const REQUIRED_LLM_THINKING_OPTIONS = {
-    codex: [
-        { value: 'fast', label: 'Fast' }
-    ]
-};
 
 let llmProviderConfig = JSON.parse(JSON.stringify(DEFAULT_LLM_PROVIDER_CONFIG));
 
@@ -417,6 +411,14 @@ function getModelSelectElement() {
 
 function getThinkingSelectElement() {
     return document.getElementById('llm-thinking-select');
+}
+
+function getFastCheckboxElement() {
+    return document.getElementById('llm-fast-checkbox');
+}
+
+function getFastToggleElement() {
+    return document.getElementById('llm-fast-toggle');
 }
 
 function normalizeOptionList(options, fallback) {
@@ -447,11 +449,12 @@ function normalizeLlmConfig(config) {
             }
         });
         next.options[provider].thinking = normalizeOptionList(incomingOptions.thinking, next.options[provider].thinking);
-        (REQUIRED_LLM_THINKING_OPTIONS[provider] || []).forEach((requiredThinking) => {
-            if (!next.options[provider].thinking.some((option) => option.value === requiredThinking.value)) {
-                next.options[provider].thinking.unshift({ ...requiredThinking });
+        if (provider === 'codex') {
+            next.options[provider].thinking = next.options[provider].thinking.filter((option) => option.value !== 'fast');
+            if (!next.options[provider].thinking.length) {
+                next.options[provider].thinking = [...DEFAULT_LLM_PROVIDER_CONFIG.options.codex.thinking];
             }
-        });
+        }
 
         const selected = config.selected?.[provider] || {};
         const modelValues = new Set(next.options[provider].models.map((option) => option.value));
@@ -461,10 +464,15 @@ function normalizeLlmConfig(config) {
         } else {
             next.selected[provider].model = next.options[provider].models[0]?.value || '';
         }
-        if (thinkingValues.has(selected.thinking)) {
-            next.selected[provider].thinking = selected.thinking;
+        const legacyFast = provider === 'codex' && selected.thinking === 'fast';
+        const selectedThinking = legacyFast ? DEFAULT_LLM_PROVIDER_CONFIG.selected.codex.thinking : selected.thinking;
+        if (thinkingValues.has(selectedThinking)) {
+            next.selected[provider].thinking = selectedThinking;
         } else {
             next.selected[provider].thinking = next.options[provider].thinking[0]?.value || '';
+        }
+        if (provider === 'codex') {
+            next.selected[provider].fast = Boolean(selected.fast || legacyFast);
         }
     });
     return next;
@@ -490,27 +498,39 @@ function renderLlmModelControls(providerOverride = null) {
     const provider = normalizeProvider(providerOverride || getSelectedProvider());
     const modelSelect = getModelSelectElement();
     const thinkingSelect = getThinkingSelectElement();
+    const fastCheckbox = getFastCheckboxElement();
+    const fastToggle = getFastToggleElement();
     const providerConfig = llmProviderConfig.options?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.options[provider];
     const selected = llmProviderConfig.selected?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.selected[provider];
     fillSelect(modelSelect, providerConfig.models, selected.model);
     fillSelect(thinkingSelect, providerConfig.thinking, selected.thinking);
+    if (fastCheckbox) {
+        fastCheckbox.checked = provider === 'codex' && Boolean(selected.fast);
+        fastCheckbox.disabled = provider !== 'codex';
+    }
+    if (fastToggle) {
+        fastToggle.style.display = provider === 'codex' ? 'inline-flex' : 'none';
+    }
 }
 
 function getSelectedLlmSettings(providerOverride = null) {
     const provider = normalizeProvider(providerOverride || getSelectedProvider());
     const modelSelect = getModelSelectElement();
     const thinkingSelect = getThinkingSelectElement();
+    const fastCheckbox = getFastCheckboxElement();
     const selected = llmProviderConfig.selected?.[provider] || DEFAULT_LLM_PROVIDER_CONFIG.selected[provider];
     const model = modelSelect?.value || selected.model;
     const thinking = thinkingSelect?.value || selected.thinking;
-    return { provider, model, thinking };
+    const fast = provider === 'codex' && Boolean(fastCheckbox ? fastCheckbox.checked : selected.fast);
+    return { provider, model, thinking, fast };
 }
 
 async function persistSelectedProvider(showSuccessToast = false) {
     const settings = getSelectedLlmSettings();
     const savedProvider = await setLlmProvider(settings.provider, showSuccessToast, false, {
         model: settings.model,
-        thinking: settings.thinking
+        thinking: settings.thinking,
+        fast: settings.fast
     });
     if (!savedProvider) {
         throw new Error('Failed to persist selected LLM provider');
@@ -529,6 +549,7 @@ export async function setLlmProvider(provider, showSuccessToast = true, refreshA
         const payload = { provider: normalized };
         if (settings.model) payload.model = settings.model;
         if (settings.thinking) payload.thinking = settings.thinking;
+        if (typeof settings.fast === 'boolean') payload.fast = settings.fast;
         if (settings.options) payload.options = settings.options;
         const result = await api('/api/llm-provider', 'POST', payload);
         if (!result.success) {
@@ -567,6 +588,7 @@ async function syncProviderControls(statusProvider) {
     if (selectEls.length === 0) return;
     const modelSelect = getModelSelectElement();
     const thinkingSelect = getThinkingSelectElement();
+    const fastCheckbox = getFastCheckboxElement();
 
     selectEls.forEach((selectEl) => {
         if (!selectEl.dataset.wired) {
@@ -580,19 +602,21 @@ async function syncProviderControls(statusProvider) {
                 const settings = getSelectedLlmSettings(provider);
                 await setLlmProvider(provider, true, true, {
                     model: settings.model,
-                    thinking: settings.thinking
+                    thinking: settings.thinking,
+                    fast: settings.fast
                 });
             });
         }
     });
-    [modelSelect, thinkingSelect].filter(Boolean).forEach((selectEl) => {
+    [modelSelect, thinkingSelect, fastCheckbox].filter(Boolean).forEach((selectEl) => {
         if (!selectEl.dataset.wired) {
             selectEl.dataset.wired = '1';
             selectEl.addEventListener('change', async () => {
                 const settings = getSelectedLlmSettings();
                 llmProviderConfig.selected[settings.provider] = {
                     model: settings.model,
-                    thinking: settings.thinking
+                    thinking: settings.thinking,
+                    fast: settings.fast
                 };
                 await setLlmProvider(settings.provider, false, false, settings);
             });
@@ -678,6 +702,7 @@ export async function saveLlmSettingsModal() {
     const savedProvider = await setLlmProvider(settings.provider, true, false, {
         model: settings.model,
         thinking: settings.thinking,
+        fast: settings.fast,
         options
     });
     if (savedProvider) {
@@ -739,6 +764,7 @@ export async function startClaude(mode) {
             llm_provider: savedProvider,
             llm_model: selectedSettings.model,
             llm_thinking: selectedSettings.thinking,
+            llm_fast: selectedSettings.fast,
             mission_type: missionType
         };
         if (projectName) payload.project_name = projectName;
@@ -757,7 +783,8 @@ export async function startClaude(mode) {
         const startResult = await api(`/api/start/${mode}`, 'POST', {
             provider: savedProvider,
             model: selectedSettings.model,
-            thinking: selectedSettings.thinking
+            thinking: selectedSettings.thinking,
+            fast: selectedSettings.fast
         });
         showToast(`Mission set and started: ${startResult.message}`, 'success');
         refresh();
@@ -776,7 +803,8 @@ export async function startClaude(mode) {
         const data = await api(`/api/start/${mode}`, 'POST', {
             provider: savedProvider || selectedProvider,
             model: selectedSettings.model,
-            thinking: selectedSettings.thinking
+            thinking: selectedSettings.thinking,
+            fast: selectedSettings.fast
         });
         showToast(data.message);
         refresh();
@@ -843,6 +871,7 @@ export async function setMission() {
         llm_provider: savedProvider,
         llm_model: selectedSettings.model,
         llm_thinking: selectedSettings.thinking,
+        llm_fast: selectedSettings.fast,
         mission_type: missionType
     };
     if (projectName) {
@@ -899,6 +928,7 @@ export async function queueMission() {
             llm_provider: savedProvider,
             llm_model: selectedSettings.model,
             llm_thinking: selectedSettings.thinking,
+            llm_fast: selectedSettings.fast,
             mission_type: missionType
         };
         if (projectName) payload.project_name = projectName;

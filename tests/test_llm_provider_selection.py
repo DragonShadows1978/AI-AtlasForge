@@ -258,15 +258,38 @@ def test_codex_fast_mode_uses_cli_service_tier(monkeypatch, tmp_path):
     provider_path.write_text(json.dumps({
         "provider": "codex",
         "selected": {
+            "codex": {"model": "gpt-5.5", "thinking": "high", "fast": True},
+        },
+    }))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+    monkeypatch.delenv("ATLASFORGE_CODEX_THINKING", raising=False)
+    monkeypatch.delenv("ATLASFORGE_CODEX_FAST", raising=False)
+
+    command = conductor.build_llm_command("codex")
+
+    assert command[0] == "codex"
+    assert "--enable" in command
+    assert command[command.index("--enable") + 1] == "fast_mode"
+    assert 'service_tier="fast"' in command
+    assert 'model_reasoning_effort="high"' in command
+
+
+def test_codex_legacy_fast_thinking_enables_fast_without_reasoning(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({
+        "provider": "codex",
+        "selected": {
             "codex": {"model": "gpt-5.5", "thinking": "fast"},
         },
     }))
     monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
     monkeypatch.delenv("ATLASFORGE_CODEX_THINKING", raising=False)
+    monkeypatch.delenv("ATLASFORGE_CODEX_FAST", raising=False)
 
     command = conductor.build_llm_command("codex")
 
-    assert command[0] == "codex"
     assert "--enable" in command
     assert command[command.index("--enable") + 1] == "fast_mode"
     assert 'service_tier="fast"' in command

@@ -68,7 +68,7 @@ LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 LLM_MODEL_CONFIG_DEFAULTS = {
     "selected": {
         "claude": {"model": "claude-opus-4-6[1m]", "thinking": "high"},
-        "codex": {"model": "gpt-5.5", "thinking": "high"},
+        "codex": {"model": "gpt-5.5", "thinking": "high", "fast": False},
         "gemini": {"model": "gemini-2.5-pro", "thinking": "default"},
     },
     "options": {
@@ -92,7 +92,6 @@ LLM_MODEL_CONFIG_DEFAULTS = {
                 {"value": "gpt-5.5", "label": "Best available"},
             ],
             "thinking": [
-                {"value": "fast", "label": "Fast"},
                 {"value": "low", "label": "Low"},
                 {"value": "medium", "label": "Medium"},
                 {"value": "high", "label": "High"},
@@ -114,11 +113,6 @@ PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
 REQUIRED_LLM_MODEL_OPTIONS = {
     "claude": [
         {"value": "claude-opus-4-6[1m]", "label": "Claude Opus 4.6"},
-    ],
-}
-REQUIRED_LLM_THINKING_OPTIONS = {
-    "codex": [
-        {"value": "fast", "label": "Fast"},
     ],
 }
 
@@ -377,6 +371,16 @@ def _normalize_option_list(raw_options, default_options: list[dict]) -> list[dic
     return cleaned or [dict(opt) for opt in default_options]
 
 
+def _coerce_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _normalize_llm_config(data: dict | None) -> dict:
     data = data if isinstance(data, dict) else {}
     provider = _normalize_provider(data.get("provider"))
@@ -394,15 +398,17 @@ def _normalize_llm_config(data: dict | None) -> dict:
             if required_model["value"] not in {opt["value"] for opt in models}:
                 models.append(dict(required_model))
         thinking = _normalize_option_list(raw_provider_options.get("thinking"), defaults["thinking"])
-        for required_thinking in REQUIRED_LLM_THINKING_OPTIONS.get(provider_key, []):
-            if required_thinking["value"] not in {opt["value"] for opt in thinking}:
-                thinking.insert(0, dict(required_thinking))
+        if provider_key == "codex":
+            thinking = [opt for opt in thinking if opt["value"] != "fast"] or list(defaults["thinking"])
         options[provider_key] = {"models": models, "thinking": thinking}
 
         raw_selected = selected_raw.get(provider_key) if isinstance(selected_raw.get(provider_key), dict) else {}
         default_selected = LLM_MODEL_CONFIG_DEFAULTS["selected"][provider_key]
         model = _clean_option_value(raw_selected.get("model")) or default_selected["model"]
         effort = _clean_option_value(raw_selected.get("thinking")) or default_selected["thinking"]
+        legacy_fast = provider_key == "codex" and effort == "fast"
+        if legacy_fast:
+            effort = default_selected["thinking"]
         model_values = {opt["value"] for opt in models}
         effort_values = {opt["value"] for opt in thinking}
         if model not in model_values:
@@ -410,6 +416,8 @@ def _normalize_llm_config(data: dict | None) -> dict:
         if effort not in effort_values:
             effort = thinking[0]["value"]
         selected[provider_key] = {"model": model, "thinking": effort}
+        if provider_key == "codex":
+            selected[provider_key]["fast"] = _coerce_bool(raw_selected.get("fast")) or legacy_fast
 
     return {
         "provider": provider,
@@ -434,7 +442,13 @@ def get_llm_provider() -> str:
     return get_llm_config()["provider"]
 
 
-def set_llm_provider(provider: str, model: str | None = None, thinking: str | None = None, options: dict | None = None) -> str:
+def set_llm_provider(
+    provider: str,
+    model: str | None = None,
+    thinking: str | None = None,
+    options: dict | None = None,
+    fast: bool | None = None,
+) -> str:
     """Persist the LLM provider/model selection and return normalized provider."""
     current = get_llm_config()
     normalized = _normalize_provider(provider)
@@ -458,6 +472,8 @@ def set_llm_provider(provider: str, model: str | None = None, thinking: str | No
         thinking_values = {opt["value"] for opt in current["options"][normalized]["thinking"]}
         if cleaned_thinking and cleaned_thinking in thinking_values:
             provider_selected["thinking"] = cleaned_thinking
+    if normalized == "codex" and fast is not None:
+        provider_selected["fast"] = _coerce_bool(fast)
     current["updated_at"] = datetime.now().isoformat()
     io_utils.atomic_write_json(LLM_PROVIDER_PATH, _normalize_llm_config(current))
     return normalized
@@ -976,6 +992,7 @@ def queue_auto_start_watcher():
                         signal_provider,
                         model=signal_data.get("llm_model"),
                         thinking=signal_data.get("llm_thinking"),
+                        fast=signal_data.get("llm_fast"),
                     )
                     print(f"[QueueWatcher] Starting {signal_provider} in RD mode for: {mission_title}")
                     success, msg = start_claude(mode="rd")
