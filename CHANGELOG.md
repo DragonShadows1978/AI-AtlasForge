@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.6.1] - 2026-05-10
+
+### Other
+
+- Gate mission suggestion generation
+
+### Code Changes
+
+- **Modified** `af_engine/integrations/mission_report.py` — `_resolve_source_profile`, `_resolve_recommendation_status`, `_recommendation_allowed_for_source`, `_severity_score_boost`, `_resolve_source_plan_path`
+- **Modified** `af_engine/stages/analyzing.py` — `_source_profile`, `_filter_continuation_missions`
+- **Modified** `af_engine/stages/complete.py`
+- **Modified** `af_engine/stages/cycle_end.py`
+- **Modified** `dashboard_modules/core.py`
+- **Modified** `dashboard_static/src/modals.js`
+- **Modified** `dashboard_templates/main_bundled.html`
+- **Modified** `suggestion_lifecycle.py`
+- **Modified** `suggestion_storage.py` — `_migrate_v8_to_v9`
+- **Added** `tests/test_mission_report_suggestion_gating.py` — `_storage`, `teardown_function`, `test_non_full_mission_suppresses_expansion_but_keeps_bug_and_debt`, `test_full_rd_expansion_is_saved_as_proposal`, `test_plan_only_completion_requires_build_approval`
+- **Modified** `tests/test_recommendations_api_validation.py` — `TestSetMissionBuildApprovalGate`, `setUp`, `tearDown`, `_post_set_mission`, `_build_gated_rec`
+- **Modified** `tests/test_suggestion_lifecycle_status.py`
+- **Modified** `tests/test_suggestion_storage_tech_debt.py`
+
+### Stats
+
+```
+ tests/test_mission_report_suggestion_gating.py |  72 ++++++++++++
+ tests/test_recommendations_api_validation.py   |  84 +++++++++++++
+ tests/test_suggestion_lifecycle_status.py      |   6 +
+ tests/test_suggestion_storage_tech_debt.py     |   2 +-
+ 13 files changed, 680 insertions(+), 22 deletions(-)
+```
+
+_Full diff: `git diff v2.6.0..v2.6.1`_
+
+
 ## [2.6.0] - 2026-05-10
 
 ### Major Changes
