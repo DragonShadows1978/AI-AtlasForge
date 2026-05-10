@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.7.0] - 2026-05-10
+
+### Fixed
+
+- Bug fixes and dashboard updates
+
+### Code Changes
+
+- **Modified** `atlasforge_conductor.py` — `_sanitize_for_log`
+- **Modified** `dashboard_modules/core.py` — `_invalidate_ttl_cache_key`, `_ensure_build_only_implementation_plan`
+- **Modified** `dashboard_static/src/modals.js` — `loadActiveMissionIntoControlPanel`, `clearMissionControlDraft`, `loadMissionIntoStatusPanel`, `setText`
+- **Modified** `dashboard_static/src/widgets.js` — `refresh`
+- **Modified** `dashboard_static/sw.js` — `handleBundledAssetRequest`
+- **Modified** `dashboard_templates/main_bundled.html`
+- **Modified** `suggestion_analyzer.py`
+- **Modified** `tests/test_recommendations_api_validation.py` — `test_tech_debt_build_only_set_mission_loads_active_mission`, `test_set_mission_sanitizes_display_project_name_for_mission_config`
+
+### Stats
+
+```
+ dashboard_static/sw.js                       | 28 +++++++-
+ dashboard_templates/main_bundled.html        |  8 +--
+ suggestion_analyzer.py                       | 18 ++++--
+ tests/test_recommendations_api_validation.py | 68 ++++++++++++++++++++
+ 9 files changed, 285 insertions(+), 17 deletions(-)
+```
+
+_Full diff: `git diff v2.6.2..v2.7.0`_
+
+
 ## [2.6.2] - 2026-05-10
 
 ### Other
