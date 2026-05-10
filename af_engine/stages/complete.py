@@ -87,6 +87,8 @@ Respond with JSON:
                     "problem_statement": context.mission.get("problem_statement"),
                     "cycle_history": context.cycle_history,
                     "project_name": context.mission.get("project_name"),
+                    "mission_type": context.mission.get("mission_type", "full_rd"),
+                    "execution_profile": context.mission.get("mission_type", "full_rd"),
                 }
             )
         ]

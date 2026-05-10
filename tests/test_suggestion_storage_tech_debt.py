@@ -37,7 +37,7 @@ def test_schema_ensure_reaches_current_user_version(tmp_path):
     storage = SQLiteSuggestionStorage(db_path=tmp_path / "suggestions.sqlite")
 
     with storage._get_connection() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
 
 
 def test_add_infers_project_name_from_suggestion_text(tmp_path):

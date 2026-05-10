@@ -15,7 +15,9 @@ from atlasforge_config import MISSION_QUEUE_PATH, STATE_DIR
 
 logger = logging.getLogger(__name__)
 
-VALID_SUGGESTION_STATUSES = frozenset({"open", "queued", "completed", "deprecated"})
+VALID_SUGGESTION_STATUSES = frozenset({
+    "open", "queued", "completed", "deprecated", "proposed", "rejected"
+})
 FAILED_STAGES = frozenset({"FAILED", "ERROR", "HALTED", "CANCELLED", "CANCELED"})
 
 
@@ -112,6 +114,13 @@ def mark_suggestion_status(
             reason = closed_reason or "deprecated"
             if current.get("closed_reason") != reason:
                 updates["closed_reason"] = reason
+        elif status == "rejected":
+            reason = closed_reason or "rejected"
+            if current.get("closed_reason") != reason:
+                updates["closed_reason"] = reason
+        elif status == "proposed":
+            if closed_reason and current.get("closed_reason") != closed_reason:
+                updates["closed_reason"] = closed_reason
         elif status == "open":
             if previous_status != "open" or closed_reason:
                 updates["reopened_at"] = now

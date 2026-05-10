@@ -542,6 +542,90 @@ class _JsonIO:
         return json.loads(path.read_text())
 
 
+class TestSetMissionBuildApprovalGate(_RecommendationsApiTestBase):
+
+    def setUp(self):
+        super().setUp()
+        from dashboard_modules import core as core_mod
+        self.core_mod = core_mod
+        self._old_io_utils = core_mod.io_utils
+        self._old_base_dir = core_mod.BASE_DIR
+        self._old_workspace_dir = core_mod.WORKSPACE_DIR
+        self._old_mission_path = core_mod.MISSION_PATH
+        tmp_root = Path(self._tmpdir.name) / "atlasforge"
+        (tmp_root / "state").mkdir(parents=True, exist_ok=True)
+        core_mod.io_utils = _JsonIO
+        core_mod.BASE_DIR = tmp_root
+        core_mod.WORKSPACE_DIR = tmp_root / "workspace"
+        core_mod.MISSION_PATH = tmp_root / "state" / "mission.json"
+
+    def tearDown(self):
+        self.core_mod.io_utils = self._old_io_utils
+        self.core_mod.BASE_DIR = self._old_base_dir
+        self.core_mod.WORKSPACE_DIR = self._old_workspace_dir
+        self.core_mod.MISSION_PATH = self._old_mission_path
+        super().tearDown()
+
+    def _post_set_mission(self, rec_id, payload):
+        return self.client.post(
+            f"/api/recommendations/{rec_id}/set-mission",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _build_gated_rec(self):
+        return self.storage.add({
+            "mission_title": "Gated build mission",
+            "mission_description": "Build from the approved implementation plan.",
+            "classification": "COMPLETION",
+            "mission_type": "build_only",
+            "execution_profile": "build_only",
+            "requires_user_build_approval": True,
+            "build_approval_status": "pending",
+        })
+
+    def test_gated_build_requires_explicit_action(self):
+        rec_id = self._build_gated_rec()
+
+        resp = self._post_set_mission(rec_id, {"cycle_budget": 1, "execution_profile": "build_only"})
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("explicit approval", resp.get_json()["error"])
+        self.assertEqual(self.storage.get_by_id(rec_id)["status"], "open")
+
+    def test_review_action_requires_notes(self):
+        rec_id = self._build_gated_rec()
+
+        resp = self._post_set_mission(rec_id, {
+            "cycle_budget": 1,
+            "execution_profile": "build_only",
+            "build_approval_action": "review",
+            "build_review_notes": "   ",
+        })
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("requires user instructions", resp.get_json()["error"])
+        self.assertEqual(self.storage.get_by_id(rec_id)["status"], "open")
+
+    def test_review_action_launches_plan_only_with_user_notes(self):
+        rec_id = self._build_gated_rec()
+
+        resp = self._post_set_mission(rec_id, {
+            "cycle_budget": 1,
+            "execution_profile": "build_only",
+            "build_approval_action": "review",
+            "build_review_notes": "Add a rollback section before implementation.",
+        })
+
+        self.assertEqual(resp.status_code, 200)
+        mission = json.loads(Path(self.core_mod.MISSION_PATH).read_text())
+        self.assertEqual(mission["mission_type"], "plan_only")
+        self.assertIn("Add a rollback section before implementation.", mission["problem_statement"])
+        stored = self.storage.get_by_id(rec_id)
+        self.assertEqual(stored["status"], "queued")
+        self.assertEqual(stored["build_approval_status"], "review_requested")
+
+
 class TestNarrativeMissionValidation(_RecommendationsApiTestBase):
 
     def setUp(self):

@@ -34,6 +34,7 @@ _CLASSIFICATION_TO_PROFILE = {
     "TECH_DEBT": "build_only",
     "EXPANSION": "plan_only",
 }
+_VALID_SUGGESTION_STATUSES = {"open", "queued", "completed", "deprecated", "proposed", "rejected"}
 
 
 def _resolve_suggestion_classification(recommendation: Dict[str, Any]) -> str:
@@ -58,6 +59,42 @@ def _resolve_suggestion_profile(recommendation: Dict[str, Any], classification: 
         if isinstance(raw, str) and raw in _VALID_MISSION_PROFILES:
             return raw
     return _CLASSIFICATION_TO_PROFILE.get(classification, "full_rd")
+
+
+def _resolve_source_profile(event_data: Dict[str, Any]) -> str:
+    for key in ("source_mission_profile", "mission_type", "execution_profile"):
+        raw = event_data.get(key)
+        if isinstance(raw, str) and raw in _VALID_MISSION_PROFILES:
+            return raw
+    return "full_rd"
+
+
+def _resolve_recommendation_status(recommendation: Dict[str, Any], classification: str) -> str:
+    if classification in {"BUGFIX", "TECH_DEBT", "COMPLETION", "MANUAL"}:
+        return "open"
+    raw = recommendation.get("status") or recommendation.get("proposal_status")
+    if classification == "EXPANSION":
+        return "rejected" if raw == "rejected" else "proposed"
+    if isinstance(raw, str) and raw in _VALID_SUGGESTION_STATUSES:
+        return raw
+    return "open"
+
+
+def _recommendation_allowed_for_source(recommendation: Dict[str, Any], source_profile: str) -> bool:
+    classification = _resolve_suggestion_classification(recommendation)
+    if classification in {"BUGFIX", "TECH_DEBT", "COMPLETION", "MANUAL"}:
+        return True
+    return classification == "EXPANSION" and source_profile == "full_rd"
+
+
+def _severity_score_boost(mission: Dict[str, Any]) -> float:
+    raw = mission.get("severity") or mission.get("max_severity") or mission.get("risk")
+    severity = raw.upper().strip() if isinstance(raw, str) else ""
+    if severity == "CRITICAL":
+        return 10.0
+    if severity == "HIGH":
+        return 5.0
+    return 0.0
 
 # Directories for output
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -137,16 +174,32 @@ class MissionReportIntegration(BaseIntegrationHandler):
         # Generate and save final report
         final_report = self._generate_final_report(event)
         source_summary = final_report.get("final_summary", "") if final_report else ""
+        source_profile = _resolve_source_profile(event_data)
+        source_plan_path = self._resolve_source_plan_path(event_data)
 
         # Save all continuation missions from the manifest (primary path)
         continuation_missions = event_data.get("continuation_missions")
         if continuation_missions and isinstance(continuation_missions, list):
-            self._save_continuation_manifest(continuation_missions, mission_id, source_summary)
+            self._save_continuation_manifest(
+                continuation_missions,
+                mission_id,
+                source_summary,
+                source_mission_profile=source_profile,
+                source_plan_path=source_plan_path,
+            )
+        elif source_profile == "plan_only":
+            self._save_plan_only_build_followup(event_data, mission_id, source_summary, source_plan_path)
         else:
             # Backward-compat: fall back to single next_mission_recommendation
             next_rec = event_data.get("next_mission_recommendation")
-            if next_rec:
-                self._save_recommendation(next_rec, mission_id, source_summary)
+            if next_rec and isinstance(next_rec, dict) and _recommendation_allowed_for_source(next_rec, source_profile):
+                self._save_recommendation(
+                    next_rec,
+                    mission_id,
+                    source_summary,
+                    source_mission_profile=source_profile,
+                    source_plan_path=source_plan_path,
+                )
 
         # Ingest to knowledge base
         self._ingest_to_knowledge_base(mission_id)
@@ -283,7 +336,9 @@ class MissionReportIntegration(BaseIntegrationHandler):
         source_mission_id: str,
         source_summary: str,
         source_type: str = "successful_completion",
-        drift_context: Optional[Dict[str, Any]] = None
+        drift_context: Optional[Dict[str, Any]] = None,
+        source_mission_profile: str = "full_rd",
+        source_plan_path: Optional[str] = None,
     ) -> Optional[str]:
         """
         Save a mission recommendation to SQLite storage.
@@ -306,6 +361,11 @@ class MissionReportIntegration(BaseIntegrationHandler):
 
         classification = _resolve_suggestion_classification(recommendation)
         mission_profile = _resolve_suggestion_profile(recommendation, classification)
+        status = _resolve_recommendation_status(recommendation, classification)
+        requires_build_approval = bool(recommendation.get("requires_user_build_approval"))
+        if classification == "COMPLETION" and source_mission_profile == "plan_only":
+            mission_profile = "build_only"
+            requires_build_approval = True
         rec_entry = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
             "mission_title": recommendation.get("mission_title", "Untitled Mission"),
@@ -320,8 +380,13 @@ class MissionReportIntegration(BaseIntegrationHandler):
             "classification": classification,
             "mission_type": mission_profile,
             "execution_profile": mission_profile,
+            "status": status,
             "bug_references": recommendation.get("bug_references", []),
             "scope_context": recommendation.get("scope_context"),
+            "requires_user_build_approval": requires_build_approval,
+            "build_approval_status": "pending" if requires_build_approval else recommendation.get("build_approval_status"),
+            "build_review_notes": recommendation.get("build_review_notes"),
+            "source_plan_path": recommendation.get("source_plan_path") or source_plan_path,
         }
 
         # Add drift context if provided
@@ -386,6 +451,8 @@ class MissionReportIntegration(BaseIntegrationHandler):
         missions: list,
         source_mission_id: str,
         source_summary: str,
+        source_mission_profile: str = "full_rd",
+        source_plan_path: Optional[str] = None,
     ) -> None:
         """
         Save all missions from the continuation manifest to SQLite.
@@ -406,10 +473,24 @@ class MissionReportIntegration(BaseIntegrationHandler):
         saved = 0
         for mission in missions:
             try:
+                if not isinstance(mission, dict):
+                    continue
+                if not _recommendation_allowed_for_source(mission, source_mission_profile):
+                    logger.info(
+                        "[MissionReport] Suppressed %s continuation from %s mission: %s",
+                        mission.get("category") or mission.get("classification"),
+                        source_mission_profile,
+                        mission.get("title", ""),
+                    )
+                    continue
                 category = (mission.get("category") or "EXPANSION").upper()
                 classification, mission_profile, scope_context, base_score = category_map.get(
                     category, ("EXPANSION", "plan_only", None, 50.0)
                 )
+                requires_build_approval = False
+                if classification == "COMPLETION" and source_mission_profile == "plan_only":
+                    mission_profile = "build_only"
+                    requires_build_approval = True
                 # Higher priority number → lower in queue priority (invert manifest priority).
                 # Default to 1 (highest priority) when field is missing; clamp to [1, 10].
                 raw_priority = mission.get("priority", 1)
@@ -417,7 +498,7 @@ class MissionReportIntegration(BaseIntegrationHandler):
                     manifest_priority = max(1, min(10, int(raw_priority)))
                 except (TypeError, ValueError):
                     manifest_priority = 1
-                priority_score = max(10.0, base_score - (manifest_priority - 1) * 5)
+                priority_score = max(10.0, base_score - (manifest_priority - 1) * 5 + _severity_score_boost(mission))
 
                 title = mission.get("title", "").strip()
                 if not title or len(title) < 5:
@@ -436,17 +517,81 @@ class MissionReportIntegration(BaseIntegrationHandler):
                     "classification": classification,
                     "mission_type": mission_profile,
                     "execution_profile": mission_profile,
+                    "status": "proposed" if classification == "EXPANSION" else "open",
                     "bug_references": mission.get("source_bugs", []),
                     "scope_context": scope_context,
+                    "requires_user_build_approval": requires_build_approval,
+                    "build_approval_status": "pending" if requires_build_approval else None,
+                    "source_plan_path": mission.get("source_plan_path") or source_plan_path,
                 }
                 self._save_recommendation(rec_entry, source_mission_id, source_summary,
-                                          source_type="successful_completion")
+                                          source_type="successful_completion",
+                                          source_mission_profile=source_mission_profile,
+                                          source_plan_path=source_plan_path)
                 saved += 1
             except Exception as e:
                 title_safe = mission.get('title', '?') if isinstance(mission, dict) else repr(mission)
                 logger.warning(f"[MissionReport] Failed to save continuation mission '{title_safe}': {e}")
 
         logger.info(f"[MissionReport] Saved {saved}/{len(missions)} continuation missions from manifest")
+
+    def _resolve_source_plan_path(self, event_data: Dict[str, Any]) -> Optional[str]:
+        raw = event_data.get("source_plan_path") or event_data.get("implementation_plan_path")
+        if isinstance(raw, str) and raw:
+            return raw
+        mission_workspace = event_data.get("mission_workspace")
+        if isinstance(mission_workspace, str) and mission_workspace:
+            candidate = Path(mission_workspace) / "artifacts" / "implementation_plan.md"
+            if candidate.exists():
+                return str(candidate)
+        mission_dir = event_data.get("mission_dir")
+        if isinstance(mission_dir, str) and mission_dir:
+            candidate = Path(mission_dir) / "workspace" / "artifacts" / "implementation_plan.md"
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    def _save_plan_only_build_followup(
+        self,
+        event_data: Dict[str, Any],
+        source_mission_id: str,
+        source_summary: str,
+        source_plan_path: Optional[str],
+    ) -> Optional[str]:
+        original = event_data.get("problem_statement") or event_data.get("original_mission") or "the approved implementation plan"
+        plan_excerpt = ""
+        if source_plan_path:
+            try:
+                plan_excerpt = Path(source_plan_path).read_text(errors="replace")[:4000]
+            except Exception:
+                logger.debug("[MissionReport] Could not read plan-only implementation plan", exc_info=True)
+        description = (
+            "Build from the approved plan produced by the source plan-only mission.\n\n"
+            f"Original mission:\n{original}"
+        )
+        if plan_excerpt:
+            description += f"\n\nImplementation plan excerpt:\n{plan_excerpt}"
+        recommendation = {
+            "mission_title": f"[BUILD] {str(original).strip()[:80]}",
+            "mission_description": description,
+            "suggested_cycles": event_data.get("cycle_count") or event_data.get("total_cycles") or 3,
+            "rationale": "Plan-only mission completed; implementation requires explicit user build approval.",
+            "classification": "COMPLETION",
+            "mission_type": "build_only",
+            "execution_profile": "build_only",
+            "status": "open",
+            "requires_user_build_approval": True,
+            "build_approval_status": "pending",
+            "source_plan_path": source_plan_path,
+        }
+        return self._save_recommendation(
+            recommendation,
+            source_mission_id,
+            source_summary,
+            source_type="successful_completion",
+            source_mission_profile="plan_only",
+            source_plan_path=source_plan_path,
+        )
 
     def _ingest_to_knowledge_base(self, mission_id: str) -> None:
         """

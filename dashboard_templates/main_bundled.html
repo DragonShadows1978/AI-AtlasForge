@@ -3352,6 +3352,24 @@
                         <option value="review_existing">Review Existing</option>
                     </select>
                 </div>
+                <div class="rec-detail" id="rec-build-review-gate" style="display: none; align-items: flex-start; gap: 12px;">
+                    <label>Build Plan:</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px; min-width: 260px; max-width: 520px;">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="radio" name="rec-build-review-action" value="approve">
+                            <span>Approve build</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="radio" name="rec-build-review-action" value="review">
+                            <span>Review / modify plan</span>
+                        </label>
+                        <textarea id="rec-build-review-notes"
+                                  class="mission-input"
+                                  rows="3"
+                                  style="min-height: 72px; padding: 8px; width: 100%;"
+                                  placeholder="Required when sending back to planning"></textarea>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" id="rec-edit-toggle-btn" onclick="toggleEditMode()">Edit</button>

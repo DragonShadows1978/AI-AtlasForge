@@ -444,6 +444,14 @@ export async function openRecModal(recId) {
             : storedProfile;
         typeSelect.value = effectiveProfile;
     }
+    const buildGate = document.getElementById('rec-build-review-gate');
+    const buildNotes = document.getElementById('rec-build-review-notes');
+    const buildActionRadios = document.querySelectorAll('input[name="rec-build-review-action"]');
+    buildActionRadios.forEach(radio => { radio.checked = false; });
+    if (buildNotes) buildNotes.value = '';
+    if (buildGate) {
+        buildGate.style.display = rec.requires_user_build_approval ? 'flex' : 'none';
+    }
 
     // Reset project name field and trigger async auto-suggestion
     const projectInput = document.getElementById('rec-project-name-input');
@@ -567,9 +575,30 @@ export async function setMissionFromRec() {
             : '';
 
         const typeSelectS = document.getElementById('rec-modal-type');
-        const executionProfileS = typeSelectS ? typeSelectS.value : 'full_rd';
+        let executionProfileS = typeSelectS ? typeSelectS.value : 'full_rd';
         const catSelectS = document.getElementById('rec-modal-mission-type');
         const missionCatS = catSelectS ? catSelectS.value : null;
+        const rec = recommendations.find(r => String(r.id) === String(selectedRecId));
+        const requiresBuildReview = !!(rec && rec.requires_user_build_approval);
+        let buildApprovalAction = null;
+        let buildReviewNotes = '';
+        if (requiresBuildReview) {
+            const checkedAction = document.querySelector('input[name="rec-build-review-action"]:checked');
+            buildApprovalAction = checkedAction ? checkedAction.value : null;
+            if (!buildApprovalAction) {
+                showToast('Choose Approve Build or Review / Modify Plan', 'error');
+                return;
+            }
+            if (buildApprovalAction === 'review') {
+                const notesEl = document.getElementById('rec-build-review-notes');
+                buildReviewNotes = notesEl ? notesEl.value.trim() : '';
+                if (!buildReviewNotes) {
+                    showToast('Review / Modify Plan requires instructions', 'error');
+                    return;
+                }
+                executionProfileS = 'plan_only';
+            }
+        }
 
         // Persist chosen execution_profile and classification back to the suggestion before set-mission queues it
         try {
@@ -581,6 +610,10 @@ export async function setMissionFromRec() {
 
         const setPayload = { cycle_budget: cycleBudget, execution_profile: executionProfileS };
         if (projectNameS) setPayload.project_name = projectNameS;
+        if (requiresBuildReview) {
+            setPayload.build_approval_action = buildApprovalAction;
+            if (buildReviewNotes) setPayload.build_review_notes = buildReviewNotes;
+        }
 
         const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', setPayload);
 

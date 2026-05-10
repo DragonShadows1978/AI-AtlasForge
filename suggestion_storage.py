@@ -45,7 +45,7 @@ STATE_DIR = BASE_DIR / "state"
 DB_PATH = STATE_DIR / "mission_suggestions.db"
 
 # Current schema version
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # SQLite INTEGER max (2^63 - 1); values beyond this overflow
 SQLITE_MAX_INT = (2 ** 63) - 1
@@ -60,7 +60,8 @@ ALLOWED_COLUMNS = frozenset({
     'classification', 'mission_type', 'bug_references', 'scope_context',
     'execution_profile', 'status', 'accepted_mission_id', 'queued_at',
     'completed_at', 'reopened_at', 'closed_reason', 'project_name',
-    'project_slug', 'project_source',
+    'project_slug', 'project_source', 'requires_user_build_approval',
+    'build_approval_status', 'build_review_notes', 'source_plan_path',
 })
 
 # C2-2: defense-in-depth identifier safety. Column names must consist solely of
@@ -70,7 +71,7 @@ ALLOWED_COLUMNS = frozenset({
 _SAFE_COL_RE = re.compile(r'^[A-Za-z0-9_]+$')
 
 _VALID_CLASSIFICATIONS = frozenset({'BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'})
-_VALID_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated'})
+_VALID_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated', 'proposed', 'rejected'})
 _VALID_EXEC_PROFILES = frozenset({
     'full_rd', 'plan_only', 'build_only', 'test_red_team',
     'bug_hunt', 'research_only', 'review_existing',
@@ -310,6 +311,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 version = 8
                 logger.info("Database schema migrated to version 8 (suggestion project identity)")
 
+            if version < 9:
+                self._migrate_v8_to_v9(conn)
+                conn.execute("PRAGMA user_version = 9")
+                version = 9
+                logger.info("Database schema migrated to version 9 (proposal/build approval lifecycle)")
+
             # Idempotent backfill: even on DBs already at v3, sweep any rows
             # whose execution_profile is NULL or empty. Cheap (single UPDATE
             # filtered to NULL/'') and protects the UI from blank badges.
@@ -355,10 +362,14 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 created_at TEXT NOT NULL,
                 source_type TEXT DEFAULT 'manual' CHECK(source_type IN ('drift_halt', 'successful_completion', 'merged', 'manual')),
                 classification TEXT DEFAULT 'EXPANSION' CHECK(classification IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')),
-                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'queued', 'completed', 'deprecated')),
+                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'queued', 'completed', 'deprecated', 'proposed', 'rejected')),
                 project_name TEXT DEFAULT 'AI-AtlasForge',
                 project_slug TEXT DEFAULT 'ai-atlasforge',
                 project_source TEXT DEFAULT 'inferred',
+                requires_user_build_approval INTEGER DEFAULT 0 CHECK(requires_user_build_approval IN (0, 1)),
+                build_approval_status TEXT DEFAULT NULL CHECK(build_approval_status IS NULL OR build_approval_status IN ('pending', 'approved', 'review_requested')),
+                build_review_notes TEXT,
+                source_plan_path TEXT,
                 accepted_mission_id TEXT,
                 queued_at TEXT,
                 completed_at TEXT,
@@ -690,6 +701,103 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             )
             known_projects.append(name)
 
+    def _migrate_v8_to_v9(self, conn: sqlite3.Connection) -> None:
+        """Add proposal/rejection statuses and explicit build approval metadata."""
+        conn.executescript("""
+            CREATE TABLE mission_suggestions_v9 (
+                id TEXT PRIMARY KEY,
+                mission_title TEXT NOT NULL,
+                mission_description TEXT,
+                suggested_cycles INTEGER DEFAULT 3 CHECK(suggested_cycles >= 1 AND suggested_cycles <= 10),
+                source_mission_id TEXT,
+                source_mission_summary TEXT,
+                rationale TEXT,
+                created_at TEXT NOT NULL,
+                source_type TEXT DEFAULT 'manual' CHECK(source_type IN ('drift_halt', 'successful_completion', 'merged', 'manual')),
+                classification TEXT DEFAULT 'EXPANSION' CHECK(classification IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')),
+                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'queued', 'completed', 'deprecated', 'proposed', 'rejected')),
+                project_name TEXT DEFAULT 'AI-AtlasForge',
+                project_slug TEXT DEFAULT 'ai-atlasforge',
+                project_source TEXT DEFAULT 'inferred',
+                requires_user_build_approval INTEGER DEFAULT 0 CHECK(requires_user_build_approval IN (0, 1)),
+                build_approval_status TEXT DEFAULT NULL CHECK(build_approval_status IS NULL OR build_approval_status IN ('pending', 'approved', 'review_requested')),
+                build_review_notes TEXT,
+                source_plan_path TEXT,
+                accepted_mission_id TEXT,
+                queued_at TEXT,
+                completed_at TEXT,
+                reopened_at TEXT,
+                closed_reason TEXT,
+                priority_score REAL DEFAULT 50.0,
+                health_status TEXT DEFAULT 'healthy' CHECK(health_status IN ('healthy', 'stale', 'orphaned', 'needs_review', 'hot')),
+                last_analyzed_at TEXT,
+                last_edited_at TEXT,
+                auto_tags TEXT DEFAULT '[]',
+                merged_from TEXT,
+                merged_source_descriptions TEXT,
+                drift_context TEXT,
+                original_mission_title TEXT,
+                original_mission_description TEXT,
+                original_rationale TEXT,
+                original_suggested_cycles INTEGER,
+                mission_type TEXT,
+                bug_references TEXT DEFAULT '[]',
+                scope_context TEXT,
+                execution_profile TEXT DEFAULT 'full_rd'
+            );
+
+            INSERT INTO mission_suggestions_v9 (
+                id, mission_title, mission_description, suggested_cycles,
+                source_mission_id, source_mission_summary, rationale,
+                created_at, source_type, classification, status,
+                project_name, project_slug, project_source,
+                accepted_mission_id, queued_at, completed_at, reopened_at, closed_reason,
+                priority_score, health_status, last_analyzed_at, last_edited_at,
+                auto_tags, merged_from, merged_source_descriptions, drift_context,
+                original_mission_title, original_mission_description,
+                original_rationale, original_suggested_cycles,
+                mission_type, bug_references, scope_context, execution_profile
+            )
+            SELECT
+                id, mission_title, mission_description, suggested_cycles,
+                source_mission_id, source_mission_summary, rationale,
+                created_at, source_type, classification,
+                CASE WHEN status IN ('open', 'queued', 'completed', 'deprecated') THEN status ELSE 'open' END,
+                project_name, project_slug, project_source,
+                accepted_mission_id, queued_at, completed_at, reopened_at, closed_reason,
+                priority_score, health_status, last_analyzed_at, last_edited_at,
+                auto_tags, merged_from, merged_source_descriptions, drift_context,
+                original_mission_title, original_mission_description,
+                original_rationale, original_suggested_cycles,
+                mission_type, bug_references, scope_context, execution_profile
+            FROM mission_suggestions;
+
+            DROP TABLE mission_suggestions;
+            ALTER TABLE mission_suggestions_v9 RENAME TO mission_suggestions;
+
+            CREATE INDEX IF NOT EXISTS idx_suggestions_source_type
+                ON mission_suggestions(source_type);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_health_status
+                ON mission_suggestions(health_status);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_classification
+                ON mission_suggestions(classification);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_status
+                ON mission_suggestions(status);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_project_slug
+                ON mission_suggestions(project_slug);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_accepted_mission
+                ON mission_suggestions(accepted_mission_id)
+                WHERE accepted_mission_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_suggestions_completed_at
+                ON mission_suggestions(completed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_priority
+                ON mission_suggestions(priority_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_created
+                ON mission_suggestions(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_source_mission
+                ON mission_suggestions(source_mission_id);
+        """)
+
     def _row_to_dict(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         """Convert a database row to a suggestion dict."""
         if row is None:
@@ -706,6 +814,9 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     result[json_col] = [] if json_col in ['auto_tags', 'merged_from', 'bug_references'] else None
             elif json_col in ('auto_tags', 'bug_references'):
                 result[json_col] = []
+
+        if 'requires_user_build_approval' in result:
+            result['requires_user_build_approval'] = bool(result.get('requires_user_build_approval'))
 
         # Preserve all keys including None values for faithful round-tripping
         return result
@@ -874,6 +985,21 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 or project_source not in {'explicit', 'inferred', 'backfill', 'fallback', 'merged'}
             ):
                 raise ValueError("project_source must be explicit, inferred, backfill, fallback, merged, or null")
+        if 'requires_user_build_approval' in suggestion:
+            approval_required = suggestion.get('requires_user_build_approval')
+            if isinstance(approval_required, bool):
+                pass
+            elif approval_required not in (0, 1):
+                raise ValueError("requires_user_build_approval must be boolean")
+        if 'build_approval_status' in suggestion:
+            approval_status = suggestion.get('build_approval_status')
+            if approval_status is not None and approval_status not in {'pending', 'approved', 'review_requested'}:
+                raise ValueError("build_approval_status must be pending, approved, review_requested, or null")
+        for text_field in ('build_review_notes', 'source_plan_path'):
+            if text_field in suggestion:
+                value = suggestion.get(text_field)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{text_field} must be a string")
 
         # priority_score: numeric, no NaN/inf, bounded range
         if 'priority_score' in suggestion or not partial:
@@ -969,6 +1095,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'project_name': project_name,
             'project_slug': project_slug_value,
             'project_source': suggestion.get('project_source', 'inferred'),
+            'requires_user_build_approval': 1 if suggestion.get('requires_user_build_approval') else 0,
+            'build_approval_status': suggestion.get('build_approval_status'),
+            'build_review_notes': suggestion.get('build_review_notes'),
+            'source_plan_path': suggestion.get('source_plan_path'),
             'accepted_mission_id': suggestion.get('accepted_mission_id'),
             'queued_at': suggestion.get('queued_at'),
             'completed_at': suggestion.get('completed_at'),

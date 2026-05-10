@@ -12,15 +12,21 @@ def test_suggestion_status_defaults_and_filters(tmp_path):
     open_id = storage.add({"mission_title": "Open Mission"})
     queued_id = storage.add({"mission_title": "Queued Mission", "status": "queued"})
     deprecated_id = storage.add({"mission_title": "Deprecated Mission", "status": "deprecated"})
+    proposed_id = storage.add({"mission_title": "Proposed Mission", "status": "proposed"})
+    rejected_id = storage.add({"mission_title": "Rejected Mission", "status": "rejected"})
 
     assert storage.get_by_id(open_id)["status"] == "open"
     assert [item["id"] for item in storage.get_filtered(status="open")] == [open_id]
     assert [item["id"] for item in storage.get_filtered(status="deprecated")] == [deprecated_id]
+    assert [item["id"] for item in storage.get_filtered(status="proposed")] == [proposed_id]
+    assert [item["id"] for item in storage.get_filtered(status="rejected")] == [rejected_id]
 
     assert storage.update(queued_id, {"status": "completed"})
     assert storage.get_by_id(queued_id)["status"] == "completed"
     assert storage.count(status="completed") == 1
     assert storage.count(status="deprecated") == 1
+    assert storage.count(status="proposed") == 1
+    assert storage.count(status="rejected") == 1
 
 
 def test_suggestion_status_rejects_invalid_values(tmp_path):

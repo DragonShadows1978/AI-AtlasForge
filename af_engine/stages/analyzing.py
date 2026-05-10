@@ -49,7 +49,7 @@ class AnalyzingStageHandler(BaseStageHandler):
 {guard_prompt}
 
 === ANALYZING STAGE ===
-Your goal: Evaluate results, enforce scope gates, and generate targeted continuation missions.
+Your goal: Evaluate results, enforce scope gates, and generate only justified continuation missions.
 
 IMPORTANT: In ANALYZING stage, only write to research/ or artifacts/.
 Do NOT fix bugs here. If fixes are needed, recommend BUILDING stage.
@@ -88,10 +88,23 @@ If ANY in-scope CRITICAL/HIGH/MODERATE/LIGHT bugs remain unfixed → reject to B
 Only proceed to Step C if all in-scope bugs are fixed or marked NONBLOCKING.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP C — GENERATE CONTINUATION MISSIONS (only when gate passes)
+STEP C — SUGGESTION DECISION GATE (only when gate passes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Generate missions in priority order. Each category is a SEPARATE mission.
+Before creating any continuation mission, classify whether a follow-up is actually warranted.
+Do not create continuation missions just because the mission ended.
+
+Source mission execution profile: {context.mission.get("mission_type", "full_rd")}
+
+Decision rules:
+  - BUGFIX and TECH_DEBT findings that are real and not fixed must become open follow-up missions.
+  - HIGH and CRITICAL findings are blockers regardless of scope. If they cannot be fixed inside the current mission, create BUGFIX follow-up missions.
+  - MODERATE/LIGHT bugs and tech debt should still be recorded as BUGFIX or TECH_DEBT follow-up missions when unfixed.
+  - FULL R&D missions may include forward-looking idea/expansion proposals after required bugs/debt/completion work.
+  - Bug fix, build-only, test/red-team, review-existing, and research-only missions must not invent expansion ideas by default.
+  - PLAN ONLY missions create exactly one BUILD follow-up from implementation_plan.md. That follow-up requires explicit user build approval.
+
+Generate missions in priority order only after applying those rules. Each category is a SEPARATE mission.
 
 CATEGORY 1 — BUGFIX (out-of-scope bugs, MANDATORY if any exist)
   - Group out-of-scope bugs by component. One mission per component.
@@ -106,9 +119,12 @@ CATEGORY 2 — TECH_DEBT (out-of-scope MODERATE/LIGHT bugs, lower priority)
 CATEGORY 3 — COMPLETION (if implementation_plan.md items were not finished)
   - One mission per unfinished scope item.
   - Title: "[COMPLETE] {{feature or component that was not finished}}"
+  - For PLAN ONLY missions, this is the single "[BUILD] ..." follow-up.
+  - For PLAN ONLY build follow-ups, set requires_user_build_approval=true and source_plan_path="{impl_plan_path}".
 
-CATEGORY 4 — EXPANSION (new features, forward-looking — ONLY after cats 1-3)
+CATEGORY 4 — EXPANSION (new features, forward-looking proposals — FULL R&D ONLY)
   - Suggest what to build next based on what was successfully completed.
+  - These are proposals, not open missions. Set proposal_status="proposed".
   - Title: "[EXPAND] {{area}}" or "[FEATURE] {{name}}"
 
 RULE: If out-of-scope bugs exist, Category 1 missions MUST appear before Category 4.
@@ -137,15 +153,26 @@ Respond with JSON:
     "recommendation": "COMPLETE" | "BUILDING" | "PLANNING",
     "red_team_findings_count": 0,
     "red_team_blocking_bugs": [],
+    "suggestion_decision": {{
+        "generate_ideas": false,
+        "generate_bugfixes": false,
+        "generate_tech_debt": false,
+        "reason": "Why continuation missions are or are not warranted",
+        "critical_findings": [],
+        "high_findings": []
+    }},
     "continuation_missions": [
         {{
             "priority": 1,
             "category": "BUGFIX",
+            "severity": "HIGH",
             "is_pure_bugfix": true,
             "title": "[BUGFIX] component — N bugs (HIGH/MODERATE)",
             "description": "Detailed description of what to fix and why",
             "rationale": "Out-of-scope bugs found by Red Team in component X",
             "source_bugs": ["path/to/file.py:240", "path/to/file.py:265"],
+            "proposal_status": "open",
+            "requires_user_build_approval": false,
             "blocks": []
         }}
     ],
@@ -154,10 +181,10 @@ Respond with JSON:
 
 Notes on continuation_missions:
 - Include this field ONLY when status=success (gate passed).
-- If no bugs and no unfinished scope, include only Category 4 missions.
+- If no bugs, no tech debt, and no unfinished scope, use [] unless this is a FULL R&D mission with useful idea proposals.
 - If no follow-up is needed at all, use an empty list [].
 - BUGFIX/TECH_DEBT missions must have is_pure_bugfix=true.
-- EXPANSION missions have is_pure_bugfix=false.
+- EXPANSION missions have is_pure_bugfix=false and proposal_status="proposed".
 
 If recommending COMPLETE, also include:
 {{
@@ -234,6 +261,7 @@ If recommending COMPLETE, also include:
             # Write continuation_missions.json manifest to artifacts/
             continuation_missions = response.get("continuation_missions", [])
             if isinstance(continuation_missions, list):
+                continuation_missions = self._filter_continuation_missions(continuation_missions, response, context)
                 self._write_continuation_manifest(continuation_missions, context)
             else:
                 logger.warning("ANALYZING: continuation_missions is not a list, skipping manifest write")
@@ -276,6 +304,79 @@ If recommending COMPLETE, also include:
             logger.info(f"ANALYZING: Wrote continuation manifest with {len(missions)} missions to {manifest_path}")
         except Exception as e:
             logger.error(f"ANALYZING: Failed to write continuation_missions.json: {e}")
+
+    def _source_profile(self, context: StageContext) -> str:
+        raw = context.mission.get("mission_type") or context.mission.get("execution_profile")
+        valid = {
+            "full_rd", "plan_only", "build_only", "test_red_team",
+            "bug_hunt", "research_only", "review_existing",
+        }
+        return raw if isinstance(raw, str) and raw in valid else "full_rd"
+
+    def _filter_continuation_missions(
+        self,
+        missions: List[Dict[str, Any]],
+        response: Dict[str, Any],
+        context: StageContext,
+    ) -> List[Dict[str, Any]]:
+        """Hard gate continuation missions so prompt drift cannot flood suggestions."""
+        profile = self._source_profile(context)
+        filtered: List[Dict[str, Any]] = []
+        seen_build_followup = False
+        for item in missions:
+            if not isinstance(item, dict):
+                continue
+            category = str(item.get("category") or item.get("classification") or "EXPANSION").upper().strip()
+            if category in {"BUG", "BUGS"}:
+                category = "BUGFIX"
+            elif category in {"DEBT", "TECHDEBT", "TECH-DEBT"}:
+                category = "TECH_DEBT"
+            elif category in {"FEATURE", "IDEA"}:
+                category = "EXPANSION"
+            if category not in {"BUGFIX", "TECH_DEBT"} and item.get("source_bugs"):
+                category = "BUGFIX"
+            item["category"] = category
+
+            if category in {"BUGFIX", "TECH_DEBT"}:
+                item["proposal_status"] = "open"
+                item["is_pure_bugfix"] = True
+                filtered.append(item)
+            elif category == "COMPLETION":
+                if profile == "plan_only":
+                    if seen_build_followup:
+                        continue
+                    seen_build_followup = True
+                    item["title"] = item.get("title") or f"[BUILD] {context.problem_statement[:80]}"
+                    item["requires_user_build_approval"] = True
+                    item["proposal_status"] = "open"
+                    item["source_plan_path"] = str(Path(context.artifacts_dir) / "implementation_plan.md")
+                filtered.append(item)
+            elif category == "EXPANSION" and profile == "full_rd":
+                item["proposal_status"] = "proposed"
+                item["is_pure_bugfix"] = False
+                filtered.append(item)
+
+        if profile == "plan_only" and not seen_build_followup:
+            filtered.append({
+                "priority": 1,
+                "category": "COMPLETION",
+                "title": f"[BUILD] {context.problem_statement[:80]}",
+                "description": (
+                    "Build from the implementation plan produced by this plan-only mission. "
+                    "The user must explicitly approve the build or send it back for plan revision."
+                ),
+                "rationale": "Plan-only mission completed and requires a gated build follow-up.",
+                "proposal_status": "open",
+                "requires_user_build_approval": True,
+                "source_plan_path": str(Path(context.artifacts_dir) / "implementation_plan.md"),
+                "blocks": [],
+            })
+
+        suppressed = len(missions) - len(filtered)
+        if suppressed > 0:
+            logger.info("ANALYZING: suppressed %s continuation mission(s) for profile=%s", suppressed, profile)
+        response["continuation_missions"] = filtered
+        return filtered
 
     def get_restrictions(self) -> StageRestrictions:
         """

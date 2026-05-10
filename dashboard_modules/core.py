@@ -61,7 +61,7 @@ _CLASSIFICATION_TO_PROFILE = {
     'EXPANSION': 'plan_only',
 }
 
-_VALID_SUGGESTION_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated'})
+_VALID_SUGGESTION_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated', 'proposed', 'rejected'})
 
 
 def _project_registry_helpers():
@@ -1722,6 +1722,26 @@ def api_set_mission_from_recommendation(rec_id):
             "success": False,
             "error": f"Recommendation is already {target_rec.get('status')}"
         }), 409
+    requires_build_review = bool(target_rec.get("requires_user_build_approval"))
+    build_approval_action = None
+    build_review_notes = ""
+    if requires_build_review:
+        raw_action = data.get("build_approval_action")
+        build_approval_action = raw_action.strip().lower() if isinstance(raw_action, str) else ""
+        if build_approval_action not in {"approve", "review"}:
+            return jsonify({
+                "success": False,
+                "error": "Build plan requires explicit approval or review with modification"
+            }), 400
+        if build_approval_action == "review":
+            raw_notes = data.get("build_review_notes")
+            build_review_notes = raw_notes.strip() if isinstance(raw_notes, str) else ""
+            if not build_review_notes:
+                return jsonify({
+                    "success": False,
+                    "error": "Review with modification requires user instructions"
+                }), 400
+            execution_profile = "plan_only"
     if not user_project_name:
         user_project_name = target_rec.get("project_name") or None
 
@@ -1741,6 +1761,23 @@ def api_set_mission_from_recommendation(rec_id):
         problem_statement = "\n\n".join(parts) if parts else target_rec.get("mission_title", "")
     else:
         problem_statement = target_rec.get("mission_description") or target_rec.get("mission_title") or ""
+    if requires_build_review:
+        source_plan_path = target_rec.get("source_plan_path")
+        if build_approval_action == "approve":
+            problem_statement = (
+                f"{problem_statement}\n\n"
+                "## Build Approval\n"
+                "The user explicitly approved this build plan for implementation."
+            ).strip()
+        elif build_approval_action == "review":
+            problem_statement = (
+                f"{problem_statement}\n\n"
+                "## User Plan Review Request\n"
+                f"{build_review_notes}\n\n"
+                "Revise and expand the implementation plan. Do not build code yet."
+            ).strip()
+        if source_plan_path:
+            problem_statement = f"{problem_statement}\n\nSource implementation plan: {source_plan_path}".strip()
 
     # Pre-flight validation via canonical MissionConfig
     try:
@@ -1862,6 +1899,15 @@ def api_set_mission_from_recommendation(rec_id):
 
     try:
         from suggestion_lifecycle import mark_suggestion_status
+        if requires_build_review:
+            try:
+                storage.update(rec_id, {
+                    "build_approval_status": "approved" if build_approval_action == "approve" else "review_requested",
+                    "build_review_notes": build_review_notes or None,
+                    "last_edited_at": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                _rlog.warning("SQLite build approval update failed", exc_info=True)
         mark_suggestion_status(
             rec_id,
             "queued",

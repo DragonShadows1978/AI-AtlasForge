@@ -97,7 +97,8 @@ Your task:
 2. List ALL files created or modified across the entire mission
 3. Summarize the complete journey from start to finish
 4. Provide lessons learned and recommendations
-5. **IMPORTANT**: Suggest ONE follow-up mission that would naturally extend or build upon this work
+5. Do NOT invent follow-up missions here. ANALYZING owns continuation decisions.
+   Include next_mission_recommendation only when a continuation was already identified in artifacts/continuation_missions.json.
 
 Respond with JSON:
 {{
@@ -189,7 +190,8 @@ Respond with JSON:
             # Mission complete
             final_report = response.get("final_report", {})
             deliverables = response.get("deliverables", [])
-            next_mission = response.get("next_mission_recommendation", {})
+            next_mission = response.get("next_mission_recommendation", {}) if continuation_missions else {}
+            mission_type = context.mission.get("mission_type", "full_rd")
 
             # Derive backward-compat next_mission_recommendation from manifest if not in response
             if not next_mission and continuation_missions:
@@ -212,6 +214,8 @@ Respond with JSON:
                         "final_report": final_report,
                         "workspace_dir": context.workspace_dir,
                         "continuation_missions": continuation_missions,
+                        "mission_type": mission_type,
+                        "execution_profile": mission_type,
                     }
                 ),
                 Event(
@@ -224,6 +228,14 @@ Respond with JSON:
                         "next_mission_recommendation": next_mission,
                         "continuation_missions": continuation_missions,
                         "final_report": final_report,
+                        "mission_type": mission_type,
+                        "execution_profile": mission_type,
+                        "started_at": context.mission.get("created_at"),
+                        "mission_workspace": context.mission.get("mission_workspace"),
+                        "mission_dir": context.mission.get("mission_dir"),
+                        "problem_statement": context.mission.get("problem_statement"),
+                        "cycle_history": context.cycle_history,
+                        "project_name": context.mission.get("project_name"),
                     }
                 )
             ]
