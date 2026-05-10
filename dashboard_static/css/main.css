@@ -97,12 +97,16 @@ h1 { color: var(--accent); font-size: 1.3em; }
 /* Layout */
 .container {
     display: grid;
-    /* Balanced 3-column layout: equal flexible widths with min/max constraints */
-    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(300px, 1.2fr);
-    gap: 15px;
-    padding: 15px;
+    /* Keep the activity rail from dominating desktop width. */
+    grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(280px, 0.95fr);
+    gap: 12px;
+    padding: 12px;
     height: calc(100vh - 140px);
     overflow: hidden;
+}
+
+.container > * {
+    min-width: 0;
 }
 
 /* Widget Columns with Independent Scroll */
@@ -112,6 +116,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     height: 100%;
     padding-right: 5px;
     scrollbar-gutter: stable;
+    min-width: 0;
 }
 
 /* Custom scrollbar styling for widget columns */
@@ -150,7 +155,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     }
     .container {
         /* Tablet: balanced columns that fit better on smaller screens */
-        grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(300px, 1.2fr);
+        grid-template-columns: minmax(250px, 1fr) minmax(250px, 1fr) minmax(280px, 0.95fr);
         height: auto;
         min-height: calc(100vh - 140px);
         overflow-x: auto;
@@ -491,7 +496,13 @@ h1 { color: var(--accent); font-size: 1.3em; }
 .btn.danger:hover { background: var(--red); color: white; }
 .btn.success { border-color: var(--green); color: var(--green); }
 .btn.success:hover { background: var(--green); color: var(--bg); }
-.btn-group { display: flex; gap: 8px; margin-top: 10px; }
+.btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    min-width: 0;
+}
 
 /* Mission Editor */
 .mission-input {
@@ -515,24 +526,36 @@ h1 { color: var(--accent); font-size: 1.3em; }
 
 /* Chat */
 .chat-container {
-    height: calc(100vh - 200px);
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    padding: 12px;
+    margin-bottom: 0;
 }
 .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 15px;
+    overflow-x: hidden;
+    min-width: 0;
+    max-width: 100%;
+    padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 .message {
-    max-width: 85%;
-    padding: 10px 14px;
+    max-width: min(92%, 42rem);
+    padding: 9px 12px;
     border-radius: 12px;
     font-size: 0.9em;
     line-height: 1.4;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    min-width: 0;
 }
 .message.human {
     align-self: flex-end;
@@ -549,6 +572,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     background: transparent;
     color: var(--text-dim);
     font-size: 0.8em;
+    max-width: 100%;
 }
 .message.suggestion {
     align-self: center;
@@ -557,6 +581,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     color: var(--purple, #bc8cff);
     font-size: 0.85em;
     font-style: italic;
+    max-width: 100%;
 }
 .message-meta {
     font-size: 0.75em;
@@ -747,15 +772,21 @@ h1 { color: var(--accent); font-size: 1.3em; }
     display: flex;
     gap: 4px;
     margin: 10px 0;
+    min-width: 0;
+    overflow: hidden;
 }
 .stage {
     flex: 1;
+    min-width: 0;
     padding: 6px 4px;
     text-align: center;
-    font-size: 0.7em;
+    font-size: clamp(0.58rem, 0.64vw, 0.7rem);
     border-radius: 4px;
     background: var(--border);
     color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .stage.active {
     background: var(--accent);
@@ -1554,11 +1585,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
 /* Quick-add form */
 .rec-quick-add {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 10px;
+    min-width: 0;
 }
 .rec-quick-add-input {
-    flex: 1;
+    flex: 1 1 150px;
+    min-width: 0;
     padding: 8px 12px;
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -1581,7 +1615,8 @@ h1 { color: var(--accent); font-size: 1.3em; }
     border-radius: 4px;
     color: var(--text);
     font-size: 0.85em;
-    flex-shrink: 0;
+    flex: 0 1 145px;
+    min-width: 0;
 }
 
 /* Filter select dropdown */
@@ -9292,11 +9327,13 @@ body.modal-open {
 /* Queue Controls */
 .queue-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 8px 0;
     margin-bottom: 10px;
     border-bottom: 1px solid var(--border);
+    min-width: 0;
 }
 
 .queue-toggle {
@@ -9576,14 +9613,17 @@ body.modal-open {
 /* Quick Add Form */
 .queue-add-form {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
+    min-width: 0;
 }
 
 .queue-input {
-    flex: 1;
+    flex: 1 1 170px;
+    min-width: 0;
     padding: 8px 10px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -9717,7 +9757,8 @@ body.modal-open {
     border-radius: 4px;
     color: var(--text);
     font-size: 0.85em;
-    min-width: 100px;
+    min-width: 0;
+    max-width: 125px;
 }
 
 .queue-priority-select:focus {
@@ -9727,6 +9768,7 @@ body.modal-open {
 
 /* Queue Cycles Input */
 .queue-cycles-input {
+    flex: 0 0 50px;
     width: 50px;
     padding: 6px 8px;
     text-align: center;
@@ -9735,6 +9777,23 @@ body.modal-open {
     border-radius: 4px;
     color: var(--text);
     font-size: 0.85em;
+}
+
+.queue-add-project-row {
+    display: flex;
+    flex: 1 1 100%;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+}
+
+.queue-project-input {
+    flex: 1 1 170px;
+    min-width: 0;
+}
+
+.btn-create-project {
+    flex: 0 0 auto;
 }
 
 .queue-cycles-input:focus {

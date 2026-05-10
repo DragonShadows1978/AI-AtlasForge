@@ -23,23 +23,25 @@ function _injectStyles() {
     style.textContent = `
         .activity-toggle-header {
             display: flex;
-            gap: 4px;
+            gap: 5px;
             align-items: center;
             padding: 0 0 8px;
             border-bottom: 1px solid var(--border);
             margin-bottom: 8px;
             flex-shrink: 0;
             flex-wrap: wrap;
+            min-width: 0;
         }
         .activity-tab-btn {
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 4px;
             background: transparent;
             border: 1px solid var(--border);
             color: var(--text-dim);
             cursor: pointer;
-            font-size: 0.8em;
+            font-size: 0.78em;
             white-space: nowrap;
+            min-width: 0;
         }
         .activity-tab-btn.active {
             background: var(--accent);
