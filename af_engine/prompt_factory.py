@@ -168,8 +168,16 @@ class PromptFactory:
 
             kb_section = self._format_kb_learnings(learnings)
 
-            # Insert after ground rules but before mission details
-            if "=== CURRENT MISSION ===" in prompt:
+            # Put memory before the task instructions. The PLANNING prompt tells
+            # the agent the KB context is above, so do not append it after the
+            # JSON response contract.
+            if "=== PLANNING STAGE ===" in prompt:
+                return prompt.replace(
+                    "=== PLANNING STAGE ===",
+                    f"{kb_section}\n=== PLANNING STAGE ===",
+                    1,
+                )
+            elif "=== CURRENT MISSION ===" in prompt:
                 parts = prompt.split("=== CURRENT MISSION ===", 1)  # maxsplit=1 prevents content loss
                 return f"{parts[0]}\n{kb_section}\n=== CURRENT MISSION ==={parts[1]}"
             else:
@@ -190,11 +198,13 @@ class PromptFactory:
 
         for learning in learnings:
             title = learning.get("title", "Untitled")
-            content = learning.get("content", "")
+            content = learning.get("content") or learning.get("description") or ""
             mission_id = learning.get("mission_id", "unknown")
-            category = learning.get("category", "general")
+            category = learning.get("category") or learning.get("learning_type") or "general"
+            confidence = learning.get("confidence_score")
 
-            lines.append(f"**{title}** [{category}] (from {mission_id})")
+            score = f" confidence={confidence:.2f}" if isinstance(confidence, (int, float)) else ""
+            lines.append(f"**{title}** [{category}{score}] (from {mission_id})")
             lines.append(content[:500])  # Truncate long content
             lines.append("")
 
@@ -262,7 +272,15 @@ class PromptFactory:
 
             ai_section = self._format_afterimage_memories(memories)
 
-            # Append to prompt
+            # For PLANNING, keep code memory before the stage instructions.
+            if "=== PLANNING STAGE ===" in prompt:
+                return prompt.replace(
+                    "=== PLANNING STAGE ===",
+                    f"{ai_section}\n\n=== PLANNING STAGE ===",
+                    1,
+                )
+
+            # Append to non-planning prompts.
             return f"{prompt}\n\n{ai_section}"
 
         except Exception as e:

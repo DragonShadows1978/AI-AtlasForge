@@ -40,11 +40,24 @@ import re as _re
 def _sanitize_for_log(value: str) -> str:
     """Strip control characters and newlines to prevent log injection.
 
-    Covers ASCII controls (\\x00-\\x1f, \\x7f) and Unicode line/paragraph
-    separators (U+2028, U+2029) which some terminals and log parsers treat
-    as line endings.
+    Covers ASCII controls (\\x00-\\x1f, \\x7f), Unicode line/paragraph
+    separators (U+2028, U+2029), and bidi override/isolate controls
+    (U+202A-U+202E, U+2066-U+2069) that can reorder visible log text.
     """
-    return _re.sub(r'[\x00-\x1f\x7f\u2028\u2029]', '', str(value))
+    return _re.sub(r'[\x00-\x1f\x7f\u2028\u2029\u202a-\u202e\u2066-\u2069]', '', str(value))
+
+
+def _validate_path_component(value: Any, label: str = "path component") -> str:
+    """Validate a resolver-produced value before using it as one path segment."""
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string, got {type(value).__name__}")
+    if not value or not value.strip():
+        raise ValueError(f"{label} must not be empty")
+    if value in {".", ".."} or "/" in value or "\\" in value or "\x00" in value:
+        raise ValueError(f"{label} must be a single safe path component")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError(f"{label} contains control characters")
+    return value
 
 
 # Prefixes used by prompt-injection attacks to override LLM instructions.
@@ -358,12 +371,16 @@ class StageOrchestrator:
                     research_context
                 )
 
-        # Inject AfterImage context for BUILDING stage
-        if stage == "BUILDING":
-            full_prompt = self.prompts.inject_afterimage_context(
+        # Inject AfterImage context for PLANNING and BUILDING stages. PLANNING
+        # uses the mission statement to recall similar prior code patterns
+        # before the agent writes its plan.
+        if stage in ("PLANNING", "BUILDING"):
+            afterimage_prompt = self.prompts.inject_afterimage_context(
                 full_prompt,
                 stage_context.problem_statement
             )
+            if isinstance(afterimage_prompt, str):
+                full_prompt = afterimage_prompt
 
         # Inject recovery context if available
         recovery_info = self._get_recovery_info()
@@ -520,7 +537,7 @@ class StageOrchestrator:
         )
 
         if result.message:
-            logger.info(f"Handler message: {result.message}")
+            logger.info("Handler message: %s", _sanitize_for_log(result.message))
 
         # Check if stage handler requests iteration increment
         # Only increment on ANALYZING -> BUILDING or ANALYZING -> PLANNING transitions
@@ -1202,6 +1219,7 @@ Continue the mission from where the previous cycle left off.
         resolved_project_name = None
         if resolve_project_name is not None:
             resolved_project_name = resolve_project_name(problem_statement, mid, config.project_name)
+            resolved_project_name = _validate_path_component(resolved_project_name, "resolved_project_name")
             mission_workspace = WORKSPACE_DIR / resolved_project_name / mid
             logger.info(f"Resolved project name: {resolved_project_name}")
         else:
@@ -1226,6 +1244,10 @@ Continue the mission from where the previous cycle left off.
 
         # Create mission directory (for config, analytics, drift validation)
         mission_dir = MISSIONS_DIR / mid
+        try:
+            mission_dir.resolve().relative_to(MISSIONS_DIR.resolve())
+        except ValueError:
+            raise ValueError(f"mission_id '{mid}' would escape MISSIONS_DIR: {mission_dir}")
         mission_dir.mkdir(parents=True, exist_ok=True)
 
         # Create workspace directories (may already exist if shared project)
@@ -1466,7 +1488,7 @@ Continue the mission from where the previous cycle left off.
                 next_item = queue[0]
                 next_item_id = next_item.get("id")
 
-            logger.info(f"Processing queued mission: {next_item.get('mission_title', 'Untitled')}")
+            logger.info("Processing queued mission: %s", _sanitize_for_log(next_item.get('mission_title', 'Untitled')))
 
             # Send completion notification for previous mission
             if QUEUE_NOTIFICATIONS_AVAILABLE and notify_mission_completed:
@@ -1595,6 +1617,7 @@ Continue the mission from where the previous cycle left off.
             resolved_project_name = None
             if PROJECT_NAME_RESOLVER_AVAILABLE and resolve_project_name:
                 resolved_project_name = resolve_project_name(problem_statement, mission_id, user_project_name)
+                resolved_project_name = _validate_path_component(resolved_project_name, "resolved_project_name")
                 mission_workspace = WORKSPACE_DIR / resolved_project_name / mission_id
                 logger.info(f"Queue mission resolved project name: {resolved_project_name}")
             else:
@@ -1619,6 +1642,10 @@ Continue the mission from where the previous cycle left off.
 
             # Create mission directory (for config, analytics, drift validation)
             mission_dir = MISSIONS_DIR / mission_id
+            try:
+                mission_dir.resolve().relative_to(MISSIONS_DIR.resolve())
+            except ValueError:
+                raise ValueError(f"mission_id '{mission_id}' would escape MISSIONS_DIR: {mission_dir}")
             mission_dir.mkdir(parents=True, exist_ok=True)
 
             # Create workspace directories (may already exist if shared project)
@@ -1703,8 +1730,12 @@ Continue the mission from where the previous cycle left off.
                 pass  # websocket_events not available
 
             logger.info(f"Created mission {mission_id} from queue. Auto-start signal written.")
-            logger.info(f"Queued mission started: {queue_item.get('mission_title', 'Untitled')} "
-                       f"(new_mission_id={mission_id}, queue_item_id={queue_item.get('id')})")
+            logger.info(
+                "Queued mission started: %s (new_mission_id=%s, queue_item_id=%s)",
+                _sanitize_for_log(queue_item.get('mission_title', 'Untitled')),
+                mission_id,
+                queue_item.get('id'),
+            )
 
             # Small delay to ensure filesystem sync before verification
             time.sleep(0.01)  # 10ms

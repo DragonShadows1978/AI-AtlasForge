@@ -23,6 +23,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Write|Edit|Bash|Grep|Glob|WebFetch|WebSearch|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/exploration-memory-hook.py"
+          }
+        ]
+      }
     ]
   }
 }

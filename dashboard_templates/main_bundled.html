@@ -26,10 +26,10 @@
         These prefetch hints are optional - if stale, lazy loading still works,
         but users experience a brief delay on first tab access.
     -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-54FGZE3M.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-HIXBYTBE.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/missionlogs-KDVLL22N.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/investigation-history-PVTY256A.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-MZJ7DKLS.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/lessons-SPT5PTKP.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/missionlogs-OEC2NLS4.js" as="script">
+    <link rel="prefetch" href="/static/dist/chunks/investigation-history-FJEX5S4F.js" as="script">
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->
@@ -105,6 +105,7 @@
         header{background:var(--panel);border-bottom:1px solid var(--border);padding:15px 20px;display:flex;flex-direction:column;gap:10px}
         .header-row-1{display:flex;justify-content:space-between;align-items:center}
         .header-row-2{display:flex;align-items:center;gap:20px}
+        @media(min-width:901px){.header-row-2{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);column-gap:20px}.header-row-2 .status-group{grid-column:1;justify-self:start;min-width:0}.header-row-2 .controls-group{grid-column:2;justify-self:center}}
         h1{color:var(--accent);font-size:1.3em}
 
         /* Breathing animation for AtlasForge Working status */
@@ -640,7 +641,8 @@
                 <div id="rd-mode-controls">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
                         <label style="font-size: 0.85em; color: var(--text-dim);">Project:</label>
-                        <input type="text" id="project-name-input" placeholder="Auto-detect from mission" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 180px; font-size: 0.85em;">
+                        <input type="text" id="project-name-input" list="mission-project-list" placeholder="Auto-detect from mission" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); width: 180px; font-size: 0.85em;">
+                        <datalist id="mission-project-list"></datalist>
                         <label style="font-size: 0.85em; color: var(--text-dim);">Cycles:</label>
                         <select id="cycle-budget-input" style="padding: 5px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
                             <option value="1">1</option>
@@ -722,35 +724,17 @@
                 <div class="card-header" onclick="toggleCard('mission-suggestions')">
                     <h3>Mission Suggestions <span id="rec-count" class="badge">0</span>
                         <button class="btn btn-small merge-picker-btn" onclick="event.stopPropagation();openMergePicker()" title="Select suggestions to merge into a single mission">Merge Suggestions</button>
+                        <button class="btn btn-small" onclick="event.stopPropagation();openManageSuggestions()" title="Review and delete stored suggestions">Manage Suggestions</button>
                         <button class="btn btn-small" onclick="event.stopPropagation();refreshAllTags()" title="Re-run auto-tagging on all suggestions">Refresh Tags</button>
                     </h3>
                     <button class="widget-settings-btn" onclick="event.stopPropagation(); openWidgetSettings(this)" title="Panel settings">&#9881;</button><span class="collapse-toggle">&#9660;</span>
-                </div>
-                <!-- Health Summary Bar - outside card-content so visible when collapsed -->
-                <div id="rec-health-summary" class="rec-health-summary" style="display: none;">
-                    <div class="rec-health-stat hot" onclick="filterByHealth('hot')" title="Click to filter hot items">
-                        <span class="label">Hot</span>
-                        <span id="health-hot-count" class="count">0</span>
-                    </div>
-                    <div class="rec-health-stat stale" onclick="filterByHealth('stale')" title="Click to filter stale items">
-                        <span class="label">Stale</span>
-                        <span id="health-stale-count" class="count">0</span>
-                    </div>
-                    <div class="rec-health-stat needs-review" onclick="filterByHealth('needs_review')" title="Click to filter items needing review">
-                        <span class="label">Review</span>
-                        <span id="health-review-count" class="count">0</span>
-                    </div>
-                    <div class="rec-health-stat healthy" onclick="filterByHealth('healthy')" title="Click to filter healthy items">
-                        <span class="label">Healthy</span>
-                        <span id="health-healthy-count" class="count">0</span>
-                    </div>
-                    <span id="rec-filter-count" class="rec-filter-count" style="display: none;"></span>
-                    <button class="btn btn-tiny" onclick="clearAllFilters()" title="Clear all filters" style="margin-left: auto;">Clear</button>
                 </div>
                 <div class="card-content">
                     <!-- Quick-Add Form -->
                     <div class="rec-quick-add">
                         <input type="text" id="rec-quick-add-title" class="rec-quick-add-input" placeholder="Add new suggestion..." onkeypress="if(event.key==='Enter')submitQuickAdd()">
+                        <input type="text" id="rec-quick-add-project" class="rec-quick-add-input" list="rec-quick-add-project-list" placeholder="Project name...">
+                        <datalist id="rec-quick-add-project-list"></datalist>
                         <select id="rec-quick-add-type" class="rec-quick-add-type-select" title="Execution profile">
                             <option value="full_rd" selected>Full R&amp;D</option>
                             <option value="plan_only">Plan Only</option>
@@ -771,6 +755,12 @@
                             <option value="health_status">Health Status</option>
                         </select>
                         <button id="rec-sort-dir-btn" class="btn btn-tiny" onclick="toggleSortDirection()" title="Toggle sort direction">&#8595; Desc</button>
+                        <label>Project:</label>
+                        <select id="rec-project-filter" class="rec-filter-select" onchange="filterByProject()">
+                            <option value="">All Projects</option>
+                        </select>
+                        <label>Search:</label>
+                        <input type="search" id="rec-search-filter" class="rec-search-filter" placeholder="Date, type, tag, title..." oninput="filterRecommendationsBySearch()">
                         <label>Tag:</label>
                         <select id="rec-tag-filter" class="rec-filter-select" onchange="filterByTag()">
                             <option value="">All Tags</option>
@@ -783,6 +773,8 @@
                             <option value="security">security</option>
                             <option value="ui">ui</option>
                         </select>
+                        <button class="btn btn-tiny" onclick="clearAllFilters()" title="Clear suggestion filters">Clear Filters</button>
+                        <span id="rec-filter-count" class="rec-filter-count" style="display: none;"></span>
                     </div>
                     <div id="legacy-recommendations-list" class="recommendations-list">
                         <div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>
@@ -2773,6 +2765,10 @@
                 }
             }
 
+            /**
+             * Build an update-panel button. `onclick` must always be a trusted
+             * literal handler string; it is not escaped as user content.
+             */
             function _btn(cls, id, onclick, label) {
                 return '<button class="up-btn ' + cls + '"' +
                     (id ? ' id="' + _esc(id) + '"' : '') +
@@ -2781,7 +2777,7 @@
             }
 
             function _esc(s) {
-                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
             }
 
             // ── Panel toggle ───────────────────────────────────────────────────
@@ -3315,8 +3311,10 @@
                     <label>Project:</label>
                     <input type="text" id="rec-project-name-input"
                            class="mission-input"
+                           list="rec-project-list"
                            style="min-height: auto; padding: 8px; width: 220px; font-size: 0.9em;"
                            placeholder="Auto-detecting...">
+                    <datalist id="rec-project-list"></datalist>
                 </div>
                 <div class="rec-detail">
                     <label>Cycle Budget:</label>
@@ -3326,11 +3324,6 @@
                         <option value="3" selected>3 cycles</option>
                         <option value="5">5 cycles</option>
                         <option value="10">10 cycles</option>
-                        <option value="20">20 cycles</option>
-                        <option value="30">30 cycles</option>
-                        <option value="40">40 cycles</option>
-                        <option value="50">50 cycles</option>
-                        <option value="100">100 cycles</option>
                     </select>
                 </div>
                 <div class="rec-detail">
@@ -3422,6 +3415,24 @@
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeMergePicker()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Suggestions Modal -->
+    <div id="manage-suggestions-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3>Manage Suggestions</h3>
+                <button class="modal-close" onclick="closeManageSuggestions()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="manage-suggestions-body">
+                    <div class="loading-spinner">Loading suggestions...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeManageSuggestions()">Close</button>
             </div>
         </div>
     </div>

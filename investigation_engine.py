@@ -60,7 +60,7 @@ SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
 
 # Model name allowlist regex — prevents shell-injection via env-supplied model names
-_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,127}$')
+_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,127}$')
 
 
 def _env_flag_enabled(name: str, default: bool = False) -> bool:
@@ -710,6 +710,7 @@ def invoke_claude(
     artifact_event_file: Optional[Path] = None,
     artifact_sources_file: Optional[Path] = None,
     artifact_label: Optional[str] = None,
+    stream_context: str = "investigation",
 ) -> tuple[str, float]:
     """
     Invoke Claude CLI with the given prompt.
@@ -820,7 +821,9 @@ def invoke_claude(
                 stream_stdout_to_file as _stream_fn,
                 reconstruct_text_from_stream_file as _recon_fn,
             )
-            _stream_file = _reg('investigation', _agent_id, _agent_label, pid=None)
+            if stream_context not in {"mission", "investigation"}:
+                stream_context = "investigation"
+            _stream_file = _reg(stream_context, _agent_id, _agent_label, pid=None)
             _comp = _comp_fn
             _recon = _recon_fn
         except Exception as e:

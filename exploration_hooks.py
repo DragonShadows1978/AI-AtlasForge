@@ -740,6 +740,59 @@ def get_drift_history(force_reload: bool = False) -> List[Dict]:
     return []
 
 
+def _current_mission_is_active() -> bool:
+    """Return True when mission.json describes a currently active mission."""
+    try:
+        import io_utils
+        mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        stage = str(mission.get('current_stage') or '').upper()
+        status = str(mission.get('status') or '').lower()
+        if stage in {'COMPLETE', 'COMPLETED'}:
+            return False
+        if status in {'complete', 'completed', 'stopped', 'failed', 'cancelled'}:
+            return False
+        return bool(mission.get('mission_id'))
+    except Exception:
+        return False
+
+
+def _load_global_exploration_graph():
+    """Load global exploration memory if it exists and contains data."""
+    from atlasforge_enhancements import ExplorationGraph
+
+    if not EXPLORATION_DIR.exists():
+        return None
+    try:
+        graph = ExplorationGraph(storage_path=EXPLORATION_DIR)
+        return graph if len(graph.nodes) > 0 else None
+    except Exception:
+        return None
+
+
+def _select_dashboard_exploration_graph(force_reload: bool = False):
+    """
+    Select the exploration graph dashboard widgets should read.
+
+    Active missions get mission-local memory first. When no mission is active,
+    prefer global memory so a stale completed mission in state/mission.json does
+    not hide the historical/global Exploration Memory graph.
+    """
+    global_graph = _load_global_exploration_graph()
+    enhancer = get_current_enhancer(force_reload=force_reload)
+    mission_graph = None
+    if enhancer and getattr(enhancer, 'exploration_graph', None) is not None:
+        if len(enhancer.exploration_graph.nodes) > 0:
+            mission_graph = enhancer.exploration_graph
+
+    if _current_mission_is_active() and mission_graph:
+        return mission_graph, 'mission'
+    if global_graph:
+        return global_graph, 'global'
+    if mission_graph:
+        return mission_graph, 'mission'
+    return None, None
+
+
 def get_recent_explorations(limit: int = 10, force_reload: bool = False) -> List[Dict]:
     """
     Get recently explored items.
@@ -751,24 +804,7 @@ def get_recent_explorations(limit: int = 10, force_reload: bool = False) -> List
     Returns:
         List of recent explorations with timestamps
     """
-    from atlasforge_enhancements import ExplorationGraph
-
-    # First try mission-specific enhancer
-    enhancer = get_current_enhancer(force_reload=force_reload)
-    graph = None
-
-    if enhancer and len(enhancer.exploration_graph.nodes) > 0:
-        graph = enhancer.exploration_graph
-    else:
-        # Try global exploration data
-        global_graph_path = EXPLORATION_DIR
-        if global_graph_path.exists():
-            try:
-                global_graph = ExplorationGraph(storage_path=global_graph_path)
-                if len(global_graph.nodes) > 0:
-                    graph = global_graph
-            except Exception:
-                pass
+    graph, _source = _select_dashboard_exploration_graph(force_reload=force_reload)
 
     if graph:
         try:
@@ -809,41 +845,11 @@ def get_af_dashboard_data(force_reload: bool = False) -> Dict:
     Returns:
         Dict with all dashboard data
     """
-    from atlasforge_enhancements import ExplorationGraph
     from datetime import datetime
 
-    enhancer = get_current_enhancer(force_reload=force_reload)
+    graph, source = _select_dashboard_exploration_graph(force_reload=force_reload)
 
-    # If no enhancer or empty graph, try global exploration data
-    if not enhancer or len(enhancer.exploration_graph.nodes) == 0:
-        global_graph_path = EXPLORATION_DIR
-        if global_graph_path.exists():
-            try:
-                global_graph = ExplorationGraph(storage_path=global_graph_path)
-                if len(global_graph.nodes) > 0:
-                    # Return global graph stats
-                    stats = global_graph.get_exploration_stats()
-                    return {
-                        "exploration": {
-                            "total_nodes": stats.get('total_nodes', 0),
-                            "total_edges": stats.get('total_edges', 0),
-                            "total_insights": stats.get('total_insights', 0),
-                            "nodes_by_type": stats.get('nodes_by_type', {}),
-                            "top_tags": stats.get('top_tags', {}),
-                            "most_explored": stats.get('most_explored', [])
-                        },
-                        "drift_history": get_drift_history(),
-                        "recent_explorations": get_recent_explorations(10),
-                        "coverage_pct": 0.0,
-                        "insight_coverage": global_graph.get_insight_coverage(),
-                        "scaffold_effectiveness": {"message": "No calibration data yet"},
-                        "generated_at": datetime.now().isoformat(),
-                        "source": "global"
-                    }
-            except Exception:
-                pass  # Fall through to default response
-
-    if not enhancer:
+    if not graph:
         return {
             "error": "No enhancer available",
             "exploration": {"total_nodes": 0, "total_insights": 0, "total_edges": 0},
@@ -853,17 +859,17 @@ def get_af_dashboard_data(force_reload: bool = False) -> Dict:
         }
 
     try:
-        stats = enhancer.get_exploration_stats()
+        stats = graph.get_exploration_stats()
 
         # Calculate coverage percentage (nodes with embeddings / total nodes)
         nodes_with_embeddings = sum(
-            1 for n in enhancer.exploration_graph.nodes.values()
+            1 for n in graph.nodes.values()
             if n.embedding is not None
         )
         coverage_pct = (nodes_with_embeddings / max(stats.get('total_nodes', 1), 1)) * 100
 
         # Also get insight coverage
-        insight_coverage = enhancer.exploration_graph.get_insight_coverage()
+        insight_coverage = graph.get_insight_coverage()
 
         return {
             "exploration": {
@@ -878,8 +884,9 @@ def get_af_dashboard_data(force_reload: bool = False) -> Dict:
             "recent_explorations": get_recent_explorations(10),
             "coverage_pct": round(coverage_pct, 1),
             "insight_coverage": insight_coverage,
-            "scaffold_effectiveness": enhancer.get_scaffold_effectiveness() if hasattr(enhancer, 'get_scaffold_effectiveness') else {},
-            "generated_at": enhancer.exploration_graph.get_exploration_stats().get('generated_at')
+            "scaffold_effectiveness": {"message": "No calibration data yet"} if source == 'global' else {},
+            "generated_at": stats.get('generated_at') or datetime.now().isoformat(),
+            "source": source
         }
     except Exception as e:
         return {"error": str(e)}
@@ -899,24 +906,7 @@ def get_visualization_data(width: float = 800, height: float = 600, force_reload
     Returns:
         Dict with nodes, edges, and stats for visualization
     """
-    from atlasforge_enhancements import ExplorationGraph
-
-    # First try mission-specific enhancer
-    enhancer = get_current_enhancer(force_reload=force_reload)
-    graph = None
-
-    if enhancer and len(enhancer.exploration_graph.nodes) > 0:
-        graph = enhancer.exploration_graph
-    else:
-        # Try global exploration data
-        global_graph_path = EXPLORATION_DIR
-        if global_graph_path.exists():
-            try:
-                global_graph = ExplorationGraph(storage_path=global_graph_path)
-                if len(global_graph.nodes) > 0:
-                    graph = global_graph
-            except Exception:
-                pass
+    graph, _source = _select_dashboard_exploration_graph(force_reload=force_reload)
 
     if not graph:
         return {

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+import pytest
 
 
 AF_ROOT = Path(__file__).resolve().parent.parent
@@ -10,6 +13,178 @@ if str(AF_ROOT) not in sys.path:
     sys.path.insert(0, str(AF_ROOT))
 
 import agent_stream_manager as asm  # noqa: E402
+
+
+def test_agent_context_rejects_overlong_agent_id():
+    with pytest.raises(ValueError, match="at most"):
+        asm.AgentContext("a" * (asm._MAX_AGENT_ID_LENGTH + 1), "mission", "BUILDING Agent 1")
+
+
+def test_agent_context_rejects_negative_pid():
+    with pytest.raises(ValueError, match="pid"):
+        asm.AgentContext("agent_neg_pid", "mission", "BUILDING Agent 1", pid=-1)
+
+
+def test_wrap_with_seq_strips_crlf():
+    wrapped = asm._wrap_with_seq("hello\r\n", 1)
+
+    assert json.loads(wrapped)["raw"] == "hello"
+
+
+def test_copy_agent_fields_preserves_epoch_started_at():
+    result = asm._copy_agent_fields(
+        {
+            "agent_id": "epoch",
+            "started_at": 0,
+            "spawned_at": 123,
+            "completed_at": 2,
+        }
+    )
+
+    assert result["started_at"] == 0
+    assert result["duration_seconds"] == 2
+
+
+def test_parse_stream_line_rejects_non_string_input():
+    assert asm._parse_stream_line(None) == (None, None)
+    assert asm._parse_stream_line(123) == (None, None)
+
+
+def test_workspace_paths_match_rejects_non_string_input():
+    assert asm._workspace_paths_match(123, "/tmp/workspace") is False
+    assert asm._workspace_paths_match("/tmp/workspace", ["bad"]) is False
+
+
+def test_is_pid_alive_rejects_non_int_pid():
+    assert asm._is_pid_alive("../../proc/1") is False
+    assert asm._is_pid_alive("1") is False
+    assert asm._is_pid_alive(True) is False
+    assert asm._is_pid_alive(0) is False
+
+
+def test_update_pid_rejects_negative_pid():
+    manager = asm.AgentStreamManager()
+
+    with pytest.raises(ValueError, match="positive"):
+        manager.update_pid("missing", -1)
+
+
+def test_get_agent_stream_lines_rejects_non_string_agent_id():
+    manager = asm.AgentStreamManager()
+    assert manager.get_agent_stream_lines(123) == []
+    assert manager.get_agent_stream_lines("") == []
+
+
+def test_register_agent_cleans_init_lock_after_context_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    manager = asm.AgentStreamManager()
+
+    with pytest.raises(ValueError, match="context must be"):
+        manager.register_agent("bad-context", "agent_bad", "BUILDING Agent 1")
+
+    assert "agent_bad" not in manager._agent_init_locks
+    assert "agent_bad" not in manager._agents
+
+
+def test_complete_agent_caps_error_tombstone(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    manager = asm.AgentStreamManager()
+    ctx = asm.AgentContext("agent_err", "mission", "BUILDING Agent 1")
+    manager._agents = {"agent_err": ctx}
+    monkeypatch.setattr(manager, "_save_state_locked", lambda: None)
+    monkeypatch.setattr(manager, "_write_snapshot", lambda _ctx: None)
+    monkeypatch.setattr(manager, "_log_agent_error", lambda _ctx, _error: None)
+
+    manager.complete_agent("agent_err", error="x" * (asm._MAX_AGENT_ERROR_LENGTH + 100))
+
+    tombstone = manager._agents["agent_err"]
+    assert tombstone["status"] == "error"
+    assert len(tombstone["error"]) == asm._MAX_AGENT_ERROR_LENGTH
+
+
+def test_load_disk_agents_rejects_non_object_root(tmp_path, caplog):
+    manager = asm.AgentStreamManager()
+    manager.STATE_FILE = tmp_path / "active_agents.json"
+    manager.STATE_FILE.write_text("[]", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert manager._load_disk_agents() == {}
+
+    assert "active_agents.json root" in caplog.text
+
+
+def test_get_agent_stream_lines_rejects_non_object_snapshot(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    manager = asm.AgentStreamManager()
+    snapshot = tmp_path / "mission_done.snapshot.json"
+    snapshot.write_text("[]", encoding="utf-8")
+    manager._agents = {
+        "mission_done": {
+            "_tombstone": True,
+            "agent_id": "mission_done",
+            "context": "mission",
+            "label": "Done",
+            "status": "complete",
+            "snapshot_file": str(snapshot),
+        }
+    }
+
+    with caplog.at_level(logging.WARNING):
+        assert manager.get_agent_stream_lines("mission_done") == []
+
+    assert "agent snapshot root" in caplog.text
+
+
+def test_parse_jsonl_file_rejects_negative_max_bytes(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    path = tmp_path / "mission_agent.jsonl"
+    path.write_text("", encoding="utf-8")
+    manager = asm.AgentStreamManager()
+
+    with pytest.raises(ValueError, match="max_bytes"):
+        manager._parse_jsonl_file(path, max_bytes=-1)
+
+
+def test_read_jsonl_lines_capped_rejects_negative_max_bytes(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    path = tmp_path / "mission_agent.jsonl"
+    path.write_text("", encoding="utf-8")
+    manager = asm.AgentStreamManager()
+
+    with pytest.raises(ValueError, match="max_bytes"):
+        manager._read_jsonl_lines_capped(path, max_bytes=-1)
+
+
+def test_parse_jsonl_file_uses_file_timestamp_for_disk_events(monkeypatch, tmp_path):
+    monkeypatch.setattr(asm, "STREAM_DIR", tmp_path)
+    path = tmp_path / "mission_agent.jsonl"
+    path.write_text(
+        json.dumps({"seq": 1, "raw": json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hi"}]}})}) + "\n",
+        encoding="utf-8",
+    )
+    manager = asm.AgentStreamManager()
+
+    lines = manager._parse_jsonl_file(path)
+
+    assert lines[0]["timestamp"]
+
+
+def test_tool_use_with_falsy_input_is_preserved():
+    event = asm._parse_jsonl_line(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "zero_tool", "input": 0}
+                    ]
+                },
+            }
+        )
+    )
+
+    assert event["event_type"] == "tool_call"
+    assert "0" in event["display_text"]
 
 
 def test_parse_jsonl_line_codex_agent_message():

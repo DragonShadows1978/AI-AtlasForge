@@ -102,6 +102,7 @@ class FetchedSource:
     content_type: str = "unknown"  # html, pdf, text, json
     truncated: bool = False
     original_length: int = 0
+    from_wayback: bool = False
 
     @property
     def is_valid(self) -> bool:
@@ -233,6 +234,22 @@ class ValidationConfig:
 
     # Cache directory - if None, uses default
     cache_dir: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self._validate_int_field("parallel_validators", min_value=1)
+        self._validate_int_field("fetch_timeout_seconds", min_value=1)
+        self._validate_int_field("cache_ttl_hours", min_value=0)
+        self._validate_int_field("max_claims_per_finding", min_value=1)
+        self._validate_int_field("max_source_chars", min_value=1)
+
+    def _validate_int_field(self, field_name: str, *, min_value: int) -> None:
+        value = getattr(self, field_name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{field_name} must be an integer, got {type(value).__name__}")
+        if value < min_value:
+            comparator = ">=" if min_value == 0 else ">"
+            threshold = min_value if min_value == 0 else min_value - 1
+            raise ValueError(f"{field_name} must be {comparator} {threshold}, got {value}")
 
     def to_dict(self) -> dict:
         return {

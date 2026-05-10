@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+import init_guard as _init_guard
 from af_engine.mission_profiles import (
     SMALL_PATCH_LINE_CAP,
     allow_code_writes,
@@ -42,7 +43,12 @@ from init_guard import InitGuard
 # overlay logic, not the workspace gate.
 # ---------------------------------------------------------------------------
 
-AF_ROOT = os.environ.get("ATLASFORGE_ROOT", "/home/vader/AI-AtlasForge")
+AF_ROOT = os.environ.get(
+    "ATLASFORGE_ROOT",
+    str(Path(__file__).resolve().parents[2]),
+)
+AF_ROOT = os.path.realpath(AF_ROOT)
+_init_guard._WORKSPACE_ROOTS = [AF_ROOT, "/tmp/atlasforge"]
 
 
 def _ws(rel: str) -> str:
@@ -52,7 +58,9 @@ def _ws(rel: str) -> str:
 
 SRC_PATH = _ws("src/foo.py")
 ARTIFACTS_PATH = _ws("artifacts/plan.md")
+ARTIFACTS_SOURCE_PATH = _ws("artifacts/generated.py")
 RESEARCH_PATH = _ws("research/notes.md")
+RESEARCH_SOURCE_PATH = _ws("research/probe.js")
 TESTS_PATH = _ws("tests/test_foo.py")
 
 
@@ -79,6 +87,23 @@ def test_allow_code_writes_false_allows_artifacts_research_writes():
     ok_r, _ = InitGuard.validate_write_path("BUILDING", RESEARCH_PATH, mission=mission)
     assert ok_a is True
     assert ok_r is True
+
+
+def test_allow_code_writes_false_blocks_source_like_artifacts_research_files():
+    """No-code profiles may write notes/plans, but not source files hidden there."""
+    mission = apply_mission_type_profile({}, "plan_only")
+
+    ok_a, reason_a = InitGuard.validate_write_path(
+        "BUILDING", ARTIFACTS_SOURCE_PATH, mission=mission
+    )
+    ok_r, reason_r = InitGuard.validate_write_path(
+        "BUILDING", RESEARCH_SOURCE_PATH, mission=mission
+    )
+
+    assert ok_a is False
+    assert ok_r is False
+    assert "code writes" in reason_a
+    assert "code writes" in reason_r
 
 
 def test_allow_code_writes_false_planning_unaffected():
@@ -122,6 +147,16 @@ def test_allow_implementation_false_blocks_testing_source_writes():
     assert "implementation" in reason.lower() or "profile" in reason.lower()
 
 
+def test_allow_implementation_false_blocks_planning_source_writes():
+    """test_red_team profile must block source writes even if resumed into PLANNING."""
+    mission = apply_mission_type_profile({}, "test_red_team")
+
+    ok, reason = enforce_profile_implementation(mission, "PLANNING", SRC_PATH)
+
+    assert ok is False
+    assert "implementation" in reason.lower() or "profile" in reason.lower()
+
+
 def test_allow_implementation_false_allows_tests_research_writes():
     """test_red_team must still allow tests/research writes."""
     mission = apply_mission_type_profile({}, "test_red_team")
@@ -155,6 +190,30 @@ def test_optional_patch_if_small_blocks_large_source_patch():
     )
     assert ok is False
     assert str(too_big) in reason or "exceeds" in reason
+
+
+def test_optional_patch_if_small_rejects_negative_added_lines():
+    """Negative line counts are invalid, not a tiny patch."""
+    mission = apply_mission_type_profile({}, "bug_hunt")
+
+    ok, reason = enforce_profile_implementation(
+        mission, "TESTING", SRC_PATH, added_lines=-1
+    )
+
+    assert ok is False
+    assert "negative" in reason
+
+
+def test_optional_patch_if_small_requires_added_line_count_for_source_patch():
+    """Unknown patch size must fail closed for bug_hunt source edits."""
+    mission = apply_mission_type_profile({}, "bug_hunt")
+
+    ok, reason = enforce_profile_implementation(
+        mission, "TESTING", SRC_PATH, added_lines=None
+    )
+
+    assert ok is False
+    assert "line count" in reason
 
 
 def test_allow_implementation_missing_means_unrestricted():
@@ -198,6 +257,31 @@ def test_requires_existing_plan_satisfied_when_plan_present(tmp_path: Path):
 
     assert requires_existing_plan(mission) is True
     assert (tmp_path / "artifacts" / "implementation_plan.md").exists()
+
+
+def test_conductor_requires_existing_plan_on_resume_iteration(tmp_path: Path):
+    """Crash-recovery resumes still need the required plan before BUILDING."""
+    import atlasforge_conductor as conductor
+
+    mission = apply_mission_type_profile({}, "build_only")
+    mission["mission_workspace"] = str(tmp_path)
+    mission["iteration"] = 3
+
+    assert conductor._requires_existing_plan_missing(mission, "BUILDING") is True
+
+
+def test_conductor_redirects_disabled_stage_without_later_stage_to_complete():
+    """Disabled post-handler targets must complete even when stop_after is false."""
+    import atlasforge_conductor as conductor
+
+    mission = {
+        "enabled_stages": ["PLANNING"],
+        "stop_after_profile_complete": False,
+    }
+
+    assert conductor._redirect_disabled_profile_stage(
+        mission, "PLANNING", "BUILDING"
+    ) == "COMPLETE"
 
 
 def test_requires_existing_plan_missing_for_other_profiles():
@@ -285,10 +369,9 @@ def test_enforce_profile_implementation_unknown_value_fails_closed():
 
 
 def test_enforce_profile_implementation_non_implementation_stage_passes():
-    """The flag is no-op outside BUILDING/TESTING."""
+    """The flag is no-op outside PLANNING/BUILDING/TESTING."""
     mission = apply_mission_type_profile({}, "test_red_team")
-    ok, _ = enforce_profile_implementation(mission, "PLANNING", SRC_PATH)
-    assert ok is True
+
     ok, _ = enforce_profile_implementation(mission, "ANALYZING", SRC_PATH)
     assert ok is True
 

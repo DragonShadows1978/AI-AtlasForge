@@ -36,6 +36,12 @@ function copyMission() {
 let recommendations = [];
 let selectedRecId = null;
 
+function normalizeCycleBudget(value, fallback = 3) {
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed)) return fallback;
+    return Math.max(1, Math.min(10, parsed));
+}
+
 async function loadRecommendations() {
     const data = await api('/api/recommendations');
     recommendations = data.items || [];
@@ -64,7 +70,7 @@ function renderRecommendations() {
                 <div class="rec-item-preview">${escapeHtml((rec.mission_description || '').substring(0, 100))}${(rec.mission_description || '').length > 100 ? '...' : ''}</div>
             </div>
             <div class="rec-item-meta">
-                <span class="rec-cycles-badge">${escapeHtml(String(rec.suggested_cycles || 3))} cycles</span>
+                <span class="rec-cycles-badge">${escapeHtml(String(normalizeCycleBudget(rec.suggested_cycles)))} cycles</span>
                 <span>${escapeHtml(formatDate(rec.created_at))}</span>
             </div>
         </div>
@@ -91,7 +97,7 @@ function openRecModal(recId) {
 
     // Set suggested cycles
     const cyclesSelect = document.getElementById('rec-modal-cycles');
-    const suggestedCycles = rec.suggested_cycles || 3;
+    const suggestedCycles = normalizeCycleBudget(rec.suggested_cycles);
     cyclesSelect.value = suggestedCycles;
 
     document.getElementById('rec-modal').style.display = 'flex';
@@ -116,7 +122,7 @@ async function deleteRecommendation() {
 async function setMissionFromRec() {
     if (!selectedRecId) return;
 
-    const cycleBudget = parseInt(document.getElementById('rec-modal-cycles').value) || 3;
+    const cycleBudget = normalizeCycleBudget(document.getElementById('rec-modal-cycles').value);
 
     const data = await api('/api/recommendations/' + selectedRecId + '/set-mission', 'POST', {
         cycle_budget: cycleBudget

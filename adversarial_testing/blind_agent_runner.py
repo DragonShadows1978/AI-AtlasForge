@@ -1140,6 +1140,7 @@ class BlindAgentRedTeam:
                 _stderr_thread.start()
 
             stdout_text = ""
+            stderr_text = ""
             try:
                 if streaming_enabled and stream_file:
                     # Streaming path: feed stdin manually because communicate() is not used.
@@ -1182,7 +1183,7 @@ class BlindAgentRedTeam:
                             except (IOError, OSError) as _read_err:
                                 logger.debug("stdout read error for agent %s: %s", agent_id, _read_err)
                 else:
-                    stdout_text, _ = proc.communicate(input=prompt, timeout=_kill_timeout)
+                    stdout_text, stderr_text = proc.communicate(input=prompt, timeout=_kill_timeout)
             except subprocess.TimeoutExpired:
                 logger.warning(
                     "[RED_TEAM] Agent[%d] SAFETY TIMEOUT after %.0fs — process may be hung or crashed",
@@ -1240,7 +1241,7 @@ class BlindAgentRedTeam:
                     except (IOError, OSError):
                         pass
                     try:
-                        proc.stderr.read(64 * 1024)
+                        stderr_text = proc.stderr.read(64 * 1024)
                     except (IOError, OSError):
                         pass
                 # On timeout: read whatever was written to findings_file
@@ -1265,6 +1266,13 @@ class BlindAgentRedTeam:
                         logger.warning("Agent %s stderr (rc=%s): %s", agent_id, _rc, _stderr_text)
                     else:
                         logger.debug("Agent %s stderr: %s", agent_id, _stderr_text)
+            elif stderr_text:
+                _stderr_text = stderr_text[:2000]
+                _rc = proc.returncode if proc is not None else None
+                if _rc not in (0, None):
+                    logger.warning("Agent %s stderr (rc=%s): %s", agent_id, _rc, _stderr_text)
+                else:
+                    logger.debug("Agent %s stderr: %s", agent_id, _stderr_text)
 
             elapsed = time.time() - start_time
 
@@ -1604,7 +1612,7 @@ class BlindAgentRedTeam:
 
         results: List[dict] = []
 
-        _complete_raw_matches = re.findall(r'---BUG---\s*(.*?)\s*---END BUG---', content, re.DOTALL)
+        _complete_raw_matches = re.findall(r'---BUG---\s*((?:(?!---(?:BUG|SUSPECTED)---).)*?)\s*---END BUG---', content, re.DOTALL)
         for raw in _complete_raw_matches:
             try:
                 file_val = _field("File", raw).strip()
@@ -1677,7 +1685,11 @@ class BlindAgentRedTeam:
             except Exception as e:
                 logger.warning("Skipping unparseable partial ---BUG--- block: %s", e)
 
-        for raw in re.findall(r'---SUSPECTED---\s*(.*?)\s*---END SUSPECTED---', content, re.DOTALL):
+        for raw in re.findall(
+            r'---SUSPECTED---\s*((?:(?!---(?:BUG|SUSPECTED)---).)*?)\s*---END SUSPECTED---',
+            content,
+            re.DOTALL,
+        ):
             try:
                 file_val = _field("File", raw)
                 line_val = _field("Line", raw)

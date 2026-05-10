@@ -46,6 +46,178 @@ except ImportError:
 # Valid source_type values for recommendation filtering (must match DB CHECK constraint in suggestion_storage.py)
 _VALID_SOURCE_TYPES = {'drift_halt', 'successful_completion', 'manual', 'merged'}
 
+# Valid suggestion classification values (must match _validate_row in suggestion_storage.py)
+_VALID_CLASSIFICATIONS = frozenset({'BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'})
+
+# Valid execution_profile values (must match orchestrator profiles)
+_VALID_EXECUTION_PROFILES = frozenset({
+    'full_rd', 'plan_only', 'build_only', 'test_red_team',
+    'bug_hunt', 'research_only', 'review_existing',
+})
+
+_CLASSIFICATION_TO_PROFILE = {
+    'BUGFIX': 'bug_hunt',
+    'TECH_DEBT': 'build_only',
+    'EXPANSION': 'plan_only',
+}
+
+_VALID_SUGGESTION_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated'})
+
+
+def _project_registry_helpers():
+    from Mission_Manager.project_registry import canonicalize_project_name, project_slug, infer_project_name
+    return canonicalize_project_name, project_slug, infer_project_name
+
+
+def _parse_project_name(data, *, required=False, fallback_suggestion=None):
+    raw = data.get("project_name")
+    if raw is None:
+        raw = data.get("project")
+    if raw is None or raw == "":
+        if required:
+            raise ValueError("project_name is required for new projects")
+        if fallback_suggestion is not None:
+            try:
+                canonicalize_project_name, project_slug, infer_project_name = _project_registry_helpers()
+                inferred = infer_project_name(fallback_suggestion, _known_project_names())
+                return inferred, project_slug(inferred), "inferred"
+            except Exception:
+                return None, None, None
+        return None, None, None
+    if not isinstance(raw, str):
+        raise ValueError("project_name must be a string")
+    canonicalize_project_name, project_slug, _ = _project_registry_helpers()
+    canonical = canonicalize_project_name(raw, _known_project_names())
+    if not canonical:
+        if required:
+            raise ValueError("project_name is required")
+        return None, None, None
+    return canonical, project_slug(canonical), "explicit"
+
+
+def _known_project_names(status=None):
+    storage = _get_suggestion_storage()
+    names = []
+    if storage:
+        try:
+            names.extend(p.get("project_name") for p in storage.get_projects(status=status))
+        except Exception:
+            logger.debug("Failed to load suggestion DB projects", exc_info=True)
+    try:
+        from Mission_Manager.project_registry import workspace_projects
+        names.extend(workspace_projects())
+    except Exception:
+        logger.debug("Failed to load workspace projects", exc_info=True)
+    cleaned = []
+    seen = set()
+    try:
+        canonicalize_project_name, project_slug, _ = _project_registry_helpers()
+        for name in names:
+            canonical = canonicalize_project_name(name)
+            slug = project_slug(canonical)
+            if canonical and slug and slug not in seen:
+                cleaned.append(canonical)
+                seen.add(slug)
+    except Exception:
+        cleaned = [str(n) for n in names if n]
+    return sorted(cleaned, key=str.lower)
+
+
+def _normalize_mission_title(data, default=None):
+    if "mission_title" not in data:
+        raw_title = default
+    else:
+        raw_title = data["mission_title"]
+    if raw_title is None:
+        raise ValueError("mission_title cannot be null")
+    if not isinstance(raw_title, str):
+        raise ValueError("mission_title must be a string")
+    title = raw_title.strip()
+    if len(title) < 3:
+        raise ValueError("Mission title must be at least 3 characters")
+    return title
+
+
+def _parse_suggested_cycles(data, default=3):
+    if "suggested_cycles" not in data:
+        return default
+    raw_cycles = data["suggested_cycles"]
+    if isinstance(raw_cycles, bool) or not isinstance(raw_cycles, int):
+        raise ValueError("suggested_cycles must be an integer 1-10")
+    if raw_cycles < 1 or raw_cycles > 10:
+        raise ValueError("suggested_cycles must be an integer 1-10")
+    return raw_cycles
+
+
+def _optional_string_field(data, field_name, default="", none_value=""):
+    raw_value = data.get(field_name, default)
+    if raw_value is None:
+        return none_value
+    if not isinstance(raw_value, str):
+        raise ValueError(f"{field_name} must be a string")
+    return raw_value
+
+
+def _parse_classification(data, default="EXPANSION", allow_none_default=True):
+    raw = data.get("classification")
+    if raw is None:
+        raw = data.get("mission_classification")
+    if raw is None:
+        raw = data.get("mission_category")
+    if raw is None:
+        legacy = data.get("mission_type")
+        if isinstance(legacy, str) and legacy.upper().strip() in _VALID_CLASSIFICATIONS:
+            raw = legacy
+    if raw is None:
+        if allow_none_default:
+            return default
+        raise ValueError("classification cannot be null on update; omit the key to leave unchanged")
+    if not isinstance(raw, str):
+        raise ValueError("classification must be a string")
+    normalized = raw.upper().strip()
+    if normalized not in _VALID_CLASSIFICATIONS:
+        raise ValueError(
+            f"Invalid classification {raw!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_CLASSIFICATIONS))}"
+        )
+    return normalized
+
+
+def _parse_execution_profile(data, default=None, allow_none_default=True):
+    if "mission_type" in data:
+        raw_mt = data.get("mission_type")
+        if raw_mt is None:
+            if allow_none_default:
+                return default
+            raise ValueError("mission_type cannot be null on update; omit the key to leave unchanged")
+        if not isinstance(raw_mt, str):
+            raise ValueError("mission_type must be a string")
+        if raw_mt in _VALID_EXECUTION_PROFILES:
+            return raw_mt
+        if raw_mt.upper().strip() in _VALID_CLASSIFICATIONS:
+            return default
+        raise ValueError(
+            f"Invalid mission_type {raw_mt!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_EXECUTION_PROFILES))}"
+        )
+
+    raw = data.get("execution_profile")
+    if raw is None:
+        if allow_none_default:
+            return default
+        raise ValueError("mission_type cannot be null on update; omit the key to leave unchanged")
+    if raw == "" and allow_none_default:
+        return default
+    if not isinstance(raw, str):
+        raise ValueError("execution_profile must be a string")
+    if raw not in _VALID_EXECUTION_PROFILES:
+        raise ValueError(
+            f"Invalid execution_profile {raw!r}. "
+            f"Must be one of: {', '.join(sorted(_VALID_EXECUTION_PROFILES))}"
+        )
+    return raw
+
+
 # Constants - will be set by init function
 BASE_DIR = None
 STATE_DIR = None
@@ -102,7 +274,7 @@ def _normalize_runtime_provider(provider):
 
 def _clean_llm_option(value):
     option = str(value or "").strip()
-    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", option):
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,79}$", option):
         return option
     return None
 
@@ -383,6 +555,12 @@ def api_start(mode):
 @core_bp.route('/api/stop', methods=['POST'])
 def api_stop():
     success, message = stop_claude()
+    if success:
+        try:
+            from suggestion_lifecycle import mark_active_suggestion_open_if_incomplete
+            mark_active_suggestion_open_if_incomplete()
+        except Exception:
+            logger.warning("Failed to restore active suggestion status on stop", exc_info=True)
     return jsonify({"success": success, "message": message})
 
 
@@ -486,6 +664,10 @@ def api_narrative_mission():
             return jsonify({"success": False, "message": "story_number and story_title required"})
         if not isinstance(story_title, str):
             return jsonify({"success": False, "message": "story_title must be a string"}), 400
+        if story_genre is not None and not isinstance(story_genre, str):
+            return jsonify({"success": False, "message": "story_genre must be a string"}), 400
+        if story_logline is not None and not isinstance(story_logline, str):
+            return jsonify({"success": False, "message": "story_logline must be a string"}), 400
 
         try:
             story_number = int(story_number)
@@ -667,6 +849,10 @@ def api_mission():
             mission_id = f"mission_{uuid.uuid4().hex[:8]}"
             missions_dir = BASE_DIR / "missions"
             mission_dir = missions_dir / mission_id
+            try:
+                mission_dir.resolve().relative_to(missions_dir.resolve())
+            except ValueError:
+                return jsonify({"success": False, "error": "Invalid mission path"}), 400
 
             resolved_project_name = None
             try:
@@ -803,6 +989,18 @@ def api_suggest_project_name():
     try:
         from project_name_resolver import suggest_project_name
         result = suggest_project_name(problem_statement)
+        try:
+            _, project_slug, infer_project_name = _project_registry_helpers()
+            known = _known_project_names(status="open")
+            inferred = infer_project_name({
+                "mission_title": problem_statement,
+                "mission_description": problem_statement,
+            }, known_projects=known)
+            result["suggested_name"] = inferred
+            result["suggested_slug"] = project_slug(inferred)
+            result["existing_projects"] = known
+        except Exception:
+            pass
         return jsonify(result)
     except ImportError:
         return jsonify({"error": "project_name_resolver module not found"}), 500
@@ -875,13 +1073,35 @@ def api_recommendations():
         return jsonify({"items": [], "error": "Storage not available"}), 503
 
     source_type_filter = request.args.get('source_type')
+    status_filter = request.args.get('status', 'open')
+    project_filter = request.args.get('project') or request.args.get('project_name')
 
     if source_type_filter and source_type_filter not in _VALID_SOURCE_TYPES:
         return jsonify({"items": [], "error": "Invalid source_type"}), 400
+    if status_filter != 'all' and status_filter not in _VALID_SUGGESTION_STATUSES:
+        return jsonify({"items": [], "error": "Invalid status"}), 400
 
     try:
-        if source_type_filter:
-            items = storage.get_filtered(source_type=source_type_filter)
+        try:
+            from suggestion_lifecycle import reconcile_suggestion_statuses
+            reconcile_suggestion_statuses(storage)
+        except Exception:
+            logger.debug("recommendations status reconciliation failed", exc_info=True)
+
+        effective_status = None if status_filter == 'all' else status_filter
+        project_slug_value = None
+        if project_filter:
+            try:
+                _, project_slug, _ = _project_registry_helpers()
+                project_slug_value = project_slug(project_filter)
+            except Exception:
+                project_slug_value = None
+        if source_type_filter or effective_status or project_slug_value:
+            items = storage.get_filtered(
+                source_type=source_type_filter,
+                status=effective_status,
+                project_slug=project_slug_value,
+            )
         else:
             items = storage.get_all()
         return jsonify({"items": items})
@@ -898,39 +1118,65 @@ def api_add_recommendation():
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Request body must be a JSON object"}), 400
     import uuid
 
-    source_type = data.get("source_type", "manual")
-    if source_type not in _VALID_SOURCE_TYPES:
+    raw_source_type = data.get("source_type", "manual")
+    if not isinstance(raw_source_type, str):
+        return jsonify({"success": False, "error": "source_type must be a string"}), 400
+    if raw_source_type not in _VALID_SOURCE_TYPES:
         return jsonify({"success": False, "error": "Invalid source_type"}), 400
+    source_type = raw_source_type
 
     try:
-        suggested_cycles = max(1, min(10, int(data.get("suggested_cycles", 3))))
-    except (ValueError, TypeError, OverflowError):
-        return jsonify({"success": False, "error": "suggested_cycles must be an integer 1-10"}), 400
+        mission_title = _normalize_mission_title(data, default="Untitled Mission")
+        suggested_cycles = _parse_suggested_cycles(data, default=3)
+        raw_desc = _optional_string_field(data, "mission_description", default="", none_value="")
+        raw_rationale = _optional_string_field(data, "rationale", default="", none_value="")
+        source_mission_id = _optional_string_field(data, "source_mission_id", default=None, none_value=None)
+        source_mission_summary = _optional_string_field(data, "source_mission_summary", default="", none_value="")
+        project_name, project_slug_value, project_source = _parse_project_name(
+            data,
+            required=bool(data.get("new_project")),
+            fallback_suggestion={
+                "mission_title": mission_title,
+                "mission_description": raw_desc,
+                "rationale": raw_rationale,
+                "source_mission_summary": source_mission_summary,
+            },
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
-    _VALID_EXECUTION_PROFILES = {
-        'full_rd', 'plan_only', 'build_only', 'test_red_team',
-        'bug_hunt', 'research_only', 'review_existing',
-    }
-    raw_exec_profile = data.get("execution_profile", "full_rd")
     try:
-        execution_profile = raw_exec_profile if raw_exec_profile in _VALID_EXECUTION_PROFILES else "full_rd"
-    except TypeError:
-        execution_profile = "full_rd"
+        classification = _parse_classification(data, default="EXPANSION")
+        execution_profile = _parse_execution_profile(
+            data,
+            default=_CLASSIFICATION_TO_PROFILE.get(classification, "full_rd"),
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
     recommendation = {
         "id": f"rec_{uuid.uuid4().hex[:8]}",
-        "mission_title": data.get("mission_title", "Untitled Mission"),
-        "mission_description": data.get("mission_description", ""),
+        "mission_title": mission_title,
+        "mission_description": raw_desc,
         "suggested_cycles": suggested_cycles,
-        "source_mission_id": data.get("source_mission_id"),
-        "source_mission_summary": data.get("source_mission_summary", ""),
-        "rationale": data.get("rationale", ""),
+        "source_mission_id": source_mission_id,
+        "source_mission_summary": source_mission_summary,
+        "rationale": raw_rationale,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_type": source_type,
+        "classification": classification,
+        "mission_type": execution_profile,
         "execution_profile": execution_profile,
+        "status": "open",
     }
+    if project_name:
+        recommendation["project_name"] = project_name
+        recommendation["project_slug"] = project_slug_value
+        recommendation["project_source"] = project_source
 
     # Auto-tag and check for similar suggestions
     similar_to = []
@@ -954,6 +1200,8 @@ def api_add_recommendation():
             response["merge_candidates"] = similar_to
             response["has_similar"] = True
         return jsonify(response)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except Exception:
         logger.exception("SQLite add failed")
         return jsonify({"success": False, "error": "An internal error occurred"}), 500
@@ -966,7 +1214,12 @@ def api_merge_candidates():
     storage = _get_suggestion_storage()
     if storage:
         try:
-            items = storage.get_all()
+            try:
+                from suggestion_lifecycle import reconcile_suggestion_statuses
+                reconcile_suggestion_statuses(storage)
+            except Exception:
+                logger.debug("merge-candidates status reconciliation failed", exc_info=True)
+            items = storage.get_filtered(status="open")
         except Exception:
             logging.exception("merge-candidates storage error")
             return jsonify({"error": "Failed to load suggestions"}), 500
@@ -983,6 +1236,21 @@ def api_merge_candidates():
             "suggested_cycles": item.get("suggested_cycles", 3),
             "auto_tags": item.get("auto_tags", []),
             "priority_score": item.get("priority_score", 50),
+            "created_at": item.get("created_at"),
+            "source_type": item.get("source_type", ""),
+            "classification": item.get("classification", "EXPANSION"),
+            "mission_type": item.get("mission_type", ""),
+            "execution_profile": item.get("execution_profile", ""),
+            "project_name": item.get("project_name", ""),
+            "project_slug": item.get("project_slug", ""),
+            "project_source": item.get("project_source", ""),
+            "health_status": item.get("health_status", ""),
+            "status": item.get("status", "open"),
+            "accepted_mission_id": item.get("accepted_mission_id"),
+            "queued_at": item.get("queued_at"),
+            "completed_at": item.get("completed_at"),
+            "reopened_at": item.get("reopened_at"),
+            "closed_reason": item.get("closed_reason"),
         })
 
     return jsonify({
@@ -1000,10 +1268,12 @@ def api_merge_recommendations():
 
     import uuid
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Request body must be a JSON object"}), 400
     source_ids = data.get("source_ids", [])
     merged_data = data.get("merged_data", {})
     if not isinstance(merged_data, dict):
-        merged_data = {}
+        return jsonify({"success": False, "error": "merged_data must be an object"}), 400
     delete_sources = data.get("delete_sources", True)
 
     if not isinstance(source_ids, list):
@@ -1042,27 +1312,47 @@ def api_merge_recommendations():
                             "error": "One or more source recommendations not found"}), 404
 
         try:
-            _merged_cycles = max(1, min(10, int(merged_data.get("suggested_cycles", 3))))
-        except (ValueError, TypeError, OverflowError):
-            _merged_cycles = 3
-        _VALID_MERGE_PROFILES = {
-            'full_rd', 'plan_only', 'build_only', 'test_red_team',
-            'bug_hunt', 'research_only', 'review_existing',
-        }
+            _merged_title = _normalize_mission_title(merged_data, default="Merged Suggestion")
+            _merged_cycles = _parse_suggested_cycles(merged_data, default=3)
+            _merged_desc = _optional_string_field(merged_data, "mission_description", default="", none_value="")
+            _merged_rationale = _optional_string_field(merged_data, "rationale", default="", none_value="")
+            _merged_project, _merged_project_slug, _merged_project_source = _parse_project_name(
+                merged_data,
+                fallback_suggestion={
+                    "mission_title": _merged_title,
+                    "mission_description": _merged_desc,
+                    "rationale": _merged_rationale,
+                },
+            )
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
         _raw_merge_profile = merged_data.get("execution_profile", "full_rd")
-        _merge_profile = _raw_merge_profile if _raw_merge_profile in _VALID_MERGE_PROFILES else "full_rd"
+        if not isinstance(_raw_merge_profile, str):
+            return jsonify({"success": False, "error": "execution_profile must be a string"}), 400
+        if _raw_merge_profile not in _VALID_EXECUTION_PROFILES:
+            return jsonify({"success": False, "error": "Invalid execution_profile"}), 400
+        try:
+            _merged_classification = _parse_classification(merged_data, default="EXPANSION")
+        except ValueError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
         new_rec = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
-            "mission_title": merged_data.get("mission_title", "Merged Suggestion"),
-            "mission_description": merged_data.get("mission_description", ""),
+            "mission_title": _merged_title,
+            "mission_description": _merged_desc,
             "suggested_cycles": _merged_cycles,
-            "rationale": merged_data.get("rationale", ""),
+            "rationale": _merged_rationale,
             "source_type": "merged",
             "merged_from": source_ids,
             "merged_source_descriptions": source_descriptions,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "execution_profile": _merge_profile,
+            "classification": _merged_classification,
+            "mission_type": _raw_merge_profile,
+            "execution_profile": _raw_merge_profile,
         }
+        if _merged_project:
+            new_rec["project_name"] = _merged_project
+            new_rec["project_slug"] = _merged_project_slug
+            new_rec["project_source"] = _merged_project_source or "merged"
 
         # Add new record first, then delete sources (atomic safety: if add fails, sources remain)
         storage.add(new_rec)
@@ -1093,11 +1383,56 @@ def api_analyze_recommendations():
     try:
         from suggestion_analyzer import get_analyzer
         analyzer = get_analyzer()
+        storage = _get_suggestion_storage()
+        if storage:
+            try:
+                from suggestion_lifecycle import reconcile_suggestion_statuses
+                reconcile_suggestion_statuses(storage)
+            except Exception:
+                logger.debug("analyze status reconciliation failed", exc_info=True)
         result = analyzer.analyze_all(persist=True)
+        all_items = result.get("items", [])
+        visible_items = [
+            item for item in all_items
+            if item.get("status", "open") == "open"
+        ]
+        project_filter = request.args.get("project") or request.args.get("project_name")
+        if project_filter:
+            try:
+                _, project_slug, _ = _project_registry_helpers()
+                wanted = project_slug(project_filter)
+                visible_items = [item for item in visible_items if item.get("project_slug") == wanted]
+            except Exception:
+                pass
+        result = dict(result)
+        result["items"] = visible_items
+        result["total"] = len(visible_items)
+        result["all_total"] = len(all_items)
         return jsonify(result)
     except Exception:
         logger.exception("analyze_recommendations failed")
         return jsonify({"error": "An internal error occurred"}), 500
+
+
+@core_bp.route('/api/recommendations/projects', methods=['GET'])
+def api_recommendation_projects():
+    """Return project options represented in the mission suggestion DB."""
+    storage = _get_suggestion_storage()
+    if not storage:
+        return jsonify({"projects": [], "items": []}), 503
+    status_filter = request.args.get('status', 'open')
+    if status_filter != 'all' and status_filter not in _VALID_SUGGESTION_STATUSES:
+        return jsonify({"projects": [], "items": [], "error": "Invalid status"}), 400
+    try:
+        effective_status = None if status_filter == 'all' else status_filter
+        projects = storage.get_projects(status=effective_status)
+        return jsonify({
+            "projects": [p["project_name"] for p in projects],
+            "items": projects,
+        })
+    except Exception:
+        logger.exception("recommendation projects failed")
+        return jsonify({"projects": [], "items": [], "error": "An internal error occurred"}), 500
 
 
 @core_bp.route('/api/recommendations/auto-tag', methods=['POST'])
@@ -1177,29 +1512,16 @@ def api_update_recommendation(rec_id):
         return jsonify({"success": False, "error": "Storage not available"}), 503
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Request body must be a JSON object"}), 400
 
-    # Input validation
-    if "suggested_cycles" in data:
-        try:
-            cycles = int(data["suggested_cycles"])
-            if cycles < 1 or cycles > 10:
-                return jsonify({
-                    "success": False,
-                    "error": "Cycle count must be between 1 and 10"
-                }), 400
-        except (ValueError, TypeError, OverflowError):
-            return jsonify({
-                "success": False,
-                "error": "Cycle count must be a valid number"
-            }), 400
-
-    if "mission_title" in data:
-        title = str(data["mission_title"]).strip()
-        if len(title) < 3:
-            return jsonify({
-                "success": False,
-                "error": "Mission title must be at least 3 characters"
-            }), 400
+    try:
+        if "suggested_cycles" in data:
+            _parse_suggested_cycles(data)
+        if "mission_title" in data:
+            _normalize_mission_title(data)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
     try:
         # Get current record to preserve originals
@@ -1209,40 +1531,120 @@ def api_update_recommendation(rec_id):
 
         updates = {}
         # Preserve originals if first edit
-        if "original_mission_title" not in current:
+        original_fields = (
+            "original_mission_title",
+            "original_mission_description",
+            "original_rationale",
+            "original_suggested_cycles",
+        )
+        if all(current.get(field) is None for field in original_fields):
             updates["original_mission_title"] = current.get("mission_title")
             updates["original_mission_description"] = current.get("mission_description")
             updates["original_rationale"] = current.get("rationale")
             updates["original_suggested_cycles"] = current.get("suggested_cycles")
         # Update fields
         if "mission_title" in data:
-            updates["mission_title"] = str(data["mission_title"]).strip()
+            updates["mission_title"] = _normalize_mission_title(data)
         if "mission_description" in data:
-            updates["mission_description"] = data["mission_description"]
+            val = data["mission_description"]
+            if val is None:
+                val = ""
+            elif not isinstance(val, str):
+                return jsonify({
+                    "success": False,
+                    "error": "mission_description must be a string"
+                }), 400
+            updates["mission_description"] = val
         if "suggested_cycles" in data and data["suggested_cycles"] is not None:
-            try:
-                updates["suggested_cycles"] = int(data["suggested_cycles"])
-            except (ValueError, TypeError):
-                return jsonify({"success": False, "error": "suggested_cycles must be an integer"}), 400
+            updates["suggested_cycles"] = _parse_suggested_cycles(data)
         if "rationale" in data:
-            updates["rationale"] = data["rationale"]
+            val = data["rationale"]
+            if val is None:
+                val = ""
+            elif not isinstance(val, str):
+                return jsonify({
+                    "success": False,
+                    "error": "rationale must be a string"
+                }), 400
+            updates["rationale"] = val
         if "execution_profile" in data:
-            _VALID_EDIT_PROFILES = {
-                'full_rd', 'plan_only', 'build_only', 'test_red_team',
-                'bug_hunt', 'research_only', 'review_existing',
-            }
-            _ep = data["execution_profile"]
+            raw_ep = data["execution_profile"]
+            if raw_ep is None:
+                return jsonify({
+                    "success": False,
+                    "error": "execution_profile cannot be null on update"
+                }), 400
+            if not isinstance(raw_ep, str):
+                return jsonify({
+                    "success": False,
+                    "error": "execution_profile must be a string"
+                }), 400
+            if raw_ep not in _VALID_EXECUTION_PROFILES:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Invalid execution_profile {raw_ep!r}. "
+                        f"Must be one of: {', '.join(sorted(_VALID_EXECUTION_PROFILES))}"
+                    )
+                }), 400
+            updates["execution_profile"] = raw_ep
+            updates["mission_type"] = raw_ep
+        if any(key in data for key in ("classification", "mission_classification", "mission_category")):
             try:
-                updates["execution_profile"] = _ep if _ep in _VALID_EDIT_PROFILES else "full_rd"
-            except TypeError:
-                updates["execution_profile"] = "full_rd"
+                updates["classification"] = _parse_classification(data, allow_none_default=False)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
         if "mission_type" in data:
-            _VALID_MTYPES = {'BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'}
-            _mt = str(data["mission_type"]).upper().strip()
-            updates["mission_type"] = _mt if _mt in _VALID_MTYPES else "EXPANSION"
+            raw_mt = data["mission_type"]
+            if raw_mt is None:
+                return jsonify({
+                    "success": False,
+                    "error": "mission_type cannot be null on update; omit the key to leave unchanged"
+                }), 400
+            if not isinstance(raw_mt, str):
+                return jsonify({
+                    "success": False,
+                    "error": "mission_type must be a string"
+                }), 400
+            legacy_classification = raw_mt.upper().strip()
+            if legacy_classification in _VALID_CLASSIFICATIONS:
+                updates["classification"] = legacy_classification
+            elif raw_mt in _VALID_EXECUTION_PROFILES:
+                updates["mission_type"] = raw_mt
+                updates["execution_profile"] = raw_mt
+            else:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Invalid mission_type {raw_mt!r}. "
+                        f"Must be one of: {', '.join(sorted(_VALID_EXECUTION_PROFILES))}"
+                    )
+                }), 400
+        if "status" in data:
+            raw_status = data["status"]
+            if not isinstance(raw_status, str) or raw_status not in _VALID_SUGGESTION_STATUSES:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Invalid status {raw_status!r}. "
+                        f"Must be one of: {', '.join(sorted(_VALID_SUGGESTION_STATUSES))}"
+                    )
+                }), 400
+            updates["status"] = raw_status
+        if "project_name" in data or "project" in data:
+            try:
+                project_name, project_slug_value, project_source = _parse_project_name(data, required=True)
+            except ValueError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+            updates["project_name"] = project_name
+            updates["project_slug"] = project_slug_value
+            updates["project_source"] = project_source
         updates["last_edited_at"] = datetime.now(timezone.utc).isoformat()
-        storage.update(rec_id, updates)
+        if not storage.update(rec_id, updates):
+            return jsonify({"success": False, "error": "Recommendation not found"}), 404
         return jsonify({"success": True})
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except Exception:
         logger.exception("SQLite update failed")
         return jsonify({"success": False, "error": "An internal error occurred"}), 500
@@ -1250,7 +1652,7 @@ def api_update_recommendation(rec_id):
 
 @core_bp.route('/api/recommendations/<rec_id>/set-mission', methods=['POST'])
 def api_set_mission_from_recommendation(rec_id):
-    """Set a mission from a recommendation and remove it from the list.
+    """Set a mission from a recommendation and mark it queued.
 
     Supports shared workspaces via project_name resolution.
     """
@@ -1269,10 +1671,6 @@ def api_set_mission_from_recommendation(rec_id):
     _raw_pn = data.get("project_name")
     user_project_name = _raw_pn if isinstance(_raw_pn, str) and _raw_pn else None
 
-    _VALID_EXEC_PROFILES = {
-        'full_rd', 'plan_only', 'build_only', 'test_red_team',
-        'bug_hunt', 'research_only', 'review_existing',
-    }
     # Accept either `execution_profile` (canonical) or `mission_type` (alias).
     # Treat None/empty/non-string in the canonical key as "fall through to alias"
     # so callers sending `false` or `""` still get the intended profile.
@@ -1281,9 +1679,14 @@ def api_set_mission_from_recommendation(rec_id):
         _raw_exec = data.get("mission_type")
     if not isinstance(_raw_exec, str) or not _raw_exec:
         _raw_exec = "full_rd"
-    execution_profile = _raw_exec if _raw_exec in _VALID_EXEC_PROFILES else "full_rd"
+    execution_profile = _raw_exec if _raw_exec in _VALID_EXECUTION_PROFILES else "full_rd"
 
     try:
+        try:
+            from suggestion_lifecycle import reconcile_suggestion_statuses
+            reconcile_suggestion_statuses(storage)
+        except Exception:
+            logger.debug("set-mission status reconciliation failed", exc_info=True)
         target_rec = storage.get_by_id(rec_id)
     except Exception:
         import logging
@@ -1292,6 +1695,13 @@ def api_set_mission_from_recommendation(rec_id):
 
     if not target_rec:
         return jsonify({"success": False, "error": "Recommendation not found"}), 404
+    if target_rec.get("status", "open") != "open":
+        return jsonify({
+            "success": False,
+            "error": f"Recommendation is already {target_rec.get('status')}"
+        }), 409
+    if not user_project_name:
+        user_project_name = target_rec.get("project_name") or None
 
     import uuid as _uuid_r
     import logging as _rlog
@@ -1324,6 +1734,10 @@ def api_set_mission_from_recommendation(rec_id):
 
     missions_dir = BASE_DIR / "missions"
     mission_dir = missions_dir / mission_id
+    try:
+        mission_dir.resolve().relative_to(missions_dir.resolve())
+    except ValueError:
+        return jsonify({"success": False, "error": "Invalid mission path"}), 400
 
     resolved_project_name = None
     try:
@@ -1418,9 +1832,27 @@ def api_set_mission_from_recommendation(rec_id):
         _rlog.warning("Analytics: Failed to register mission", exc_info=True)
 
     try:
-        storage.delete(rec_id)
+        from suggestion_lifecycle import mark_suggestion_status
+        mark_suggestion_status(
+            rec_id,
+            "queued",
+            storage,
+            mission_id=mission_id,
+            closed_reason="mission_control",
+        )
+        if resolved_project_name:
+            try:
+                from Mission_Manager.project_registry import canonicalize_project_name, project_slug
+                canonical_project = canonicalize_project_name(resolved_project_name, _known_project_names())
+                storage.update(rec_id, {
+                    "project_name": canonical_project,
+                    "project_slug": project_slug(canonical_project),
+                    "project_source": "explicit" if user_project_name else "inferred",
+                })
+            except Exception:
+                pass
     except Exception:
-        _rlog.warning("SQLite delete failed", exc_info=True)
+        _rlog.warning("SQLite status update failed", exc_info=True)
 
     response_msg = f"Mission set with {applied_cycle_budget} cycle(s)."
     if resolved_project_name:
@@ -1563,8 +1995,8 @@ def download_file(filepath):
     if file_size > _MAX_DOWNLOAD_BYTES:
         abort(413)  # Request Entity Too Large
 
-    # Pass the *unresolved* path so O_NOFOLLOW sees symlinks,
-    # and allowed_base for post-open fd containment check.
+    # The resolved containment check above is authoritative. O_NOFOLLOW in
+    # _safe_read_bytes still protects against a final-component symlink swap.
     try:
         data = _safe_read_bytes(full_path, max_bytes=_MAX_DOWNLOAD_BYTES, allowed_base=allowed_base)
     except IOError:

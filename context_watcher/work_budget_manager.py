@@ -60,6 +60,7 @@ _MODEL_LOW_DELTA_THRESHOLD: dict[str, int] = {
 }
 
 _DEFAULT_BUDGET = 40_000
+_MAX_BUDGET = 10_000_000
 _DEFAULT_MAX_CONTINUATIONS = 5
 _DEFAULT_LOW_DELTA_THRESHOLD = 1_500
 _CONSECUTIVE_LOW_DELTA_REQUIRED = 2
@@ -80,10 +81,14 @@ def _resolve_budget_for_model(model: str) -> int:
     if env_override:
         try:
             val = int(env_override)
-            if val > 0:
+            if 0 < val <= _MAX_BUDGET:
                 return val
+            logger.warning(
+                "Ignoring WORK_BUDGET_TOKENS=%r: must be between 1 and %d",
+                env_override, _MAX_BUDGET,
+            )
         except ValueError:
-            pass
+            logger.warning("Ignoring invalid WORK_BUDGET_TOKENS=%r", env_override)
     for key in sorted(_MODEL_BUDGETS, key=len, reverse=True):
         if key in model.lower():
             return _MODEL_BUDGETS[key]
@@ -161,6 +166,8 @@ class WorkBudgetManager:
             raise TypeError(f"budget_tokens must be an int, got float {budget_tokens!r}")
         if budget_tokens is not None and budget_tokens <= 0:
             raise ValueError(f"budget_tokens must be positive, got {budget_tokens!r}")
+        if budget_tokens is not None and budget_tokens > _MAX_BUDGET:
+            raise ValueError(f"budget_tokens must be <= {_MAX_BUDGET}, got {budget_tokens!r}")
         _resolved = budget_tokens if budget_tokens is not None else _resolve_budget_for_model(self._model)
         if _resolved <= 0:
             logger.warning(

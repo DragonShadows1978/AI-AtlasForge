@@ -149,7 +149,7 @@ class SourceFetcher:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         # monotonic-clock timestamp of the most recently reserved request slot;
         # 0.0 means "never issued a request yet" (no rate-limit on first call).
-        self._last_request_time = 0.0
+        self._last_request_time: Optional[float] = None
         self._rate_limit_delay = 0.5  # seconds between requests
         self._rate_limit_lock = threading.Lock()
 
@@ -163,8 +163,31 @@ class SourceFetcher:
         Returns:
             Dict mapping URL to FetchedSource
         """
-        unique_urls = list(set(u for u in urls if u and self._is_valid_url(u)))
         results = {}
+        unique_urls = []
+        seen_raw = set()
+        seen_valid = set()
+
+        for raw_url in urls:
+            result_key = raw_url if isinstance(raw_url, str) else str(raw_url)
+            if result_key in seen_raw:
+                continue
+            seen_raw.add(result_key)
+
+            if not self._is_valid_url(raw_url):
+                results[result_key] = FetchedSource(
+                    url=result_key,
+                    content="",
+                    accessible=False,
+                    error="unsafe URL",
+                )
+                continue
+
+            canonical_key = self._canonical_url_key(raw_url)
+            if canonical_key in seen_valid:
+                continue
+            seen_valid.add(canonical_key)
+            unique_urls.append(raw_url)
 
         if not unique_urls:
             return results
@@ -172,7 +195,7 @@ class SourceFetcher:
         logger.info(f"Fetching {len(unique_urls)} unique URLs")
 
         # Use thread pool for parallel fetching
-        max_workers = min(10, len(unique_urls))
+        max_workers = max(1, min(10, len(unique_urls)))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(self.fetch_single, url): url
@@ -201,6 +224,12 @@ class SourceFetcher:
         logger.info(f"Fetched {accessible_count}/{len(results)} sources successfully")
 
         return results
+
+    def _canonical_url_key(self, url: str) -> str:
+        """Normalize scheme/host casing for fetch dedupe without changing output URL."""
+        parsed = urlparse(url)
+        netloc = parsed.netloc.lower()
+        return parsed._replace(scheme=parsed.scheme.lower(), netloc=netloc).geturl()
 
     def fetch_single(self, url: str) -> FetchedSource:
         """
@@ -283,7 +312,7 @@ class SourceFetcher:
                 "content_type": data.get("content_type", "text/html"),
                 "pre_extracted": True,
             }
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, OSError) as e:
             logger.debug(f"proxy fetch unavailable for {url}: {e}")
             return None
         except (ValueError, KeyError) as e:
@@ -328,9 +357,9 @@ class SourceFetcher:
             # escapes _fetch_url's narrowed _NETWORK_EXCEPTIONS/ValueError
             # catches and surfaces to the caller.
             if "pdf" in content_type.lower():
-                if not isinstance(raw_content, (str, bytes)):
+                if not isinstance(raw_content, bytes):
                     raise TypeError(
-                        f"proxy returned non-str/non-bytes content for PDF url "
+                        f"fetcher returned non-bytes content for PDF url "
                         f"{url[:100]}: {type(raw_content).__name__}"
                     )
             else:
@@ -392,9 +421,10 @@ class SourceFetcher:
         with httpx.Client(timeout=self.config.fetch_timeout_seconds, follow_redirects=True) as client:
             response = client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; FactChecker/1.0)"})
             response.raise_for_status()
+            content_type = response.headers.get("content-type", "text/html")
             return {
-                "content": response.text,
-                "content_type": response.headers.get("content-type", "text/html"),
+                "content": response.content if "pdf" in content_type.lower() else response.text,
+                "content_type": content_type,
             }
 
     def _fetch_with_requests(self, url: str) -> Dict:
@@ -406,9 +436,10 @@ class SourceFetcher:
             allow_redirects=True,
         )
         response.raise_for_status()
+        content_type = response.headers.get("content-type", "text/html")
         return {
-            "content": response.text,
-            "content_type": response.headers.get("content-type", "text/html"),
+            "content": response.content if "pdf" in content_type.lower() else response.text,
+            "content_type": content_type,
         }
 
     def _fetch_with_curl(self, url: str) -> Dict:
@@ -512,22 +543,30 @@ class SourceFetcher:
 
             # Handle both string and bytes content
             if isinstance(content, str):
-                # If string, try to encode as latin-1 (preserves byte values)
-                try:
-                    content = content.encode('latin-1')
-                except UnicodeEncodeError:
-                    content = content.encode('utf-8', errors='replace')
+                raise TypeError("PDF content must be bytes, got str")
 
             pdf_file = io.BytesIO(content)
             reader = PdfReader(pdf_file)
 
-            # Extract text from first 20 pages
-            max_pages = min(20, len(reader.pages))
+            # Extract text from first 20 pages. Some PDF libraries expose
+            # pages as a generator-like sequence, so avoid relying on len()
+            # or integer indexing for the main extraction loop.
+            max_pages = 20
             text_parts = []
+            hit_page_limit = False
+            iterated_pages = 0
 
-            for page_num in range(max_pages):
+            try:
+                total_pages = len(reader.pages)
+            except TypeError:
+                total_pages = None
+
+            for page_num, page in enumerate(reader.pages):
+                if page_num >= max_pages:
+                    hit_page_limit = True
+                    break
+                iterated_pages = page_num + 1
                 try:
-                    page = reader.pages[page_num]
                     text = page.extract_text()
                     if text:
                         text_parts.append(f"--- Page {page_num + 1} ---\n{text}")
@@ -541,8 +580,10 @@ class SourceFetcher:
             full_text = "\n\n".join(text_parts)
 
             # Add note if truncated
-            if len(reader.pages) > max_pages:
-                full_text += f"\n\n[... {len(reader.pages) - max_pages} more pages not extracted ...]"
+            if total_pages is not None and total_pages > max_pages:
+                full_text += f"\n\n[... {total_pages - max_pages} more pages not extracted ...]"
+            elif hit_page_limit and iterated_pages >= max_pages:
+                full_text += "\n\n[... additional pages not extracted ...]"
 
             logger.debug(f"Extracted {len(text_parts)} pages from PDF using {PDF_LIBRARY}")
             return full_text
@@ -558,7 +599,7 @@ class SourceFetcher:
     def _try_wayback(self, url: str) -> Optional[FetchedSource]:
         """Try to fetch from Wayback Machine as fallback."""
         try:
-            wayback_api = f"https://archive.org/wayback/available?url={url}"
+            wayback_api = f"https://archive.org/wayback/available?url={quote(url, safe='')}"
 
             if HAS_HTTPX:
                 with httpx.Client(timeout=10) as client:
@@ -596,7 +637,9 @@ class SourceFetcher:
                 # the proxy is down the original _fetch_via_proxy call has
                 # already burned WEB_PROXY_TIMEOUT seconds. Hitting it again
                 # here would double that cost for no gain — go direct.
-                return self._fetch_url(wayback_url, skip_proxy=True)
+                result = self._fetch_url(wayback_url, skip_proxy=True)
+                result.from_wayback = True
+                return result
 
         except UnsafeUrlError:
             # If the wayback-provided URL is itself unsafe, that is a
@@ -643,6 +686,7 @@ class SourceFetcher:
                 content_type=data.get("content_type", "unknown"),
                 truncated=data.get("truncated", False),
                 original_length=data.get("original_length", len(data["content"])),
+                from_wayback=bool(data.get("from_wayback", False)),
             )
 
         except FileNotFoundError:
@@ -691,6 +735,7 @@ class SourceFetcher:
                 "content_type": result.content_type,
                 "truncated": result.truncated,
                 "original_length": result.original_length,
+                "from_wayback": result.from_wayback,
             }
 
             # Write to temp file in same directory (needed for atomic rename)
@@ -701,11 +746,15 @@ class SourceFetcher:
             )
             temp_file = Path(temp_path)
 
-            # os.fdopen takes ownership of fd; its context manager closes it
-            # once. Any further os.close(fd) would be a double-close. Let
-            # the outer except block clean up temp_file on failure.
-            with os.fdopen(fd, 'w') as f:
-                json.dump(data, f)
+            try:
+                # os.fdopen takes ownership of fd once it succeeds. If fdopen
+                # itself fails, close the raw fd on the failure path below.
+                with os.fdopen(fd, 'w') as f:
+                    fd = None
+                    json.dump(data, f)
+            finally:
+                if fd is not None:
+                    os.close(fd)
 
             # os.replace is atomic and cross-platform (unlike os.rename on
             # Windows when the destination exists).
@@ -743,7 +792,7 @@ class SourceFetcher:
         with self._rate_limit_lock:
             now = time.monotonic()
             # First call ever: no prior slot, so proceed immediately.
-            if self._last_request_time == 0.0:
+            if self._last_request_time is None:
                 self._last_request_time = now
                 sleep_for = 0.0
             else:

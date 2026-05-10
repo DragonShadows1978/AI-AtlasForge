@@ -18,7 +18,7 @@ from pathlib import Path
 from datetime import datetime
 import json
 
-from atlasforge_config import EXPLORATION_DIR, MISSION_PATH
+from atlasforge_config import BASE_DIR, EXPLORATION_DIR, MISSION_PATH
 
 # Import our modules
 import sys
@@ -360,27 +360,25 @@ def register_interactive_graph_routes(app):
             if not file_path:
                 return jsonify({"error": "No path provided", "content": "", "total_lines": 0})
 
-            # Security: only allow files under certain directories
-            # These are dynamically set based on the AtlasForge installation
-            from atlasforge_config import BASE_DIR
-            allowed_roots = [
-                str(BASE_DIR) + '/',
-                str(Path.home()) + '/'
-            ]
-            abs_path = str(Path(file_path).resolve())
-
-            if not any(abs_path.startswith(root) for root in allowed_roots):
+            # Security: preview only files inside the AtlasForge repository.
+            # Use Path.relative_to() after resolve() instead of string prefixes so
+            # sibling paths and home-directory secrets are not accidentally exposed.
+            repo_root = Path(BASE_DIR).resolve()
+            abs_path_obj = Path(file_path).expanduser().resolve()
+            try:
+                abs_path_obj.relative_to(repo_root)
+            except ValueError:
                 return jsonify({"error": "Path not allowed", "content": "", "total_lines": 0})
 
-            if not Path(abs_path).exists():
+            if not abs_path_obj.exists():
                 return jsonify({"error": "File not found", "content": "", "total_lines": 0})
 
-            if not Path(abs_path).is_file():
+            if not abs_path_obj.is_file():
                 return jsonify({"error": "Not a file", "content": "", "total_lines": 0})
 
             # Read file content
             try:
-                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                with open(abs_path_obj, 'r', encoding='utf-8', errors='replace') as f:
                     lines = []
                     total_lines = 0
                     for i, line in enumerate(f):
@@ -394,7 +392,7 @@ def register_interactive_graph_routes(app):
                     content = ''.join(lines)
 
                 return jsonify({
-                    "path": abs_path,
+                    "path": str(abs_path_obj),
                     "content": content,
                     "lines_shown": len(lines),
                     "total_lines": total_lines,

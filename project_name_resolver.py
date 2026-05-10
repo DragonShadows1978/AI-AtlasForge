@@ -63,6 +63,13 @@ def sanitize_project_name(name: str) -> str:
     """
     if not name:
         return ""
+    try:
+        from Mission_Manager.project_registry import canonicalize_project_name
+        canonical = canonicalize_project_name(name)
+        if canonical:
+            name = canonical
+    except Exception:
+        pass
 
     # Remove quotes
     name = name.strip('"\'')
@@ -73,9 +80,9 @@ def sanitize_project_name(name: str) -> str:
     # Remove special characters except alphanumeric, underscore, hyphen, space
     name = re.sub(r'[^\w\s-]', '', name)
 
-    # If has spaces, convert to PascalCase
+    # If has spaces, convert to a readable filesystem-safe directory name.
     if ' ' in name:
-        name = ''.join(word.capitalize() for word in name.split())
+        name = '_'.join(word for word in name.split())
 
     # Ensure it doesn't start with a number
     if name and name[0].isdigit():

@@ -231,8 +231,9 @@ def _find_all_balanced_json(text: str):
                         candidates.append((start, j + 1, text[start:j + 1]))
                         break
             j += 1
-        # Advance past this opening brace to find next candidate
-        i = start + 1
+        # Advance past the whole balanced object so nested objects inside an
+        # already-captured candidate are not returned as separate top-level JSON.
+        i = j + 1 if depth == 0 else start + 1
     return candidates
 
 

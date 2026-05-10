@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -67,15 +67,18 @@ _STAGE_GUARD_POLICIES = {
             "AtlasForgeWriteStageNote",
         },
         "allowed_write_paths": [
-            "state/plans/*.json",
-            "missions/*/planning/*.json",
-            "missions/*/planning/*.md",
-            "workspace/*/artifacts/*.json",
-            "workspace/*/artifacts/*.md",
-            "workspace/*/research/*.json",
+            "workspace/*/artifacts/implementation_plan.md",
             "workspace/*/research/*.md",
         ],
-        "allowed_extensions": {".json", ".md"},
+        "tool_write_paths": {
+            "AtlasForgeSubmitPlan": [
+                "workspace/*/artifacts/implementation_plan.md",
+            ],
+            "AtlasForgeWriteStageNote": [
+                "workspace/*/research/*.md",
+            ],
+        },
+        "allowed_extensions": {".md"},
     },
     "BUILDING": {
         "allowed_tools": {
@@ -655,11 +658,11 @@ TOOLS = [
                 "stage": {"type": "string"},
                 "plan": {
                     "type": "object",
-                    "description": "Structured plan JSON to persist.",
+                    "description": "Structured plan data to render into artifacts/implementation_plan.md.",
                 },
                 "target_path": {
                     "type": "string",
-                    "description": "Optional repo-relative path. Defaults to state/plans/<mission_id>.json.",
+                    "description": "Optional repo-relative path. During PLANNING, defaults to workspace/<mission>/artifacts/implementation_plan.md.",
                 },
             },
             "required": ["plan"],
@@ -950,17 +953,50 @@ def _policy_public_view(stage: str) -> dict:
         "stage": stage,
         "allowed_tools": sorted(policy["allowed_tools"]),
         "allowed_write_paths": list(policy["allowed_write_paths"]),
+        "tool_write_paths": {
+            tool: list(paths)
+            for tool, paths in policy.get("tool_write_paths", {}).items()
+        },
         "allowed_extensions": sorted(policy["allowed_extensions"]),
         "atlasforge_root": str(_atlasforge_root()),
     }
 
 
+def _repo_relative_path(path: Path) -> str:
+    root = _atlasforge_root()
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        raise ValueError("mission workspace escapes ATLASFORGE_ROOT")
+
+
+def _mission_workspace_relative(mission_id: str) -> str:
+    mission = _current_mission()
+    current_id = _clean_identifier(mission.get("mission_id"), "", max_len=80)
+    if current_id == mission_id:
+        for key in ("mission_workspace", "project_workspace", "workspace_dir"):
+            raw = mission.get(key)
+            if isinstance(raw, str) and raw.strip():
+                candidate = Path(raw.strip()).expanduser()
+                if not candidate.is_absolute():
+                    candidate = _atlasforge_root() / candidate
+                return _repo_relative_path(candidate)
+    return f"workspace/{mission_id}"
+
+
 def _normalize_repo_relative_path(raw_path: Any) -> str:
     if not isinstance(raw_path, str):
         raise ValueError("target_path must be a string")
-    path = raw_path.strip()
-    if not path:
+    if not raw_path:
         raise ValueError("target_path is required")
+    if raw_path != raw_path.strip():
+        raise ValueError("target_path must not contain leading or trailing whitespace")
+    if "://" in raw_path:
+        raise ValueError("target_path must not be URL-schemed")
+    if unquote(raw_path) != raw_path:
+        raise ValueError("target_path must not contain percent-encoded characters")
+    path = raw_path
     if len(path) > 260:
         raise ValueError("target_path is too long")
     if "\x00" in path or any(ord(ch) < 0x20 for ch in path):
@@ -968,7 +1004,7 @@ def _normalize_repo_relative_path(raw_path: Any) -> str:
     p = Path(path)
     if p.is_absolute():
         raise ValueError("target_path must be repo-relative")
-    if ".." in p.parts:
+    if ".." in p.parts or any(".." in part for part in p.parts):
         raise ValueError("target_path must not contain '..'")
     normalized = Path(*[part for part in p.parts if part not in ("", ".")]).as_posix()
     if not normalized:
@@ -995,7 +1031,9 @@ def _enforce_stage_artifact_policy(tool_name: str, stage: str, target_path: str)
     suffix = Path(rel_path).suffix.lower()
     if suffix not in policy["allowed_extensions"]:
         raise ValueError(f"{stage} cannot write files with extension {suffix or '<none>'}")
-    if not any(fnmatch(rel_path, pattern) for pattern in policy["allowed_write_paths"]):
+    tool_paths = policy.get("tool_write_paths", {}).get(tool_name)
+    allowed_paths = tool_paths or policy["allowed_write_paths"]
+    if not any(fnmatch(rel_path, pattern) for pattern in allowed_paths):
         raise ValueError(f"{stage} cannot write target_path {rel_path}")
     return rel_path, _path_under_root(rel_path)
 
@@ -1037,9 +1075,64 @@ def _stage_artifact_envelope(kind: str, stage: str, mission_id: str, payload: di
     }
 
 
+def _render_plan_markdown(plan: dict, mission_id: str) -> str:
+    lines = [
+        "# Implementation Plan",
+        "",
+        f"Mission: {mission_id}",
+        f"Provider: {_active_provider()}",
+        f"Submitted: {datetime.now(timezone.utc).isoformat()}",
+        "",
+    ]
+    scalar_fields = [
+        ("understanding", "Understanding"),
+        ("approach", "Approach"),
+        ("approach_rationale", "Approach Rationale"),
+        ("message_to_human", "Message"),
+    ]
+    for key, heading in scalar_fields:
+        value = plan.get(key)
+        if isinstance(value, str) and value.strip():
+            lines.extend([f"## {heading}", "", value.strip(), ""])
+
+    list_fields = [
+        ("key_requirements", "Key Requirements"),
+        ("assumptions", "Assumptions"),
+        ("research_conducted", "Research Conducted"),
+        ("sources_consulted", "Sources Consulted"),
+        ("success_criteria", "Success Criteria"),
+        ("estimated_files", "Estimated Files"),
+    ]
+    for key, heading in list_fields:
+        values = plan.get(key)
+        if isinstance(values, list) and values:
+            lines.extend([f"## {heading}", ""])
+            for item in values:
+                lines.append(f"- {str(item).strip()}")
+            lines.append("")
+
+    steps = plan.get("steps")
+    if isinstance(steps, list) and steps:
+        lines.extend(["## Steps", ""])
+        for idx, step in enumerate(steps, start=1):
+            if isinstance(step, dict):
+                desc = str(step.get("description") or step.get("step") or "").strip()
+                files = step.get("files")
+                suffix = ""
+                if isinstance(files, list) and files:
+                    suffix = " (" + ", ".join(str(f).strip() for f in files if str(f).strip()) + ")"
+                lines.append(f"{idx}. {desc or 'Planned work'}{suffix}")
+            else:
+                lines.append(f"{idx}. {str(step).strip()}")
+        lines.append("")
+
+    lines.extend(["## Structured Plan", "", "```json", json.dumps(plan, indent=2, sort_keys=True), "```", ""])
+    return "\n".join(lines)
+
+
 def _default_stage_artifact_path(tool_name: str, stage: str, mission_id: str) -> str:
     if tool_name == "AtlasForgeSubmitPlan":
-        return f"state/plans/{mission_id}.json"
+        return f"{_mission_workspace_relative(mission_id)}/artifacts/implementation_plan.md"
     if tool_name == "AtlasForgeSubmitReview":
         if stage in {"ANALYZING", "CYCLE_END", "REVIEW"}:
             return f"state/reviews/{mission_id}.json"
@@ -1049,6 +1142,8 @@ def _default_stage_artifact_path(tool_name: str, stage: str, mission_id: str) ->
             return f"state/test_reports/{mission_id}.json"
         return f"state/build_reports/{mission_id}.json"
     directory = stage.lower()
+    if tool_name == "AtlasForgeWriteStageNote" and stage == "PLANNING":
+        return f"{_mission_workspace_relative(mission_id)}/research/research_findings.md"
     return f"missions/{mission_id}/{directory}/note.md"
 
 
@@ -1070,6 +1165,15 @@ def _handle_atlasforge_submit_json_artifact(
     stage = _resolve_stage(arguments)
     target = arguments.get("target_path") or _default_stage_artifact_path(tool_name, stage, mission_id)
     rel_path, abs_path = _enforce_stage_artifact_policy(tool_name, stage, target)
+    if tool_name == "AtlasForgeSubmitPlan":
+        _atomic_write_text(abs_path, _render_plan_markdown(payload, mission_id))
+        return json.dumps({
+            "ok": True,
+            "path": rel_path,
+            "stage": stage,
+            "provider": _active_provider(),
+            "message": "implementation plan accepted by AtlasForge MCP stage guard.",
+        }, indent=2, sort_keys=True)
     envelope = _stage_artifact_envelope(kind, stage, mission_id, payload)
     _atomic_write_json(abs_path, envelope)
     return json.dumps({

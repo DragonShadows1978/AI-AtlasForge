@@ -50,6 +50,22 @@ header {
     align-items: center;
     gap: 15px;
 }
+@media (min-width: 901px) {
+    .header-row-2 {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        column-gap: 20px;
+    }
+    .header-row-2 .status-group {
+        grid-column: 1;
+        justify-self: start;
+        min-width: 0;
+    }
+    .header-row-2 .controls-group {
+        grid-column: 2;
+        justify-self: center;
+    }
+}
 h1 { color: var(--accent); font-size: 1.3em; }
 
 /* Breathing animation for AtlasForge Working status */
@@ -1454,6 +1470,7 @@ h1 { color: var(--accent); font-size: 1.3em; }
     align-items: center;
     gap: 8px;
     margin-bottom: 10px;
+    flex-wrap: wrap;
 }
 .rec-sort-select {
     background: var(--panel);
@@ -1464,6 +1481,23 @@ h1 { color: var(--accent); font-size: 1.3em; }
     font-size: 0.85em;
 }
 .rec-sort-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.rec-search-filter {
+    min-width: 220px;
+    flex: 1 1 220px;
+    padding: 6px 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85em;
+}
+.rec-search-filter::placeholder {
+    color: var(--text-dim);
+}
+.rec-search-filter:focus {
     outline: none;
     border-color: var(--accent);
 }
@@ -1783,15 +1817,29 @@ h1 { color: var(--accent); font-size: 1.3em; }
     align-items: center;
     gap: 10px;
     margin-bottom: 8px;
+    flex-wrap: wrap;
 }
 .merge-picker-search {
     flex: 1;
+    min-width: 220px;
     padding: 6px 10px;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--card-bg);
     color: var(--text);
     font-size: 0.9em;
+}
+.merge-picker-sort-label {
+    font-size: 0.82em;
+    color: var(--text-dim);
+}
+.merge-picker-sort {
+    padding: 6px 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85em;
 }
 .merge-picker-count {
     margin: 0;
@@ -1866,6 +1914,32 @@ h1 { color: var(--accent); font-size: 1.3em; }
     text-align: center;
     padding: 30px;
     color: var(--red);
+}
+.manage-suggestions-header {
+    margin-bottom: 15px;
+    padding: 10px;
+    background: var(--bg);
+    border-radius: 6px;
+}
+.manage-suggestions-list {
+    max-height: 55vh;
+    overflow-y: auto;
+}
+.manage-suggestion-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    margin-bottom: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.manage-suggestion-item:last-child {
+    margin-bottom: 0;
+}
+.manage-delete-one {
+    flex-shrink: 0;
 }
 .loading-spinner {
     text-align: center;

@@ -22,6 +22,8 @@ import json
 import sqlite3
 import hashlib
 import logging
+import re
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -129,6 +131,9 @@ class SemanticIndex:
         self._pending_additions: List[Tuple[str, str]] = []  # (learning_id, text) pairs
         self._hierarchical_cache: Optional[Dict[str, Any]] = None
         self._coherence_cache: Dict[int, float] = {}
+        self._duplicate_cache: Optional[List[Dict[str, Any]]] = None
+        self._duplicate_threshold: Optional[float] = None
+        self._duplicate_lock = threading.Lock()
 
     def fit(self) -> bool:
         """
@@ -173,6 +178,8 @@ class SemanticIndex:
             self._cluster_cache = None  # Invalidate cluster cache
             self._hierarchical_cache = None
             self._coherence_cache = {}
+            self._duplicate_cache = None
+            self._duplicate_threshold = None
 
             logger.info(f"SemanticIndex fitted with {len(self.learning_ids)} learnings, "
                        f"vocabulary size: {len(self.vectorizer.vocabulary_)}")
@@ -244,42 +251,70 @@ class SemanticIndex:
             return []
 
         try:
-            # Compute pairwise similarities
-            sim_matrix = cosine_similarity(self.tfidf_matrix)
+            with self._duplicate_lock:
+                if self._duplicate_cache is not None and self._duplicate_threshold == threshold:
+                    return self._duplicate_cache
 
-            # Find groups using union-find approach
-            n = len(self.learning_ids)
-            visited = set()
-            groups = []
+                n = len(self.learning_ids)
+                if n > 5000:
+                    groups = self._find_duplicates_blocked(threshold)
+                    self._duplicate_cache = groups
+                    self._duplicate_threshold = threshold
+                    return groups
 
-            for i in range(n):
-                if i in visited:
-                    continue
+                # The TF-IDF rows are L2-normalized, so sparse dot product gives
+                # cosine similarity without materializing an n x n dense matrix.
+                sim_pairs = (self.tfidf_matrix @ self.tfidf_matrix.T).tocoo()
 
-                # Find all learnings similar to this one
-                similar_indices = []
-                for j in range(n):
-                    if i != j and sim_matrix[i, j] >= threshold:
-                        similar_indices.append(j)
+                # Find groups using union-find approach
+                parent = list(range(n))
+                edge_sims: Dict[Tuple[int, int], float] = {}
 
-                if similar_indices:
-                    group_indices = [i] + similar_indices
+                def find(x: int) -> int:
+                    while parent[x] != x:
+                        parent[x] = parent[parent[x]]
+                        x = parent[x]
+                    return x
+
+                def union(a: int, b: int):
+                    root_a = find(a)
+                    root_b = find(b)
+                    if root_a != root_b:
+                        parent[root_b] = root_a
+
+                for row, col, sim in zip(sim_pairs.row, sim_pairs.col, sim_pairs.data):
+                    if row >= col or sim < threshold:
+                        continue
+                    i = int(row)
+                    j = int(col)
+                    edge_sims[(i, j)] = float(sim)
+                    union(i, j)
+
+                grouped_indices: Dict[int, List[int]] = {}
+                for i in range(n):
+                    root = find(i)
+                    grouped_indices.setdefault(root, []).append(i)
+
+                groups = []
+
+                for group_indices in grouped_indices.values():
+                    if len(group_indices) < 2:
+                        continue
+
                     group_ids = [self.learning_ids[idx] for idx in group_indices]
 
-                    # Calculate average similarity within group
-                    total_sim = 0
+                    # Average only duplicate-strength edges. This keeps the
+                    # summary cheap and aligned with why the group was formed.
+                    total_sim = 0.0
                     count = 0
-                    for gi in range(len(group_indices)):
-                        for gj in range(gi + 1, len(group_indices)):
-                            total_sim += sim_matrix[group_indices[gi], group_indices[gj]]
+                    group_set = set(group_indices)
+                    for (i, j), sim in edge_sims.items():
+                        if i in group_set and j in group_set:
+                            total_sim += sim
                             count += 1
                     avg_sim = total_sim / count if count > 0 else threshold
 
-                    # Mark all as visited
-                    for idx in group_indices:
-                        visited.add(idx)
-
-                    # Representative is the one with longest description
+                    # Representative is the one with richest text.
                     descriptions = [self.learning_descriptions[idx] for idx in group_indices]
                     rep_idx = max(range(len(group_indices)),
                                   key=lambda x: len(descriptions[x]))
@@ -291,13 +326,113 @@ class SemanticIndex:
                         'count': len(group_ids)
                     })
 
-            # Sort by group size (largest first)
-            groups.sort(key=lambda x: x['count'], reverse=True)
-            return groups
+                # Sort by group size (largest first)
+                groups.sort(key=lambda x: x['count'], reverse=True)
+                self._duplicate_cache = groups
+                self._duplicate_threshold = threshold
+                return groups
 
         except Exception as e:
             logger.error(f"Duplicate detection failed: {e}")
             return []
+
+    def _find_duplicates_blocked(self, threshold: float = 0.85) -> List[Dict[str, Any]]:
+        """Find duplicates for large corpora without all-pairs similarity.
+
+        For 30k+ learnings, a full similarity matrix is too slow and too large
+        for an interactive dashboard tab. Blocking keeps the operation bounded
+        by comparing exact text duplicates and same-title candidates only.
+        """
+        exact_buckets: Dict[str, List[int]] = {}
+        title_buckets: Dict[str, List[int]] = {}
+
+        def normalize(text: str) -> str:
+            text = text.lower()
+            text = re.sub(r'[^a-z0-9]+', ' ', text)
+            return ' '.join(text.split())
+
+        for idx, text in enumerate(self.learning_descriptions):
+            normalized = normalize(text)
+            if not normalized:
+                continue
+            exact_buckets.setdefault(normalized[:1200], []).append(idx)
+
+            # The combined text starts with title. Use the first sentence-ish
+            # chunk as a coarse title block while avoiding generic tiny keys.
+            title_chunk = normalize(' '.join(text.split()[:10]))
+            if len(title_chunk) >= 24:
+                title_buckets.setdefault(title_chunk, []).append(idx)
+
+        visited = set()
+        groups = []
+
+        def add_group(indices: List[int], similarity: float):
+            unique_indices = [idx for idx in dict.fromkeys(indices) if idx not in visited]
+            if len(unique_indices) < 2:
+                return
+            group_ids = [self.learning_ids[idx] for idx in unique_indices]
+            rep_idx = max(unique_indices, key=lambda idx: len(self.learning_descriptions[idx]))
+            visited.update(unique_indices)
+            groups.append({
+                'learning_ids': group_ids,
+                'similarity': round(similarity, 3),
+                'representative': self.learning_ids[rep_idx],
+                'count': len(group_ids)
+            })
+
+        # Exact duplicate text groups are cheap and high-confidence.
+        for indices in exact_buckets.values():
+            if len(indices) > 1:
+                add_group(indices, 1.0)
+
+        # Same-title buckets catch common ingestion duplicates. Keep bucket size
+        # bounded so one generic title cannot stall the tab.
+        for indices in title_buckets.values():
+            candidates = [idx for idx in indices if idx not in visited]
+            if len(candidates) < 2 or len(candidates) > 250:
+                continue
+
+            local_matrix = self.tfidf_matrix[candidates]
+            sim_pairs = (local_matrix @ local_matrix.T).tocoo()
+            parent = list(range(len(candidates)))
+            edge_sims: Dict[Tuple[int, int], float] = {}
+
+            def find(x: int) -> int:
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            def union(a: int, b: int):
+                root_a = find(a)
+                root_b = find(b)
+                if root_a != root_b:
+                    parent[root_b] = root_a
+
+            for row, col, sim in zip(sim_pairs.row, sim_pairs.col, sim_pairs.data):
+                if row >= col or sim < threshold:
+                    continue
+                i = int(row)
+                j = int(col)
+                edge_sims[(i, j)] = float(sim)
+                union(i, j)
+
+            local_groups: Dict[int, List[int]] = {}
+            for local_idx, global_idx in enumerate(candidates):
+                local_groups.setdefault(find(local_idx), []).append(global_idx)
+
+            for group_indices in local_groups.values():
+                if len(group_indices) < 2:
+                    continue
+                group_set = {candidates.index(idx) for idx in group_indices}
+                sims = [
+                    sim for (i, j), sim in edge_sims.items()
+                    if i in group_set and j in group_set
+                ]
+                add_group(group_indices, sum(sims) / len(sims) if sims else threshold)
+
+        groups.sort(key=lambda x: x['count'], reverse=True)
+        return groups
 
     def get_clusters(self, distance_threshold: float = 0.7) -> Dict[int, List[str]]:
         """
@@ -685,6 +820,8 @@ class SemanticIndex:
             self._cluster_threshold = None
             self._hierarchical_cache = None
             self._coherence_cache = {}
+            self._duplicate_cache = None
+            self._duplicate_threshold = None
             self.tfidf_matrix = None
             self.learning_ids = []
             self.learning_descriptions = []
@@ -695,6 +832,8 @@ class SemanticIndex:
             self._cluster_threshold = None
             self._hierarchical_cache = None
             self._coherence_cache = {}
+            self._duplicate_cache = None
+            self._duplicate_threshold = None
 
     def add_learning_incremental(self, learning_id: str, text: str) -> bool:
         """
@@ -916,6 +1055,23 @@ class MissionKnowledgeBase:
                 cursor.execute("ALTER TABLE learnings ADD COLUMN investigation_query TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_learnings_timestamp
+                ON learnings(timestamp DESC)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_learnings_domain
+                ON learnings(problem_domain)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_learnings_type
+                ON learnings(learning_type)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_learnings_source_type
+                ON learnings(source_type)
+            """)
 
             # GitHub links table (mission-GitHub artifact linking)
             cursor.execute("""

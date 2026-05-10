@@ -43,7 +43,7 @@ function showKBError(containerId, message, retryFn = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const retryBtn = retryFn ? `<button class="kb-retry-btn" onclick="${retryFn}">Retry</button>` : '';
+    const retryBtn = retryFn ? '<button class="kb-retry-btn" type="button">Retry</button>' : '';
     container.innerHTML = `
         <div class="kb-error" role="alert" aria-live="polite">
             <span class="kb-error-icon">!</span>
@@ -51,6 +51,10 @@ function showKBError(containerId, message, retryFn = null) {
             ${retryBtn}
         </div>
     `;
+    const retryButton = container.querySelector('.kb-retry-btn');
+    if (retryButton && retryFn === 'refreshKBAnalyticsWidget()') {
+        retryButton.addEventListener('click', refreshKBAnalyticsWidget);
+    }
 }
 
 // =============================================================================

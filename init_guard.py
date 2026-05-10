@@ -63,13 +63,15 @@ def _compute_workspace_roots() -> List[str]:
     allow_pytest = os.environ.get("ATLASFORGE_ALLOW_PYTEST_TMP", "0") == "1"
     if user and allow_pytest:
         roots.append(f"/tmp/pytest-of-{user}")
-    # Normalize: rstrip trailing slashes, drop duplicates, drop empty.
+    # Normalize: resolve symlinked roots the same way `_is_under_workspace`
+    # resolves candidate paths, rstrip trailing slashes, drop duplicates, drop empty.
     seen, out = set(), []
     for r in roots:
-        rr = r.rstrip("/")
-        if rr and rr not in seen:
-            seen.add(rr)
-            out.append(rr)
+        for candidate in (r, os.path.realpath(r)):
+            rr = candidate.rstrip("/")
+            if rr and rr not in seen:
+                seen.add(rr)
+                out.append(rr)
     return out
 
 

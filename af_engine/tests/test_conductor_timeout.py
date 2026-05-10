@@ -236,6 +236,15 @@ That's all."""
 
     @pytest.mark.regression
     @pytest.mark.regression_timeout_retry
+    def test_extract_json_returns_none_for_non_string(self):
+        """Verify truthy non-string inputs do not reach regex/json parsing."""
+        import atlasforge_conductor as conductor
+
+        assert conductor.extract_json_from_response(42) is None
+        assert conductor.extract_json_from_response(["not", "json"]) is None
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
     def test_extract_json_handles_trailing_comma(self):
         """Verify trailing comma is handled."""
         import atlasforge_conductor as conductor
@@ -551,6 +560,22 @@ class TestCleanupTrailingCommas:
         result = conductor._cleanup_trailing_commas(text)
 
         assert result == '{"items": ["a", "b"], "count": 2}'
+
+    @pytest.mark.regression
+    @pytest.mark.regression_timeout_retry
+    def test_commas_before_brackets_inside_strings_preserved(self):
+        """Verify cleanup does not corrupt string values containing comma-bracket text."""
+        import atlasforge_conductor as conductor
+
+        text = '{"pattern": ",}", "array_pattern": ",]", "items": ["a",],}'
+        result = conductor._cleanup_trailing_commas(text)
+
+        assert result == '{"pattern": ",}", "array_pattern": ",]", "items": ["a"]}'
+        assert conductor.extract_json_from_response(text) == {
+            "pattern": ",}",
+            "array_pattern": ",]",
+            "items": ["a"],
+        }
 
 
 # ===========================================================================

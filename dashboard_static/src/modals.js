@@ -19,10 +19,28 @@ let editedRecData = null;
 let selectedForMerge = new Set();
 let mergeCandidatesCache = [];
 let mergeInProgress = false;
+let mergeSortField = 'created_at';
+let mergeSortDirection = 'desc';
+let manageSuggestionsCache = [];
+let selectedForManageDelete = new Set();
+let manageDeleteInProgress = false;
 let _openRecModalInFlight = false;
 let _queueInProgress = false;
 let _deleteInFlight = false;
 let _setMissionInFlight = false;
+
+function normalizeCycleBudget(value, fallback = 3) {
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed)) return fallback;
+    return Math.max(1, Math.min(10, parsed));
+}
+
+function readCycleBudget(selectEl) {
+    if (!selectEl) return null;
+    const parsed = parseInt(selectEl.value, 10);
+    if (isNaN(parsed) || parsed < 1) return null;
+    return Math.min(10, parsed);
+}
 
 // Store scroll position when modal opens (for mobile)
 let savedScrollX = 0;
@@ -41,7 +59,7 @@ function _safeHealthFilter(value) {
 
 // localStorage key for sort/filter persistence
 const REC_SORT_STORAGE_KEY = 'rec_sort_filter_state';
-const REC_SORT_SCHEMA_VERSION = 2; // v2 adds healthFilter field
+const REC_SORT_SCHEMA_VERSION = 4; // v4 adds project filter
 
 function saveRecSortState() {
     try {
@@ -50,7 +68,8 @@ function saveRecSortState() {
             sortField: currentSortField,
             sortDirection: currentSortDirection,
             tagFilter: currentTagFilter,
-            healthFilter: currentHealthFilter
+            searchQuery: currentSearchQuery,
+            projectFilter: currentProjectFilter
         }));
     } catch (e) {
         console.log('Could not save rec sort state:', e);
@@ -90,12 +109,15 @@ function loadRecSortState() {
             const tagSelect = document.getElementById('rec-tag-filter');
             if (tagSelect) tagSelect.value = currentTagFilter;
         }
-        if (parsed.healthFilter !== undefined) {
-            currentHealthFilter = _safeHealthFilter(parsed.healthFilter);
-            if (currentHealthFilter) {
-                const activeEl = document.querySelector(`.rec-health-stat.${CSS.escape(currentHealthFilter.replace('_', '-'))}`);
-                if (activeEl) activeEl.classList.add('active');
-            }
+        if (parsed.searchQuery !== undefined && typeof parsed.searchQuery === 'string') {
+            currentSearchQuery = parsed.searchQuery;
+            const searchInput = document.getElementById('rec-search-filter');
+            if (searchInput) searchInput.value = currentSearchQuery;
+        }
+        if (parsed.projectFilter !== undefined && typeof parsed.projectFilter === 'string') {
+            currentProjectFilter = parsed.projectFilter;
+            const projectSelect = document.getElementById('rec-project-filter');
+            if (projectSelect) projectSelect.value = currentProjectFilter;
         }
     } catch (e) {
         console.log('Could not load rec sort state:', e);
@@ -109,7 +131,10 @@ let newSuggestionId = null;
 // Filter state
 let currentTagFilter = '';
 let currentHealthFilter = '';
+let currentSearchQuery = '';
+let currentProjectFilter = '';
 let allRecommendations = [];
+let recommendationProjects = [];
 
 // Pagination state
 let currentPage = 1;
@@ -184,20 +209,17 @@ export async function loadRecommendations() {
     console.log('[DEBUG] recommendations array length:', recommendations.length);
     // Store all recommendations for filtering
     allRecommendations = [...recommendations];
+    await loadRecommendationProjects();
     // Reset pagination on reload
     currentPage = 1;
     // Restore persisted sort/filter before rendering
     loadRecSortState();
-    // Apply current sort before rendering
-    applySortToRecommendations();
-    console.log('[DEBUG] About to call renderRecommendations');
-    renderRecommendations();
+    // Apply current filters and sort before rendering
+    applyFilters();
     console.log('[DEBUG] About to call updateRecCount');
     updateRecCount();
     // Update health summary bar
     updateHealthSummaryBar();
-    // Update pagination controls
-    updatePaginationControls();
 }
 
 function renderRecommendations() {
@@ -205,7 +227,10 @@ function renderRecommendations() {
     if (!container) return;
 
     if (recommendations.length === 0) {
-        container.innerHTML = '<div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>';
+        const hasFilters = Boolean(currentTagFilter || currentSearchQuery || currentHealthFilter || currentProjectFilter);
+        container.innerHTML = hasFilters && allRecommendations.length > 0
+            ? '<div class="rec-placeholder">No suggestions match the current filters.</div>'
+            : '<div class="rec-placeholder">No suggestions yet. Complete a mission to get suggestions.</div>';
         return;
     }
 
@@ -215,11 +240,11 @@ function renderRecommendations() {
     container.innerHTML = paginatedRecs.map(rec => {
         const isDriftHalt = rec.source_type === 'drift_halt';
         const isMerged = rec.source_type === 'merged';
-        const missionType = rec.mission_type || 'EXPANSION';
+        const classification = rec.classification || rec.mission_classification || 'EXPANSION';
         const itemClass = isDriftHalt ? 'rec-item drift-halt'
             : (isMerged ? 'rec-item merged'
-            : (missionType === 'BUGFIX' ? 'rec-item bugfix-mission'
-            : (missionType === 'TECH_DEBT' ? 'rec-item tech-debt-mission'
+            : (classification === 'BUGFIX' ? 'rec-item bugfix-mission'
+            : (classification === 'TECH_DEBT' ? 'rec-item tech-debt-mission'
             : 'rec-item')));
         const sourceBadge = isDriftHalt
             ? '<span class="rec-source-badge drift">From Drift</span>'
@@ -229,9 +254,9 @@ function renderRecommendations() {
                     ? `<span class="rec-source-badge merged">Merged (${(rec.merged_from || []).length})</span>`
                     : ''));
 
-        // Mission type badge (BUGFIX / TECH_DEBT / COMPLETION — no badge for EXPANSION/MANUAL)
+        // Classification badge (BUGFIX / TECH_DEBT / COMPLETION — no badge for EXPANSION/MANUAL)
         const missionTypeBadge = (() => {
-            switch (missionType) {
+            switch (classification) {
                 case 'BUGFIX':     return '<span class="mission-type-badge bugfix">[BUGFIX]</span>';
                 case 'TECH_DEBT':  return '<span class="mission-type-badge tech-debt">[DEBT]</span>';
                 case 'COMPLETION': return '<span class="mission-type-badge completion">[COMPLETE]</span>';
@@ -271,6 +296,9 @@ function renderRecommendations() {
         const tagBadges = (rec.auto_tags || []).slice(0, 3).map(tag =>
             `<span class="rec-tag-badge" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</span>`
         ).join('');
+        const projectBadge = rec.project_name
+            ? `<span class="rec-project-badge" data-project="${escapeHtml(rec.project_slug || '')}">${escapeHtml(rec.project_name)}</span>`
+            : '';
 
         // Priority score indicator
         const priorityScore = rec.priority_score || 0;
@@ -289,7 +317,7 @@ function renderRecommendations() {
             <div class="${itemClass}" data-rec-id="${escapeHtml(rec.id)}">
                 <div class="rec-item-content">
                     <div class="rec-item-title">
-                        ${missionTypeBadge}${profileBadge}${escapeHtml(rec.mission_title)}
+                        ${missionTypeBadge}${profileBadge}${projectBadge}${escapeHtml(rec.mission_title)}
                         ${sourceBadge}
                         ${healthBadge}
                     </div>
@@ -298,7 +326,7 @@ function renderRecommendations() {
                 </div>
                 <div class="rec-item-meta">
                     ${priorityBadge}
-                    <span class="rec-cycles-badge">${rec.suggested_cycles || 3} cycles</span>
+                    <span class="rec-cycles-badge">${escapeHtml(String(normalizeCycleBudget(rec.suggested_cycles)))} cycles</span>
                     <span>${formatDate(rec.created_at)}</span>
                 </div>
             </div>
@@ -396,22 +424,23 @@ export async function openRecModal(recId) {
     }
 
     const cyclesSelect = document.getElementById('rec-modal-cycles');
-    const suggestedCycles = rec.suggested_cycles || 3;
+    const suggestedCycles = normalizeCycleBudget(rec.suggested_cycles);
     if (cyclesSelect) cyclesSelect.value = suggestedCycles;
 
     const missionCatSelect = document.getElementById('rec-modal-mission-type');
     if (missionCatSelect) {
-        missionCatSelect.value = (rec.mission_type || 'EXPANSION').toUpperCase();
+        missionCatSelect.value = (rec.classification || 'EXPANSION').toUpperCase();
     }
 
     const typeSelect = document.getElementById('rec-modal-type');
     if (typeSelect) {
-        const _MTYPE_PROFILE = { BUGFIX: 'bug_hunt', TECH_DEBT: 'build_only' };
-        const storedProfile = rec.execution_profile || 'full_rd';
-        const missionType = (rec.mission_type || '').toUpperCase();
-        // If the stored profile is still the generic default, apply smart mapping from mission_type
-        const effectiveProfile = (storedProfile === 'full_rd' && _MTYPE_PROFILE[missionType])
-            ? _MTYPE_PROFILE[missionType]
+        const _CLASSIFICATION_PROFILE = { BUGFIX: 'bug_hunt', TECH_DEBT: 'build_only' };
+        const storedProfile = rec.execution_profile || rec.mission_type || 'full_rd';
+        const classification = (rec.classification || '').toUpperCase();
+        // If the stored profile is still the generic default, apply smart mapping from classification.
+        const hasMappedProfile = Object.prototype.hasOwnProperty.call(_CLASSIFICATION_PROFILE, classification);
+        const effectiveProfile = (storedProfile === 'full_rd' && hasMappedProfile)
+            ? _CLASSIFICATION_PROFILE[classification]
             : storedProfile;
         typeSelect.value = effectiveProfile;
     }
@@ -419,11 +448,11 @@ export async function openRecModal(recId) {
     // Reset project name field and trigger async auto-suggestion
     const projectInput = document.getElementById('rec-project-name-input');
     if (projectInput) {
-        projectInput.value = '';
-        projectInput.placeholder = 'Auto-detecting...';
-        projectInput.dataset.suggested = '';
+        projectInput.value = rec.project_name || '';
+        projectInput.placeholder = rec.project_name || 'Auto-detecting...';
+        projectInput.dataset.suggested = rec.project_name || '';
         const missionText = rec.mission_description || rec.mission_title || '';
-        if (missionText.length > 10) {
+        if (!rec.project_name && missionText.length > 10) {
             api('/api/suggest-project-name', 'POST', { problem_statement: missionText })
                 .then(result => {
                     if (result && result.suggested_name) {
@@ -435,7 +464,7 @@ export async function openRecModal(recId) {
                 })
                 .catch(() => { projectInput.placeholder = 'Enter project name (optional)'; });
         } else {
-            projectInput.placeholder = 'Enter project name (optional)';
+            projectInput.placeholder = rec.project_name || 'Enter project name';
         }
     }
 
@@ -526,12 +555,11 @@ export async function setMissionFromRec() {
     _setMissionInFlight = true;
     try {
         const _cyclesEl = document.getElementById('rec-modal-cycles');
-        const _rawCyclesS = _cyclesEl ? parseInt(_cyclesEl.value, 10) : NaN;
-        if (isNaN(_rawCyclesS) || _rawCyclesS < 1) {
+        const cycleBudget = readCycleBudget(_cyclesEl);
+        if (cycleBudget === null) {
             showToast('Invalid cycle count — must be a number >= 1', 'error');
             return;
         }
-        const cycleBudget = _rawCyclesS;
 
         const projectInputS = document.getElementById('rec-project-name-input');
         const projectNameS = projectInputS
@@ -543,10 +571,11 @@ export async function setMissionFromRec() {
         const catSelectS = document.getElementById('rec-modal-mission-type');
         const missionCatS = catSelectS ? catSelectS.value : null;
 
-        // Persist chosen execution_profile and mission_type back to the suggestion before set-mission deletes it
+        // Persist chosen execution_profile and classification back to the suggestion before set-mission queues it
         try {
             const _putS = { execution_profile: executionProfileS };
-            if (missionCatS) _putS.mission_type = missionCatS;
+            if (missionCatS) _putS.classification = missionCatS;
+            if (projectNameS) _putS.project_name = projectNameS;
             await api('/api/recommendations/' + selectedRecId, 'PUT', _putS);
         } catch (_e) { /* non-blocking — main action proceeds regardless */ }
 
@@ -599,7 +628,7 @@ export function toggleEditMode() {
             mission_title: rec.mission_title || '',
             mission_description: rec.mission_description || '',
             rationale: rec.rationale || '',
-            suggested_cycles: rec.suggested_cycles || 3
+            suggested_cycles: normalizeCycleBudget(rec.suggested_cycles)
         };
 
         // Populate edit fields
@@ -644,9 +673,9 @@ export async function saveRecChanges() {
         mission_title: _titleEl.value,
         mission_description: _descEl.value,
         rationale: _ratEl.value,
-        suggested_cycles: (() => { const _el = document.getElementById('rec-modal-cycles'); if (!_el) return null; const v = parseInt(_el.value, 10); return isNaN(v) ? null : v; })(),
+        suggested_cycles: (() => { const _el = document.getElementById('rec-modal-cycles'); return readCycleBudget(_el); })(),
         ...(_typeEl ? { execution_profile: _typeEl.value } : {}),
-        ...(_catEl ? { mission_type: _catEl.value } : {})
+        ...(_catEl ? { classification: _catEl.value } : {})
     };
 
     try {
@@ -704,7 +733,7 @@ export async function openMergePicker() {
 
         if (data.candidates && data.candidates.length >= 2) {
             mergeCandidatesCache = data.candidates;
-            renderMergeCandidates(data.candidates);
+            renderMergeCandidates(data.candidates, true);
         } else {
             body.innerHTML = `
                 <div class="merge-picker-empty">
@@ -718,36 +747,51 @@ export async function openMergePicker() {
     }
 }
 
-function renderMergeCandidates(candidates) {
+function renderMergeCandidates(candidates, resetSelection = false) {
     const body = document.getElementById('merge-picker-body');
-    selectedForMerge.clear();
+    if (resetSelection) selectedForMerge.clear();
+
+    const sortedCandidates = getSortedMergeCandidates(candidates);
 
     let html = `
         <div class="merge-picker-header">
             <div class="merge-picker-controls">
-                <input type="text" id="merge-picker-search" class="merge-picker-search" placeholder="Filter by title...">
+                <input type="text" id="merge-picker-search" class="merge-picker-search" placeholder="Search title, date, tag, or type...">
+                <label class="merge-picker-sort-label" for="merge-picker-sort">Sort:</label>
+                <select id="merge-picker-sort" class="merge-picker-sort">
+                    <option value="created_at"${mergeSortField === 'created_at' ? ' selected' : ''}>Date Created</option>
+                    <option value="priority_score"${mergeSortField === 'priority_score' ? ' selected' : ''}>Priority</option>
+                    <option value="mission_title"${mergeSortField === 'mission_title' ? ' selected' : ''}>Title</option>
+                </select>
+                <button class="btn btn-small" data-action="toggle-merge-sort">${mergeSortDirection === 'desc' ? '\u2193 Desc' : '\u2191 Asc'}</button>
                 <button class="btn btn-small" data-action="select-all">Select All</button>
                 <button class="btn btn-small" data-action="deselect-all">Deselect All</button>
             </div>
-            <p class="merge-picker-count">${candidates.length} suggestions available</p>
+            <p class="merge-picker-count">${sortedCandidates.length} suggestions available</p>
         </div>
         <div class="merge-picker-list">
     `;
 
-    candidates.forEach(item => {
+    sortedCandidates.forEach(item => {
         const safeId = escapeHtml(String(item.id));
         const tags = (item.auto_tags || []).map(t => `<span class="rec-tag">${escapeHtml(t)}</span>`).join('');
+        const searchText = buildSuggestionSearchText(item);
+        const createdAt = item.created_at ? formatDate(item.created_at) : 'No date';
+        const project = item.project_name ? `<span>${escapeHtml(item.project_name)}</span>` : '';
+        const checked = selectedForMerge.has(String(item.id)) ? ' checked' : '';
         html += `
-            <div class="merge-candidate-item" data-title="${escapeHtml(item.mission_title).toLowerCase()}" data-candidate-id="${safeId}">
+            <div class="merge-candidate-item" data-search="${escapeHtml(searchText)}" data-candidate-id="${safeId}">
                 <label class="merge-candidate-checkbox">
-                    <input type="checkbox" data-rec-id="${safeId}">
+                    <input type="checkbox" data-rec-id="${safeId}"${checked}>
                 </label>
                 <div class="merge-candidate-content">
                     <div class="merge-candidate-title">${escapeHtml(item.mission_title)}</div>
                     <div class="merge-candidate-preview">${escapeHtml(item.mission_description || '')}</div>
                     <div class="merge-candidate-meta">
-                        <span class="rec-cycles-badge">${item.suggested_cycles} cycles</span>
+                        <span class="rec-cycles-badge">${escapeHtml(String(normalizeCycleBudget(item.suggested_cycles)))} cycles</span>
                         <span class="merge-candidate-priority">Priority: ${item.priority_score}</span>
+                        ${project}
+                        <span>${escapeHtml(createdAt)}</span>
                         ${tags}
                     </div>
                 </div>
@@ -768,19 +812,47 @@ function renderMergeCandidates(candidates) {
     // Attach delegated event listeners (replaces inline handlers to prevent XSS)
     const searchInput = body.querySelector('#merge-picker-search');
     if (searchInput) searchInput.addEventListener('input', e => filterMergeCandidates(e.target.value));
-
-    body.addEventListener('click', function _mergePickerDelegate(e) {
-        const action = e.target.closest('[data-action]');
-        if (!action) return;
-        const actionName = action.dataset.action;
-        if (actionName === 'select-all') selectAllForMerge();
-        else if (actionName === 'deselect-all') deselectAllForMerge();
-        else if (actionName === 'merge-selected') openMergeModal();
+    const sortSelect = body.querySelector('#merge-picker-sort');
+    if (sortSelect) sortSelect.addEventListener('change', e => {
+        mergeSortField = e.target.value;
+        renderMergeCandidates(mergeCandidatesCache, false);
     });
 
-    body.addEventListener('change', function _mergeCheckboxDelegate(e) {
-        const cb = e.target.closest('input[type="checkbox"][data-rec-id]');
-        if (cb) toggleMergeSelection(cb.dataset.recId);
+    if (!body._mergePickerDelegatesAttached) {
+        body._mergePickerDelegatesAttached = true;
+        body.addEventListener('click', function _mergePickerDelegate(e) {
+            const action = e.target.closest('[data-action]');
+            if (!action) return;
+            const actionName = action.dataset.action;
+            if (actionName === 'select-all') selectAllForMerge();
+            else if (actionName === 'deselect-all') deselectAllForMerge();
+            else if (actionName === 'merge-selected') openMergeModal();
+            else if (actionName === 'toggle-merge-sort') {
+                mergeSortDirection = mergeSortDirection === 'desc' ? 'asc' : 'desc';
+                renderMergeCandidates(mergeCandidatesCache, false);
+            }
+        });
+
+        body.addEventListener('change', function _mergeCheckboxDelegate(e) {
+            const cb = e.target.closest('input[type="checkbox"][data-rec-id]');
+            if (cb) toggleMergeSelection(cb.dataset.recId);
+        });
+    }
+    updateMergeSelectionCount();
+}
+
+function getSortedMergeCandidates(candidates) {
+    const dir = mergeSortDirection === 'asc' ? 1 : -1;
+    return [...candidates].sort((a, b) => {
+        if (mergeSortField === 'created_at') {
+            return dir * (new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        }
+        if (mergeSortField === 'priority_score') {
+            return dir * ((a.priority_score || 0) - (b.priority_score || 0));
+        }
+        const left = String(a.mission_title || '').toLowerCase();
+        const right = String(b.mission_title || '').toLowerCase();
+        return dir * left.localeCompare(right);
     });
 }
 
@@ -814,8 +886,8 @@ export function filterMergeCandidates(query) {
     const items = document.querySelectorAll('.merge-candidate-item');
     const lowerQuery = query.toLowerCase();
     items.forEach(item => {
-        const title = item.getAttribute('data-title') || '';
-        const visible = title.includes(lowerQuery);
+        const searchText = item.getAttribute('data-search') || '';
+        const visible = searchText.includes(lowerQuery);
         item.style.display = visible ? '' : 'none';
         // Remove hidden items from selection to prevent invisible merges
         if (!visible) {
@@ -881,7 +953,9 @@ export function openMergeModal() {
     // Generate combined title and description
     const combinedTitle = selectedRecs.map(r => r.mission_title).join(' + ');
     const combinedDescription = selectedRecs.map(r => `## ${r.mission_title}\n${r.mission_description || ''}`).join('\n\n');
-    const maxCycles = selectedRecs.reduce((max, r) => Math.max(max, r.suggested_cycles || 3), 3);
+    const maxCycles = selectedRecs.reduce((max, r) => Math.max(max, normalizeCycleBudget(r.suggested_cycles)), 3);
+    const projects = Array.from(new Set(selectedRecs.map(r => r.project_name).filter(Boolean)));
+    const mergedProject = projects.length === 1 ? projects[0] : '';
 
     body.innerHTML = `
         <div class="merge-preview">
@@ -903,6 +977,10 @@ export function openMergeModal() {
             <div class="form-group">
                 <label>Rationale:</label>
                 <textarea id="merge-rationale" class="form-textarea" rows="3">Merged from ${selectedRecs.length} similar suggestions for efficiency.</textarea>
+            </div>
+            <div class="form-group">
+                <label>Project:</label>
+                <input type="text" id="merge-project" class="form-input" list="rec-project-list" value="${escapeHtml(mergedProject)}" placeholder="Select or enter project name">
             </div>
             <div class="form-group-row">
                 <div class="form-group">
@@ -948,8 +1026,8 @@ export async function executeMerge() {
 
     const sourceIds = Array.from(selectedForMerge);
     const cyclesEl = document.getElementById('merge-cycles');
-    const parsedCycles = cyclesEl ? parseInt(cyclesEl.value, 10) : NaN;
-    if (isNaN(parsedCycles) || parsedCycles < 1) {
+    const parsedCycles = readCycleBudget(cyclesEl);
+    if (parsedCycles === null) {
         showToast('Please enter a valid cycle count (1 or more)', 'error');
         mergeInProgress = false;
         if (mergeBtn) mergeBtn.disabled = false;
@@ -961,6 +1039,8 @@ export async function executeMerge() {
         rationale: document.getElementById('merge-rationale')?.value ?? '',
         suggested_cycles: parsedCycles
     };
+    const mergeProject = document.getElementById('merge-project')?.value?.trim() || '';
+    if (mergeProject) mergedData.project_name = mergeProject;
     const deleteSourcesEl = document.getElementById('merge-delete-sources');
     const deleteSources = deleteSourcesEl ? deleteSourcesEl.checked : false;
 
@@ -1020,12 +1100,11 @@ export async function queueMissionSuggestion() {
             showToast('Cycles input not found', 'error');
             return;
         }
-        const _rawCyclesQ = parseInt(recModalCyclesEl.value, 10);
-        if (isNaN(_rawCyclesQ) || _rawCyclesQ < 1) {
+        const cycleBudget = readCycleBudget(recModalCyclesEl);
+        if (cycleBudget === null) {
             showToast('Invalid cycle count — must be a number >= 1', 'error');
             return;
         }
-        const cycleBudget = _rawCyclesQ;
 
         const projectInputQ = document.getElementById('rec-project-name-input');
         const projectNameQ = projectInputQ
@@ -1037,10 +1116,11 @@ export async function queueMissionSuggestion() {
         const catSelectQ = document.getElementById('rec-modal-mission-type');
         const missionCatQ = catSelectQ ? catSelectQ.value : null;
 
-        // Persist chosen execution_profile and mission_type back to the suggestion record
+        // Persist chosen execution_profile and classification back to the suggestion record
         try {
             const _putPayload = { execution_profile: executionProfileQ };
-            if (missionCatQ) _putPayload.mission_type = missionCatQ;
+            if (missionCatQ) _putPayload.classification = missionCatQ;
+            if (projectNameQ) _putPayload.project_name = projectNameQ;
             await api('/api/recommendations/' + selectedRecId, 'PUT', _putPayload);
         } catch (_e) { /* non-blocking */ }
 
@@ -1049,6 +1129,7 @@ export async function queueMissionSuggestion() {
             cycle_budget: cycleBudget,
             priority: 0,
             source: 'recommendation',
+            source_id: selectedRecId,
             mission_type: executionProfileQ,
         };
         if (projectNameQ) queuePayload.project_name = projectNameQ;
@@ -1211,6 +1292,48 @@ export async function loadHealthSummary() {
     }
 }
 
+async function loadRecommendationProjects() {
+    try {
+        const data = await api('/api/recommendations/projects?status=open');
+        recommendationProjects = data.items || [];
+        populateProjectControls();
+    } catch (e) {
+        recommendationProjects = [];
+        populateProjectControls();
+    }
+}
+
+function populateProjectControls() {
+    const projectSelect = document.getElementById('rec-project-filter');
+    if (projectSelect) {
+        const current = currentProjectFilter || projectSelect.value || '';
+        projectSelect.innerHTML = '<option value="">All Projects</option>' + recommendationProjects.map(project => {
+            const value = project.project_name || '';
+            const count = project.count ? ` (${project.count})` : '';
+            return `<option value="${escapeHtml(value)}">${escapeHtml(value + count)}</option>`;
+        }).join('');
+        projectSelect.value = current;
+        if (projectSelect.value !== current) {
+            projectSelect.value = '';
+            currentProjectFilter = '';
+        }
+    }
+
+    const datalist = document.getElementById('rec-project-list');
+    if (datalist) {
+        datalist.innerHTML = recommendationProjects
+            .map(project => `<option value="${escapeHtml(project.project_name || '')}">`)
+            .join('');
+    }
+
+    const quickDatalist = document.getElementById('rec-quick-add-project-list');
+    if (quickDatalist) {
+        quickDatalist.innerHTML = recommendationProjects
+            .map(project => `<option value="${escapeHtml(project.project_name || '')}">`)
+            .join('');
+    }
+}
+
 // =============================================================================
 // MERGE CANDIDATES AUTO-PROMPT FUNCTIONS
 // =============================================================================
@@ -1284,14 +1407,16 @@ export function proceedToMerge() {
 /**
  * Add a new suggestion via API and check for merge candidates
  */
-export async function addNewSuggestion(title, description = '', executionProfile = 'full_rd') {
+export async function addNewSuggestion(title, description = '', executionProfile = 'full_rd', projectName = '') {
     try {
-        const result = await api('/api/recommendations', 'POST', {
+        const payload = {
             mission_title: title,
             mission_description: description || title,
             suggested_cycles: 3,
             execution_profile: executionProfile,
-        });
+        };
+        if (projectName) payload.project_name = projectName;
+        const result = await api('/api/recommendations', 'POST', payload);
 
         if (result.success) {
             showToast('Suggestion added');
@@ -1319,6 +1444,25 @@ export async function addNewSuggestion(title, description = '', executionProfile
 export function filterByTag() {
     const select = document.getElementById('rec-tag-filter');
     currentTagFilter = select ? select.value : '';
+    saveRecSortState();
+    applyFilters();
+}
+
+/**
+ * Filter recommendations by free-text search across title, description, date, tags, and type fields.
+ */
+export function filterRecommendationsBySearch() {
+    const input = document.getElementById('rec-search-filter');
+    currentSearchQuery = input ? input.value.trim().toLowerCase() : '';
+    currentPage = 1;
+    saveRecSortState();
+    applyFilters();
+}
+
+export function filterByProject() {
+    const select = document.getElementById('rec-project-filter');
+    currentProjectFilter = select ? select.value : '';
+    currentPage = 1;
     saveRecSortState();
     applyFilters();
 }
@@ -1355,15 +1499,22 @@ export function filterByHealth(status) {
 export function clearAllFilters() {
     currentTagFilter = '';
     currentHealthFilter = '';
+    currentSearchQuery = '';
+    currentProjectFilter = '';
 
     const tagSelect = document.getElementById('rec-tag-filter');
     if (tagSelect) tagSelect.value = '';
+    const searchInput = document.getElementById('rec-search-filter');
+    if (searchInput) searchInput.value = '';
+    const projectSelect = document.getElementById('rec-project-filter');
+    if (projectSelect) projectSelect.value = '';
 
     document.querySelectorAll('.rec-health-stat').forEach(el => {
         el.classList.remove('active');
     });
 
     currentPage = 1;
+    saveRecSortState();
     applyFilters();
 }
 
@@ -1381,6 +1532,14 @@ function applyFilters() {
         );
     }
 
+    if (currentSearchQuery) {
+        filtered = filtered.filter(r => buildSuggestionSearchText(r).includes(currentSearchQuery));
+    }
+
+    if (currentProjectFilter) {
+        filtered = filtered.filter(r => r.project_name === currentProjectFilter);
+    }
+
     // Apply health filter
     if (currentHealthFilter) {
         filtered = filtered.filter(r =>
@@ -1393,6 +1552,29 @@ function applyFilters() {
     renderRecommendations();
     updateFilterIndicator();
     updatePaginationControls();
+}
+
+function buildSuggestionSearchText(rec) {
+    const tags = Array.isArray(rec.auto_tags) ? rec.auto_tags.join(' ') : '';
+    const createdAt = rec.created_at || '';
+    const formattedDate = createdAt ? formatDate(createdAt) : '';
+    return [
+        rec.mission_title,
+        rec.mission_description,
+        rec.rationale,
+        rec.source_type,
+        rec.classification,
+        rec.mission_type,
+        rec.execution_profile,
+        rec.project_name,
+        rec.project_slug,
+        rec.project_source,
+        rec.health_status,
+        rec.suggested_cycles ? `${normalizeCycleBudget(rec.suggested_cycles)} cycles` : '',
+        tags,
+        createdAt,
+        formattedDate,
+    ].filter(Boolean).join(' ').toLowerCase();
 }
 
 /**
@@ -1464,6 +1646,230 @@ function getPaginatedRecommendations() {
 }
 
 // =============================================================================
+// MANAGE SUGGESTIONS FUNCTIONS
+// =============================================================================
+
+export async function openManageSuggestions() {
+    const modal = document.getElementById('manage-suggestions-modal');
+    const body = document.getElementById('manage-suggestions-body');
+
+    if (!modal || !body) {
+        showToast('Manage suggestions modal not found', 'error');
+        return;
+    }
+
+    body.innerHTML = '<div class="loading-spinner">Loading suggestions...</div>';
+    modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+
+    try {
+        if (allRecommendations.length === 0) {
+            const data = await api('/api/recommendations/analyze');
+            allRecommendations = data.items || [];
+        }
+        manageSuggestionsCache = [...allRecommendations];
+        selectedForManageDelete.clear();
+        renderManageSuggestions();
+    } catch (e) {
+        body.innerHTML = '<div class="merge-picker-error">Error loading: ' + escapeHtml(e.message) + '</div>';
+    }
+}
+
+export function closeManageSuggestions() {
+    const modal = document.getElementById('manage-suggestions-modal');
+    if (modal) modal.style.display = 'none';
+    selectedForManageDelete.clear();
+    manageSuggestionsCache = [];
+    removeModalOpenClass();
+}
+
+function renderManageSuggestions() {
+    const body = document.getElementById('manage-suggestions-body');
+    if (!body) return;
+
+    const sorted = [...manageSuggestionsCache].sort((a, b) =>
+        new Date(b.created_at || 0) - new Date(a.created_at || 0)
+    );
+
+    if (sorted.length === 0) {
+        body.innerHTML = '<div class="merge-picker-empty">No suggestions to manage.</div>';
+        return;
+    }
+
+    body.innerHTML = `
+        <div class="manage-suggestions-header">
+            <div class="merge-picker-controls">
+                <input type="text" id="manage-suggestions-search" class="merge-picker-search" placeholder="Search title, date, tag, or type...">
+                <button class="btn btn-small" data-action="manage-select-all">Select All</button>
+                <button class="btn btn-small" data-action="manage-deselect-all">Deselect All</button>
+                <button class="btn btn-small danger" id="manage-delete-selected-btn" data-action="manage-delete-selected" disabled>Delete Selected</button>
+            </div>
+            <p class="merge-picker-count"><span id="manage-suggestions-count">${sorted.length}</span> suggestions</p>
+        </div>
+        <div class="manage-suggestions-list">
+            ${sorted.map(item => renderManageSuggestionItem(item)).join('')}
+        </div>
+    `;
+
+    const searchInput = body.querySelector('#manage-suggestions-search');
+    if (searchInput) searchInput.addEventListener('input', e => filterManageSuggestions(e.target.value));
+
+    if (!body._manageSuggestionsDelegatesAttached) {
+        body._manageSuggestionsDelegatesAttached = true;
+        body.addEventListener('click', e => {
+            const action = e.target.closest('[data-action]');
+            if (!action) return;
+            const actionName = action.dataset.action;
+            if (actionName === 'manage-select-all') selectAllForManageDelete();
+            else if (actionName === 'manage-deselect-all') deselectAllForManageDelete();
+            else if (actionName === 'manage-delete-selected') deleteSelectedManagedSuggestions();
+            else if (actionName === 'manage-delete-one') deleteManagedSuggestion(action.dataset.recId);
+        });
+
+        body.addEventListener('change', e => {
+            const cb = e.target.closest('input[type="checkbox"][data-manage-rec-id]');
+            if (!cb) return;
+            const id = cb.dataset.manageRecId;
+            if (cb.checked) selectedForManageDelete.add(id);
+            else selectedForManageDelete.delete(id);
+            updateManageDeleteCount();
+        });
+    }
+
+    updateManageDeleteCount();
+}
+
+function renderManageSuggestionItem(item) {
+    const safeId = escapeHtml(String(item.id));
+    const tags = (item.auto_tags || []).slice(0, 4).map(t => `<span class="rec-tag">${escapeHtml(t)}</span>`).join('');
+    const createdAt = item.created_at ? formatDate(item.created_at) : 'No date';
+    const project = item.project_name ? `<span>${escapeHtml(item.project_name)}</span>` : '';
+    const checked = selectedForManageDelete.has(String(item.id)) ? ' checked' : '';
+    return `
+        <div class="manage-suggestion-item" data-search="${escapeHtml(buildSuggestionSearchText(item))}" data-manage-id="${safeId}">
+            <label class="merge-candidate-checkbox">
+                <input type="checkbox" data-manage-rec-id="${safeId}"${checked}>
+            </label>
+            <div class="merge-candidate-content">
+                <div class="merge-candidate-title">${escapeHtml(item.mission_title || 'Untitled')}</div>
+                <div class="merge-candidate-preview">${escapeHtml(item.mission_description || '')}</div>
+                <div class="merge-candidate-meta">
+                    <span>${escapeHtml(createdAt)}</span>
+                    ${project}
+                    <span>${escapeHtml(item.execution_profile || item.mission_type || item.source_type || 'suggestion')}</span>
+                    ${tags}
+                </div>
+            </div>
+            <button class="btn btn-small danger manage-delete-one" data-action="manage-delete-one" data-rec-id="${safeId}">Delete</button>
+        </div>
+    `;
+}
+
+export function filterManageSuggestions(query) {
+    const lowerQuery = query.trim().toLowerCase();
+    let visibleCount = 0;
+    document.querySelectorAll('.manage-suggestion-item').forEach(item => {
+        const searchText = item.getAttribute('data-search') || '';
+        const visible = searchText.includes(lowerQuery);
+        item.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+    });
+    updateManageDeleteCount(visibleCount);
+}
+
+function selectAllForManageDelete() {
+    document.querySelectorAll('.manage-suggestion-item:not([style*="display: none"]) input[type="checkbox"][data-manage-rec-id]').forEach(cb => {
+        cb.checked = true;
+        selectedForManageDelete.add(cb.dataset.manageRecId);
+    });
+    updateManageDeleteCount();
+}
+
+function deselectAllForManageDelete() {
+    document.querySelectorAll('input[type="checkbox"][data-manage-rec-id]').forEach(cb => {
+        cb.checked = false;
+    });
+    selectedForManageDelete.clear();
+    updateManageDeleteCount();
+}
+
+function updateManageDeleteCount(visibleCount = null) {
+    const btn = document.getElementById('manage-delete-selected-btn');
+    if (btn) {
+        const count = selectedForManageDelete.size;
+        btn.textContent = count > 0 ? `Delete Selected (${count})` : 'Delete Selected';
+        btn.disabled = count === 0 || manageDeleteInProgress;
+    }
+    const countEl = document.getElementById('manage-suggestions-count');
+    if (countEl) {
+        countEl.textContent = visibleCount === null
+            ? String(manageSuggestionsCache.length)
+            : `${visibleCount} of ${manageSuggestionsCache.length}`;
+    }
+}
+
+async function deleteManagedSuggestion(recId) {
+    if (!recId || manageDeleteInProgress) return;
+    manageDeleteInProgress = true;
+    updateManageDeleteCount();
+    try {
+        const result = await api('/api/recommendations/' + encodeURIComponent(recId), 'DELETE');
+        if (result.success === false) {
+            showToast(result.error || 'Delete failed', 'error');
+            return;
+        }
+        removeSuggestionFromLocalCaches(recId);
+        selectedForManageDelete.delete(String(recId));
+        renderManageSuggestions();
+        applyFilters();
+        updateRecCount();
+        showToast('Suggestion deleted');
+    } catch (e) {
+        showToast('Error deleting: ' + e.message, 'error');
+    } finally {
+        manageDeleteInProgress = false;
+        updateManageDeleteCount();
+    }
+}
+
+async function deleteSelectedManagedSuggestions() {
+    if (selectedForManageDelete.size === 0 || manageDeleteInProgress) return;
+    const ids = Array.from(selectedForManageDelete);
+    if (!confirm(`Delete ${ids.length} selected suggestion${ids.length === 1 ? '' : 's'}?`)) return;
+
+    manageDeleteInProgress = true;
+    updateManageDeleteCount();
+    try {
+        let deleted = 0;
+        for (const id of ids) {
+            const result = await api('/api/recommendations/' + encodeURIComponent(id), 'DELETE');
+            if (result.success !== false) {
+                removeSuggestionFromLocalCaches(id);
+                deleted++;
+            }
+        }
+        selectedForManageDelete.clear();
+        renderManageSuggestions();
+        applyFilters();
+        updateRecCount();
+        showToast(`Deleted ${deleted} suggestion${deleted === 1 ? '' : 's'}`);
+    } catch (e) {
+        showToast('Error deleting suggestions: ' + e.message, 'error');
+    } finally {
+        manageDeleteInProgress = false;
+        updateManageDeleteCount();
+    }
+}
+
+function removeSuggestionFromLocalCaches(recId) {
+    const id = String(recId);
+    allRecommendations = allRecommendations.filter(r => String(r.id) !== id);
+    recommendations = recommendations.filter(r => String(r.id) !== id);
+    manageSuggestionsCache = manageSuggestionsCache.filter(r => String(r.id) !== id);
+    mergeCandidatesCache = mergeCandidatesCache.filter(r => String(r.id) !== id);
+}
+
+// =============================================================================
 // QUICK-ADD FUNCTIONS
 // =============================================================================
 
@@ -1478,8 +1884,11 @@ export function submitQuickAdd() {
     }
     const typeSelect = document.getElementById('rec-quick-add-type');
     const executionProfile = typeSelect ? typeSelect.value : 'full_rd';
-    addNewSuggestion(input.value.trim(), '', executionProfile);
+    const projectInput = document.getElementById('rec-quick-add-project');
+    const projectName = projectInput ? projectInput.value.trim() : '';
+    addNewSuggestion(input.value.trim(), '', executionProfile, projectName);
     input.value = '';
+    if (projectInput) projectInput.value = '';
 }
 
 /**

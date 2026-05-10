@@ -165,6 +165,49 @@ class TestFetchSourcesErrorPropagation(unittest.TestCase):
         self.assertIn("simulated DNS failure", results[url].error or "")
 
 
+class TestFetchSourcesUrlFiltering(unittest.TestCase):
+    """Regression coverage for source_fetcher URL filtering and dedupe."""
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp(prefix="sf_filter_")
+        self.fetcher = _make_fetcher(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_invalid_urls_are_reported_not_dropped(self):
+        with mock.patch.object(
+            self.fetcher,
+            "fetch_single",
+            return_value=FetchedSource(
+                url="http://example.com/ok",
+                content="ok",
+                accessible=True,
+            ),
+        ):
+            results = self.fetcher.fetch_sources(["http://example.com/ok", "file:///etc/passwd"])
+
+        self.assertIn("file:///etc/passwd", results)
+        self.assertFalse(results["file:///etc/passwd"].accessible)
+        self.assertEqual(results["file:///etc/passwd"].error, "unsafe URL")
+
+    def test_host_case_dedup_fetches_once(self):
+        calls = []
+
+        def fake_fetch(url: str):
+            calls.append(url)
+            return FetchedSource(url=url, content="ok", accessible=True)
+
+        urls = ["https://EXAMPLE.com/path", "https://example.com/path"]
+        with mock.patch.object(self.fetcher, "fetch_single", side_effect=fake_fetch):
+            results = self.fetcher.fetch_sources(urls)
+
+        self.assertEqual(calls, ["https://EXAMPLE.com/path"])
+        self.assertEqual(list(results.keys()), ["https://EXAMPLE.com/path"])
+
+
 class TestFetchUrlErrorPropagation(unittest.TestCase):
     """Defect 3: _fetch_url must let UnsafeUrlError propagate."""
 
@@ -380,6 +423,81 @@ class TestWaybackRetryBypassesProxy(unittest.TestCase):
         # And it should have produced an accessible result from the direct path.
         self.assertIsNotNone(result)
         self.assertTrue(result.accessible)
+        self.assertTrue(result.from_wayback)
+
+    def test_wayback_api_url_quotes_original_url(self):
+        """The original URL must be encoded inside the Wayback API query."""
+        from investigation_validator import source_fetcher as source_fetcher_mod
+
+        seen = {}
+
+        class _FakeResp:
+            def json(self):
+                return {"archived_snapshots": {}}
+
+        class _FakeClient:
+            def __init__(self, *a, **kw):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get(self, url, *a, **kw):
+                seen["url"] = url
+                return _FakeResp()
+
+        with mock.patch.object(source_fetcher_mod, "HAS_HTTPX", True):
+            with mock.patch.object(source_fetcher_mod.httpx, "Client", _FakeClient):
+                self.fetcher._try_wayback("http://example.com/a path?q=1")
+
+        self.assertIn("url=http%3A%2F%2Fexample.com%2Fa%20path%3Fq%3D1", seen["url"])
+
+
+class TestProxyAndCacheHardening(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp(prefix="sf_proxy_cache_")
+        self.fetcher = _make_fetcher(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_proxy_oserror_returns_none(self):
+        from investigation_validator import source_fetcher as source_fetcher_mod
+
+        with mock.patch.object(source_fetcher_mod, "HAS_REQUESTS", True):
+            with mock.patch.object(
+                source_fetcher_mod.requests,
+                "post",
+                side_effect=OSError("socket setup failed"),
+            ):
+                self.assertIsNone(self.fetcher._fetch_via_proxy("https://example.com"))
+
+    def test_cache_result_closes_fd_when_fdopen_fails(self):
+        from investigation_validator import source_fetcher as source_fetcher_mod
+        import os as _os
+        import tempfile as _tempfile
+
+        fd, path = _tempfile.mkstemp(dir=self.tmpdir, prefix="fdopen_fail_", suffix=".json")
+
+        with mock.patch.object(source_fetcher_mod.tempfile, "mkstemp", return_value=(fd, path)):
+            with mock.patch.object(source_fetcher_mod.os, "fdopen", side_effect=OSError("fdopen failed")):
+                with mock.patch.object(source_fetcher_mod.os, "close", wraps=_os.close) as close:
+                    self.fetcher._cache_result(
+                        "https://example.com",
+                        FetchedSource(url="https://example.com", content="x", accessible=True),
+                    )
+
+        close.assert_called_once_with(fd)
+
+    def test_rate_limit_uses_none_initial_sentinel(self):
+        self.assertIsNone(self.fetcher._last_request_time)
+        self.fetcher._apply_rate_limit()
+        self.assertIsInstance(self.fetcher._last_request_time, float)
 
 
 class TestIsValidUrlHardening(unittest.TestCase):
@@ -515,6 +633,54 @@ class TestCurlFailureIsNetworkException(unittest.TestCase):
         # instead of letting it escape as a bug.
         from investigation_validator.source_fetcher import _NETWORK_EXCEPTIONS
         self.assertIsInstance(cm.exception, _NETWORK_EXCEPTIONS)
+
+
+class TestPdfHardening(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp(prefix="sf_pdf_")
+        self.fetcher = _make_fetcher(self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_pdf_content_must_be_bytes(self):
+        with mock.patch.object(self.fetcher, "_fetch_via_proxy", return_value={
+            "content": "%PDF text",
+            "content_type": "application/pdf",
+        }):
+            with self.assertRaises(TypeError):
+                self.fetcher._fetch_url("https://example.com/doc.pdf")
+
+    def test_pdf_extraction_iterates_generator_pages(self):
+        from investigation_validator import source_fetcher as source_fetcher_mod
+
+        class _Page:
+            def __init__(self, text):
+                self._text = text
+
+            def extract_text(self):
+                return self._text
+
+        class _Pages:
+            def __iter__(self):
+                for idx in range(2):
+                    yield _Page(f"text {idx}")
+
+            def __len__(self):
+                raise TypeError("generator-like pages")
+
+        class _Reader:
+            pages = _Pages()
+
+        with mock.patch.object(source_fetcher_mod, "HAS_PDF", True):
+            with mock.patch.object(source_fetcher_mod, "PdfReader", return_value=_Reader()):
+                text = self.fetcher._extract_pdf_text(b"%PDF")
+
+        self.assertIn("text 0", text)
+        self.assertIn("text 1", text)
+        self.assertNotIn("additional pages", text)
 
 
 class TestWaybackPropagatesUnsafeUrlError(unittest.TestCase):

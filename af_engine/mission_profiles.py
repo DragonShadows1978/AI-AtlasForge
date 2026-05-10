@@ -255,6 +255,12 @@ def next_enabled_stage(mission: Dict[str, Any], current_stage: str) -> Optional[
 # Soft cap on patch size for profiles that allow only "small" patches
 # (e.g., bug_hunt). Measured as added lines per file write.
 SMALL_PATCH_LINE_CAP = 50
+_SOURCE_FILE_SUFFIXES = frozenset({
+    ".py", ".pyw", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".css", ".scss", ".sass", ".html", ".go", ".rs", ".java", ".c",
+    ".cc", ".cpp", ".h", ".hpp", ".cs", ".php", ".rb", ".swift",
+    ".kt", ".kts", ".sh", ".bash", ".zsh", ".ps1", ".sql",
+})
 
 # Path-fragment markers identifying writes that are always allowed regardless
 # of profile flags (artifacts/research/notes/test outputs). Stage policy still
@@ -342,6 +348,16 @@ def _path_marker_match(path: str, markers: tuple = _ALWAYS_ALLOWED_PATH_MARKERS)
     return False
 
 
+def _looks_like_source_file(path: str) -> bool:
+    """Return True for source-like file extensions, without touching the filesystem."""
+    if not isinstance(path, str) or not path:
+        return False
+    import os as _os
+    norm = _os.path.normpath(path).replace("\\", "/")
+    suffix = _os.path.splitext(norm)[1].lower()
+    return suffix in _SOURCE_FILE_SUFFIXES
+
+
 def effective_write_paths(mission: Dict[str, Any], stage: str) -> Optional[tuple]:
     """Return the profile-imposed write-path restriction tuple for `stage`.
 
@@ -395,9 +411,14 @@ def enforce_profile_implementation(
 
     flag = allow_implementation(mission)
     if flag is None or flag is True:
+        if allow_code_writes(mission) is False and _looks_like_source_file(path):
+            return False, (
+                "Profile forbids code writes; source-like files are blocked "
+                "even under artifacts/research"
+            )
         return True, "no profile restriction"
 
-    impl_stages = {"BUILDING", "TESTING"}
+    impl_stages = {"PLANNING", "BUILDING", "TESTING"}
     if stage not in impl_stages:
         return True, f"profile flag inactive for stage {stage}"
 
@@ -413,7 +434,9 @@ def enforce_profile_implementation(
 
     if flag == "optional_patch_if_small":
         if added_lines is None:
-            return True, "small-patch profile: line count unknown, allowed"
+            return False, "small-patch profile: added line count is required"
+        if added_lines < 0:
+            return False, "small-patch profile: added_lines cannot be negative"
         if added_lines <= SMALL_PATCH_LINE_CAP:
             return True, f"small-patch profile: {added_lines} <= {SMALL_PATCH_LINE_CAP}"
         return False, (

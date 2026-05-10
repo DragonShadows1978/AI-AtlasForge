@@ -43,47 +43,53 @@ _INJECTION_PREFIXES = (
 def _extract_json_object(text: str):
     """Find the first balanced {...} block in text that contains a 'summary' key.
 
-    Walks string counting brace depth, correctly skipping braces inside string
-    literals so that {"summary": "has } inside"} is parsed correctly.
+    Walks the text once, counting brace depth and correctly skipping braces
+    inside string literals so that {"summary": "has } inside"} is parsed
+    correctly.
     Returns the raw JSON string on success, or None if nothing suitable is found.
     """
     if not text:
         return None
     # Limit input length to prevent O(N^2) worst case on adversarial inputs
     text = text[:200_000]
-    start = text.find('{')
-    while start != -1:
-        depth = 0
-        in_string = False
-        escape_next = False
-        end = None
-        for i, ch in enumerate(text[start:], start):
+    stack = []
+    in_string = False
+    escape_next = False
+    string_buf = []
+
+    for i, ch in enumerate(text):
+        if in_string:
             if escape_next:
+                string_buf.append(ch)
                 escape_next = False
                 continue
-            if ch == '\\' and in_string:
+            if ch == '\\':
                 escape_next = True
                 continue
             if ch == '"':
-                in_string = not in_string
+                key = "".join(string_buf)
+                in_string = False
+                string_buf = []
+                if key == "summary" and stack:
+                    j = i + 1
+                    while j < len(text) and text[j].isspace():
+                        j += 1
+                    if j < len(text) and text[j] == ":":
+                        stack[-1]["has_summary_key"] = True
                 continue
-            if in_string:
-                continue
-            if ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end is None:
-            # No closing brace found from here to end-of-string; no later '{' can
-            # have a matching '}' either, so stop scanning.
-            break
-        candidate = text[start:end + 1]
-        if '"summary"' in candidate:
-            return candidate
-        start = text.find('{', end + 1)
+            if len(string_buf) <= len("summary"):
+                string_buf.append(ch)
+            continue
+
+        if ch == '"':
+            in_string = True
+            string_buf = []
+        elif ch == "{":
+            stack.append({"start": i, "has_summary_key": False})
+        elif ch == "}" and stack:
+            frame = stack.pop()
+            if frame["has_summary_key"]:
+                return text[frame["start"]:i + 1]
     return None
 
 
@@ -538,11 +544,15 @@ Respond in JSON:
             Combined SynthesisResult
         """
         syntheses = [s for s in (syntheses or []) if s is not None]
-        if not syntheses:
+        successful = [s for s in syntheses if s.success is not False]
+        if not successful:
             return SynthesisResult(
-                topic="No topic",
-                timestamp=datetime.now().isoformat()
+                topic=syntheses[0].topic if syntheses else "No topic",
+                timestamp=datetime.now().isoformat(),
+                success=False if syntheses else True,
+                error="All synthesis inputs failed" if syntheses else None,
             )
+        syntheses = successful
 
         merged = SynthesisResult(
             topic=syntheses[0].topic,

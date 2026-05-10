@@ -59,7 +59,7 @@ function renderJournalEntries(entries) {
             <div class="journal-entry ${isExpanded ? 'expanded' : ''}" data-index="${idx}"
                  onclick="toggleJournalEntry(this)">
                 <div class="journal-timestamp">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</div>
-                <div class="journal-stage">${e.stage || 'UNKNOWN'}</div>
+                <div class="journal-stage">${escapeHtml(e.stage || 'UNKNOWN')}</div>
                 <div class="journal-message">${escapeHtml(displayContent)}</div>
                 ${shouldTruncate ? '<div class="journal-expand-hint">Click to ' + (isExpanded ? 'collapse' : 'expand') + '</div>' : ''}
             </div>
@@ -337,6 +337,13 @@ async function loadFiles() {
 
 let _fpCurrentDownloadUrl = null;
 let _fpCurrentTextContent = null;
+const FILE_PREVIEW_IMAGE_MIME_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/bmp'
+]);
 
 function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
     const modal = document.getElementById('file-preview-modal');
@@ -357,7 +364,8 @@ function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
         .then(r => r.json())
         .then(data => {
             if (data.file_type === 'image') {
-                body.innerHTML = `<img src="data:${data.mime_type};base64,${data.content}" alt="${_escFp(name)}">`;
+                const safeMimeType = FILE_PREVIEW_IMAGE_MIME_TYPES.has(data.mime_type) ? data.mime_type : 'image/png';
+                body.innerHTML = `<img src="data:${safeMimeType};base64,${data.content}" alt="${_escFp(name)}">`;
             } else if (data.file_type === 'text') {
                 const truncNote = data.truncated
                     ? '<div class="file-preview-truncated">\u26a0 File truncated \u2014 showing first 100\u202fKB</div>'
@@ -849,11 +857,11 @@ async function refreshTokenIntegrityWidget() {
         badge.className = 'badge ' + (anomalyCt > 0 ? 'badge-danger' : 'badge-success');
 
         summary.innerHTML =
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + scanned + '</div><div class="atlasforge-stat-label">Scanned</div></div>' +
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + normal + '</div><div class="atlasforge-stat-label">Normal</div></div>' +
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value" style="color:' + (zeroCt > 0 ? 'var(--danger,#f85149)' : 'var(--accent-green,#3fb950)') + '">' + zeroCt + '</div><div class="atlasforge-stat-label">Zero-Token</div></div>';
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + escapeHtml(String(scanned)) + '</div><div class="atlasforge-stat-label">Scanned</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + escapeHtml(String(normal)) + '</div><div class="atlasforge-stat-label">Normal</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value" style="color:' + (zeroCt > 0 ? 'var(--danger,#f85149)' : 'var(--accent-green,#3fb950)') + '">' + escapeHtml(String(zeroCt)) + '</div><div class="atlasforge-stat-label">Zero-Token</div></div>';
 
-        const anomalies = (data.anomalies || []).filter(function(a) { return !a.mission_id.startsWith('test_'); });
+        const anomalies = (data.anomalies || []).filter(function(a) { return !(a.mission_id || '').startsWith('test_'); });
         if (anomalies.length === 0) {
             anomalyList.innerHTML = '<div style="color:var(--accent-green,#3fb950);font-size:0.85em;">All missions healthy</div>';
         } else {

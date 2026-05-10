@@ -280,6 +280,7 @@ _CODEX_READ_ONLY_STAGES = frozenset({
 _CODEX_FULL_SEND_STAGES = frozenset({"BUILDING", "TESTING"})
 CODEX_TESTING_RED_TEAM_AGENTS = 3
 CODEX_TESTING_RED_TEAM_TIMEOUT_SECONDS = 2700
+ATLASFORGE_TESTING_RUNNER_DEFAULT_MAX_LANES = 6
 
 
 def get_codex_stage_sandbox(stage: Optional[str]) -> Optional[str]:
@@ -333,14 +334,17 @@ def _read_llm_state() -> dict:
 
 def _safe_model_name(value: Any) -> Optional[str]:
     model = str(value or "").strip()
-    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", model):
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,79}$", model):
         return model
     return None
 
 
-def _safe_thinking_effort(value: Any) -> Optional[str]:
+def _safe_thinking_effort(value: Any, provider: Optional[str] = None) -> Optional[str]:
     effort = str(value or "").strip().lower()
-    if effort in {"low", "medium", "high", "xhigh", "max"}:
+    allowed = {"low", "medium", "high", "xhigh", "max"}
+    if provider == "codex":
+        allowed.add("fast")
+    if effort in allowed:
         return effort
     return None
 
@@ -406,8 +410,13 @@ def _write_codex_stage_guard_context(stage: Optional[str], mission: Optional[dic
         logger.warning("Failed to write Codex stage-guard context: %s", exc)
 
 
-def get_llm_model(provider: str) -> Optional[str]:
+def get_llm_model(provider: str, mission: Optional[dict] = None) -> Optional[str]:
     """Resolve provider-specific model override for CLI invocation."""
+    if isinstance(mission, dict):
+        mission_model = _safe_model_name(mission.get("llm_model") or mission.get("model"))
+        if mission_model:
+            return mission_model
+
     state = _read_llm_state()
     selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
     provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
@@ -429,7 +438,7 @@ def get_llm_thinking_effort(provider: str) -> Optional[str]:
     state = _read_llm_state()
     selected = state.get("selected") if isinstance(state.get("selected"), dict) else {}
     provider_selected = selected.get(provider) if isinstance(selected.get(provider), dict) else {}
-    persisted = _safe_thinking_effort(provider_selected.get("thinking"))
+    persisted = _safe_thinking_effort(provider_selected.get("thinking"), provider)
     if persisted:
         return persisted
     env_key = {
@@ -437,7 +446,7 @@ def get_llm_thinking_effort(provider: str) -> Optional[str]:
         "codex": "ATLASFORGE_CODEX_THINKING",
         "gemini": "ATLASFORGE_GEMINI_THINKING",
     }.get(provider)
-    return _safe_thinking_effort(os.environ.get(env_key)) if env_key else None
+    return _safe_thinking_effort(os.environ.get(env_key), provider) if env_key else None
 
 
 def codex_stage_guard_prompt(stage: str, mission: Optional[dict] = None) -> str:
@@ -456,9 +465,11 @@ stage artifacts:
 
 - Call `AtlasForgeGetStagePolicy` if you need the current MCP write policy.
 - During PLANNING, submit structured planning artifacts with
-  `AtlasForgeSubmitPlan`.
+  `AtlasForgeSubmitPlan`; it writes the only permitted planning plan file:
+  `artifacts/implementation_plan.md`.
 - Do not implement source changes during PLANNING.
-- If a planning note is needed, use `AtlasForgeWriteStageNote`.
+- If planning research notes are needed, use `AtlasForgeWriteStageNote`; during
+  PLANNING it may write only `research/*.md`.
 
 AtlasForge launches Codex PLANNING with a read-only workspace sandbox, so MCP
 stage-guard tools are the intended write path for planning artifacts.
@@ -565,7 +576,10 @@ def build_llm_command(
         cmd = ["codex"]
         cmd.extend(codex_proxy_cli_args())
         codex_sandbox = get_codex_stage_sandbox(stage)
-        if thinking:
+        if thinking == "fast":
+            cmd.extend(["--enable", "fast_mode"])
+            cmd.extend(["-c", 'service_tier="fast"'])
+        elif thinking:
             cmd.extend(["-c", f'model_reasoning_effort="{thinking}"'])
         if _codex_web_search_enabled():
             # Native Responses web_search. Off by default so proxy MCP is authoritative.
@@ -754,6 +768,7 @@ def append_journal(entry: dict):
 def send_to_chat(message: str):
     """Send a message to the chat history for UI display."""
     provider = get_llm_provider()
+    message = str(message)
 
     def update_history(history):
         if not isinstance(history, list):
@@ -769,7 +784,7 @@ def send_to_chat(message: str):
         return history
 
     io_utils.atomic_update_json(CHAT_HISTORY_PATH, update_history, [])
-    logger.info(f"Chat: {message[:100]}...")
+    logger.info(f"Chat: {_sanitize_for_log(message)[:100]}...")
 
 
 def check_human_message() -> Optional[dict]:
@@ -1084,10 +1099,18 @@ def invoke_llm(
         raise ValueError(f"invoke_llm timeout must be a finite number > 0, got {timeout}")
     if cwd is None:
         cwd = BASE_DIR
+    try:
+        cwd = Path(cwd).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, TypeError) as exc:
+        logger.warning("invoke_llm received invalid cwd %r: %s", cwd, exc)
+        return None, "invalid_cwd"
+    if not cwd.is_dir():
+        logger.warning("invoke_llm cwd is not a directory: %s", cwd)
+        return None, "invalid_cwd"
 
     try:
         provider = resolve_llm_provider(mission)
-        model = get_llm_model(provider)
+        model = get_llm_model(provider, mission=mission)
         command = build_llm_command(provider, model=model, stage=stage, mission=mission)
         env = {k: v for k, v in os.environ.items()
                if k in _SAFE_ENV_EXACT or k.startswith(_SAFE_ENV_PREFIXES)}
@@ -1210,7 +1233,14 @@ def invoke_llm(
 
                 def _drain_stderr():
                     try:
-                        _stderr_buf.append(proc.stderr.read() if proc.stderr else "")
+                        chunks = []
+                        if proc.stderr:
+                            while True:
+                                chunk = proc.stderr.read(8192)
+                                if not chunk:
+                                    break
+                                chunks.append(chunk)
+                        _stderr_buf.append("".join(chunks))
                     except Exception:
                         _stderr_buf.append("")
 
@@ -1240,8 +1270,11 @@ def invoke_llm(
                     pgid = os.getpgid(proc.pid)
                     os.killpg(pgid, signal.SIGKILL)
                     logger.info(f"SIGKILL sent to process group {pgid} (pid={proc.pid})")
-                    proc.wait(timeout=5)
-                    logger.info(f"Process {proc.pid} terminated after SIGKILL")
+                    try:
+                        proc.wait(timeout=5)
+                        logger.info(f"Process {proc.pid} terminated after SIGKILL")
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"Process {proc.pid} survived SIGKILL (D-state?)")
                 except ProcessLookupError:
                     logger.warning(f"Process {proc.pid} already dead when SIGKILL attempted")
                 except OSError as e:
@@ -1502,7 +1535,7 @@ def extract_json_from_response(text: str) -> Optional[dict]:
     Returns:
         Parsed JSON dict if extraction successful, None otherwise
     """
-    if not text:
+    if not text or not isinstance(text, str):
         return None
 
     # Strategy 1: Try direct parse (clean JSON)
@@ -1869,7 +1902,9 @@ def _mission_content_hash(mission: dict) -> str:
     import hashlib as _hashlib
     if not isinstance(mission, dict):
         return _hashlib.md5(b"").hexdigest()[:16]
-    key = (mission.get("problem_statement") or "") + "|" + (mission.get("mission_id") or "")
+    problem_statement = str(mission.get("problem_statement") or "")
+    mission_id = str(mission.get("mission_id") or "")
+    key = problem_statement + "|" + mission_id
     return _hashlib.md5(key.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
@@ -2113,6 +2148,40 @@ def _clear_queue_signal_file() -> None:
             pass
 
 
+def _mark_source_suggestion_status(controller, status: str) -> None:
+    """Best-effort lifecycle update for missions created from suggestions."""
+    try:
+        from suggestion_lifecycle import (
+            mission_id_from_mission,
+            mark_suggestion_status,
+            source_recommendation_id_from_mission,
+        )
+        mission = getattr(controller, "mission", {}) or {}
+        rec_id = source_recommendation_id_from_mission(mission)
+        if rec_id:
+            if status == "open":
+                try:
+                    if hasattr(controller, "state") and hasattr(controller.state, "set_field"):
+                        controller.state.set_field("failed", True)
+                        controller.state.set_field("suggestion_status_returned", "open")
+                    elif hasattr(controller, "set_field"):
+                        controller.set_field("failed", True)
+                        controller.set_field("suggestion_status_returned", "open")
+                    else:
+                        controller.mission["failed"] = True
+                        controller.mission["suggestion_status_returned"] = "open"
+                except Exception:
+                    logger.debug("Failed to persist source suggestion failure marker", exc_info=True)
+            mark_suggestion_status(
+                rec_id,
+                status,
+                mission_id=mission_id_from_mission(mission),
+                closed_reason="completed" if status == "completed" else "failed",
+            )
+    except Exception:
+        logger.debug("Source suggestion lifecycle update failed", exc_info=True)
+
+
 def get_mission_workspace(controller) -> Path:
     """Get the working directory for the current mission.
 
@@ -2120,9 +2189,20 @@ def get_mission_workspace(controller) -> Path:
     """
     mission_workspace = controller.mission.get("mission_workspace")
     if mission_workspace:
-        workspace_path = Path(mission_workspace)
-        if workspace_path.exists():
+        if not isinstance(mission_workspace, (str, os.PathLike)):
+            logger.warning(
+                "Ignoring mission_workspace with invalid type: %s",
+                type(mission_workspace).__name__,
+            )
+            return WORKSPACE_DIR
+        try:
+            workspace_path = Path(mission_workspace).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            logger.warning("Ignoring invalid mission_workspace %r: %s", mission_workspace, exc)
+            return WORKSPACE_DIR
+        if workspace_path.is_dir():
             return workspace_path
+        logger.warning("Ignoring mission_workspace that is not a directory: %s", workspace_path)
     return WORKSPACE_DIR
 
 
@@ -2248,6 +2328,47 @@ def _red_team_report_count(workspace: Path) -> int:
         return 0
 
 
+def _requires_existing_plan_missing(mission: Optional[dict], current_stage: str) -> bool:
+    """Return True when the active profile requires a plan but none exists."""
+    if current_stage != "BUILDING" or not isinstance(mission, dict):
+        return False
+    try:
+        from af_engine.mission_profiles import requires_existing_plan as _req_plan
+    except ImportError:
+        return False
+    if not _req_plan(mission):
+        return False
+    workspace = mission.get("mission_workspace") or mission.get("project_workspace")
+    if not workspace:
+        return True
+    return not (Path(workspace) / "artifacts" / "implementation_plan.md").exists()
+
+
+def _redirect_disabled_profile_stage(
+    mission: Optional[dict],
+    current_stage: str,
+    next_stage: Optional[str],
+) -> Optional[str]:
+    """Redirect disabled profile stages to the next enabled stage or COMPLETE."""
+    if not next_stage or next_stage == "COMPLETE" or not isinstance(mission, dict):
+        return next_stage
+    try:
+        from af_engine.mission_profiles import (
+            stage_allowed_for_mission as _stage_allowed,
+            next_enabled_stage as _next_enabled,
+        )
+    except ImportError:
+        return next_stage
+
+    if _stage_allowed(mission, next_stage):
+        return next_stage
+
+    redirected = _next_enabled(mission, next_stage)
+    if redirected is None and not _stage_allowed(mission, current_stage):
+        redirected = _next_enabled(mission, current_stage)
+    return redirected or "COMPLETE"
+
+
 def _codex_red_team_payload(result: Any, workspace: Path, error: Optional[str] = None) -> Dict[str, Any]:
     """Normalize BlindAgentRedTeam output into TESTING JSON metadata."""
     stop_reasons = getattr(result, "stop_reasons", {}) if result is not None else {}
@@ -2349,6 +2470,122 @@ def run_codex_testing_red_team_preflight(controller, workspace: Path) -> Dict[st
         f"issues={len(payload.get('red_team_issues', []))}"
     )
     return payload
+
+
+def _testing_runner_enabled(mission: Optional[dict]) -> bool:
+    """Return whether the runner-owned TESTING pipeline should replace tester pass."""
+    if not _env_flag_enabled("ATLASFORGE_TESTING_RUNNER", default=True):
+        return False
+    if isinstance(mission, dict) and mission.get("disable_testing_runner") is True:
+        return False
+    return True
+
+
+def run_atlasforge_testing_runner(controller, workspace: Path) -> Dict[str, Any]:
+    """Run the lead-planned TestingRunner and return strict TESTING JSON."""
+    try:
+        from af_engine.stages.testing_runner import (
+            TestingRunner,
+            TestingRunnerConfig,
+        )
+
+        stage_context = controller._build_stage_context()
+        timeout_minutes = 45
+        try:
+            timeout_minutes = int(os.environ.get("ATLASFORGE_TESTING_RUNNER_TIMEOUT_MINUTES", "45"))
+        except (TypeError, ValueError):
+            timeout_minutes = 45
+        max_lanes = ATLASFORGE_TESTING_RUNNER_DEFAULT_MAX_LANES
+        try:
+            max_lanes = int(os.environ.get("ATLASFORGE_TESTING_RUNNER_MAX_LANES", str(max_lanes)))
+        except (TypeError, ValueError):
+            max_lanes = ATLASFORGE_TESTING_RUNNER_DEFAULT_MAX_LANES
+
+        config = TestingRunnerConfig(
+            mission_id=stage_context.mission_id,
+            mission=stage_context.mission,
+            mission_text=stage_context.problem_statement or stage_context.original_mission,
+            workspace_dir=Path(workspace),
+            artifacts_dir=Path(stage_context.artifacts_dir),
+            tests_dir=Path(stage_context.tests_dir),
+            max_lanes=max(ATLASFORGE_TESTING_RUNNER_DEFAULT_MAX_LANES, max_lanes),
+            timeout_minutes=max(5, timeout_minutes),
+        )
+        send_to_chat(
+            "[TESTING] Launching TestingRunner "
+            f"({config.max_lanes} lanes, {config.timeout_minutes}m budget)"
+        )
+        runner = TestingRunner(config)
+        result = runner.run(progress_callback=lambda msg: send_to_chat(f"[TESTING] {msg}"))
+        send_to_chat(
+            "[TESTING] TestingRunner complete: "
+            f"{result.get('status')} ({result.get('summary', '')})"
+        )
+        return result
+    except Exception as exc:
+        logger.error("TestingRunner failed", exc_info=True)
+        send_to_chat(f"[TESTING] TestingRunner failed: {exc}")
+        artifacts_dir = Path(workspace) / "artifacts" / "testing"
+        try:
+            artifacts_dir.mkdir(parents=True, exist_ok=True)
+            error_path = artifacts_dir / "result.json"
+            fallback = {
+                "status": "tests_error",
+                "self_tests": [],
+                "adversarial_testing": {
+                    "red_team_issues": [],
+                    "red_team_agent_count": 0,
+                    "red_team_duration_seconds": 0,
+                    "red_team_completion": {
+                        "agent_reports_collected": 0,
+                        "agents_reached_report_phase": 0,
+                        "all_agents_completed": False,
+                        "timed_out_agents": [],
+                    },
+                    "mutation_score": None,
+                    "mutation_testing": {
+                        "status": "error",
+                        "summary": str(exc),
+                        "issues": [],
+                    },
+                    "epistemic_score": 0.0,
+                    "rigor_level": "insufficient",
+                },
+                "mutation_testing": {
+                    "status": "error",
+                    "summary": str(exc),
+                    "issues": [],
+                },
+                "summary": f"TestingRunner failed before completing lanes: {exc}",
+                "success_criteria_met": [],
+                "success_criteria_failed": ["TestingRunner execution failed"],
+                "issues_to_fix": [f"Restore TESTING runner execution: {exc}"],
+                "message_to_human": f"TestingRunner failed before completing lanes: {exc}",
+                "testing_runner": {
+                    "schema": "testing-runner-v1",
+                    "artifact_dir": str(artifacts_dir),
+                    "result_path": str(error_path),
+                    "error": str(exc),
+                },
+            }
+            error_path.write_text(json.dumps(fallback, indent=2, default=str) + "\n", encoding="utf-8")
+            return fallback
+        except Exception:
+            return {
+                "status": "tests_error",
+                "summary": f"TestingRunner failed before completing lanes: {exc}",
+                "message_to_human": f"TestingRunner failed before completing lanes: {exc}",
+                "issues_to_fix": [f"Restore TESTING runner execution: {exc}"],
+                "adversarial_testing": {
+                    "red_team_agent_count": 0,
+                    "red_team_completion": {
+                        "agent_reports_collected": 0,
+                        "agents_reached_report_phase": 0,
+                        "all_agents_completed": False,
+                        "timed_out_agents": [],
+                    },
+                },
+            }
 
 
 def codex_testing_preflight_prompt(payload: Dict[str, Any]) -> str:
@@ -2534,29 +2771,16 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 _announced_mission_id = _current_mission_id
 
             # build_only / requires_existing_plan pre-flight: if the active
-            # profile demands an existing plan and we're entering BUILDING for
-            # the first iteration, abort cleanly when the plan is missing.
+            # profile demands an existing plan and we're entering BUILDING,
+            # abort cleanly when the plan is missing.
             try:
-                from af_engine.mission_profiles import requires_existing_plan as _req_plan
-                if (
-                    current_stage == "BUILDING"
-                    and _req_plan(controller.mission)
-                    and int(controller.mission.get("iteration", 0) or 0) == 0
-                ):
-                    _ws = controller.mission.get("mission_workspace") or controller.mission.get("project_workspace")
-                    _plan_ok = False
-                    if _ws:
-                        _plan_path = Path(_ws) / "artifacts" / "implementation_plan.md"
-                        _plan_ok = _plan_path.exists()
-                    if not _plan_ok:
-                        send_to_chat(
-                            "[PROFILE] build_only requires existing artifacts/implementation_plan.md; "
-                            "not found — completing mission."
-                        )
-                        controller.update_stage("COMPLETE")
-                        continue
-            except ImportError:
-                pass
+                if _requires_existing_plan_missing(controller.mission, current_stage):
+                    send_to_chat(
+                        "[PROFILE] build_only requires existing artifacts/implementation_plan.md; "
+                        "not found — completing mission."
+                    )
+                    controller.update_stage("COMPLETE")
+                    continue
             except Exception as _e_pre:
                 logger.warning("requires_existing_plan preflight error: %s", _e_pre)
 
@@ -2599,6 +2823,10 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 completed_mission_id = controller.mission.get("mission_id")
                 total_cycles = controller.mission.get("cycle_budget", 1)
                 logger.info(f"Mission COMPLETE after {total_cycles} cycle(s).")
+                if controller.mission.get("halted_due_to_drift") or controller.mission.get("failed"):
+                    _mark_source_suggestion_status(controller, "open")
+                else:
+                    _mark_source_suggestion_status(controller, "completed")
 
                 # Record completed mission to memory
                 mission_summary = {
@@ -2683,7 +2911,12 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
             stage_provider = resolve_llm_provider(controller.mission)
             codex_red_team_payload: Optional[Dict[str, Any]] = None
-            if stage_provider == "codex" and current_stage == "TESTING":
+            testing_runner_response: Optional[Dict[str, Any]] = None
+            if (
+                stage_provider == "codex"
+                and current_stage == "TESTING"
+                and not _testing_runner_enabled(controller.mission)
+            ):
                 codex_red_team_payload = run_codex_testing_red_team_preflight(
                     controller,
                     workspace,
@@ -2801,7 +3034,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             if HAS_WORK_BUDGET_MANAGER and _watcher_policy == "token_first":
                 try:
                     _detected_provider = resolve_llm_provider(controller.mission)
-                    _detected_model = get_llm_model(_detected_provider) or ""
+                    _detected_model = get_llm_model(_detected_provider, mission=controller.mission) or ""
                     _work_budget_mgr = WorkBudgetManager(model=_detected_model)
                     logger.info(
                         "WorkBudgetManager active: provider=%s model=%s budget=%d tokens",
@@ -2818,8 +3051,12 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 llm_timeout = MAX_ABSOLUTE_TIMEOUT_MINUTES * 60 if HAS_CONTEXT_WATCHER else 3600
             elif current_stage == "BUILDING":
                 llm_timeout = 7200  # 2 hours for builds
+            if current_stage == "TESTING" and _testing_runner_enabled(controller.mission):
+                testing_runner_response = run_atlasforge_testing_runner(controller, workspace)
+                response_text = json.dumps(testing_runner_response, indent=2, default=str)
+                error_info = None
             # Use hierarchical parallel execution for complex BUILDING stages
-            if _should_use_parallel(current_stage, controller.mission):
+            elif _should_use_parallel(current_stage, controller.mission):
                 parallel_response, parallel_error = _run_hierarchical_building(
                     prompt, controller.mission, workspace, stage=current_stage, timeout=llm_timeout
                 )
@@ -2937,6 +3174,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         logger.error(f"Empty response loop exhausted {MAX_CLAUDE_RETRIES} retries")
                         try:
                             controller.update_stage("COMPLETE")
+                            _mark_source_suggestion_status(controller, "open")
                             send_to_chat(f"[FATAL] Mission halted — empty response loop in {current_stage}")
                         except Exception:
                             pass
@@ -3052,6 +3290,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         })
                         try:
                             controller.update_stage("COMPLETE")
+                            _mark_source_suggestion_status(controller, "open")
                             send_to_chat(f"[FATAL] Mission halted in {current_stage} — marking COMPLETE")
                         except Exception as e:
                             logger.error(f"Failed to update stage to COMPLETE during break cleanup: {e}")
@@ -3096,6 +3335,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         })
                         try:
                             controller.update_stage("COMPLETE")
+                            _mark_source_suggestion_status(controller, "open")
                             send_to_chat(f"[FATAL] Mission halted in {current_stage} after {timeout_retries} retries — marking COMPLETE")
                         except Exception:
                             pass
@@ -3139,7 +3379,13 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 logger.warning("JSON extraction failed, attempting format correction re-prompt")
                 correction_prompt = build_format_correction_prompt(current_stage, response_text)
                 try:
-                    corrected_text, _corr_err = invoke_llm(correction_prompt, timeout=120, cwd=WORKSPACE_DIR, stage=current_stage)
+                    corrected_text, _corr_err = invoke_llm(
+                        correction_prompt,
+                        timeout=120,
+                        cwd=WORKSPACE_DIR,
+                        stage=current_stage,
+                        mission=controller.mission,
+                    )
                     if corrected_text:
                         response = extract_json_from_response(corrected_text)
                         if response:
@@ -3171,6 +3417,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         logger.error(f"Claude failed {MAX_CLAUDE_RETRIES} times to produce valid JSON (no adapter)")
                         try:
                             controller.update_stage("COMPLETE")
+                            _mark_source_suggestion_status(controller, "open")
                             send_to_chat(f"[FATAL] Mission halted in {current_stage} — JSON parse failures exhausted retries")
                         except Exception as e:
                             logger.error(f"Failed to update stage to COMPLETE after parse retries: {e}")
@@ -3197,6 +3444,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         logger.error(f"Halting: {parse_failure_count} consecutive parse failures with fallback adapter")
                         try:
                             controller.update_stage("COMPLETE")
+                            _mark_source_suggestion_status(controller, "open")
                             send_to_chat(f"[FATAL] Mission halted — fallback adapter exhausted after {parse_failure_count} failures")
                         except Exception as e:
                             logger.error(f"Failed to halt after fallback exhaustion: {e}")
@@ -3229,31 +3477,18 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             # Mission-type profile: if the handler picked a stage outside the
             # profile's enabled_stages, short-circuit to the next enabled stage
             # (or COMPLETE) BEFORE update_stage fires events for the disabled stage.
-            try:
-                from af_engine.mission_profiles import (
-                    stage_allowed_for_mission as _stage_allowed,
-                    next_enabled_stage as _next_enabled,
+            redirected_stage = _redirect_disabled_profile_stage(
+                controller.mission,
+                current_stage,
+                next_stage,
+            )
+            if redirected_stage != next_stage:
+                logger.info(
+                    "[mission_profile] Handler picked disabled stage %s — redirecting to %s",
+                    next_stage,
+                    redirected_stage,
                 )
-                if (next_stage and next_stage != "COMPLETE"
-                        and not _stage_allowed(controller.mission, next_stage)):
-                    redirected = _next_enabled(controller.mission, next_stage)
-                    if redirected is None and not _stage_allowed(controller.mission, current_stage):
-                        # Walk forward from current_stage too
-                        redirected = _next_enabled(controller.mission, current_stage)
-                    if redirected:
-                        logger.info(
-                            "[mission_profile] Handler picked disabled stage %s — redirecting to %s",
-                            next_stage, redirected,
-                        )
-                        next_stage = redirected
-                    elif controller.mission.get("stop_after_profile_complete"):
-                        logger.info(
-                            "[mission_profile] Handler picked disabled stage %s and no later enabled stage — completing",
-                            next_stage,
-                        )
-                        next_stage = "COMPLETE"
-            except ImportError:
-                pass
+                next_stage = redirected_stage
 
             # Update stage if changed
             if next_stage != current_stage:
@@ -3276,6 +3511,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
 
     except Exception as e:
         logger.error(f"R&D Mode error: {e}", exc_info=True)
+        _mark_source_suggestion_status(controller, "open")
         send_to_chat("R&D Error: an unexpected error occurred. Check logs for details.")
     finally:
         save_state(state)

@@ -49,6 +49,10 @@ MAX_MAX_ITERATIONS: int = 50
 MIN_PROBLEM_STATEMENT_LEN: int = 10
 MAX_PROJECT_NAME_LEN: int = 64
 PROJECT_NAME_PATTERN: re.Pattern = re.compile(r'^[a-zA-Z0-9_\-]+$')
+ZERO_WIDTH_TRANSLATION: Dict[int, None] = dict.fromkeys(
+    map(ord, "\u200b\u200c\u200d"),
+    None,
+)
 
 # Audit reason vocabulary (canonical)
 REASON_MIN_CLAMP = "min_clamp"
@@ -57,6 +61,11 @@ REASON_TYPE_COERCION = "type_coercion"
 REASON_DEFAULT_APPLIED = "default_applied"
 REASON_ENV_RESOLUTION = "env_resolution"
 REASON_INVALID_REJECTED = "invalid_rejected"
+
+
+def _strip_problem_statement(value: str) -> str:
+    """Trim visible whitespace and zero-width space variants from mission text."""
+    return value.translate(ZERO_WIDTH_TRANSLATION).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +184,7 @@ class MissionConfig:
         if not isinstance(ps, str):
             ps = str(ps)
             self.problem_statement = ps
-        ps_stripped = ps.strip()
+        ps_stripped = _strip_problem_statement(ps)
         if len(ps_stripped) < MIN_PROBLEM_STATEMENT_LEN:
             errors.append(
                 f"problem_statement must be at least {MIN_PROBLEM_STATEMENT_LEN} characters, "
@@ -280,10 +289,13 @@ class MissionConfig:
         errors: List[str],
     ) -> int:
         """Validate an integer range field. Records error for hard failures, clamps for range."""
-        # Type coercion. Note: bool is a subclass of int — we accept that
-        # silently for backwards-compat (cycle_budget=True == 1). int(float('inf'))
-        # raises OverflowError which (ValueError, TypeError) does NOT catch,
-        # so OverflowError must be in the except tuple.
+        # Type coercion. bool is a subclass of int, but accepting True as 1
+        # hides invalid request data and bypasses type-coercion auditing.
+        # int(float('inf')) raises OverflowError which (ValueError, TypeError)
+        # does NOT catch, so OverflowError must be in the except tuple.
+        if isinstance(value, bool):
+            errors.append(f"{name} must be an integer, got boolean {value!r}")
+            return min_val
         if not isinstance(value, int):
             try:
                 value = int(value)
@@ -291,11 +303,12 @@ class MissionConfig:
                 errors.append(f"{name} must be an integer, got {value!r}")
                 return min_val  # Placeholder; error will prevent construction
 
-        # Hard rejection: value=0 or negative for cycle_budget
-        if name == "cycle_budget" and value <= 0:
+        # Hard rejection: zero/negative iteration controls are caller errors,
+        # not values to silently clamp into a runnable mission.
+        if name in {"cycle_budget", "max_iterations"} and value <= 0:
             errors.append(
-                f"cycle_budget must be >= {min_val}, got {value}. "
-                f"Use cycle_budget=1 for a single-cycle mission."
+                f"{name} must be >= {min_val}, got {value}. "
+                f"Use {name}=1 for the minimum allowed mission setting."
             )
             return min_val
 
@@ -353,8 +366,10 @@ class MissionConfig:
             })
         else:
             try:
+                if isinstance(cb_raw, bool):
+                    raise TypeError("boolean is not an integer parameter")
                 cb_value = int(cb_raw)
-                if cb_value != cb_raw:
+                if cb_value != cb_raw or type(cb_raw) is not int:
                     overrides.append({
                         "param": "cycle_budget",
                         "submitted_value": cb_raw,
@@ -376,8 +391,10 @@ class MissionConfig:
             })
         else:
             try:
+                if isinstance(mi_raw, bool):
+                    raise TypeError("boolean is not an integer parameter")
                 mi_value = int(mi_raw)
-                if mi_value != mi_raw:
+                if mi_value != mi_raw or type(mi_raw) is not int:
                     overrides.append({
                         "param": "max_iterations",
                         "submitted_value": mi_raw,
@@ -533,7 +550,7 @@ class MissionConfig:
         This is the single place where the mission dict schema is defined.
         All call sites that previously built this dict inline now call here.
         """
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         project = resolved_project_name or self.project_name
 
         extra_metadata = dict(self.metadata)
@@ -641,16 +658,19 @@ def validate_mission_params(raw: Dict[str, Any]) -> Tuple[bool, List[str]]:
     ps = (raw.get("problem_statement") or raw.get("mission") or "")
     if not isinstance(ps, str):
         ps = str(ps)
-    if len(ps.strip()) < MIN_PROBLEM_STATEMENT_LEN:
+    ps_stripped = _strip_problem_statement(ps)
+    if len(ps_stripped) < MIN_PROBLEM_STATEMENT_LEN:
         errors.append(
             f"problem_statement must be at least {MIN_PROBLEM_STATEMENT_LEN} characters "
-            f"(got {len(ps.strip())})"
+            f"(got {len(ps_stripped)})"
         )
 
     # cycle_budget -- hard reject 0 or negative; allow None (defaults to 3)
     cb = raw.get("cycle_budget")
     if cb is not None:
         try:
+            if isinstance(cb, bool):
+                raise TypeError("boolean is not an integer parameter")
             cb_int = int(cb)
             if cb_int <= 0:
                 errors.append(
@@ -668,6 +688,8 @@ def validate_mission_params(raw: Dict[str, Any]) -> Tuple[bool, List[str]]:
     mi = raw.get("max_iterations")
     if mi is not None:
         try:
+            if isinstance(mi, bool):
+                raise TypeError("boolean is not an integer parameter")
             mi_int = int(mi)
             if mi_int < MIN_MAX_ITERATIONS:
                 errors.append(
@@ -688,6 +710,21 @@ def validate_mission_params(raw: Dict[str, Any]) -> Tuple[bool, List[str]]:
             errors.append(
                 f"llm_provider must be one of {sorted(VALID_LLM_PROVIDERS)}, got {llm!r}"
             )
+
+    # mission_type -- allow None (defaults to full_rd)
+    mt = raw.get("mission_type")
+    if mt is not None:
+        if not isinstance(mt, str):
+            errors.append(f"mission_type must be a string, got {type(mt).__name__}")
+        else:
+            mt_norm = mt.strip()
+            try:
+                from af_engine.mission_profiles import is_valid_mission_type
+                valid_mission_type = is_valid_mission_type(mt_norm)
+            except ImportError:
+                valid_mission_type = mt_norm == "full_rd"
+            if not valid_mission_type:
+                errors.append(f"mission_type must be a known profile, got {mt!r}")
 
     # project_name -- allow None
     pn = raw.get("project_name")
@@ -820,11 +857,13 @@ def prune_old_audit_logs(
     # Defensive coercion: a negative max_missions is meaningless and used to
     # let `len(candidates) > max_missions` evaluate to True for *every*
     # candidate, then `candidates.pop(0)` IndexError'd when the list ran dry
-    # only after deleting everything. Same for negative size budgets.
+    # only after deleting everything. Fail loud instead of silently pruning all.
     try:
-        max_missions = max(0, int(max_missions))
+        max_missions = int(max_missions)
     except (TypeError, ValueError):
         max_missions = 200
+    if max_missions < 0:
+        raise ValueError("max_missions must be >= 0")
     try:
         max_total_mb = max(0.0, float(max_total_mb))
     except (TypeError, ValueError):

@@ -21,6 +21,29 @@ let selectedLearnings = new Set();
 let batchDeleteMode = false;
 let analyticsVisible = false;
 let selectedMergeTarget = {};
+let lessonsMetaCache = {
+    loadedAt: 0,
+    stats: null,
+    domains: null,
+};
+
+function safeLearningTypeClass(value) {
+    return String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+document.addEventListener('click', (event) => {
+    const selectTarget = event.target.closest('[data-select-learning-id]');
+    if (selectTarget) {
+        event.stopPropagation();
+        toggleLearningSelection(selectTarget.dataset.selectLearningId || '', event);
+        return;
+    }
+
+    const learningTarget = event.target.closest('[data-learning-id]');
+    if (learningTarget) {
+        showLearningDetails(learningTarget.dataset.learningId || '');
+    }
+});
 
 // =============================================================================
 // LESSONS SEARCH PERSISTENCE
@@ -84,12 +107,15 @@ export async function loadAllLessons() {
         if (type) url += '&type=' + encodeURIComponent(type);
         if (sourceType) url += '&source_type=' + encodeURIComponent(sourceType);
 
-        const data = await api(url);
+        const [data, meta] = await Promise.all([
+            api(url),
+            loadLessonsMeta(),
+        ]);
         lessonsData = data.learnings || [];
-        renderLessonsList(lessonsData);
+        renderCurrentLessonsList();
 
         // Update stats
-        const stats = await api('/api/knowledge-base/stats');
+        const stats = meta.stats;
         if (!stats.error) {
             const totalEl = document.getElementById('lessons-total-count');
             const missionsEl = document.getElementById('lessons-missions-count');
@@ -98,19 +124,33 @@ export async function loadAllLessons() {
         }
 
         // Load domains for filter
-        const domains = await api('/api/knowledge-base/domains');
+        const domains = meta.domains;
         if (domains.domains && domains.domains.length > 0) {
             const select = document.getElementById('lessons-domain-filter');
             if (select) {
                 const currentValue = select.value;
                 select.innerHTML = '<option value="">All Domains</option>' +
-                    domains.domains.map(d => `<option value="${d}">${d}</option>`).join('');
+                    domains.domains.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
                 select.value = currentValue;
             }
         }
     } catch (e) {
         console.error('Load lessons error:', e);
     }
+}
+
+async function loadLessonsMeta(force = false) {
+    const now = Date.now();
+    if (!force && lessonsMetaCache.stats && lessonsMetaCache.domains && now - lessonsMetaCache.loadedAt < 60000) {
+        return lessonsMetaCache;
+    }
+
+    const [stats, domains] = await Promise.all([
+        api('/api/knowledge-base/stats'),
+        api('/api/knowledge-base/domains'),
+    ]);
+    lessonsMetaCache = { loadedAt: now, stats, domains };
+    return lessonsMetaCache;
 }
 
 export async function searchLessons() {
@@ -138,9 +178,17 @@ export async function searchLessons() {
 
         const data = await api(url);
         lessonsData = data.results || [];
-        renderLessonsList(lessonsData);
+        renderCurrentLessonsList();
     } catch (e) {
         console.error('Search lessons error:', e);
+    }
+}
+
+function renderCurrentLessonsList() {
+    if (batchDeleteMode) {
+        renderLessonsListWithCheckboxes();
+    } else {
+        renderLessonsList(lessonsData);
     }
 }
 
@@ -155,11 +203,11 @@ function renderLessonsList(lessons) {
 
     const html = lessons.map(l => `
         <div class="learning-item ${l.learning_id === selectedLearningId ? 'active' : ''}"
-             onclick="showLearningDetails('${l.learning_id}')">
+             data-learning-id="${escapeHtml(l.learning_id || '')}">
             <div class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</div>
             <div class="learning-item-meta">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
-                ${l.problem_domain || ''}
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
+                ${escapeHtml(l.problem_domain || '')}
             </div>
         </div>
     `).join('');
@@ -169,7 +217,7 @@ function renderLessonsList(lessons) {
 
 export async function showLearningDetails(learningId) {
     selectedLearningId = learningId;
-    renderLessonsList(lessonsData);
+    renderCurrentLessonsList();
 
     try {
         const data = await api('/api/knowledge-base/learnings/' + learningId);
@@ -204,7 +252,7 @@ export async function showLearningDetails(learningId) {
                 <div class="learning-detail-section">
                     <h4>Type & Domain</h4>
                     <p>
-                        <span class="learning-type-badge ${data.learning_type || ''}">${data.learning_type || 'unknown'}</span>
+                        <span class="learning-type-badge ${safeLearningTypeClass(data.learning_type)}">${escapeHtml(data.learning_type || 'unknown')}</span>
                         ${escapeHtml(data.problem_domain || 'No domain')}
                     </p>
                 </div>
@@ -336,8 +384,8 @@ async function loadRelatedLearnings(currentLearningId, domain, keywords) {
             html += `<div class="related-group">
                 <div style="color: var(--green); font-size: 0.8em; margin-bottom: 4px;">From Missions (${fromMissions.length})</div>
                 ${fromMissions.slice(0, 3).map(l => `
-                    <div class="related-learning-item" onclick="showLearningDetails('${l.learning_id}')" style="cursor: pointer; padding: 4px 8px; margin: 2px 0; background: var(--bg); border-radius: 4px; font-size: 0.85em;">
-                        <span class="learning-type-badge ${l.learning_type || ''}" style="font-size: 0.75em; margin-right: 4px;">${l.learning_type || '?'}</span>
+                    <div class="related-learning-item" data-learning-id="${escapeHtml(l.learning_id || '')}" style="cursor: pointer; padding: 4px 8px; margin: 2px 0; background: var(--bg); border-radius: 4px; font-size: 0.85em;">
+                        <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}" style="font-size: 0.75em; margin-right: 4px;">${escapeHtml(l.learning_type || '?')}</span>
                         ${escapeHtml((l.title || 'Untitled').substring(0, 50))}
                     </div>
                 `).join('')}
@@ -348,8 +396,8 @@ async function loadRelatedLearnings(currentLearningId, domain, keywords) {
             html += `<div class="related-group" style="margin-top: 8px;">
                 <div style="color: var(--accent); font-size: 0.8em; margin-bottom: 4px;">From Investigations (${fromInvestigations.length})</div>
                 ${fromInvestigations.slice(0, 3).map(l => `
-                    <div class="related-learning-item" onclick="showLearningDetails('${l.learning_id}')" style="cursor: pointer; padding: 4px 8px; margin: 2px 0; background: var(--bg); border-radius: 4px; font-size: 0.85em;">
-                        <span class="learning-type-badge ${l.learning_type || ''}" style="font-size: 0.75em; margin-right: 4px;">${l.learning_type || '?'}</span>
+                    <div class="related-learning-item" data-learning-id="${escapeHtml(l.learning_id || '')}" style="cursor: pointer; padding: 4px 8px; margin: 2px 0; background: var(--bg); border-radius: 4px; font-size: 0.85em;">
+                        <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}" style="font-size: 0.75em; margin-right: 4px;">${escapeHtml(l.learning_type || '?')}</span>
                         ${escapeHtml((l.title || 'Untitled').substring(0, 50))}
                     </div>
                 `).join('')}
@@ -435,7 +483,7 @@ function renderChainsPanel(chains) {
                 ${chain.missions && chain.missions.length > 0 ? `
                     <div class="chain-missions" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-dim); font-size: 0.85em;">Missions: </span>
-                        ${chain.missions.map(m => `<span class="mission-badge">${m}</span>`).join(' ')}
+                        ${chain.missions.map(m => `<span class="mission-badge">${escapeHtml(m)}</span>`).join(' ')}
                     </div>
                 ` : ''}
             </div>
@@ -446,11 +494,11 @@ function renderChainsPanel(chains) {
 function renderChainLearnings(learnings) {
     if (!learnings || learnings.length === 0) return '';
     return learnings.map((l, i) => `
-        <div class="chain-learning" onclick="showLearningDetails('${l.learning_id}')" style="display: flex; align-items: center; padding: 8px; cursor: pointer;">
+        <div class="chain-learning" data-learning-id="${escapeHtml(l.learning_id || '')}" style="display: flex; align-items: center; padding: 8px; cursor: pointer;">
             <span class="chain-step" style="min-width: 24px; color: var(--accent);">${i + 1}.</span>
-            <span class="learning-type-badge ${l.learning_type || ''}" style="margin-right: 8px;">${l.learning_type || 'unknown'}</span>
+            <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}" style="margin-right: 8px;">${escapeHtml(l.learning_type || 'unknown')}</span>
             <span class="learning-item-title" style="flex: 1;">${escapeHtml(l.title || 'Untitled')}</span>
-            <span class="chain-mission-id" style="color: var(--text-dim); font-size: 0.8em;">${l.mission_id || ''}</span>
+            <span class="chain-mission-id" style="color: var(--text-dim); font-size: 0.8em;">${escapeHtml(l.mission_id || '')}</span>
         </div>
     `).join('');
 }
@@ -509,15 +557,15 @@ function renderClustersTree(clusters) {
 function renderClusterLearnings(learningIds, learnings) {
     if (learnings && learnings.length > 0) {
         return learnings.map(l => `
-            <div class="learning-item" onclick="showLearningDetails('${l.learning_id}')">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
+            <div class="learning-item" data-learning-id="${escapeHtml(l.learning_id || '')}">
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
                 <span class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</span>
             </div>
         `).join('');
     }
     return learningIds.map(id => `
-        <div class="learning-item" onclick="showLearningDetails('${id}')">
-            <span style="color: var(--text-dim);">${id}</span>
+        <div class="learning-item" data-learning-id="${escapeHtml(id || '')}">
+            <span style="color: var(--text-dim);">${escapeHtml(id || '')}</span>
         </div>
     `).join('');
 }
@@ -542,7 +590,12 @@ export async function loadDuplicates() {
         const data = await api('/api/knowledge-base/duplicates?threshold=0.85');
         duplicatesData = data.duplicate_groups || [];
         const countEl = document.getElementById('duplicates-count');
-        if (countEl) countEl.textContent = duplicatesData.length > 0 ? `(${duplicatesData.length} groups)` : '';
+        if (countEl) {
+            const total = data.total_count ?? duplicatesData.length;
+            countEl.textContent = duplicatesData.length > 0
+                ? `(${duplicatesData.length}${total > duplicatesData.length ? ` of ${total}` : ''} groups)`
+                : '';
+        }
         renderDuplicatesPanel(duplicatesData);
     } catch (e) {
         console.error('Load duplicates error:', e);
@@ -563,23 +616,25 @@ function renderDuplicatesPanel(duplicates) {
     panel.innerHTML = duplicates.map((group, idx) => {
         const learnings = group.learnings || [];
         const similarity = group.similarity || 0;
-        const representative = group.representative;
+        const representative = selectedMergeTarget[idx] || group.representative || learnings[0]?.learning_id;
+        if (representative) selectedMergeTarget[idx] = representative;
 
         return `
             <div class="duplicate-group">
                 <div class="duplicate-header">
                     <span>Similarity: ${(similarity * 100).toFixed(0)}%</span>
-                    <button class="btn btn-sm" onclick="mergeDuplicates(${idx})">Merge Selected</button>
+                    <button class="btn btn-sm" onclick="mergeDuplicates(${idx})" ${learnings.length < 2 ? 'disabled' : ''}>Merge Selected</button>
                 </div>
                 <div class="duplicate-items">
                     ${learnings.map(l => `
                         <label class="duplicate-item">
-                            <input type="radio" name="dup-${idx}" value="${l.learning_id}"
+                            <input type="radio" name="dup-${idx}" value="${escapeHtml(l.learning_id)}"
                                    ${l.learning_id === representative ? 'checked' : ''}
-                                   onchange="window._selectedMergeTarget[${idx}]='${l.learning_id}'">
+                                   onchange="window._selectedMergeTarget[${idx}]=this.value">
                             <span>
                                 <strong>${escapeHtml(l.title || 'Untitled')}</strong>
-                                <div style="font-size: 0.8em; color: var(--text-dim);">${l.mission_id || ''}</div>
+                                <div style="font-size: 0.8em; color: var(--text-dim);">${escapeHtml(l.mission_id || '')}</div>
+                                <div style="font-size: 0.8em; color: var(--text-dim);">${escapeHtml((l.description || '').substring(0, 160))}</div>
                             </span>
                         </label>
                     `).join('')}
@@ -611,6 +666,7 @@ export async function mergeDuplicates(groupIdx) {
 
         if (result.success) {
             showToast(`Merged ${result.merged} duplicate learnings`);
+            lessonsMetaCache.loadedAt = 0;
             loadDuplicates();
             loadAllLessons();
         } else {
@@ -625,7 +681,7 @@ export async function mergeAllDuplicates() {
     if (!confirm('Merge all duplicate groups? This will keep the representative learning from each group.')) return;
 
     try {
-        const data = await api('/api/knowledge-base/duplicates?threshold=0.85');
+        const data = await api('/api/knowledge-base/duplicates?threshold=0.85&limit=1000');
         const groups = data.duplicate_groups || [];
 
         if (groups.length === 0) {
@@ -633,23 +689,36 @@ export async function mergeAllDuplicates() {
             return;
         }
 
-        let merged = 0;
+        const mergeGroups = [];
         for (const group of groups) {
             const learnings = group.learnings || [];
             if (learnings.length < 2) continue;
 
             const keepId = group.representative || learnings[0].learning_id;
             const mergeIds = learnings.filter(l => l.learning_id !== keepId).map(l => l.learning_id);
-
-            const result = await api('/api/knowledge-base/merge', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keep_id: keepId, merge_ids: mergeIds })
-            });
-            if (result.success) merged += mergeIds.length;
+            if (mergeIds.length > 0) {
+                mergeGroups.push({ keep_id: keepId, merge_ids: mergeIds });
+            }
         }
 
-        showToast(`Merged ${merged} duplicate learnings`);
+        if (mergeGroups.length === 0) {
+            showToast('No mergeable duplicates found');
+            return;
+        }
+
+        const result = await api('/api/knowledge-base/merge-duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ groups: mergeGroups })
+        });
+
+        if (!result.success) {
+            showToast('Merge failed: ' + (result.error || 'Unknown error'), 'error');
+            return;
+        }
+
+        showToast(`Merged ${result.merged || 0} duplicate learnings`);
+        lessonsMetaCache.loadedAt = 0;
         loadAllLessons();
         if (currentLessonsSubtab === 'duplicates') loadDuplicates();
     } catch (e) {
@@ -858,14 +927,14 @@ function renderLessonsListWithCheckboxes() {
 
     const html = lessonsData.map(l => `
         <div class="learning-item ${l.learning_id === selectedLearningId ? 'active' : ''}"
-             onclick="showLearningDetails('${l.learning_id}')">
+             data-learning-id="${escapeHtml(l.learning_id || '')}">
             <input type="checkbox" class="batch-checkbox"
                    ${selectedLearnings.has(l.learning_id) ? 'checked' : ''}
-                   onclick="toggleLearningSelection('${l.learning_id}', event)"
+                   data-select-learning-id="${escapeHtml(l.learning_id || '')}"
                    style="margin-right: 10px;">
             <div class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</div>
             <div class="learning-item-meta">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
             </div>
         </div>
     `).join('');
@@ -923,6 +992,7 @@ export async function confirmBatchDelete() {
         }
 
         showToast('Deleted ' + (result.deleted || ids.length) + ' learnings');
+        lessonsMetaCache.loadedAt = 0;
         selectedLearnings.clear();
         exitBatchMode();
         loadAllLessons();

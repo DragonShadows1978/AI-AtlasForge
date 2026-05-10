@@ -45,7 +45,7 @@ STATE_DIR = BASE_DIR / "state"
 DB_PATH = STATE_DIR / "mission_suggestions.db"
 
 # Current schema version
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 8
 
 # SQLite INTEGER max (2^63 - 1); values beyond this overflow
 SQLITE_MAX_INT = (2 ** 63) - 1
@@ -57,8 +57,10 @@ ALLOWED_COLUMNS = frozenset({
     'last_analyzed_at', 'last_edited_at', 'auto_tags', 'merged_from',
     'merged_source_descriptions', 'drift_context', 'original_mission_title',
     'original_mission_description', 'original_rationale', 'original_suggested_cycles',
-    'mission_type', 'bug_references', 'scope_context',
-    'execution_profile',
+    'classification', 'mission_type', 'bug_references', 'scope_context',
+    'execution_profile', 'status', 'accepted_mission_id', 'queued_at',
+    'completed_at', 'reopened_at', 'closed_reason', 'project_name',
+    'project_slug', 'project_source',
 })
 
 # C2-2: defense-in-depth identifier safety. Column names must consist solely of
@@ -66,6 +68,123 @@ ALLOWED_COLUMNS = frozenset({
 # This prevents injection if ALLOWED_COLUMNS is ever expanded with an unsafe name,
 # or if SQLite backtick-quoting semantics change in a future version.
 _SAFE_COL_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+_VALID_CLASSIFICATIONS = frozenset({'BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'})
+_VALID_STATUSES = frozenset({'open', 'queued', 'completed', 'deprecated'})
+_VALID_EXEC_PROFILES = frozenset({
+    'full_rd', 'plan_only', 'build_only', 'test_red_team',
+    'bug_hunt', 'research_only', 'review_existing',
+})
+
+_CLASSIFICATION_TO_PROFILE = {
+    'BUGFIX': 'bug_hunt',
+    'TECH_DEBT': 'build_only',
+    'EXPANSION': 'plan_only',
+}
+
+
+def _project_helpers():
+    from Mission_Manager.project_registry import (
+        canonicalize_project_name,
+        infer_project_name,
+        project_slug,
+    )
+    return canonicalize_project_name, infer_project_name, project_slug
+
+
+def _normalize_insert_defaults(suggestion: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize full-row defaults before validation for every insert path."""
+    normalized = dict(suggestion)
+    legacy_mission_type = normalized.get('mission_type')
+    explicit_invalid_mission_type = False
+    explicit_invalid_execution_profile = False
+    classification = normalized.get('classification')
+    if classification is None and isinstance(legacy_mission_type, str):
+        upper_legacy = legacy_mission_type.upper().strip()
+        if upper_legacy in _VALID_CLASSIFICATIONS:
+            classification = upper_legacy
+        elif legacy_mission_type not in _VALID_EXEC_PROFILES:
+            explicit_invalid_mission_type = True
+    elif legacy_mission_type is not None and not isinstance(legacy_mission_type, str):
+        explicit_invalid_mission_type = True
+    if classification is None:
+        classification = 'EXPANSION'
+    normalized['classification'] = classification
+
+    profile = None
+    if isinstance(legacy_mission_type, str) and legacy_mission_type in _VALID_EXEC_PROFILES:
+        profile = legacy_mission_type
+    if profile is None and isinstance(normalized.get('execution_profile'), str) and normalized.get('execution_profile') in _VALID_EXEC_PROFILES:
+        profile = normalized.get('execution_profile')
+    elif (
+        normalized.get('execution_profile') not in (None, "")
+        and not (
+            isinstance(normalized.get('execution_profile'), str)
+            and normalized.get('execution_profile') in _VALID_EXEC_PROFILES
+        )
+    ):
+        explicit_invalid_execution_profile = True
+    if profile is None:
+        profile = _CLASSIFICATION_TO_PROFILE.get(classification, 'full_rd')
+    if not explicit_invalid_mission_type:
+        normalized['mission_type'] = profile
+    if not explicit_invalid_execution_profile:
+        normalized['execution_profile'] = profile
+
+    if normalized.get('status') is None:
+        normalized['status'] = 'open'
+
+    try:
+        canonicalize_project_name, infer_project_name, project_slug = _project_helpers()
+        project_name = canonicalize_project_name(normalized.get('project_name'))
+        project_source = normalized.get('project_source')
+        if project_name:
+            normalized['project_name'] = project_name
+            normalized['project_slug'] = project_slug(project_name)
+            normalized['project_source'] = project_source or 'explicit'
+        else:
+            inferred = infer_project_name(normalized)
+            normalized['project_name'] = inferred
+            normalized['project_slug'] = project_slug(inferred)
+            normalized['project_source'] = project_source or 'inferred'
+    except Exception:
+        if normalized.get('project_name') is None:
+            normalized['project_name'] = 'AI-AtlasForge'
+            normalized['project_slug'] = 'ai-atlasforge'
+            normalized['project_source'] = 'fallback'
+    return normalized
+
+
+def _normalize_partial_update(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize aliases for partial writes without inventing absent defaults."""
+    normalized = dict(updates)
+    raw_mission_type = normalized.get('mission_type')
+    if isinstance(raw_mission_type, str):
+        upper = raw_mission_type.upper().strip()
+        if upper in _VALID_CLASSIFICATIONS:
+            normalized['classification'] = upper
+            normalized.pop('mission_type', None)
+        elif raw_mission_type in _VALID_EXEC_PROFILES:
+            normalized['mission_type'] = raw_mission_type
+            normalized['execution_profile'] = raw_mission_type
+
+    raw_execution_profile = normalized.get('execution_profile')
+    if isinstance(raw_execution_profile, str) and raw_execution_profile in _VALID_EXEC_PROFILES:
+        normalized['mission_type'] = raw_execution_profile
+
+    raw_classification = normalized.get('classification')
+    if isinstance(raw_classification, str):
+        normalized['classification'] = raw_classification.upper().strip()
+    if 'project_name' in normalized:
+        try:
+            canonicalize_project_name, _, project_slug = _project_helpers()
+            project_name = canonicalize_project_name(normalized.get('project_name'))
+            normalized['project_name'] = project_name
+            normalized['project_slug'] = project_slug(project_name) if project_name else ''
+            normalized.setdefault('project_source', 'explicit')
+        except Exception:
+            pass
+    return normalized
 
 
 class SuggestionStorageBackend(ABC):
@@ -152,12 +271,44 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             if version < 2:
                 self._migrate_v1_to_v2(conn)
                 conn.execute("PRAGMA user_version = 2")
+                version = 2
                 logger.info("Database schema migrated to version 2 (mission_type, bug_references, scope_context)")
 
             if version < 3:
                 self._migrate_v2_to_v3(conn)
                 conn.execute("PRAGMA user_version = 3")
+                version = 3
                 logger.info("Database schema migrated to version 3 (execution_profile)")
+
+            if version < 4:
+                self._migrate_v3_to_v4(conn)
+                conn.execute("PRAGMA user_version = 4")
+                version = 4
+                logger.info("Database schema migrated to version 4 (suggestion status)")
+
+            if version < 5:
+                self._migrate_v4_to_v5(conn)
+                conn.execute("PRAGMA user_version = 5")
+                version = 5
+                logger.info("Database schema migrated to version 5 (suggestion lifecycle metadata)")
+
+            if version < 6:
+                self._migrate_v5_to_v6(conn)
+                conn.execute("PRAGMA user_version = 6")
+                version = 6
+                logger.info("Database schema migrated to version 6 (classification separated from mission_type)")
+
+            if version < 7:
+                self._migrate_v6_to_v7(conn)
+                conn.execute("PRAGMA user_version = 7")
+                version = 7
+                logger.info("Database schema migrated to version 7 (deprecated suggestion status)")
+
+            if version < 8:
+                self._migrate_v7_to_v8(conn)
+                conn.execute("PRAGMA user_version = 8")
+                version = 8
+                logger.info("Database schema migrated to version 8 (suggestion project identity)")
 
             # Idempotent backfill: even on DBs already at v3, sweep any rows
             # whose execution_profile is NULL or empty. Cheap (single UPDATE
@@ -170,6 +321,24 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             except sqlite3.OperationalError:
                 # Column missing on a pre-v3 DB that failed migration — let
                 # the migration error above surface; this is purely defensive.
+                pass
+            try:
+                conn.execute(
+                    "UPDATE mission_suggestions SET status = 'open' "
+                    "WHERE status IS NULL OR status = ''"
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute(
+                    "UPDATE mission_suggestions SET classification = 'EXPANSION' "
+                    "WHERE classification IS NULL OR classification = ''"
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                self._backfill_project_fields(conn)
+            except sqlite3.OperationalError:
                 pass
 
     def _create_schema(self, conn: sqlite3.Connection) -> None:
@@ -185,6 +354,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 rationale TEXT,
                 created_at TEXT NOT NULL,
                 source_type TEXT DEFAULT 'manual' CHECK(source_type IN ('drift_halt', 'successful_completion', 'merged', 'manual')),
+                classification TEXT DEFAULT 'EXPANSION' CHECK(classification IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')),
+                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'queued', 'completed', 'deprecated')),
+                project_name TEXT DEFAULT 'AI-AtlasForge',
+                project_slug TEXT DEFAULT 'ai-atlasforge',
+                project_source TEXT DEFAULT 'inferred',
+                accepted_mission_id TEXT,
+                queued_at TEXT,
+                completed_at TEXT,
+                reopened_at TEXT,
+                closed_reason TEXT,
                 priority_score REAL DEFAULT 50.0,
                 health_status TEXT DEFAULT 'healthy' CHECK(health_status IN ('healthy', 'stale', 'orphaned', 'needs_review', 'hot')),
                 last_analyzed_at TEXT,
@@ -206,6 +385,17 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 ON mission_suggestions(source_type);
             CREATE INDEX IF NOT EXISTS idx_suggestions_health_status
                 ON mission_suggestions(health_status);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_classification
+                ON mission_suggestions(classification);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_status
+                ON mission_suggestions(status);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_project_slug
+                ON mission_suggestions(project_slug);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_accepted_mission
+                ON mission_suggestions(accepted_mission_id)
+                WHERE accepted_mission_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_suggestions_completed_at
+                ON mission_suggestions(completed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_suggestions_priority
                 ON mission_suggestions(priority_score DESC);
             CREATE INDEX IF NOT EXISTS idx_suggestions_created
@@ -260,6 +450,245 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             "UPDATE mission_suggestions SET execution_profile = 'full_rd' "
             "WHERE execution_profile IS NULL OR execution_profile = ''"
         )
+
+    def _migrate_v3_to_v4(self, conn: sqlite3.Connection) -> None:
+        """Add suggestion lifecycle status (v3 → v4). Existing rows are open."""
+        try:
+            conn.execute(
+                "ALTER TABLE mission_suggestions ADD COLUMN status TEXT DEFAULT 'open' "
+                "CHECK(status IN ('open', 'queued', 'completed'))"
+            )
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e):
+                logger.warning("_migrate_v3_to_v4: unexpected error: %s", e)
+                raise
+        conn.execute(
+            "UPDATE mission_suggestions SET status = 'open' "
+            "WHERE status IS NULL OR status = ''"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_status "
+            "ON mission_suggestions(status)"
+        )
+
+    def _migrate_v4_to_v5(self, conn: sqlite3.Connection) -> None:
+        """Add lifecycle metadata for accepted/completed suggestions (v4 → v5)."""
+        for stmt in [
+            "ALTER TABLE mission_suggestions ADD COLUMN accepted_mission_id TEXT",
+            "ALTER TABLE mission_suggestions ADD COLUMN queued_at TEXT",
+            "ALTER TABLE mission_suggestions ADD COLUMN completed_at TEXT",
+            "ALTER TABLE mission_suggestions ADD COLUMN reopened_at TEXT",
+            "ALTER TABLE mission_suggestions ADD COLUMN closed_reason TEXT",
+        ]:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                if 'duplicate column name' not in str(e):
+                    logger.warning("_migrate_v4_to_v5: unexpected error for stmt %r: %s", stmt, e)
+                    raise
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_accepted_mission "
+            "ON mission_suggestions(accepted_mission_id) "
+            "WHERE accepted_mission_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_completed_at "
+            "ON mission_suggestions(completed_at DESC)"
+        )
+
+    def _migrate_v5_to_v6(self, conn: sqlite3.Connection) -> None:
+        """Separate suggestion classification from execution mission_type (v5 → v6)."""
+        try:
+            conn.execute(
+                "ALTER TABLE mission_suggestions ADD COLUMN classification TEXT DEFAULT 'EXPANSION' "
+                "CHECK(classification IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL'))"
+            )
+        except sqlite3.OperationalError as e:
+            if 'duplicate column name' not in str(e):
+                logger.warning("_migrate_v5_to_v6: unexpected classification error: %s", e)
+                raise
+
+        conn.execute("""
+            UPDATE mission_suggestions
+            SET classification = CASE
+                WHEN UPPER(COALESCE(mission_type, '')) IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')
+                    THEN UPPER(mission_type)
+                WHEN classification IS NULL OR classification = ''
+                    THEN 'EXPANSION'
+                ELSE classification
+            END
+        """)
+        conn.execute("""
+            UPDATE mission_suggestions
+            SET mission_type = CASE
+                WHEN classification = 'BUGFIX' AND (execution_profile IS NULL OR execution_profile = '' OR execution_profile = 'full_rd')
+                    THEN 'bug_hunt'
+                WHEN classification = 'TECH_DEBT' AND (execution_profile IS NULL OR execution_profile = '' OR execution_profile = 'full_rd')
+                    THEN 'build_only'
+                WHEN classification = 'EXPANSION' AND (execution_profile IS NULL OR execution_profile = '' OR execution_profile = 'full_rd')
+                    THEN 'plan_only'
+                WHEN execution_profile IN ('full_rd', 'plan_only', 'build_only', 'test_red_team', 'bug_hunt', 'research_only', 'review_existing')
+                    THEN execution_profile
+                ELSE 'full_rd'
+            END
+            WHERE mission_type IS NULL
+               OR mission_type = ''
+               OR UPPER(mission_type) IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')
+        """)
+        conn.execute("""
+            UPDATE mission_suggestions
+            SET execution_profile = mission_type
+            WHERE mission_type IN ('full_rd', 'plan_only', 'build_only', 'test_red_team', 'bug_hunt', 'research_only', 'review_existing')
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_classification "
+            "ON mission_suggestions(classification)"
+        )
+
+    def _migrate_v6_to_v7(self, conn: sqlite3.Connection) -> None:
+        """Expand lifecycle status enum to include deprecated (v6 → v7)."""
+        conn.executescript("""
+            CREATE TABLE mission_suggestions_v7 (
+                id TEXT PRIMARY KEY,
+                mission_title TEXT NOT NULL,
+                mission_description TEXT,
+                suggested_cycles INTEGER DEFAULT 3 CHECK(suggested_cycles >= 1 AND suggested_cycles <= 10),
+                source_mission_id TEXT,
+                source_mission_summary TEXT,
+                rationale TEXT,
+                created_at TEXT NOT NULL,
+                source_type TEXT DEFAULT 'manual' CHECK(source_type IN ('drift_halt', 'successful_completion', 'merged', 'manual')),
+                classification TEXT DEFAULT 'EXPANSION' CHECK(classification IN ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')),
+                status TEXT DEFAULT 'open' CHECK(status IN ('open', 'queued', 'completed', 'deprecated')),
+                accepted_mission_id TEXT,
+                queued_at TEXT,
+                completed_at TEXT,
+                reopened_at TEXT,
+                closed_reason TEXT,
+                priority_score REAL DEFAULT 50.0,
+                health_status TEXT DEFAULT 'healthy' CHECK(health_status IN ('healthy', 'stale', 'orphaned', 'needs_review', 'hot')),
+                last_analyzed_at TEXT,
+                last_edited_at TEXT,
+                auto_tags TEXT DEFAULT '[]',
+                merged_from TEXT,
+                merged_source_descriptions TEXT,
+                drift_context TEXT,
+                original_mission_title TEXT,
+                original_mission_description TEXT,
+                original_rationale TEXT,
+                original_suggested_cycles INTEGER,
+                mission_type TEXT,
+                bug_references TEXT DEFAULT '[]',
+                scope_context TEXT,
+                execution_profile TEXT DEFAULT 'full_rd'
+            );
+
+            INSERT INTO mission_suggestions_v7 (
+                id, mission_title, mission_description, suggested_cycles,
+                source_mission_id, source_mission_summary, rationale,
+                created_at, source_type, classification, status,
+                accepted_mission_id, queued_at, completed_at, reopened_at, closed_reason,
+                priority_score, health_status, last_analyzed_at, last_edited_at,
+                auto_tags, merged_from, merged_source_descriptions, drift_context,
+                original_mission_title, original_mission_description,
+                original_rationale, original_suggested_cycles,
+                mission_type, bug_references, scope_context, execution_profile
+            )
+            SELECT
+                id, mission_title, mission_description, suggested_cycles,
+                source_mission_id, source_mission_summary, rationale,
+                created_at, source_type, classification, status,
+                accepted_mission_id, queued_at, completed_at, reopened_at, closed_reason,
+                priority_score, health_status, last_analyzed_at, last_edited_at,
+                auto_tags, merged_from, merged_source_descriptions, drift_context,
+                original_mission_title, original_mission_description,
+                original_rationale, original_suggested_cycles,
+                mission_type, bug_references, scope_context, execution_profile
+            FROM mission_suggestions;
+
+            DROP TABLE mission_suggestions;
+            ALTER TABLE mission_suggestions_v7 RENAME TO mission_suggestions;
+
+            CREATE INDEX IF NOT EXISTS idx_suggestions_source_type
+                ON mission_suggestions(source_type);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_health_status
+                ON mission_suggestions(health_status);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_classification
+                ON mission_suggestions(classification);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_status
+                ON mission_suggestions(status);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_suggestions_accepted_mission
+                ON mission_suggestions(accepted_mission_id)
+                WHERE accepted_mission_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_suggestions_completed_at
+                ON mission_suggestions(completed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_priority
+                ON mission_suggestions(priority_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_created
+                ON mission_suggestions(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_suggestions_source_mission
+                ON mission_suggestions(source_mission_id);
+        """)
+
+    def _migrate_v7_to_v8(self, conn: sqlite3.Connection) -> None:
+        """Add project identity fields (v7 → v8)."""
+        for stmt in [
+            "ALTER TABLE mission_suggestions ADD COLUMN project_name TEXT DEFAULT 'AI-AtlasForge'",
+            "ALTER TABLE mission_suggestions ADD COLUMN project_slug TEXT DEFAULT 'ai-atlasforge'",
+            "ALTER TABLE mission_suggestions ADD COLUMN project_source TEXT DEFAULT 'inferred'",
+        ]:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError as e:
+                if 'duplicate column name' not in str(e):
+                    logger.warning("_migrate_v7_to_v8: unexpected error for stmt %r: %s", stmt, e)
+                    raise
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_suggestions_project_slug "
+            "ON mission_suggestions(project_slug)"
+        )
+        self._backfill_project_fields(conn)
+
+    def _backfill_project_fields(self, conn: sqlite3.Connection) -> None:
+        """Best-effort project backfill for legacy suggestions."""
+        try:
+            canonicalize_project_name, infer_project_name, project_slug = _project_helpers()
+        except Exception:
+            return
+
+        rows = conn.execute(
+            "SELECT * FROM mission_suggestions "
+            "WHERE project_name IS NULL OR project_name = '' "
+            "OR project_slug IS NULL OR project_slug = '' "
+            "OR project_source IS NULL OR project_source IN ('inferred', 'backfill', 'fallback')"
+        ).fetchall()
+        if not rows:
+            return
+
+        known_rows = conn.execute("""
+            SELECT project_name
+            FROM mission_suggestions
+            WHERE project_name IS NOT NULL AND project_name != ''
+              AND project_source IN ('explicit', 'merged')
+        """).fetchall()
+        known_projects = [canonicalize_project_name(row["project_name"]) for row in known_rows if row["project_name"]]
+
+        for row in rows:
+            suggestion = dict(row)
+            source = suggestion.get("project_source") or "inferred"
+            if source in {"explicit", "merged"}:
+                name = canonicalize_project_name(suggestion.get("project_name"), known_projects)
+            else:
+                name = ""
+            if not name:
+                name = infer_project_name(suggestion, known_projects)
+                source = "backfill"
+            slug = project_slug(name)
+            conn.execute(
+                "UPDATE mission_suggestions SET project_name = ?, project_slug = ?, project_source = ? WHERE id = ?",
+                (name, slug, source, suggestion["id"]),
+            )
+            known_projects.append(name)
 
     def _row_to_dict(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
         """Convert a database row to a suggestion dict."""
@@ -354,6 +783,15 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     f"Must be one of: {', '.join(valid_health_statuses)}"
                 )
 
+        # lifecycle status enum
+        if 'status' in suggestion or not partial:
+            status = suggestion.get('status', 'open')
+            if status not in _VALID_STATUSES:
+                raise ValueError(
+                    f"Invalid status '{status}'. "
+                    f"Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+                )
+
         # suggested_cycles: int in [1, 10], not bool
         if 'suggested_cycles' in suggestion or not partial:
             suggested_cycles = suggestion.get('suggested_cycles', 3)
@@ -362,21 +800,43 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     f"suggested_cycles must be an integer between 1 and 10, got: {suggested_cycles!r}"
                 )
 
-        # mission_type enum
-        if 'mission_type' in suggestion or not partial:
-            valid_mission_types = ('BUGFIX', 'TECH_DEBT', 'COMPLETION', 'EXPANSION', 'MANUAL')
-            mission_type = suggestion.get('mission_type', 'EXPANSION')
-            if mission_type not in valid_mission_types:
+        # JSON-backed fields: accept native structured values only. Storing
+        # scalars here makes _row_to_dict return shapes the UI does not expect.
+        list_json_fields = (
+            'auto_tags',
+            'merged_from',
+            'merged_source_descriptions',
+            'bug_references',
+        )
+        for field in list_json_fields:
+            if field in suggestion:
+                value = suggestion.get(field)
+                if value is not None and not isinstance(value, (list, tuple)):
+                    raise ValueError(f"{field} must be a list")
+        if 'drift_context' in suggestion:
+            drift_context = suggestion.get('drift_context')
+            if drift_context is not None and not isinstance(drift_context, dict):
+                raise ValueError("drift_context must be an object")
+
+        # classification enum
+        if 'classification' in suggestion or not partial:
+            classification = suggestion.get('classification', 'EXPANSION')
+            if classification not in _VALID_CLASSIFICATIONS:
                 raise ValueError(
-                    f"Invalid mission_type '{mission_type}'. "
-                    f"Must be one of: {', '.join(valid_mission_types)}"
+                    f"Invalid classification '{classification}'. "
+                    f"Must be one of: {', '.join(sorted(_VALID_CLASSIFICATIONS))}"
                 )
 
-        # execution_profile enum
-        _VALID_EXEC_PROFILES = frozenset({
-            'full_rd', 'plan_only', 'build_only', 'test_red_team',
-            'bug_hunt', 'research_only', 'review_existing',
-        })
+        # mission_type/execution_profile enum. In this schema, mission_type is
+        # the AtlasForge stage profile. execution_profile is kept as a mirror
+        # for older callers.
+        if 'mission_type' in suggestion or not partial:
+            mt = suggestion.get('mission_type', 'full_rd')
+            if mt not in _VALID_EXEC_PROFILES:
+                raise ValueError(
+                    f"Invalid mission_type {mt!r}. "
+                    f"Must be one of: {', '.join(sorted(_VALID_EXEC_PROFILES))}"
+                )
         if 'execution_profile' in suggestion:
             ep = suggestion.get('execution_profile')
             # Both partial updates AND full-row inserts must reject explicit
@@ -396,12 +856,33 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                     f"Must be one of: {', '.join(sorted(_VALID_EXEC_PROFILES))}"
                 )
 
+        # project identity
+        if 'project_name' in suggestion or not partial:
+            project_name = suggestion.get('project_name', 'AI-AtlasForge')
+            if not isinstance(project_name, str) or not project_name.strip():
+                raise ValueError("project_name must be a non-empty string")
+            if len(project_name) > 100:
+                raise ValueError("project_name must be 100 characters or fewer")
+        if 'project_slug' in suggestion:
+            project_slug = suggestion.get('project_slug')
+            if not isinstance(project_slug, str) or not re.match(r'^[a-z0-9][a-z0-9-]{0,79}$', project_slug):
+                raise ValueError("project_slug must be a normalized slug")
+        if 'project_source' in suggestion:
+            project_source = suggestion.get('project_source')
+            if project_source is not None and (
+                not isinstance(project_source, str)
+                or project_source not in {'explicit', 'inferred', 'backfill', 'fallback', 'merged'}
+            ):
+                raise ValueError("project_source must be explicit, inferred, backfill, fallback, merged, or null")
+
         # priority_score: numeric, no NaN/inf, bounded range
         if 'priority_score' in suggestion or not partial:
             priority_score = suggestion.get('priority_score', 50.0)
             if priority_score is None and not partial:
                 raise ValueError("priority_score cannot be None for full rows; provide a numeric value")
             if priority_score is not None:
+                if isinstance(priority_score, bool):
+                    raise ValueError(f"priority_score must be numeric, got: {priority_score!r}")
                 try:
                     ps = float(priority_score)
                 except (TypeError, ValueError):
@@ -449,21 +930,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             ValueError: If mission_title is explicitly None or empty string
             sqlite3.IntegrityError: If duplicate ID is provided
         """
-        # Normalize execution_profile: missing key OR explicit None/"" → auto-map from mission_type
-        # before validation. Other non-string types (False, 0, [], {}) fall through
-        # to _validate_row, which raises a typed ValueError.
-        _MISSION_TYPE_TO_PROFILE = {
-            'BUGFIX': 'bug_hunt',
-            'TECH_DEBT': 'build_only',
-        }
-        if (
-            'execution_profile' not in suggestion
-            or suggestion.get('execution_profile') is None
-            or suggestion.get('execution_profile') == ""
-        ):
-            suggestion = dict(suggestion)
-            mt = suggestion.get('mission_type', '')
-            suggestion['execution_profile'] = _MISSION_TYPE_TO_PROFILE.get(mt, 'full_rd')
+        # Normalize defaults (missing/None → defaults) before validation.
+        # classification: missing or None → EXPANSION.
+        # mission_type/execution_profile: missing/None/"" → auto-map from classification.
+        # Other non-string types (False, 0, [], {}) fall through to _validate_row,
+        # which raises a typed ValueError.
+        suggestion = _normalize_insert_defaults(suggestion)
 
         # Validate all fields via shared helper (also used by upsert)
         self._validate_row(suggestion)
@@ -475,7 +947,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
-        mission_type = suggestion.get('mission_type', 'EXPANSION')
+        classification = suggestion.get('classification', 'EXPANSION')
+        mission_type = suggestion.get('mission_type', 'full_rd')
+        project_name = suggestion.get('project_name', 'AI-AtlasForge')
+        project_slug_value = suggestion.get('project_slug', 'ai-atlasforge')
 
         # Build normalized suggestion dict
         now = datetime.now(timezone.utc).isoformat()
@@ -489,6 +964,16 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'rationale': suggestion.get('rationale', ''),
             'created_at': suggestion.get('created_at', now),
             'source_type': suggestion.get('source_type', 'manual'),
+            'classification': classification,
+            'status': suggestion.get('status', 'open'),
+            'project_name': project_name,
+            'project_slug': project_slug_value,
+            'project_source': suggestion.get('project_source', 'inferred'),
+            'accepted_mission_id': suggestion.get('accepted_mission_id'),
+            'queued_at': suggestion.get('queued_at'),
+            'completed_at': suggestion.get('completed_at'),
+            'reopened_at': suggestion.get('reopened_at'),
+            'closed_reason': suggestion.get('closed_reason'),
             'priority_score': suggestion.get('priority_score', 50.0),
             'health_status': suggestion.get('health_status', 'healthy'),
             'last_analyzed_at': suggestion.get('last_analyzed_at'),
@@ -505,8 +990,8 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'mission_type': mission_type,
             'bug_references': suggestion.get('bug_references', []),
             'scope_context': suggestion.get('scope_context'),
-            # v3 columns — normalize None → 'full_rd' so NULL is never stored
-            'execution_profile': suggestion.get('execution_profile') or 'full_rd',
+            # v3 column kept as a compatibility mirror for older callers
+            'execution_profile': suggestion.get('execution_profile') or mission_type,
         }
 
         row = self._dict_to_row(suggestion)
@@ -543,6 +1028,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         # Work on a copy so we don't mutate the caller's dict
         updates = dict(updates)
         updates.pop('id', None)
+        updates = _normalize_partial_update(updates)
 
         if not updates:
             return False
@@ -639,6 +1125,9 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         self,
         source_type: str = None,
         health_status: str = None,
+        status: str = None,
+        project_slug: str = None,
+        project_name: str = None,
         min_priority: float = None,
         max_priority: float = None,
         limit: int = None,
@@ -660,6 +1149,22 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         if health_status is not None:
             conditions.append("health_status = ?")
             params.append(health_status)
+
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+
+        if project_slug is not None:
+            conditions.append("project_slug = ?")
+            params.append(project_slug)
+        elif project_name is not None:
+            try:
+                _, _, _project_slug = _project_helpers()
+                conditions.append("project_slug = ?")
+                params.append(_project_slug(project_name))
+            except Exception:
+                conditions.append("project_name = ?")
+                params.append(project_name)
 
         if min_priority is not None:
             conditions.append("priority_score >= ?")
@@ -704,7 +1209,37 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             cursor = conn.execute(query, params)
             return [self._row_to_dict(row) for row in cursor.fetchall()]
 
-    def count(self, health_status: str = None, source_type: str = None) -> int:
+    def get_projects(self, status: str = None) -> List[Dict[str, Any]]:
+        """Return canonical projects represented in the suggestion DB."""
+        conditions = [
+            "project_name IS NOT NULL",
+            "project_name != ''",
+            "project_slug IS NOT NULL",
+            "project_slug != ''",
+        ]
+        params = []
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        query = f"""
+            SELECT project_name, project_slug, COUNT(*) AS count
+            FROM mission_suggestions
+            WHERE {' AND '.join(conditions)}
+            GROUP BY project_slug
+            ORDER BY LOWER(project_name)
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                {
+                    "project_name": row["project_name"],
+                    "project_slug": row["project_slug"],
+                    "count": row["count"],
+                }
+                for row in rows
+            ]
+
+    def count(self, health_status: str = None, source_type: str = None, status: str = None) -> int:
         """Count suggestions with optional filters."""
         conditions = []
         params = []
@@ -716,6 +1251,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         if source_type is not None:
             conditions.append("source_type = ?")
             params.append(source_type)
+
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
 
         query = "SELECT COUNT(*) FROM mission_suggestions"
         if conditions:
@@ -840,16 +1379,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         all columns they want preserved. For partial updates, use update()
         instead.
         """
-        suggestion = dict(suggestion)  # don't mutate caller's dict
-
-        # Normalize execution_profile: missing key OR explicit None/"" → 'full_rd'
-        # (mirrors add()). Other non-string types fall through to _validate_row.
-        if (
-            'execution_profile' not in suggestion
-            or suggestion.get('execution_profile') is None
-            or suggestion.get('execution_profile') == ""
-        ):
-            suggestion['execution_profile'] = 'full_rd'
+        suggestion = _normalize_insert_defaults(suggestion)
 
         # Generate ID if not provided
         suggestion_id = suggestion.get('id') or f"rec_{uuid.uuid4().hex[:8]}"
@@ -908,16 +1438,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         with self._get_connection() as conn:
             for i, orig in enumerate(suggestions):
                 try:
-                    suggestion = dict(orig)  # don't mutate caller's list items
-
-                    # Normalize execution_profile: missing key OR explicit None/"" → 'full_rd'
-                    # (mirrors add()). Other non-string types fall through to _validate_row.
-                    if (
-                        'execution_profile' not in suggestion
-                        or suggestion.get('execution_profile') is None
-                        or suggestion.get('execution_profile') == ""
-                    ):
-                        suggestion['execution_profile'] = 'full_rd'
+                    suggestion = _normalize_insert_defaults(orig)
 
                     if 'id' not in suggestion:
                         suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
@@ -983,35 +1504,55 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             # Disable sqlite3 implicit transaction management so we can issue
             # BEGIN IMMEDIATE explicitly, making the delete+insert atomic.
             conn.isolation_level = None
-            conn.execute("BEGIN IMMEDIATE")
-            # Clear existing
-            conn.execute("DELETE FROM mission_suggestions")
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                # Clear existing
+                conn.execute("DELETE FROM mission_suggestions")
 
-            # Insert all
-            for orig in suggestions:
-                suggestion = dict(orig)  # don't mutate caller's list items
-                # Ensure required fields have defaults
-                if 'created_at' not in suggestion:
-                    suggestion['created_at'] = now
-                if 'id' not in suggestion:
-                    suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
-                if 'mission_title' not in suggestion:
-                    suggestion['mission_title'] = 'Untitled'
+                # Insert all
+                for orig in suggestions:
+                    suggestion = _normalize_insert_defaults(orig)
+                    # Ensure required fields have defaults
+                    if 'created_at' not in suggestion:
+                        suggestion['created_at'] = now
+                    if 'id' not in suggestion:
+                        suggestion['id'] = f"rec_{uuid.uuid4().hex[:8]}"
+                    if 'mission_title' not in suggestion:
+                        suggestion['mission_title'] = 'Untitled'
 
-                self._validate_row(suggestion)  # enforce validation (Bug 3 fix)
+                    self._validate_row(suggestion)  # enforce validation (Bug 3 fix)
 
-                row = self._dict_to_row(suggestion)
-                for col in row.keys():
-                    if not _SAFE_COL_RE.match(col):
-                        raise ValueError(f"update_all: invalid column name '{col}'")
-                columns = ', '.join(f'`{col}`' for col in row.keys())
-                placeholders = ', '.join(['?' for _ in row])
-                conn.execute(
-                    f"INSERT INTO mission_suggestions ({columns}) VALUES ({placeholders})",
-                    list(row.values())
-                )
+                    row = self._dict_to_row(suggestion)
+                    for col in row.keys():
+                        if not _SAFE_COL_RE.match(col):
+                            raise ValueError(f"update_all: invalid column name '{col}'")
+                    columns = ', '.join(f'`{col}`' for col in row.keys())
+                    placeholders = ', '.join(['?' for _ in row])
+                    conn.execute(
+                        f"INSERT INTO mission_suggestions ({columns}) VALUES ({placeholders})",
+                        list(row.values())
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
 
             logger.info(f"Bulk updated {len(suggestions)} suggestions")
+            if suggestions:
+                with self._wc_lock:
+                    old = self._write_count
+                    self._write_count += len(suggestions)
+                    new = self._write_count
+                    n = self._COMPACT_EVERY_N_WRITES
+                    should_compact = (new // n) > (old // n)
+                if should_compact:
+                    try:
+                        self.compact()
+                    except Exception as _compact_err:
+                        logger.warning("compact() failed after update_all (WAL may grow): %s", _compact_err)
             return len(suggestions)
 
     def update_batch(self, updates: List[Dict[str, Any]]) -> int:
@@ -1024,6 +1565,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                 if not suggestion_id or not update:
                     continue
 
+                update = _normalize_partial_update(update)
                 self._validate_row(update, partial=True)
                 row_updates = self._dict_to_row(update)
                 for col in row_updates.keys():
@@ -1116,6 +1658,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
         imported = 0
         skipped = 0
         errors = []
+        before_count = self.count()
 
         with self._get_connection() as conn:
             for item in items:
@@ -1160,16 +1703,12 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
                         'original_mission_description': item.get('original_mission_description'),
                         'original_rationale': item.get('original_rationale'),
                         'original_suggested_cycles': item.get('original_suggested_cycles'),
-                        # Normalize JSON null/false/empty/non-str → 'full_rd'.
-                        # Mirrors the alias normalization in core.py and queue_scheduler.py.
-                        'execution_profile': (
-                            item.get('execution_profile')
-                            if isinstance(item.get('execution_profile'), str)
-                            and item.get('execution_profile')
-                            else 'full_rd'
-                        ),
+                        'execution_profile': item.get('execution_profile'),
+                        'classification': item.get('classification'),
                         'mission_type': item.get('mission_type', 'EXPANSION'),
                     }
+
+                    suggestion = _normalize_insert_defaults(suggestion)
 
                     # S3: validate field values before insertion
                     self._validate_row(suggestion)
@@ -1191,6 +1730,7 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
 
         # Verify count matches
         final_count = self.count()
+        expected_count = before_count + imported
 
         result = {
             'success': True,
@@ -1199,8 +1739,10 @@ class SQLiteSuggestionStorage(SuggestionStorageBackend):
             'errors': errors[:10] if errors else [],
             'total_errors': len(errors),
             'json_count': len(items),
+            'db_count_before': before_count,
             'db_count': final_count,
-            'counts_match': final_count >= imported
+            'expected_db_count': expected_count,
+            'counts_match': final_count == expected_count
         }
 
         if imported > 0:

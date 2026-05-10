@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import importlib
 import json
+import logging
 from contextlib import contextmanager
 
 import pytest
@@ -12,9 +13,13 @@ import pytest
 from WebProxy import service as web_proxy_service
 from WebProxy.service import (
     _apply_max_chars,
+    _header_env,
     _int_env,
+    _is_reddit_url,
+    _resolve_first_safe_ip,
     _save_image,
     _validate_url_structure,
+    FileCache,
     SearchProvider,
     create_app,
     extract_page_content,
@@ -67,6 +72,41 @@ def test_extract_page_content_strips_scripts_and_keeps_text():
     assert "First paragraph." in payload["text"]
     assert payload["headings"] == ["Hello World"]
     assert payload["links"][0]["url"] == "https://example.com/next"
+
+
+def test_extract_page_content_handles_nested_title_and_list_attrs(monkeypatch):
+    real_beautiful_soup = web_proxy_service.BeautifulSoup
+
+    def _beautiful_soup_with_list_attrs(*args, **kwargs):
+        soup = real_beautiful_soup(*args, **kwargs)
+        soup.find("meta", attrs={"name": "description"})["content"] = [
+            "list description",
+            "ignored",
+        ]
+        soup.find("a")["href"] = ["/from-list", "/ignored"]
+        return soup
+
+    monkeypatch.setattr(web_proxy_service, "BeautifulSoup", _beautiful_soup_with_list_attrs)
+    html = """
+    <html>
+      <head>
+        <title><span>Nested Title</span></title>
+        <meta name="description" content="placeholder">
+      </head>
+      <body>
+        <main>
+          <p>body</p>
+          <a href="/placeholder">link</a>
+        </main>
+      </body>
+    </html>
+    """
+
+    payload = extract_page_content("https://example.com/base/", html, max_chars=1000)
+
+    assert payload["title"] == "Nested Title"
+    assert payload["meta_description"] == "list description"
+    assert payload["links"][0]["url"] == "https://example.com/from-list"
 
 
 def test_fetch_reddit_handles_null_fields(monkeypatch):
@@ -201,12 +241,15 @@ def test_fetch_reddit_does_not_follow_redirects(monkeypatch):
 
     _install_reddit_session(monkeypatch, _FakeSession())
 
-    result = fetch_reddit("https://www.reddit.com/r/python/comments/abc123/x/")
-
+    import requests as _rq
+    with pytest.raises(_rq.HTTPError, match="302"):
+        fetch_reddit("https://www.reddit.com/r/python/comments/abc123/x/")
     assert call_count["n"] == 1
-    assert result["status_code"] == 302
-    assert result["reddit"]["posts"] == []
-    assert result["reddit"]["comments"] == []
+
+
+def test_fetch_reddit_rejects_non_positive_timeout():
+    with pytest.raises(ValueError, match="timeout_s"):
+        fetch_reddit("https://www.reddit.com/r/python/", timeout_s=0)
 
 
 def test_fetch_reddit_enforces_max_fetch_bytes(monkeypatch):
@@ -266,6 +309,82 @@ def test_fetch_reddit_streams_with_correct_kwargs(monkeypatch):
     assert captured.get("stream") is True
 
 
+def test_file_cache_corrupt_cached_at_is_stale(tmp_path):
+    cache = FileCache(tmp_path)
+    path = cache._path_for("bad")
+    path.write_text(json.dumps({"_cached_at": "not-an-int", "value": 1}), encoding="utf-8")
+
+    assert cache.get("bad", ttl_s=60) is None
+
+
+def test_file_cache_logs_corrupt_json(tmp_path, caplog):
+    cache = FileCache(tmp_path)
+    cache._path_for("corrupt").write_text("{not json", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert cache.get("corrupt", ttl_s=60) is None
+
+    assert "cache read failed" in caplog.text
+
+
+def test_file_cache_logs_non_object_root(tmp_path, caplog):
+    cache = FileCache(tmp_path)
+    cache._path_for("list_root").write_text("[]", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert cache.get("list_root", ttl_s=60) is None
+
+    assert "expected object" in caplog.text
+
+
+def test_file_cache_zero_ttl_is_immediately_stale(monkeypatch, tmp_path):
+    cache = FileCache(tmp_path)
+    monkeypatch.setattr(web_proxy_service, "_now_ts", lambda: 100)
+    cache.put("zero", {"value": 1})
+
+    assert cache.get("zero", ttl_s=0) is None
+
+
+def test_file_cache_future_cached_at_is_stale(monkeypatch, tmp_path):
+    cache = FileCache(tmp_path)
+    path = cache._path_for("future")
+    path.write_text(json.dumps({"_cached_at": 99999999999, "value": 1}), encoding="utf-8")
+    monkeypatch.setattr(web_proxy_service, "_now_ts", lambda: 100)
+
+    assert cache.get("future", ttl_s=60) is None
+
+
+def test_create_app_sets_request_size_limit():
+    app = create_app()
+
+    assert app.config["MAX_CONTENT_LENGTH"] == web_proxy_service.MAX_REQUEST_BYTES
+
+
+def test_request_body_too_large_returns_json():
+    app = create_app()
+    app.config["MAX_CONTENT_LENGTH"] = 8
+    response = app.test_client().post(
+        "/search",
+        data=b'{"query":"this is too large"}',
+        content_type="application/json",
+    )
+
+    assert response.status_code == 413
+    assert response.get_json()["error"] == "request body too large"
+
+
+def test_iter_dir_limited_caps_scan(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(web_proxy_service, "MAX_OBSERVABILITY_ENTRIES", 2)
+    for idx in range(5):
+        (tmp_path / f"{idx}.json").write_text("{}", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        entries = web_proxy_service._iter_dir_limited(tmp_path, label="test scan")
+
+    assert len(entries) == 2
+    assert "test scan scan capped at 2 entries" in caplog.text
+
+
 _PNG_1x1 = (
     b"\x89PNG\r\n\x1a\n"
     b"\x00\x00\x00\rIHDR"
@@ -286,44 +405,62 @@ def test_save_image_extension_ignores_url_path():
     local_path = Path(result["local_path"])
     assert local_path.suffix == ".png"
     assert ".php" not in local_path.name
+    assert oct(local_path.stat().st_mode & 0o777) == "0o600"
     local_path.unlink(missing_ok=True)
 
 
-def test_save_image_unknown_content_type_falls_back_to_bin():
-    result = _save_image(
-        url="https://evil.example/foo.exe",
-        content_type="image/heic",
-        data=b"\x00\x01\x02\x03",
-    )
-    local_path = Path(result["local_path"])
-    assert local_path.suffix == ".bin"
-    assert ".exe" not in local_path.name
-    local_path.unlink(missing_ok=True)
+def test_save_image_unknown_content_type_is_rejected():
+    with pytest.raises(ValueError, match="unsupported image content type"):
+        _save_image(
+            url="https://evil.example/foo.exe",
+            content_type="image/heic",
+            data=b"\x00\x01\x02\x03",
+        )
 
 
-def test_save_image_svg_is_not_preserved_as_svg():
-    # SVG carries active content (script tags); must not land on disk as .svg.
-    result = _save_image(
-        url="https://evil.example/x.svg",
-        content_type="image/svg+xml",
-        data=b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
-    )
-    local_path = Path(result["local_path"])
-    assert local_path.suffix == ".bin"
-    assert ".svg" not in local_path.name
-    local_path.unlink(missing_ok=True)
+def test_save_image_svg_is_rejected():
+    with pytest.raises(ValueError, match="unsupported image content type"):
+        _save_image(
+            url="https://evil.example/x.svg",
+            content_type="image/svg+xml",
+            data=b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",
+        )
 
 
-def test_save_image_swallows_pil_errors_only_for_known_types():
-    result = _save_image(
-        url="https://x.example/a.png",
-        content_type="image/png",
-        data=b"\x00\x00\x00\x00",
-    )
+def test_save_image_rejects_magic_mismatch():
+    with pytest.raises(ValueError, match="bytes do not match"):
+        _save_image(
+            url="https://x.example/a.png",
+            content_type="image/png",
+            data=b"\x00\x00\x00\x00",
+        )
+
+
+def test_save_image_decompression_bomb_degrades_to_unknown_dimensions(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setattr(web_proxy_service, "IMAGE_CACHE_DIR", tmp_path)
+    try:
+        from PIL import Image  # type: ignore
+    except ImportError:
+        pytest.skip("PIL not installed")
+
+    def _raise_bomb(_path):
+        raise Image.DecompressionBombError("image too large")
+
+    monkeypatch.setattr(Image, "open", _raise_bomb)
+
+    with caplog.at_level(logging.WARNING, logger=web_proxy_service.logger.name):
+        result = _save_image(
+            url="https://x.example/bomb.png",
+            content_type="image/png",
+            data=_PNG_1x1,
+        )
+
     assert result["width"] is None
     assert result["height"] is None
-    assert result["type"] == "image"
-    Path(result["local_path"]).unlink(missing_ok=True)
+    assert Path(result["local_path"]).exists()
+    assert "image dimension decode failed" in caplog.text
 
 
 def test_fetch_page_falls_back_to_utf8_on_invalid_charset(monkeypatch):
@@ -373,6 +510,56 @@ def test_fetch_page_falls_back_to_utf8_on_invalid_charset(monkeypatch):
     result = fetch_page("https://example.com/story")
     assert result["status_code"] == 200
     assert result["title"] == "Banana"
+
+
+def test_fetch_page_logs_when_html_decode_uses_replacement(monkeypatch, caplog):
+    body = (
+        b"<html><head><title>Bad bytes</title></head><body><main><p>"
+        b"\xff"
+        b"</p></main></body></html>"
+    )
+
+    class _FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/html; charset=utf-8"}
+        encoding = "utf-8"
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size=65536):
+            yield body
+
+        def close(self):
+            return None
+
+    class _FakeSession:
+        def get(self, *args, **kwargs):
+            return _FakeResponse()
+
+    @contextmanager
+    def _fake_pinned_session(*args, **kwargs):
+        yield _FakeSession()
+
+    monkeypatch.setattr(
+        web_proxy_service,
+        "_validate_url_structure",
+        lambda url: (("https", "example.com", 443), None),
+    )
+    monkeypatch.setattr(
+        web_proxy_service,
+        "_resolve_first_safe_ip",
+        lambda url: "127.0.0.1",
+    )
+    monkeypatch.setattr(web_proxy_service, "_pinned_session", _fake_pinned_session)
+    monkeypatch.setattr(web_proxy_service, "_is_reddit_url", lambda url: False)
+
+    with caplog.at_level(logging.WARNING, logger=web_proxy_service.logger.name):
+        result = fetch_page("https://example.com/bad-bytes")
+
+    assert result["status_code"] == 200
+    assert result["title"] == "Bad bytes"
+    assert "html decode replacement used" in caplog.text
 
 
 def test_extract_page_content_drops_javascript_and_data_links():
@@ -581,6 +768,10 @@ class TestIntEnvFallback:
         monkeypatch.setenv("ATLASFORGE_TEST_VAR_XYZ", "100")
         assert _int_env("ATLASFORGE_TEST_VAR_XYZ", 42) == 100
 
+    def test_too_small_env_returns_default(self, monkeypatch):
+        monkeypatch.setenv("ATLASFORGE_TEST_VAR_XYZ", "-1")
+        assert _int_env("ATLASFORGE_TEST_VAR_XYZ", 42, min_value=1) == 42
+
     def test_empty_env_returns_default(self, monkeypatch):
         monkeypatch.setenv("ATLASFORGE_TEST_VAR_XYZ", "")
         assert _int_env("ATLASFORGE_TEST_VAR_XYZ", 42) == 42
@@ -590,6 +781,155 @@ class TestIntEnvFallback:
         # Reload should not raise; DEFAULT_PORT should fall back.
         reloaded = importlib.reload(web_proxy_service)
         assert reloaded.DEFAULT_PORT == 8765
+
+    def test_module_reload_with_negative_max_fetch_bytes_falls_back(self, monkeypatch):
+        monkeypatch.setenv("ATLASFORGE_WEB_PROXY_MAX_FETCH_BYTES", "-1")
+        reloaded = importlib.reload(web_proxy_service)
+        assert reloaded.MAX_FETCH_BYTES == 5 * 1024 * 1024
+
+
+class TestHeaderEnvValidation:
+    def test_header_env_rejects_crlf(self, monkeypatch):
+        monkeypatch.setenv("ATLASFORGE_REDDIT_USER_AGENT", "good\r\nInjected: yes")
+        with pytest.raises(ValueError, match="CR/LF"):
+            _header_env("ATLASFORGE_REDDIT_USER_AGENT", "fallback")
+
+
+class TestUrlStructureInputHygiene:
+    @pytest.mark.parametrize("value", [42, None, ["https://example.com"]])
+    def test_url_must_be_string(self, value):
+        parts, reason = _validate_url_structure(value)  # type: ignore[arg-type]
+        assert parts is None
+        assert "string" in reason
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/a path",
+            "https://example.com/\tpath",
+            "https://example.com/\x00path",
+            "https://example.com/\r\nInjected: yes",
+        ],
+    )
+    def test_url_rejects_whitespace_and_control_chars(self, url):
+        parts, reason = _validate_url_structure(url)
+        assert parts is None
+        assert "url contains" in reason
+
+    def test_reddit_url_uses_idna_normalization(self):
+        assert _is_reddit_url("https://www.reddit.com/r/python/")
+        assert not _is_reddit_url("https://reddіt.com/r/python/")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://2130706433/",
+            "http://0177.0.0.1/",
+            "http://0x7f.0.0.1/",
+            "http://999.1.1.1/",
+        ],
+    )
+    def test_rejects_legacy_numeric_hosts(self, url):
+        parts, reason = _validate_url_structure(url)
+        assert parts is None
+        assert "numeric ip notation" in reason
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+        ],
+    )
+    def test_rejects_private_ip_literals_without_leaking_ip(self, url):
+        parts, reason = _validate_url_structure(url)
+        assert parts is None
+        assert "non-public" in reason
+        assert "127.0.0.1" not in reason
+        assert "::1" not in reason
+
+    def test_resolve_first_safe_ip_catches_oserror(self, monkeypatch):
+        def _raise(*_args, **_kwargs):
+            raise OSError("transient resolver failure")
+
+        monkeypatch.setattr(web_proxy_service.socket, "getaddrinfo", _raise)
+
+        with pytest.raises(web_proxy_service.UnsafeUrlError, match="dns failed"):
+            _resolve_first_safe_ip("https://example.com/")
+
+    def test_resolve_first_safe_ip_normalizes_ipv4_mapped_ipv6(self, monkeypatch):
+        monkeypatch.setattr(
+            web_proxy_service.socket,
+            "getaddrinfo",
+            lambda *_args, **_kwargs: [
+                (
+                    web_proxy_service.socket.AF_INET6,
+                    web_proxy_service.socket.SOCK_STREAM,
+                    6,
+                    "",
+                    ("::ffff:93.184.216.34", 443, 0, 0),
+                )
+            ],
+        )
+
+        assert _resolve_first_safe_ip("https://example.com/") == "93.184.216.34"
+
+    def test_resolve_first_safe_ip_hides_non_public_resolved_ip(self, monkeypatch, caplog):
+        monkeypatch.setattr(
+            web_proxy_service.socket,
+            "getaddrinfo",
+            lambda *_args, **_kwargs: [
+                (
+                    web_proxy_service.socket.AF_INET,
+                    web_proxy_service.socket.SOCK_STREAM,
+                    6,
+                    "",
+                    ("10.1.2.3", 443),
+                )
+            ],
+        )
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(web_proxy_service.UnsafeUrlError) as exc:
+                _resolve_first_safe_ip("https://example.com/")
+
+        assert "10.1.2.3" not in str(exc.value)
+        assert "10.1.2.3" in caplog.text
+
+
+class TestEndpointStringFieldValidation:
+    @pytest.mark.parametrize(
+        ("endpoint", "payload", "field"),
+        [
+            ("/search", {"query": ["python"]}, "query"),
+            ("/search", {"query": "python", "provider": {"name": "ddg"}}, "provider"),
+            ("/fetch", {"url": ["https://example.com/"]}, "url"),
+            ("/research", {"query": None}, "query"),
+            ("/research", {"query": "python", "provider": ["ddg"]}, "provider"),
+            ("/image_search", {"query": {"q": "python"}}, "query"),
+            ("/image_search", {"query": "python", "provider": 123}, "provider"),
+            ("/image_search", {"query": "python", "safesearch": False}, "safesearch"),
+        ],
+    )
+    def test_string_fields_reject_non_strings(self, endpoint, payload, field):
+        response = create_app().test_client().post(endpoint, json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json()["error"] == f"{field} must be a string"
+
+    @pytest.mark.parametrize(
+        ("payload", "field"),
+        [
+            ({"url": 123}, "url"),
+            ({"pdf_url": ["https://example.com/paper.pdf"]}, "pdf_url"),
+        ],
+    )
+    def test_paper_fetch_string_fields_reject_non_strings(self, payload, field):
+        response = create_app().test_client().post("/paper/fetch", json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json()["error"] == f"{field} must be a string"
 
 
 class TestNegativeMaxCharsClamped:
@@ -1540,6 +1880,17 @@ class TestCollectListingTypeCoercion:
         result = fetch_reddit("https://www.reddit.com/r/python/")
         assert result["reddit"]["posts"][0]["score"] == 0
 
+    def test_permalink_without_leading_slash_falls_back_to_reddit_root(self, monkeypatch):
+        body = self._make_reddit_payload({
+            "title": "t", "author": "u", "score": 1,
+            "num_comments": 1, "subreddit": "s",
+            "url": "https://x.example/", "permalink": ".@evil.example/path",
+        })
+        _install_reddit_session_with_body(monkeypatch, body)
+        result = fetch_reddit("https://www.reddit.com/r/python/")
+
+        assert result["reddit"]["posts"][0]["permalink"] == "https://www.reddit.com"
+
     def test_non_string_selftext_coerced_to_string(self, monkeypatch):
         # Reddit JSON could drift to an int/list/dict here. The old
         # `(cd.get("selftext", "") or "")[:2000]` slice on a non-string raises
@@ -1740,12 +2091,54 @@ class TestFetchPageConnectionCleanupOnError:
             fetch_page("https://example.com/x")
         assert close_calls["n"] >= 1
 
+    def test_302_redirect_status_raises(self, monkeypatch):
+        close_calls = {"n": 0}
+
+        class _FakeResponse:
+            status_code = 302
+            headers = {"content-type": "text/html", "location": "https://example.org/"}
+            encoding = "utf-8"
+
+            def raise_for_status(self):
+                return None
+
+            def iter_content(self, chunk_size=65536):
+                yield b"<html>redirect</html>"
+
+            def close(self):
+                close_calls["n"] += 1
+
+        class _FakeSession:
+            def get(self, *args, **kwargs):
+                return _FakeResponse()
+
+        @contextmanager
+        def _fake_pinned_session(*args, **kwargs):
+            yield _FakeSession()
+
+        monkeypatch.setattr(
+            web_proxy_service,
+            "_validate_url_structure",
+            lambda url: (("https", "example.com", 443), ""),
+        )
+        monkeypatch.setattr(
+            web_proxy_service, "_resolve_first_safe_ip", lambda url: "127.0.0.1"
+        )
+        monkeypatch.setattr(
+            web_proxy_service, "_pinned_session", _fake_pinned_session
+        )
+        monkeypatch.setattr(web_proxy_service, "_is_reddit_url", lambda url: False)
+
+        import requests as _rq
+        with pytest.raises(_rq.HTTPError, match="302"):
+            fetch_page("https://example.com/x")
+        assert close_calls["n"] >= 1
+
 
 class TestImageSearchCacheBleed:
-    """B8: /image_search must not return cached `fetched_images` to a caller
-    who asked for fetch_top_n=0."""
+    """B8: /image_search cache entries must be partitioned by fetch_top_n."""
 
-    def test_cache_hit_with_zero_fetch_top_n_strips_fetched_images(
+    def test_cache_key_includes_fetch_top_n(
         self, tmp_path, monkeypatch
     ):
         # Build an isolated cache dir so we don't pollute the real one.
@@ -1756,14 +2149,31 @@ class TestImageSearchCacheBleed:
         app = mod.create_app()
         client = app.test_client()
 
-        # Seed the cache directly. The cache key is derived from query/count/
-        # provider/safesearch only (fetch_top_n is NOT part of the key).
-        cache_key = mod._cache_key(
+        # Seed a fetch_top_n=5 cache entry. A fetch_top_n=0 request must not
+        # hit it because fetched_images are part of the cached payload.
+        fetch_key = mod._cache_key(
             "image_search",
-            {"query": "cats", "count": 5, "provider": "duckduckgo", "safesearch": "off"},
+            {
+                "query": "cats",
+                "count": 5,
+                "provider": "duckduckgo",
+                "safesearch": "off",
+                "fetch_top_n": 5,
+            },
         )
+        zero_key = mod._cache_key(
+            "image_search",
+            {
+                "query": "cats",
+                "count": 5,
+                "provider": "duckduckgo",
+                "safesearch": "off",
+                "fetch_top_n": 0,
+            },
+        )
+        assert fetch_key != zero_key
         cache = mod.FileCache(mod.CACHE_DIR)
-        cache.put(cache_key, {
+        cache.put(fetch_key, {
             "provider": "duckduckgo_images",
             "query": "cats",
             "results": [{"title": "t", "url": "https://x.example/a.jpg"}],
@@ -1771,6 +2181,16 @@ class TestImageSearchCacheBleed:
             "fetched_images": [{"type": "image", "url": "https://x.example/a.jpg"}],
             "_cache_hit": False,
         })
+
+        def _fake_images(self, query, count=5, provider="auto", safesearch="off"):
+            return {
+                "provider": "duckduckgo_images",
+                "query": query,
+                "results": [{"title": "fresh", "url": "https://x.example/fresh.jpg"}],
+                "count": 1,
+            }
+
+        monkeypatch.setattr(mod.SearchProvider, "search_images", _fake_images)
 
         response = client.post(
             "/image_search",
@@ -1780,8 +2200,9 @@ class TestImageSearchCacheBleed:
         assert response.status_code == 200
         body = response.get_json()
         assert "fetched_images" not in body, (
-            "cache bleed: caller asked for fetch_top_n=0 but got fetched_images"
+            "cache bleed: caller asked for fetch_top_n=0 but hit fetch_top_n>0 cache"
         )
+        assert body["results"][0]["title"] == "fresh"
 
         # Restore the original module state.
         monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
@@ -1790,6 +2211,45 @@ class TestImageSearchCacheBleed:
 
 class TestCacheEndpointTOCTOU:
     """B9: /cache must not 500 when a file disappears between iterdir() and stat()."""
+
+    def test_cache_endpoint_skips_non_object_json(self, tmp_path, monkeypatch, caplog):
+        import importlib
+        monkeypatch.setenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", str(tmp_path / "cache"))
+        mod = importlib.reload(web_proxy_service)
+        mod.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (mod.CACHE_DIR / "search_bad.json").write_text("[]", encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING):
+            response = mod.create_app().test_client().get("/cache")
+
+        assert response.status_code == 200
+        assert response.get_json()["entries"] == []
+        assert "expected object" in caplog.text
+
+        monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
+        importlib.reload(web_proxy_service)
+
+    def test_cache_endpoint_caps_directory_scan(self, tmp_path, monkeypatch, caplog):
+        import importlib
+        monkeypatch.setenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", str(tmp_path / "cache"))
+        mod = importlib.reload(web_proxy_service)
+        monkeypatch.setattr(mod, "MAX_OBSERVABILITY_ENTRIES", 1)
+        mod.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for idx in range(3):
+            (mod.CACHE_DIR / f"search_{idx}.json").write_text(
+                json.dumps({"_cached_at": 1, "provider": "duckduckgo"}),
+                encoding="utf-8",
+            )
+
+        with caplog.at_level(logging.WARNING):
+            response = mod.create_app().test_client().get("/cache")
+
+        assert response.status_code == 200
+        assert response.get_json()["total_entries"] <= 1
+        assert "cache scan capped at 1 entries" in caplog.text
+
+        monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
+        importlib.reload(web_proxy_service)
 
     def test_cache_endpoint_skips_dangling_symlink(self, tmp_path, monkeypatch):
         import importlib
@@ -1840,6 +2300,47 @@ class TestCacheEndpointTOCTOU:
         assert response.status_code == 200
         body = response.get_json()
         assert body["cached_images"] == 0
+
+        monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
+        importlib.reload(web_proxy_service)
+
+    def test_stats_endpoint_counts_only_image_files(self, tmp_path, monkeypatch):
+        import importlib
+        monkeypatch.setenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", str(tmp_path / "cache"))
+        mod = importlib.reload(web_proxy_service)
+
+        mod.IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (mod.IMAGE_CACHE_DIR / "one.png").write_bytes(b"x")
+        (mod.IMAGE_CACHE_DIR / "nested").mkdir()
+
+        app = mod.create_app()
+        client = app.test_client()
+        response = client.get("/stats")
+
+        assert response.status_code == 200
+        assert response.get_json()["cached_images"] == 1
+
+        monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
+        importlib.reload(web_proxy_service)
+
+    def test_stats_endpoint_caps_directory_scan(self, tmp_path, monkeypatch, caplog):
+        import importlib
+        monkeypatch.setenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", str(tmp_path / "cache"))
+        mod = importlib.reload(web_proxy_service)
+        monkeypatch.setattr(mod, "MAX_OBSERVABILITY_ENTRIES", 1)
+        mod.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for idx in range(3):
+            (mod.CACHE_DIR / f"search_{idx}.json").write_text(
+                json.dumps({"_cached_at": 1, "provider": "duckduckgo"}),
+                encoding="utf-8",
+            )
+
+        with caplog.at_level(logging.WARNING):
+            response = mod.create_app().test_client().get("/stats")
+
+        assert response.status_code == 200
+        assert response.get_json()["cached_searches"] <= 1
+        assert "cache stats scan capped at 1 entries" in caplog.text
 
         monkeypatch.delenv("ATLASFORGE_WEB_PROXY_CACHE_DIR", raising=False)
         importlib.reload(web_proxy_service)
@@ -2389,7 +2890,7 @@ class TestRedditContentTypeGate:
         result = fetch_reddit("https://www.reddit.com/r/python/")
         assert result["reddit"]["posts"][0]["title"] == "ok"
 
-    def test_200_json_ct_with_malformed_body_degrades(self, monkeypatch):
+    def test_200_json_ct_with_malformed_body_degrades(self, monkeypatch, caplog):
         # Servers lie: content-type says JSON but body is garbage. The
         # defensive JSONDecodeError wrap must degrade to empty posts/comments
         # instead of propagating.
@@ -2423,10 +2924,12 @@ class TestRedditContentTypeGate:
             web_proxy_service, "_pinned_session", _fake_pinned_session
         )
 
-        result = fetch_reddit("https://www.reddit.com/r/python/")
+        with caplog.at_level(logging.WARNING):
+            result = fetch_reddit("https://www.reddit.com/r/python/")
         assert result["status_code"] == 200
         assert result["reddit"]["posts"] == []
         assert result["reddit"]["comments"] == []
+        assert "reddit JSON decode failed" in caplog.text
 
 
 class TestFetchResponseRoundTripEquivalence:
@@ -2492,3 +2995,28 @@ class TestFetchResponseRoundTripEquivalence:
 
         result = fetch_page("https://example.com/")
         assert frozenset(result.keys()) == self._HTML_KEYS
+
+
+def test_main_rejects_debug_on_non_loopback_host(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["service.py", "--host", "0.0.0.0", "--debug"])
+
+    with pytest.raises(SystemExit) as exc:
+        web_proxy_service.main()
+
+    assert exc.value.code == 2
+
+
+def test_main_allows_debug_on_loopback_host(monkeypatch):
+    calls = {}
+
+    class _FakeApp:
+        def run(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(sys, "argv", ["service.py", "--host", "127.0.0.1", "--debug"])
+    monkeypatch.setattr(web_proxy_service, "create_app", lambda: _FakeApp())
+
+    web_proxy_service.main()
+
+    assert calls["host"] == "127.0.0.1"
+    assert calls["debug"] is True

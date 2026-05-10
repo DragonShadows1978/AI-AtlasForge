@@ -24,7 +24,7 @@ from enum import Enum
 import hashlib
 import re
 
-_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,127}$')
+_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,127}$')
 
 
 # ============================================================================

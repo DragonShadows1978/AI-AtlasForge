@@ -16,7 +16,9 @@ import pytest
 from af_engine.mission_config import (
     MissionConfig,
     MissionValidationError,
+    REASON_TYPE_COERCION,
     prune_old_audit_logs,
+    validate_mission_params,
 )
 
 
@@ -90,15 +92,13 @@ def _make_mission_dir(root: Path, name: str) -> Path:
     return d
 
 
-def test_prune_with_negative_max_missions_does_not_indexerror(tmp_path: Path):
-    """Negative max_missions used to drive a pop-from-empty IndexError."""
+def test_prune_with_negative_max_missions_raises_value_error(tmp_path: Path):
+    """Negative max_missions must fail loud instead of pruning everything."""
     for i in range(3):
         _make_mission_dir(tmp_path, f"mission_{i}")
 
-    # Should NOT raise. Negative max_missions clamps to 0 → all are pruned.
-    pruned = prune_old_audit_logs(tmp_path, max_missions=-5, dry_run=True)
-    assert isinstance(pruned, list)
-    assert len(pruned) == 3
+    with pytest.raises(ValueError, match="max_missions"):
+        prune_old_audit_logs(tmp_path, max_missions=-5, dry_run=True)
 
 
 def test_prune_with_negative_max_total_mb_does_not_indexerror(tmp_path: Path):
@@ -117,6 +117,13 @@ def test_prune_with_zero_max_missions_prunes_all(tmp_path: Path):
 
     pruned = prune_old_audit_logs(tmp_path, max_missions=0, dry_run=True)
     assert len(pruned) == 2
+
+
+def test_max_iterations_zero_raises_validation_error():
+    with pytest.raises(MissionValidationError):
+        MissionConfig.from_request(
+            {"problem_statement": "x" * 20, "max_iterations": 0}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -183,3 +190,94 @@ def test_migrate_config_fills_mission_type_default():
     assert "max_iterations" in migrated
     assert "llm_provider" in migrated
     assert migrated["config_version"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tech-debt validation polish regressions
+# ---------------------------------------------------------------------------
+
+
+def test_problem_statement_zero_width_spaces_do_not_satisfy_min_length():
+    with pytest.raises(MissionValidationError):
+        MissionConfig(
+            problem_statement="\u200b\u200c\u200d" * 5,
+        )
+
+    ok, errors = validate_mission_params({"problem_statement": "\u200b" * 20})
+    assert ok is False
+    assert any("problem_statement" in error for error in errors)
+
+
+@pytest.mark.parametrize("field", ["cycle_budget", "max_iterations"])
+def test_bool_numeric_fields_are_rejected(field):
+    with pytest.raises(MissionValidationError):
+        MissionConfig.from_request(
+            {"problem_statement": "x" * 20, field: True},
+            mission_id="bool_field",
+        )
+
+    ok, errors = validate_mission_params(
+        {"problem_statement": "x" * 20, field: True}
+    )
+    assert ok is False
+    assert any(field in error for error in errors)
+
+
+def test_integral_float_numeric_fields_are_recorded_as_type_coercions():
+    cfg, audit = MissionConfig.from_request(
+        {
+            "problem_statement": "x" * 20,
+            "cycle_budget": 2.0,
+            "max_iterations": 7.0,
+        },
+        mission_id="float_coercion",
+    )
+
+    assert cfg.cycle_budget == 2
+    assert cfg.max_iterations == 7
+    coercions = {
+        item["param"]: item for item in audit.overrides
+        if item.get("reason") == REASON_TYPE_COERCION
+    }
+    assert coercions["cycle_budget"]["submitted_value"] == 2.0
+    assert coercions["cycle_budget"]["applied_value"] == 2
+    assert coercions["max_iterations"]["submitted_value"] == 7.0
+    assert coercions["max_iterations"]["applied_value"] == 7
+
+
+def test_to_mission_dict_uses_timezone_aware_utc_timestamps(tmp_path: Path):
+    cfg = MissionConfig(problem_statement="x" * 20)
+
+    mission = cfg.to_mission_dict(
+        mission_id="utc_timestamps",
+        mission_workspace=tmp_path,
+        mission_dir=tmp_path / "mission",
+    )
+
+    assert mission["created_at"].endswith("+00:00")
+    assert mission["last_updated"].endswith("+00:00")
+    assert mission["cycle_started_at"].endswith("+00:00")
+
+
+def test_validate_mission_params_rejects_invalid_mission_type():
+    ok, errors = validate_mission_params(
+        {
+            "problem_statement": "x" * 20,
+            "mission_type": "not_a_profile",
+        }
+    )
+
+    assert ok is False
+    assert any("mission_type" in error for error in errors)
+
+
+def test_validate_mission_params_accepts_valid_mission_type():
+    ok, errors = validate_mission_params(
+        {
+            "problem_statement": "x" * 20,
+            "mission_type": "bug_hunt",
+        }
+    )
+
+    assert ok is True
+    assert errors == []

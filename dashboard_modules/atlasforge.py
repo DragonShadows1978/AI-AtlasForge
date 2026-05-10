@@ -11,10 +11,37 @@ Contains routes for:
 - Decision graph population
 """
 
+import logging
+import re
+
 from flask import Blueprint, jsonify, request
+
+logger = logging.getLogger(__name__)
 
 # Create Blueprint
 atlasforge_bp = Blueprint('atlasforge', __name__, url_prefix='/api/atlasforge')
+
+_BIDI_CONTROL_CHARS = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+_MISSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_route_mission_id(mission_id: str) -> tuple[bool, str]:
+    """Validate route mission_id before passing it to file/archive helpers."""
+    if not isinstance(mission_id, str):
+        return False, "mission_id must be a string"
+    if not mission_id or not mission_id.strip():
+        return False, "mission_id must be non-empty"
+    if len(mission_id) > 255:
+        return False, "mission_id exceeds 255 characters"
+    if "/" in mission_id or "\\" in mission_id:
+        return False, "mission_id must not contain path separators"
+    if "\x00" in mission_id:
+        return False, "mission_id must not contain null bytes"
+    if any(ord(ch) < 32 or ord(ch) == 127 or ch in _BIDI_CONTROL_CHARS for ch in mission_id):
+        return False, "mission_id contains unsafe control characters"
+    if not _MISSION_ID_RE.fullmatch(mission_id):
+        return False, "mission_id may contain only letters, numbers, underscores, and hyphens"
+    return True, ""
 
 
 def _get_ttl_cache():
@@ -202,12 +229,16 @@ def register_archival_routes(app):
     @app.route('/api/rearchive/mission/<mission_id>', methods=['POST'])
     def api_rearchive_mission(mission_id):
         """Re-archive a specific mission's transcripts."""
+        ok, reason = _validate_route_mission_id(mission_id)
+        if not ok:
+            return jsonify({"success": False, "error": reason}), 400
         try:
             from af_engine import rearchive_mission
             result = rearchive_mission(mission_id)
             return jsonify(result)
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
+            logger.exception("rearchive mission failed for mission_id=%r", mission_id)
+            return jsonify({"success": False, "error": "rearchive failed"}), 500
 
     @app.route('/api/rearchive/all', methods=['POST'])
     def api_rearchive_all():
@@ -222,12 +253,18 @@ def register_archival_routes(app):
     @app.route('/api/populate-decision-graph/<mission_id>', methods=['POST'])
     def api_populate_decision_graph_mission(mission_id):
         """Populate decision graph data from a mission's transcripts."""
+        ok, reason = _validate_route_mission_id(mission_id)
+        if not ok:
+            return jsonify({"error": reason, "mission_id": None}), 400
         try:
             import exploration_hooks
             result = exploration_hooks.populate_from_mission_archive(mission_id)
             return jsonify(result)
         except Exception as e:
-            return jsonify({"error": str(e), "mission_id": mission_id})
+            logger.exception(
+                "populate decision graph failed for mission_id=%r", mission_id
+            )
+            return jsonify({"error": "populate decision graph failed", "mission_id": mission_id}), 500
 
     @app.route('/api/populate-decision-graph/all', methods=['POST'])
     def api_populate_decision_graph_all():

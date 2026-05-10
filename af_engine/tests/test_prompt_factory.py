@@ -142,6 +142,32 @@ class TestKBContextInjection:
             assert "Past Learning" in result
             assert "Do it this way" in result
 
+    def test_inject_kb_context_before_planning_stage_with_real_kb_fields(self):
+        """KB context should precede PLANNING instructions and support MissionLearning dict fields."""
+        from af_engine.prompt_factory import PromptFactory
+
+        with patch('af_engine.kb_cache.query_relevant_learnings') as mock_query:
+            mock_query.return_value = [
+                {
+                    "title": "Avoid stale prompt placement",
+                    "description": "Put memory before planning instructions, not after the JSON schema.",
+                    "mission_id": "past_mission",
+                    "learning_type": "gotcha",
+                    "confidence_score": 0.82,
+                }
+            ]
+
+            pf = PromptFactory()
+            result = pf.inject_kb_context(
+                "Header\n=== PLANNING STAGE ===\nRespond with JSON:",
+                "planning memory search",
+            )
+
+            assert result.index("LEARNINGS FROM PAST MISSIONS") < result.index("=== PLANNING STAGE ===")
+            assert "Avoid stale prompt placement" in result
+            assert "Put memory before planning instructions" in result
+            assert "[gotcha confidence=0.82]" in result
+
     def test_inject_kb_context_exception_handling(self):
         """Test that KB injection handles exceptions gracefully."""
         from af_engine.prompt_factory import PromptFactory
@@ -192,6 +218,29 @@ class TestAfterImageInjection:
         assert "CODE MEMORY" in result
         assert "src/utils.py" in result
         assert "def helper" in result
+
+    def test_inject_afterimage_context_before_planning_stage(self):
+        """PLANNING code memory should appear before planning instructions."""
+        from af_engine.prompt_factory import PromptFactory
+
+        mock_provider = Mock()
+        mock_provider.search = Mock(return_value=[
+            {
+                "file_path": "src/planner.py",
+                "snippet": "def plan(): pass",
+                "context": "Prior planning code",
+            }
+        ])
+
+        pf = PromptFactory()
+        result = pf.inject_afterimage_context(
+            "Header\n=== PLANNING STAGE ===\nPlan now",
+            "planning memory",
+            afterimage_provider=mock_provider,
+        )
+
+        assert result.index("CODE MEMORY") < result.index("=== PLANNING STAGE ===")
+        assert "src/planner.py" in result
 
 
 class TestRecoveryContextInjection:

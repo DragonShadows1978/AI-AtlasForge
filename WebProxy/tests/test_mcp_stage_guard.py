@@ -12,6 +12,7 @@ def _prepare_root(tmp_path, stage="PLANNING", provider="codex"):
     (state / "mission.json").write_text(json.dumps({
         "mission_id": "mission_test",
         "current_stage": stage,
+        "mission_workspace": str(tmp_path / "workspace" / "mission_test"),
     }))
     (state / "llm_provider.json").write_text(json.dumps({
         "provider": provider,
@@ -33,13 +34,12 @@ def test_submit_plan_writes_default_planning_artifact(tmp_path, monkeypatch):
 
     parsed = json.loads(result)
     assert parsed["ok"] is True
-    assert parsed["path"] == "state/plans/mission_test.json"
+    assert parsed["path"] == "workspace/mission_test/artifacts/implementation_plan.md"
 
-    artifact = json.loads((tmp_path / "state" / "plans" / "mission_test.json").read_text())
-    assert artifact["kind"] == "plan"
-    assert artifact["stage"] == "PLANNING"
-    assert artifact["provider"] == "codex"
-    assert artifact["payload"]["summary"] == "Do the thing"
+    artifact = (tmp_path / "workspace" / "mission_test" / "artifacts" / "implementation_plan.md").read_text()
+    assert "# Implementation Plan" in artifact
+    assert "Do the thing" in artifact
+    assert '"summary": "Do the thing"' in artifact
 
 
 def test_stage_guard_prefers_codex_runtime_context(tmp_path, monkeypatch):
@@ -61,7 +61,7 @@ def test_stage_guard_prefers_codex_runtime_context(tmp_path, monkeypatch):
     assert parsed["ok"] is True
     assert parsed["stage"] == "PLANNING"
     assert parsed["provider"] == "codex"
-    assert parsed["path"] == "state/plans/mission_env.json"
+    assert parsed["path"] == "workspace/mission_env/artifacts/implementation_plan.md"
 
 
 def test_stage_guard_uses_codex_context_file_when_env_missing(tmp_path, monkeypatch):
@@ -163,6 +163,106 @@ def test_write_tools_reject_stage_override(tmp_path, monkeypatch):
         handle_tool_call("AtlasForgeSubmitPlan", {
             "stage": "PLANNING",
             "plan": {"summary": "bypass attempt"},
-            "target_path": "state/plans/mission_test.json",
+            "target_path": "workspace/mission_test/artifacts/implementation_plan.md",
         })
-    assert not (tmp_path / "state" / "plans" / "mission_test.json").exists()
+    assert not (tmp_path / "workspace" / "mission_test" / "artifacts" / "implementation_plan.md").exists()
+
+
+def test_planning_submit_plan_rejects_research_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="PLANNING cannot write target_path"):
+        handle_tool_call("AtlasForgeSubmitPlan", {
+            "plan": {"summary": "wrong file"},
+            "target_path": "workspace/mission_test/research/research_findings.md",
+        })
+    assert not (tmp_path / "workspace" / "mission_test" / "research" / "research_findings.md").exists()
+
+
+def test_planning_stage_note_defaults_to_research_findings(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    result = json.loads(handle_tool_call("AtlasForgeWriteStageNote", {
+        "content": "Research notes for the plan.",
+    }))
+
+    assert result["ok"] is True
+    assert result["path"] == "workspace/mission_test/research/research_findings.md"
+    text = (tmp_path / "workspace" / "mission_test" / "research" / "research_findings.md").read_text()
+    assert "Research notes for the plan." in text
+
+
+def test_planning_stage_note_rejects_artifacts_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="PLANNING cannot write target_path"):
+        handle_tool_call("AtlasForgeWriteStageNote", {
+            "content": "wrong file",
+            "target_path": "workspace/mission_test/artifacts/implementation_plan.md",
+        })
+    assert not (tmp_path / "workspace" / "mission_test" / "artifacts" / "implementation_plan.md").exists()
+
+
+def test_stage_guard_rejects_whitespace_padded_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        handle_tool_call("AtlasForgeWriteStageNote", {
+            "content": "padded path",
+            "target_path": " missions/mission_test/planning/note.md",
+        })
+    assert not (tmp_path / "missions" / "mission_test" / "planning" / "note.md").exists()
+
+
+def test_stage_guard_rejects_url_schemed_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="URL-schemed"):
+        handle_tool_call("AtlasForgeWriteStageNote", {
+            "content": "url path",
+            "target_path": "file://missions/mission_test/planning/note.md",
+        })
+    assert not (tmp_path / "file:" / "missions" / "mission_test" / "planning" / "note.md").exists()
+
+
+def test_stage_guard_rejects_percent_encoded_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="percent-encoded"):
+        handle_tool_call("AtlasForgeWriteStageNote", {
+            "content": "encoded path",
+            "target_path": "missions/mission_test/planning/%2e%2e/escape.md",
+        })
+    assert not (tmp_path / "missions" / "mission_test" / "escape.md").exists()
+
+
+def test_stage_guard_rejects_embedded_dotdot_segment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLASFORGE_ROOT", str(tmp_path))
+    _prepare_root(tmp_path, stage="PLANNING")
+
+    from WebProxy.mcp_server import handle_tool_call
+
+    with pytest.raises(ValueError, match="must not contain"):
+        handle_tool_call("AtlasForgeWriteStageNote", {
+            "content": "embedded dotdot path",
+            "target_path": "missions/mission_test/planning/safe..evil.md",
+        })
+    assert not (tmp_path / "missions" / "mission_test" / "planning" / "safe..evil.md").exists()

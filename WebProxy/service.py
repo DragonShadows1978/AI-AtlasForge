@@ -19,6 +19,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import re
 import socket
@@ -35,28 +36,43 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, request
 from requests.adapters import HTTPAdapter
+from werkzeug.exceptions import RequestEntityTooLarge
 
 logger = logging.getLogger(__name__)
 
 
-def _int_env(name: str, default: int) -> int:
-    """Read int env var; on missing, empty, or non-numeric, log and return default."""
+def _int_env(name: str, default: int, *, min_value: Optional[int] = None) -> int:
+    """Read int env var; on invalid or too-small values, log and return default."""
     raw = os.environ.get(name)
     if raw is None or raw == "":
         return default
     try:
-        return int(raw)
+        value = int(raw)
     except (TypeError, ValueError):
         logger.warning(
             "env %s=%r is not an integer; falling back to %d", name, raw, default
         )
         return default
+    if min_value is not None and value < min_value:
+        logger.warning(
+            "env %s=%r must be >= %d; falling back to %d",
+            name, raw, min_value, default,
+        )
+        return default
+    return value
+
+
+def _header_env(name: str, default: str) -> str:
+    raw = os.environ.get(name, default)
+    if "\r" in raw or "\n" in raw:
+        raise ValueError(f"{name} must not contain CR/LF characters")
+    return raw
 
 
 DEFAULT_HOST = os.environ.get("ATLASFORGE_WEB_PROXY_HOST", "127.0.0.1")
-DEFAULT_PORT = _int_env("ATLASFORGE_WEB_PROXY_PORT", 8765)
+DEFAULT_PORT = _int_env("ATLASFORGE_WEB_PROXY_PORT", 8765, min_value=1)
 DEFAULT_PROVIDER = os.environ.get("ATLASFORGE_WEB_PROXY_PROVIDER", "auto").strip().lower()
-DEFAULT_TIMEOUT_S = _int_env("ATLASFORGE_WEB_PROXY_TIMEOUT_S", 20)
+DEFAULT_TIMEOUT_S = _int_env("ATLASFORGE_WEB_PROXY_TIMEOUT_S", 20, min_value=1)
 CACHE_DIR = Path(
     os.environ.get(
         "ATLASFORGE_WEB_PROXY_CACHE_DIR",
@@ -69,10 +85,10 @@ PAPER_ARTIFACT_DIR = Path(
         str(CACHE_DIR.parent / "paper_artifacts"),
     )
 )
-SEARCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_SEARCH_TTL_S", 1800)
-FETCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_FETCH_TTL_S", 86400)
-PAPER_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_PAPER_TTL_S", 7 * 86400)
-USER_AGENT = os.environ.get(
+SEARCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_SEARCH_TTL_S", 1800, min_value=0)
+FETCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_FETCH_TTL_S", 86400, min_value=0)
+PAPER_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_PAPER_TTL_S", 7 * 86400, min_value=0)
+USER_AGENT = _header_env(
     "ATLASFORGE_WEB_PROXY_USER_AGENT",
     (
         "AI-AtlasForge-WebProxy/0.1 "
@@ -87,9 +103,12 @@ REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.8",
 }
 
-MAX_FETCH_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_FETCH_BYTES", 5 * 1024 * 1024)
-MAX_PAPER_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_PAPER_BYTES", 50 * 1024 * 1024)
-MAX_URL_LENGTH = _int_env("ATLASFORGE_WEB_PROXY_MAX_URL_LENGTH", 2048)
+MAX_FETCH_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_FETCH_BYTES", 5 * 1024 * 1024, min_value=1024)
+MAX_PAPER_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_PAPER_BYTES", 50 * 1024 * 1024, min_value=1024)
+MAX_URL_LENGTH = _int_env("ATLASFORGE_WEB_PROXY_MAX_URL_LENGTH", 2048, min_value=32)
+MAX_REQUEST_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_REQUEST_BYTES", 2 * 1024 * 1024, min_value=1024)
+MAX_OBSERVABILITY_ENTRIES = _int_env("ATLASFORGE_WEB_PROXY_MAX_OBSERVABILITY_ENTRIES", 1000, min_value=1)
+_LEGACY_NUMERIC_HOST_RE = re.compile(r"^(?:0x[0-9a-f]+|0[0-7]*|[0-9]+)$", re.IGNORECASE)
 
 
 class UnsafeUrlError(ValueError):
@@ -110,10 +129,16 @@ def _ip_is_unsafe(ip: "ipaddress._BaseAddress") -> bool:
 def _validate_url_structure(url: str) -> Tuple[Optional[Tuple[str, str, int]], str]:
     """Structural URL validation — no DNS. Returns ((scheme, host, port), "")
     on success, or (None, reason) on failure."""
+    if not isinstance(url, str):
+        return None, "url must be a string"
     if not url:
         return None, "missing url"
     if len(url) > MAX_URL_LENGTH:
         return None, f"url exceeds {MAX_URL_LENGTH} chars"
+    if "\x00" in url or "\r" in url or "\n" in url:
+        return None, "url contains control characters"
+    if any(ch.isspace() for ch in url):
+        return None, "url contains whitespace"
     try:
         parsed = urlparse(url)
     except Exception as e:  # pragma: no cover
@@ -121,9 +146,28 @@ def _validate_url_structure(url: str) -> Tuple[Optional[Tuple[str, str, int]], s
     scheme = (parsed.scheme or "").lower()
     if scheme not in ("http", "https"):
         return None, f"unsupported scheme: {scheme or '(none)'}"
-    host = parsed.hostname
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return None, "invalid host"
     if not host:
         return None, "missing host"
+    if "\x00" in host or "\r" in host or "\n" in host or any(ch.isspace() for ch in host):
+        return None, "host contains unsafe characters"
+    host_no_dot = host.rstrip(".")
+    try:
+        host_ip = ipaddress.ip_address(host_no_dot)
+    except ValueError:
+        if _looks_like_legacy_numeric_host(host_no_dot):
+            return None, "host uses unsupported numeric ip notation"
+    else:
+        normalized_ip = (
+            host_ip.ipv4_mapped
+            if isinstance(host_ip, ipaddress.IPv6Address) and host_ip.ipv4_mapped
+            else host_ip
+        )
+        if _ip_is_unsafe(normalized_ip):
+            return None, "host resolves to a non-public address"
     try:
         explicit_port = parsed.port
     except ValueError:
@@ -132,6 +176,32 @@ def _validate_url_structure(url: str) -> Tuple[Optional[Tuple[str, str, int]], s
         return None, "invalid port: 0"
     port = explicit_port if explicit_port is not None else (443 if scheme == "https" else 80)
     return (scheme, host, port), ""
+
+
+def _looks_like_legacy_numeric_host(host: str) -> bool:
+    """Detect hostnames getaddrinfo may parse as non-canonical numeric IPv4."""
+    if not host or ":" in host:
+        return False
+    parts = host.split(".")
+    if len(parts) > 4:
+        return False
+    if not all(_LEGACY_NUMERIC_HOST_RE.fullmatch(part or "") for part in parts):
+        return False
+    if len(parts) == 4:
+        canonical = True
+        for part in parts:
+            if not part.isdigit():
+                canonical = False
+                break
+            if len(part) > 1 and part.startswith("0"):
+                canonical = False
+                break
+            if int(part) > 255:
+                canonical = False
+                break
+        if canonical:
+            return False
+    return True
 
 
 def _resolve_first_safe_ip(url: str) -> str:
@@ -146,7 +216,7 @@ def _resolve_first_safe_ip(url: str) -> str:
     _scheme, host, port = parts
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as e:
+    except OSError as e:
         raise UnsafeUrlError(f"dns failed: {e}")
     first_ip: Optional[str] = None
     for _family, _type, _proto, _canon, sockaddr in infos:
@@ -156,15 +226,17 @@ def _resolve_first_safe_ip(url: str) -> str:
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError:
-            raise UnsafeUrlError(f"invalid ip: {ip_str}")
+            logger.warning("DNS returned unparsable address for host %r: %r", host, ip_str)
+            raise UnsafeUrlError("dns returned an invalid address")
         if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
             normalized = ip.ipv4_mapped
         else:
             normalized = ip
         if _ip_is_unsafe(normalized):
-            raise UnsafeUrlError(f"non-public ip: {normalized}")
+            logger.warning("DNS resolved host %r to non-public address %s", host, normalized)
+            raise UnsafeUrlError("dns resolved to a non-public address")
         if first_ip is None:
-            first_ip = ip_str
+            first_ip = str(normalized)
     if first_ip is None:
         raise UnsafeUrlError("dns returned no addresses")
     return first_ip
@@ -365,9 +437,34 @@ def _normalize_whitespace(text: str) -> str:
     return text.strip()
 
 
+def _html_attr_text(value: Any) -> str:
+    """Return a scalar HTML attribute value from BeautifulSoup's loose shapes."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            text = _html_attr_text(item)
+            if text:
+                return text
+        return ""
+    return str(value).strip()
+
+
 def _cache_key(prefix: str, payload: Dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True).encode("utf-8")
     return f"{prefix}_{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _validate_timeout_s(timeout_s: Any) -> float:
+    if isinstance(timeout_s, bool):
+        raise ValueError(f"timeout_s must be a positive number, got {timeout_s!r}")
+    try:
+        value = float(timeout_s)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"timeout_s must be a positive number, got {timeout_s!r}")
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"timeout_s must be a positive finite number, got {timeout_s!r}")
+    return value
 
 
 def _apply_max_chars(payload: Dict[str, Any], max_chars: Any) -> Dict[str, Any]:
@@ -465,6 +562,8 @@ def _stream_capped_body(response, *, chunk_size: int = 65536) -> Tuple[int, str,
     try:
         response.raise_for_status()
         status_code = response.status_code
+        if not 200 <= status_code < 300:
+            raise requests.HTTPError(f"unexpected HTTP status {status_code}", response=response)
         content_type = response.headers.get("content-type", "")
         chunks: List[bytes] = []
         total = 0
@@ -492,6 +591,8 @@ def _stream_capped_body_with_limit(
     try:
         response.raise_for_status()
         status_code = response.status_code
+        if not 200 <= status_code < 300:
+            raise requests.HTTPError(f"unexpected HTTP status {status_code}", response=response)
         content_type = response.headers.get("content-type", "")
         chunks: List[bytes] = []
         total = 0
@@ -637,10 +738,29 @@ class FileCache:
             return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.warning("cache read failed for %s: %s", path.name, exc)
             return None
-        fetched_at = int(data.get("_cached_at", 0))
-        if fetched_at <= 0 or (_now_ts() - fetched_at) > ttl_s:
+        if not isinstance(data, dict):
+            logger.warning(
+                "cache entry %s root is %s, expected object",
+                path.name,
+                type(data).__name__,
+            )
+            return None
+        try:
+            fetched_at = int(data.get("_cached_at", 0))
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("cache entry %s has invalid _cached_at=%r", path.name, data.get("_cached_at"))
+            return None
+        now = _now_ts()
+        if fetched_at <= 0:
+            logger.warning("cache entry %s has non-positive _cached_at=%r", path.name, fetched_at)
+            return None
+        if fetched_at > now:
+            logger.warning("cache entry %s has future _cached_at=%r", path.name, fetched_at)
+            return None
+        if (now - fetched_at) >= ttl_s:
             return None
         data["_cache_hit"] = True
         data["_cache_key"] = key
@@ -663,8 +783,8 @@ class FileCache:
         except Exception:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("failed to remove cache temp file %s: %s", tmp_path, exc)
             raise
         return to_write
 
@@ -863,13 +983,15 @@ def extract_page_content(url: str, html: str, max_chars: int = 12000) -> Dict[st
         tag.decompose()
 
     title = ""
-    if soup.title and soup.title.string:
-        title = soup.title.string.strip()
+    if soup.title:
+        title = _normalize_whitespace(soup.title.get_text(" ", strip=True))
+        if re.search(r"</?[A-Za-z][^>]*>", title):
+            title = _normalize_whitespace(re.sub(r"</?[A-Za-z][^>]*>", " ", title))
 
     meta_description = ""
     meta = soup.find("meta", attrs={"name": "description"})
-    if meta and meta.get("content"):
-        meta_description = meta["content"].strip()
+    if meta:
+        meta_description = _html_attr_text(meta.get("content"))
 
     main = soup.find("main") or soup.find("article") or soup.body or soup
 
@@ -899,7 +1021,7 @@ def extract_page_content(url: str, html: str, max_chars: int = 12000) -> Dict[st
 
     links: List[Dict[str, str]] = []
     for anchor in main.find_all("a", href=True):
-        href = anchor.get("href", "").strip()
+        href = _html_attr_text(anchor.get("href"))
         if not href:
             continue
         absolute = urljoin(url, href)
@@ -928,7 +1050,11 @@ def _is_reddit_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     if not host:
         return False
-    return host == "reddit.com" or host.endswith(".reddit.com")
+    try:
+        host_ascii = host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return False
+    return host_ascii == "reddit.com" or host_ascii.endswith(".reddit.com")
 
 
 def _reddit_json_url(url: str) -> str:
@@ -951,6 +1077,7 @@ def _reddit_json_url(url: str) -> str:
 
 
 def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
+    timeout_s = _validate_timeout_s(timeout_s)
     # Structural-only validation of the caller's URL. The URL we actually
     # fetch is `json_url` (on www.reddit.com); that's the one we DNS-resolve
     # and pin. Resolving the original URL's DNS here would be a redundant
@@ -965,7 +1092,7 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
     _scheme, hostname, port = parts
     pinned_ip = _resolve_first_safe_ip(json_url)
     reddit_headers = {
-        "User-Agent": os.environ.get(
+        "User-Agent": _header_env(
             "ATLASFORGE_REDDIT_USER_AGENT",
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -995,8 +1122,9 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
     if 200 <= status_code < 300 and body_bytes and is_json_ct:
         try:
             data = json.loads(body_bytes.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             # Servers can lie about content-type; degrade gracefully.
+            logger.warning("reddit JSON decode failed for %s: %s", json_url, exc)
             data = []
     else:
         data = []
@@ -1020,6 +1148,16 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
         """Coerce to str, defaulting to "". None/False/0 collapse to ""
         via the `or` short-circuit; anything else is str()'d."""
         return str(x or "")
+
+    def _reddit_permalink(x: Any) -> str:
+        value = _as_str(x)
+        if (
+            not value.startswith("/")
+            or value.startswith("//")
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+        ):
+            return "https://www.reddit.com"
+        return "https://www.reddit.com" + value
 
     more_ids: List[str] = []  # accumulates "more" node child IDs for morechildren fetch
 
@@ -1052,7 +1190,7 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
                         "subreddit": _as_str(cd.get("subreddit")),
                         "created_utc": _as_int(cd.get("created_utc")),
                         "url": _as_str(cd.get("url")),
-                        "permalink": "https://www.reddit.com" + _as_str(cd.get("permalink")),
+                        "permalink": _reddit_permalink(cd.get("permalink")),
                         "selftext": _as_str(cd.get("selftext"))[:2000],
                         "is_self": bool(cd.get("is_self", False)),
                         "over_18": bool(cd.get("over_18", False)),
@@ -1066,7 +1204,7 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
                         "score": _as_int(cd.get("score")),
                         "body": _as_str(cd.get("body"))[:2000],
                         "created_utc": _as_int(cd.get("created_utc")),
-                        "permalink": "https://www.reddit.com" + _as_str(cd.get("permalink")),
+                        "permalink": _reddit_permalink(cd.get("permalink")),
                         "depth": depth,
                     }
                 )
@@ -1127,7 +1265,7 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
                                     "score": _as_int(td.get("score")),
                                     "body": _as_str(td.get("body"))[:2000],
                                     "created_utc": _as_int(td.get("created_utc")),
-                                    "permalink": "https://www.reddit.com" + _as_str(td.get("permalink")),
+                                    "permalink": _reddit_permalink(td.get("permalink")),
                                     "depth": _as_int(td.get("depth")),
                                 })
                 except Exception:
@@ -1186,13 +1324,36 @@ IMAGE_EXT_BY_CT = {
 }
 
 
+def _image_magic_matches(content_type: str, data: bytes) -> bool:
+    if content_type in {"image/jpeg", "image/jpg"}:
+        return data.startswith(b"\xff\xd8\xff")
+    if content_type == "image/png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/gif":
+        return data.startswith((b"GIF87a", b"GIF89a"))
+    if content_type == "image/webp":
+        return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    if content_type == "image/bmp":
+        return data.startswith(b"BM")
+    if content_type == "image/tiff":
+        return data.startswith((b"II*\x00", b"MM\x00*"))
+    return False
+
+
 def _save_image(url: str, content_type: str, data: bytes) -> Dict[str, Any]:
     IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     ct = (content_type or "").split(";")[0].strip().lower()
-    ext = IMAGE_EXT_BY_CT.get(ct, ".bin")
+    ext = IMAGE_EXT_BY_CT.get(ct)
+    if ext is None:
+        raise ValueError(f"unsupported image content type: {ct or 'missing'}")
+    if not _image_magic_matches(ct, data):
+        raise ValueError(f"image bytes do not match declared content type: {ct}")
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
     local_path = IMAGE_CACHE_DIR / f"{digest}{ext}"
-    local_path.write_bytes(data)
+    fd = os.open(str(local_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    os.chmod(local_path, 0o600)
 
     width: Optional[int] = None
     height: Optional[int] = None
@@ -1201,11 +1362,20 @@ def _save_image(url: str, content_type: str, data: bytes) -> Dict[str, Any]:
     except ImportError:
         pass
     else:
+        image_decode_errors = (UnidentifiedImageError, OSError, ValueError)
+        decompression_error = getattr(Image, "DecompressionBombError", None)
+        if decompression_error is not None:
+            image_decode_errors = image_decode_errors + (decompression_error,)
         try:
             with Image.open(local_path) as img:
                 width, height = img.size
-        except (UnidentifiedImageError, OSError, ValueError):
-            pass
+        except image_decode_errors as exc:
+            logger.warning(
+                "image dimension decode failed path=%s content_type=%s error=%s",
+                local_path,
+                ct,
+                exc,
+            )
 
     return {
         "type": "image",
@@ -1219,6 +1389,7 @@ def _save_image(url: str, content_type: str, data: bytes) -> Dict[str, Any]:
 
 
 def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
+    timeout_s = _validate_timeout_s(timeout_s)
     # Structural validation first — cheap, no DNS. Then delegate reddit URLs
     # BEFORE resolving, so the reddit path DNS-resolves exactly once (on
     # its json_url). Previously this function resolved the caller URL, then
@@ -1271,9 +1442,26 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
             ).to_dict()
 
         try:
+            html = body_bytes.decode(response_encoding)
+        except UnicodeDecodeError as exc:
+            logger.warning(
+                "html decode replacement used url=%r encoding=%r error=%s",
+                url,
+                response_encoding,
+                exc,
+            )
             html = body_bytes.decode(response_encoding, errors="replace")
         except LookupError:
-            html = body_bytes.decode("utf-8", errors="replace")
+            try:
+                html = body_bytes.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                logger.warning(
+                    "html decode replacement used url=%r encoding=%r error=%s",
+                    url,
+                    "utf-8",
+                    exc,
+                )
+                html = body_bytes.decode("utf-8", errors="replace")
         extracted = extract_page_content(url=url, html=html, max_chars=max_chars)
 
         # JS-rendering fallback. Plain requests can't execute JavaScript, so
@@ -1334,7 +1522,7 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
             text=extracted["text"],
             links=extracted["links"],
             text_length=extracted["text_length"],
-            rendered=used_js_render,
+            rendered=used_js_render or None,
         ).to_dict()
 
 
@@ -1375,6 +1563,18 @@ def _require_json_body() -> Tuple[Optional[Dict[str, Any]], Optional[Tuple[Any, 
     return body, None
 
 
+def _string_payload_field(
+    payload: Dict[str, Any], field: str, default: Optional[str] = ""
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return stripped string field value, or an error for non-string input."""
+    if field not in payload:
+        return default, None
+    value = payload.get(field)
+    if not isinstance(value, str):
+        return None, f"{field} must be a string"
+    return value.strip(), None
+
+
 def _coerce_count(
     raw: Any, default: int = 5, min_value: int = 1
 ) -> Optional[int]:
@@ -1391,10 +1591,33 @@ def _coerce_count(
     return value
 
 
+def _iter_dir_limited(root: Path, *, label: str, limit: Optional[int] = None) -> List[Path]:
+    """Return up to limit directory entries, logging races and truncation."""
+    if limit is None:
+        limit = MAX_OBSERVABILITY_ENTRIES
+    if not root.exists():
+        return []
+    entries: List[Path] = []
+    try:
+        for idx, path in enumerate(root.iterdir()):
+            if idx >= limit:
+                logger.warning("%s scan capped at %d entries", label, limit)
+                break
+            entries.append(path)
+    except OSError as exc:
+        logger.warning("%s scan failed: %s", label, exc)
+    return entries
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     cache = FileCache(CACHE_DIR)
     provider = SearchProvider()
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_entity_too_large(_exc):  # type: ignore[no-untyped-def]
+        return jsonify({"error": "request body too large"}), 413
 
     @app.get("/health")
     def health() -> Any:
@@ -1412,11 +1635,18 @@ def create_app() -> Flask:
         payload, err = _require_json_body()
         if err is not None:
             return err
-        query = str(payload.get("query", "")).strip()
+        query, field_error = _string_payload_field(payload, "query", "")
+        if field_error:
+            return jsonify({"error": field_error}), 400
         count = _coerce_count(payload.get("count", 5))
         if count is None:
             return jsonify({"error": "count must be a positive integer"}), 400
-        provider_name = str(payload.get("provider", DEFAULT_PROVIDER)).strip().lower()
+        provider_name, field_error = _string_payload_field(
+            payload, "provider", DEFAULT_PROVIDER
+        )
+        if field_error:
+            return jsonify({"error": field_error}), 400
+        provider_name = provider_name.lower()
         if not query:
             return jsonify({"error": "query is required"}), 400
 
@@ -1445,7 +1675,9 @@ def create_app() -> Flask:
         payload, err = _require_json_body()
         if err is not None:
             return err
-        url = str(payload.get("url", "")).strip()
+        url, field_error = _string_payload_field(payload, "url", "")
+        if field_error:
+            return jsonify({"error": field_error}), 400
         full_text = payload.get("full_text") is True
         if full_text:
             max_chars = -1
@@ -1501,7 +1733,13 @@ def create_app() -> Flask:
         payload, err = _require_json_body()
         if err is not None:
             return err
-        url = str(payload.get("url") or payload.get("pdf_url") or "").strip()
+        url, field_error = _string_payload_field(payload, "url", None)
+        if field_error:
+            return jsonify({"error": field_error}), 400
+        if not url:
+            url, field_error = _string_payload_field(payload, "pdf_url", "")
+            if field_error:
+                return jsonify({"error": field_error}), 400
         max_chars = _coerce_count(
             payload.get("max_chars", -1), default=-1, min_value=-1
         )
@@ -1542,7 +1780,9 @@ def create_app() -> Flask:
         payload, err = _require_json_body()
         if err is not None:
             return err
-        query = str(payload.get("query", "")).strip()
+        query, field_error = _string_payload_field(payload, "query", "")
+        if field_error:
+            return jsonify({"error": field_error}), 400
         count = _coerce_count(payload.get("count", 5))
         if count is None:
             return jsonify({"error": "count must be a positive integer"}), 400
@@ -1554,7 +1794,12 @@ def create_app() -> Flask:
                 jsonify({"error": "fetch_top_n must be a non-negative integer"}),
                 400,
             )
-        provider_name = str(payload.get("provider", DEFAULT_PROVIDER)).strip().lower()
+        provider_name, field_error = _string_payload_field(
+            payload, "provider", DEFAULT_PROVIDER
+        )
+        if field_error:
+            return jsonify({"error": field_error}), 400
+        provider_name = provider_name.lower()
         max_chars = _coerce_count(
             payload.get("max_chars", 12000), default=12000, min_value=0
         )
@@ -1629,7 +1874,9 @@ def create_app() -> Flask:
         payload, err = _require_json_body()
         if err is not None:
             return err
-        query = str(payload.get("query", "")).strip()
+        query, field_error = _string_payload_field(payload, "query", "")
+        if field_error:
+            return jsonify({"error": field_error}), 400
         count = _coerce_count(payload.get("count", 5))
         if count is None:
             return jsonify({"error": "count must be a positive integer"}), 400
@@ -1641,26 +1888,32 @@ def create_app() -> Flask:
                 jsonify({"error": "fetch_top_n must be a non-negative integer"}),
                 400,
             )
-        provider_name = str(payload.get("provider", DEFAULT_PROVIDER)).strip().lower()
-        safesearch = str(payload.get("safesearch", "off")).strip().lower()
+        provider_name, field_error = _string_payload_field(
+            payload, "provider", DEFAULT_PROVIDER
+        )
+        if field_error:
+            return jsonify({"error": field_error}), 400
+        provider_name = provider_name.lower()
+        safesearch, field_error = _string_payload_field(payload, "safesearch", "off")
+        if field_error:
+            return jsonify({"error": field_error}), 400
+        safesearch = safesearch.lower()
         if not query:
             return jsonify({"error": "query is required"}), 400
 
         cache_key = _cache_key(
             "image_search",
-            {"query": query, "count": count, "provider": provider_name, "safesearch": safesearch},
+            {
+                "query": query,
+                "count": count,
+                "provider": provider_name,
+                "safesearch": safesearch,
+                "fetch_top_n": fetch_top_n,
+            },
         )
         cached = cache.get(cache_key, SEARCH_TTL_S)
-        if cached and fetch_top_n <= 0:
-            # A prior request with fetch_top_n > 0 may have stored a payload
-            # that includes `fetched_images`. This caller asked for zero, so
-            # stripping it here prevents cross-request data bleed (they get
-            # bytes they never asked for, and the image list may contain URLs
-            # from a different caller's search params).
-            response_payload = {
-                k: v for k, v in cached.items() if k != "fetched_images"
-            }
-            return jsonify(response_payload)
+        if cached:
+            return jsonify(cached)
 
         try:
             result = provider.search_images(
@@ -1718,43 +1971,53 @@ def create_app() -> Flask:
     @app.get("/cache")
     def cache_list_endpoint() -> Any:
         entries: List[Dict[str, Any]] = []
-        for path in sorted(CACHE_DIR.glob("*.json")):
+        cache_paths = [
+            p for p in _iter_dir_limited(CACHE_DIR, label="cache")
+            if p.suffix == ".json"
+        ]
+        for path in sorted(cache_paths):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                entry: Dict[str, Any] = {
-                    "key": path.stem,
-                    "cached_at": data.get("_cached_at", 0),
-                    "size_bytes": path.stat().st_size,
-                }
-                if "query" in data:
-                    entry["query"] = data["query"]
-                if "url" in data:
-                    entry["url"] = data["url"]
-                if "provider" in data:
-                    entry["provider"] = data["provider"]
-                entries.append(entry)
-            except Exception:
-                logger.warning("skipping unreadable cache entry: %s", path.name)
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                logger.warning("skipping unreadable cache entry %s: %s", path.name, exc)
                 continue
-        image_entries: List[Dict[str, Any]] = []
-        if IMAGE_CACHE_DIR.exists():
-            # Directory may vanish between .exists() and iterdir(); iterdir()
-            # also raises on a race. Per-entry stat() races on dangling
-            # symlinks or concurrent deletes — skip those rather than 500.
+            if not isinstance(data, dict):
+                logger.warning(
+                    "skipping cache entry %s: root is %s, expected object",
+                    path.name,
+                    type(data).__name__,
+                )
+                continue
             try:
-                img_iter = sorted(IMAGE_CACHE_DIR.iterdir())
-            except OSError:
-                img_iter = []
-            for img_path in img_iter:
-                try:
-                    size_bytes = img_path.stat().st_size
-                except OSError:
-                    continue
-                image_entries.append({
-                    "filename": img_path.name,
-                    "path": str(img_path),
-                    "size_bytes": size_bytes,
-                })
+                size_bytes = path.stat().st_size
+            except OSError as exc:
+                logger.warning("skipping cache entry %s: stat failed: %s", path.name, exc)
+                continue
+            entry: Dict[str, Any] = {
+                "key": path.stem,
+                "cached_at": data.get("_cached_at", 0),
+                "size_bytes": size_bytes,
+            }
+            if "query" in data:
+                entry["query"] = data["query"]
+            if "url" in data:
+                entry["url"] = data["url"]
+            if "provider" in data:
+                entry["provider"] = data["provider"]
+            entries.append(entry)
+        image_entries: List[Dict[str, Any]] = []
+        img_iter = sorted(_iter_dir_limited(IMAGE_CACHE_DIR, label="image cache"))
+        for img_path in img_iter:
+            try:
+                size_bytes = img_path.stat().st_size
+            except OSError as exc:
+                logger.warning("skipping image cache entry %s: stat failed: %s", img_path.name, exc)
+                continue
+            image_entries.append({
+                "filename": img_path.name,
+                "path": str(img_path),
+                "size_bytes": size_bytes,
+            })
         return jsonify({
             "entries": entries,
             "images": image_entries,
@@ -1773,13 +2036,22 @@ def create_app() -> Flask:
         def _count_provider(p: Path) -> None:
             try:
                 data = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
-                logger.warning("skipping unreadable cache entry: %s", p.name)
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                logger.warning("skipping unreadable cache entry %s: %s", p.name, exc)
+                return
+            if not isinstance(data, dict):
+                logger.warning(
+                    "skipping cache entry %s: root is %s, expected object",
+                    p.name,
+                    type(data).__name__,
+                )
                 return
             name = data.get("provider", "unknown")
             providers[name] = providers.get(name, 0) + 1
 
-        for path in CACHE_DIR.glob("*.json"):
+        for path in _iter_dir_limited(CACHE_DIR, label="cache stats"):
+            if path.suffix != ".json":
+                continue
             stem = path.stem
             if stem.startswith("image_search_"):
                 image_count += 1
@@ -1789,13 +2061,10 @@ def create_app() -> Flask:
                 _count_provider(path)
             elif stem.startswith("fetch_"):
                 fetch_count += 1
-        if IMAGE_CACHE_DIR.exists():
-            try:
-                img_files = list(IMAGE_CACHE_DIR.iterdir())
-            except OSError:
-                img_files = []
-        else:
-            img_files = []
+        img_files = [
+            p for p in _iter_dir_limited(IMAGE_CACHE_DIR, label="image stats")
+            if p.is_file()
+        ]
         return jsonify({
             "cached_searches": search_count,
             "cached_fetches": fetch_count,
@@ -1808,12 +2077,30 @@ def create_app() -> Flask:
     return app
 
 
+def _is_loopback_bind_host(host: str) -> bool:
+    value = (host or "").strip().strip("[]")
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(value, None)
+    except socket.gaierror:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_loopback for info in infos)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the AtlasForge local web proxy service")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
+
+    if args.debug and not _is_loopback_bind_host(args.host):
+        parser.error("--debug may only be used with a loopback host")
 
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.INFO,

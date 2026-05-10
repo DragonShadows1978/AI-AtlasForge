@@ -67,7 +67,7 @@ MISSION_QUEUE_PATH = STATE_DIR / "mission_queue.json"
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 LLM_MODEL_CONFIG_DEFAULTS = {
     "selected": {
-        "claude": {"model": "sonnet", "thinking": "high"},
+        "claude": {"model": "claude-opus-4-6[1m]", "thinking": "high"},
         "codex": {"model": "gpt-5.5", "thinking": "high"},
         "gemini": {"model": "gemini-2.5-pro", "thinking": "default"},
     },
@@ -77,6 +77,7 @@ LLM_MODEL_CONFIG_DEFAULTS = {
                 {"value": "haiku", "label": "Haiku"},
                 {"value": "sonnet", "label": "Sonnet"},
                 {"value": "opus", "label": "Opus"},
+                {"value": "claude-opus-4-6[1m]", "label": "Claude Opus 4.6"},
             ],
             "thinking": [
                 {"value": "low", "label": "Low"},
@@ -91,6 +92,7 @@ LLM_MODEL_CONFIG_DEFAULTS = {
                 {"value": "gpt-5.5", "label": "Best available"},
             ],
             "thinking": [
+                {"value": "fast", "label": "Fast"},
                 {"value": "low", "label": "Low"},
                 {"value": "medium", "label": "Medium"},
                 {"value": "high", "label": "High"},
@@ -109,6 +111,16 @@ LLM_MODEL_CONFIG_DEFAULTS = {
     },
 }
 PID_PATH = BASE_DIR / "atlasforge_conductor.pid"
+REQUIRED_LLM_MODEL_OPTIONS = {
+    "claude": [
+        {"value": "claude-opus-4-6[1m]", "label": "Claude Opus 4.6"},
+    ],
+}
+REQUIRED_LLM_THINKING_OPTIONS = {
+    "codex": [
+        {"value": "fast", "label": "Fast"},
+    ],
+}
 
 # Ensure directories exist
 STATE_DIR.mkdir(exist_ok=True)
@@ -336,7 +348,7 @@ def _normalize_provider(provider: str | None) -> str:
 
 def _clean_option_value(value) -> str:
     raw = str(value or "").strip()
-    return raw[:80] if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", raw) else ""
+    return raw[:80] if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,79}$", raw) else ""
 
 
 def _clean_option_label(label, fallback: str) -> str:
@@ -378,7 +390,13 @@ def _normalize_llm_config(data: dict | None) -> dict:
     for provider_key, defaults in LLM_MODEL_CONFIG_DEFAULTS["options"].items():
         raw_provider_options = options_raw.get(provider_key) if isinstance(options_raw.get(provider_key), dict) else {}
         models = _normalize_option_list(raw_provider_options.get("models"), defaults["models"])
+        for required_model in REQUIRED_LLM_MODEL_OPTIONS.get(provider_key, []):
+            if required_model["value"] not in {opt["value"] for opt in models}:
+                models.append(dict(required_model))
         thinking = _normalize_option_list(raw_provider_options.get("thinking"), defaults["thinking"])
+        for required_thinking in REQUIRED_LLM_THINKING_OPTIONS.get(provider_key, []):
+            if required_thinking["value"] not in {opt["value"] for opt in thinking}:
+                thinking.insert(0, dict(required_thinking))
         options[provider_key] = {"models": models, "thinking": thinking}
 
         raw_selected = selected_raw.get(provider_key) if isinstance(selected_raw.get(provider_key), dict) else {}

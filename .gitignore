@@ -106,6 +106,13 @@ docs/internal/
 # ------ Claude local settings (may contain local paths/secrets) ------
 # Hooks are tracked in claude_hooks/ instead
 .claude/
+!.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/backup-core-files.py
+!.claude/hooks/exploration-memory-hook.py
 
 # ------ Jupyter Notebooks ------
 .ipynb_checkpoints/

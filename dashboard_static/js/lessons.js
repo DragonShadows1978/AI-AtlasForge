@@ -19,6 +19,24 @@ let batchDeleteMode = false;
 let analyticsVisible = false;
 let selectedMergeTarget = {};
 
+function safeLearningTypeClass(value) {
+    return String(value || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+document.addEventListener('click', (event) => {
+    const selectTarget = event.target.closest('[data-select-learning-id]');
+    if (selectTarget) {
+        event.stopPropagation();
+        toggleLearningSelection(selectTarget.dataset.selectLearningId || '', event);
+        return;
+    }
+
+    const learningTarget = event.target.closest('[data-learning-id]');
+    if (learningTarget) {
+        showLearningDetails(learningTarget.dataset.learningId || '');
+    }
+});
+
 // =============================================================================
 // MAIN LESSONS FUNCTIONS
 // =============================================================================
@@ -49,7 +67,7 @@ async function loadAllLessons() {
             const select = document.getElementById('lessons-domain-filter');
             const currentValue = select.value;
             select.innerHTML = '<option value="">All Domains</option>' +
-                domains.domains.map(d => `<option value="${d}">${d}</option>`).join('');
+                domains.domains.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
             select.value = currentValue;
         }
     } catch (e) {
@@ -89,11 +107,11 @@ function renderLessonsList(lessons) {
 
     const html = lessons.map(l => `
         <div class="learning-item ${l.learning_id === selectedLearningId ? 'active' : ''}"
-             onclick="showLearningDetails('${l.learning_id}')">
+             data-learning-id="${escapeHtml(l.learning_id || '')}">
             <div class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</div>
             <div class="learning-item-meta">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
-                ${l.problem_domain || ''}
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
+                ${escapeHtml(l.problem_domain || '')}
             </div>
         </div>
     `).join('');
@@ -122,7 +140,7 @@ async function showLearningDetails(learningId) {
                 <div class="learning-detail-section">
                     <h4>Type & Domain</h4>
                     <p>
-                        <span class="learning-type-badge ${data.learning_type || ''}">${data.learning_type || 'unknown'}</span>
+                        <span class="learning-type-badge ${safeLearningTypeClass(data.learning_type)}">${escapeHtml(data.learning_type || 'unknown')}</span>
                         ${escapeHtml(data.problem_domain || 'No domain')}
                     </p>
                 </div>
@@ -225,7 +243,7 @@ function renderChainsPanel(chains) {
                 ${chain.missions && chain.missions.length > 0 ? `
                     <div class="chain-missions" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);">
                         <span style="color: var(--text-dim); font-size: 0.85em;">Missions: </span>
-                        ${chain.missions.map(m => `<span class="mission-badge">${m}</span>`).join(' ')}
+                        ${chain.missions.map(m => `<span class="mission-badge">${escapeHtml(m)}</span>`).join(' ')}
                     </div>
                 ` : ''}
             </div>
@@ -236,11 +254,11 @@ function renderChainsPanel(chains) {
 function renderChainLearnings(learnings) {
     if (!learnings || learnings.length === 0) return '';
     return learnings.map((l, i) => `
-        <div class="chain-learning" onclick="showLearningDetails('${l.learning_id}')" style="display: flex; align-items: center; padding: 8px; cursor: pointer;">
+        <div class="chain-learning" data-learning-id="${escapeHtml(l.learning_id || '')}" style="display: flex; align-items: center; padding: 8px; cursor: pointer;">
             <span class="chain-step" style="min-width: 24px; color: var(--accent);">${i + 1}.</span>
-            <span class="learning-type-badge ${l.learning_type || ''}" style="margin-right: 8px;">${l.learning_type || 'unknown'}</span>
+            <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}" style="margin-right: 8px;">${escapeHtml(l.learning_type || 'unknown')}</span>
             <span class="learning-item-title" style="flex: 1;">${escapeHtml(l.title || 'Untitled')}</span>
-            <span class="chain-mission-id" style="color: var(--text-dim); font-size: 0.8em;">${l.mission_id || ''}</span>
+            <span class="chain-mission-id" style="color: var(--text-dim); font-size: 0.8em;">${escapeHtml(l.mission_id || '')}</span>
         </div>
     `).join('');
 }
@@ -297,15 +315,15 @@ function renderClustersTree(clusters) {
 function renderClusterLearnings(learningIds, learnings) {
     if (learnings && learnings.length > 0) {
         return learnings.map(l => `
-            <div class="learning-item" onclick="showLearningDetails('${l.learning_id}')">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
+            <div class="learning-item" data-learning-id="${escapeHtml(l.learning_id || '')}">
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
                 <span class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</span>
             </div>
         `).join('');
     }
     return learningIds.map(id => `
-        <div class="learning-item" onclick="showLearningDetails('${id}')">
-            <span style="color: var(--text-dim);">${id}</span>
+        <div class="learning-item" data-learning-id="${escapeHtml(id || '')}">
+            <span style="color: var(--text-dim);">${escapeHtml(id || '')}</span>
         </div>
     `).join('');
 }
@@ -360,12 +378,12 @@ function renderDuplicatesPanel(duplicates) {
                 <div class="duplicate-items">
                     ${learnings.map(l => `
                         <label class="duplicate-item">
-                            <input type="radio" name="dup-${idx}" value="${l.learning_id}"
+                            <input type="radio" name="dup-${idx}" value="${escapeHtml(l.learning_id || '')}"
                                    ${l.learning_id === representative ? 'checked' : ''}
-                                   onchange="selectedMergeTarget[${idx}]='${l.learning_id}'">
+                                   data-merge-target-group="${idx}">
                             <span>
                                 <strong>${escapeHtml(l.title || 'Untitled')}</strong>
-                                <div style="font-size: 0.8em; color: var(--text-dim);">${l.mission_id || ''}</div>
+                                <div style="font-size: 0.8em; color: var(--text-dim);">${escapeHtml(l.mission_id || '')}</div>
                             </span>
                         </label>
                     `).join('')}
@@ -373,6 +391,11 @@ function renderDuplicatesPanel(duplicates) {
             </div>
         `;
     }).join('');
+    panel.querySelectorAll('input[data-merge-target-group]').forEach(input => {
+        input.addEventListener('change', () => {
+            selectedMergeTarget[input.dataset.mergeTargetGroup] = input.value;
+        });
+    });
 }
 
 async function mergeDuplicates(groupIdx) {
@@ -633,14 +656,14 @@ function renderLessonsListWithCheckboxes() {
 
     const html = lessonsData.map(l => `
         <div class="learning-item ${l.learning_id === selectedLearningId ? 'active' : ''}"
-             onclick="showLearningDetails('${l.learning_id}')">
+             data-learning-id="${escapeHtml(l.learning_id || '')}">
             <input type="checkbox" class="batch-checkbox"
                    ${selectedLearnings.has(l.learning_id) ? 'checked' : ''}
-                   onclick="toggleLearningSelection('${l.learning_id}', event)"
+                   data-select-learning-id="${escapeHtml(l.learning_id || '')}"
                    style="margin-right: 10px;">
             <div class="learning-item-title">${escapeHtml(l.title || 'Untitled')}</div>
             <div class="learning-item-meta">
-                <span class="learning-type-badge ${l.learning_type || ''}">${l.learning_type || 'unknown'}</span>
+                <span class="learning-type-badge ${safeLearningTypeClass(l.learning_type)}">${escapeHtml(l.learning_type || 'unknown')}</span>
             </div>
         </div>
     `).join('');

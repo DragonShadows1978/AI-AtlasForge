@@ -13,11 +13,163 @@ from flask import Blueprint, jsonify, request
 import json
 import logging
 import os
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
 # Create Blueprint
 knowledge_base_bp = Blueprint('knowledge_base', __name__, url_prefix='/api/knowledge-base')
+
+_LEARNING_COLUMNS = [
+    "learning_id", "mission_id", "learning_type", "title", "description",
+    "problem_domain", "outcome", "relevance_keywords", "code_snippets",
+    "files_created", "timestamp", "lesson_source", "source_type",
+    "source_investigation_id", "investigation_query"
+]
+
+
+def _row_to_learning(row):
+    """Convert a learnings row to the dashboard JSON shape."""
+    data = {}
+    for i, col in enumerate(_LEARNING_COLUMNS):
+        data[col] = row[i] if i < len(row) else None
+    for json_col in ("relevance_keywords", "code_snippets", "files_created"):
+        try:
+            data[json_col] = json.loads(data[json_col] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            data[json_col] = []
+    data["source_type"] = data.get("source_type") or "mission"
+    return data
+
+
+def _learning_select_columns() -> str:
+    return ", ".join(_LEARNING_COLUMNS)
+
+
+def _source_filter_clause(source_type: str, params: list) -> str:
+    if not source_type:
+        return ""
+    params.append(source_type)
+    if source_type == "mission":
+        return " AND COALESCE(source_type, 'mission') = ?"
+    return " AND source_type = ?"
+
+
+def _fetch_learning_lookup(db_path, learning_ids):
+    if not learning_ids:
+        return {}
+    ordered_ids = list(dict.fromkeys(learning_ids))
+    placeholders = ",".join(["?"] * len(ordered_ids))
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT {_learning_select_columns()}
+            FROM learnings
+            WHERE learning_id IN ({placeholders})
+            """,
+            ordered_ids,
+        )
+        return {row[0]: _row_to_learning(row) for row in cursor.fetchall()}
+
+
+def _lightweight_clusters(kb, limit: int = 25, per_cluster: int = 12):
+    """Return bounded, non-dense clusters for large knowledge bases."""
+    limit = max(1, min(int(limit), 100))
+    per_cluster = max(1, min(int(per_cluster), 50))
+    clusters = []
+    with sqlite3.connect(kb.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COALESCE(NULLIF(problem_domain, ''), 'Unknown') AS domain,
+                   COALESCE(NULLIF(learning_type, ''), 'unknown') AS learning_type,
+                   COUNT(*) AS count,
+                   MAX(timestamp) AS newest
+            FROM learnings
+            GROUP BY domain, learning_type
+            HAVING count >= 2
+            ORDER BY count DESC, newest DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        groups = cursor.fetchall()
+
+        for idx, (domain, learning_type, count, _newest) in enumerate(groups):
+            cursor.execute(
+                f"""
+                SELECT {_learning_select_columns()}
+                FROM learnings
+                WHERE COALESCE(NULLIF(problem_domain, ''), 'Unknown') = ?
+                  AND COALESCE(NULLIF(learning_type, ''), 'unknown') = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (domain, learning_type, per_cluster),
+            )
+            learnings = [_row_to_learning(row) for row in cursor.fetchall()]
+            clusters.append({
+                "cluster_id": idx,
+                "theme": f"{domain} / {learning_type}",
+                "coherence": 1.0,
+                "size": count,
+                "learnings": learnings,
+                "bounded": True,
+            })
+    return clusters
+
+
+def _lightweight_learning_chains(kb, min_length: int = 2, limit: int = 25, per_chain: int = 12):
+    """Return chronological domain chains without all-pairs similarity work."""
+    min_length = max(2, min(int(min_length), 100))
+    limit = max(1, min(int(limit), 100))
+    per_chain = max(min_length, min(int(per_chain), 50))
+    chains = []
+    with sqlite3.connect(kb.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COALESCE(NULLIF(problem_domain, ''), 'Unknown') AS domain,
+                   COUNT(*) AS count,
+                   COUNT(DISTINCT mission_id) AS missions,
+                   MAX(timestamp) AS newest
+            FROM learnings
+            GROUP BY domain
+            HAVING count >= ? AND missions >= 2
+            ORDER BY count DESC, newest DESC
+            LIMIT ?
+            """,
+            (min_length, limit),
+        )
+        groups = cursor.fetchall()
+
+        for idx, (domain, count, _mission_count, _newest) in enumerate(groups):
+            cursor.execute(
+                f"""
+                SELECT {_learning_select_columns()}
+                FROM learnings
+                WHERE COALESCE(NULLIF(problem_domain, ''), 'Unknown') = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (domain, per_chain),
+            )
+            learnings = [_row_to_learning(row) for row in cursor.fetchall()]
+            learnings.sort(key=lambda item: item.get("timestamp") or "")
+            missions = list(dict.fromkeys(
+                item.get("mission_id") for item in learnings if item.get("mission_id")
+            ))
+            chains.append({
+                "chain_id": idx,
+                "theme": domain,
+                "coherence": 1.0,
+                "length": count,
+                "learnings": learnings,
+                "missions": missions,
+                "bounded": True,
+            })
+    return chains
 
 
 # =============================================================================
@@ -48,10 +200,9 @@ def api_kb_learnings():
         source_type = request.args.get('source_type', '')  # 'mission', 'investigation', or '' for all
         limit = max(1, min(request.args.get('limit', 50, type=int), 500))  # Clamp to [1, 500]
 
-        import sqlite3
         with sqlite3.connect(kb.db_path) as conn:
             cursor = conn.cursor()
-            query = "SELECT * FROM learnings WHERE 1=1"
+            query = f"SELECT {_learning_select_columns()} FROM learnings WHERE 1=1"
             params = []
 
             if domain:
@@ -60,9 +211,7 @@ def api_kb_learnings():
             if learning_type:
                 query += " AND learning_type = ?"
                 params.append(learning_type)
-            if source_type:
-                query += " AND source_type = ?"
-                params.append(source_type)
+            query += _source_filter_clause(source_type, params)
 
             query += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
@@ -70,29 +219,7 @@ def api_kb_learnings():
             cursor.execute(query, params)
             rows = cursor.fetchall()
 
-        columns = [
-            "learning_id", "mission_id", "learning_type", "title", "description",
-            "problem_domain", "outcome", "relevance_keywords", "code_snippets",
-            "files_created", "timestamp", "lesson_source", "source_type",
-            "source_investigation_id", "investigation_query"
-        ]
-
-        learnings = []
-        for row in rows:
-            # Handle rows with fewer columns (older DB schema)
-            data = {}
-            for i, col in enumerate(columns):
-                if i < len(row):
-                    data[col] = row[i]
-                else:
-                    data[col] = None
-
-            data["relevance_keywords"] = json.loads(data["relevance_keywords"] or "[]")
-            data["code_snippets"] = json.loads(data["code_snippets"] or "[]")
-            data["files_created"] = json.loads(data["files_created"] or "[]")
-            # Default source_type if not present
-            data["source_type"] = data.get("source_type") or "mission"
-            learnings.append(data)
+        learnings = [_row_to_learning(row) for row in rows]
 
         return jsonify({"learnings": learnings})
     except Exception:
@@ -107,37 +234,18 @@ def api_kb_learning_detail(learning_id):
         from mission_knowledge_base import get_knowledge_base
         kb = get_knowledge_base()
 
-        import sqlite3
         with sqlite3.connect(kb.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM learnings WHERE learning_id = ?", (learning_id,))
+            cursor.execute(
+                f"SELECT {_learning_select_columns()} FROM learnings WHERE learning_id = ?",
+                (learning_id,),
+            )
             row = cursor.fetchone()
 
         if not row:
             return jsonify({"error": "Learning not found"}), 404
 
-        # Updated columns list to include new investigation-related fields
-        columns = [
-            "learning_id", "mission_id", "learning_type", "title", "description",
-            "problem_domain", "outcome", "relevance_keywords", "code_snippets",
-            "files_created", "timestamp", "lesson_source", "source_type",
-            "source_investigation_id", "investigation_query"
-        ]
-
-        # Handle rows with fewer columns (older DB schema)
-        data = {}
-        for i, col in enumerate(columns):
-            if i < len(row):
-                data[col] = row[i]
-            else:
-                data[col] = None
-
-        data["relevance_keywords"] = json.loads(data["relevance_keywords"] or "[]")
-        data["code_snippets"] = json.loads(data["code_snippets"] or "[]")
-        data["files_created"] = json.loads(data["files_created"] or "[]")
-
-        # Default source_type if not present
-        data["source_type"] = data.get("source_type") or "mission"
+        data = _row_to_learning(row)
 
         # Add investigation report path if from investigation
         if data.get("source_type") == "investigation" and data.get("source_investigation_id"):
@@ -205,13 +313,17 @@ def api_kb_search():
         query = request.args.get('q', '')
         domain = request.args.get('domain', '')
         learning_type = request.args.get('type', '')
-        top_k = max(1, min(request.args.get('top_k', 10, type=int), 100))  # Clamp to [1, 100]
+        source_type = request.args.get('source_type', '')
+        requested_top_k = request.args.get('top_k', type=int)
+        requested_limit = request.args.get('limit', type=int)
+        top_k = max(1, min(requested_top_k or requested_limit or 10, 100))  # Clamp to [1, 100]
 
         if not query:
             return jsonify({"error": "Missing query parameter 'q'", "results": []})
 
         learning_types = [learning_type] if learning_type else None
-        learnings = kb.query_relevant_learnings(query, top_k=top_k, learning_types=learning_types)
+        fetch_k = min(max(top_k * 5, top_k), 500) if (domain or source_type) else top_k
+        learnings = kb.query_relevant_learnings(query, top_k=fetch_k, learning_types=learning_types)
 
         results = []
         for l in learnings:
@@ -219,11 +331,19 @@ def api_kb_search():
             if isinstance(l, dict):
                 if domain and l.get('problem_domain') != domain:
                     continue
+                item_source_type = l.get('source_type') or 'mission'
+                if source_type and item_source_type != source_type:
+                    continue
                 results.append(l)
             else:
                 if domain and getattr(l, 'problem_domain', None) != domain:
                     continue
+                item_source_type = getattr(l, 'source_type', None) or 'mission'
+                if source_type and item_source_type != source_type:
+                    continue
                 results.append(l.to_dict() if hasattr(l, 'to_dict') else l.__dict__)
+            if len(results) >= top_k:
+                break
 
         return jsonify({"query": query, "results": results})
     except Exception:
@@ -278,7 +398,7 @@ def api_kb_domains():
         import sqlite3
         with sqlite3.connect(kb.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT problem_domain FROM learnings")
+            cursor.execute("SELECT DISTINCT problem_domain FROM learnings ORDER BY problem_domain COLLATE NOCASE")
             domains = [row[0] for row in cursor.fetchall() if row[0]]
 
         return jsonify({"domains": domains})
@@ -305,11 +425,26 @@ def api_kb_clusters():
                 return jsonify({"error": "Invalid threshold value"}), 400
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid threshold value"}), 400
-        clusters = kb.get_learning_clusters(distance_threshold=threshold)
+        try:
+            limit = max(1, min(int(request.args.get('limit', 25)), 100))
+            per_cluster = max(1, min(int(request.args.get('per_cluster', 12)), 50))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid limit value"}), 400
+
+        stats = kb.get_statistics()
+        total_learnings = int(stats.get("total_learnings") or 0)
+        if total_learnings > 5000:
+            clusters = _lightweight_clusters(kb, limit=limit, per_cluster=per_cluster)
+            bounded = True
+        else:
+            clusters = kb.get_learning_clusters(distance_threshold=threshold)
+            bounded = False
 
         return jsonify({
             "clusters": clusters,
-            "count": len(clusters)
+            "count": len(clusters),
+            "bounded": bounded,
+            "total_learnings": total_learnings,
         })
     except Exception:
         logger.exception("Error fetching KB clusters")
@@ -345,10 +480,33 @@ def api_kb_duplicates():
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid threshold value"}), 400
         duplicates = kb.find_duplicate_learnings(threshold=threshold)
+        total_duplicates = len(duplicates)
+        limit = max(1, min(request.args.get('limit', 50, type=int), 1000))
+        duplicates = duplicates[:limit]
+
+        learning_ids = []
+        for group in duplicates:
+            for learning_id in group.get("learning_ids", []):
+                if learning_id not in learning_ids:
+                    learning_ids.append(learning_id)
+
+        learning_lookup = _fetch_learning_lookup(kb.db_path, learning_ids)
+
+        hydrated = []
+        for group in duplicates:
+            group_copy = dict(group)
+            group_copy["learnings"] = [
+                learning_lookup[learning_id]
+                for learning_id in group.get("learning_ids", [])
+                if learning_id in learning_lookup
+            ]
+            hydrated.append(group_copy)
 
         return jsonify({
-            "duplicate_groups": duplicates,
-            "count": len(duplicates)
+            "duplicate_groups": hydrated,
+            "count": len(hydrated),
+            "total_count": total_duplicates,
+            "limit": limit
         })
     except Exception:
         logger.exception("Error fetching KB duplicates")
@@ -363,16 +521,26 @@ def api_kb_merge():
         import sqlite3
 
         kb = get_knowledge_base()
-        data = request.get_json()
+        data = request.get_json(silent=True)
 
-        if not data:
+        if not isinstance(data, dict):
             return jsonify({"error": "Missing JSON body"}), 400
 
         keep_id = data.get('keep_id')
         merge_ids = data.get('merge_ids', [])
 
-        if not keep_id or not merge_ids:
+        if not isinstance(keep_id, str) or not keep_id or not isinstance(merge_ids, list) or not merge_ids:
             return jsonify({"error": "Missing keep_id or merge_ids"}), 400
+        if any(not isinstance(learning_id, str) for learning_id in merge_ids):
+            return jsonify({"error": "merge_ids must be a list of strings"}), 400
+
+        merge_ids = [learning_id for learning_id in dict.fromkeys(merge_ids) if learning_id != keep_id]
+        if not merge_ids:
+            return jsonify({"error": "No mergeable learning IDs provided"}), 400
+
+        merge_result = kb.merge_learnings(keep_id, merge_ids)
+        if merge_result.get("status") != "success":
+            return jsonify({"error": "Merge failed", "success": False}), 400
 
         with sqlite3.connect(kb.db_path) as conn:
             cursor = conn.cursor()
@@ -388,11 +556,77 @@ def api_kb_merge():
         return jsonify({
             "success": True,
             "merged": deleted,
-            "kept": keep_id
+            "kept": keep_id,
+            "kept_learning": merge_result.get("kept_learning")
         })
     except Exception:
         logger.exception("Error merging KB learnings")
         return jsonify({"error": "Internal error", "success": False})
+
+
+@knowledge_base_bp.route('/merge-duplicates', methods=['POST'])
+def api_kb_merge_duplicates():
+    """Merge multiple duplicate groups in one request."""
+    try:
+        from mission_knowledge_base import get_knowledge_base
+
+        kb = get_knowledge_base()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Missing JSON body", "success": False}), 400
+
+        groups = data.get("groups", [])
+        if not isinstance(groups, list) or not groups:
+            return jsonify({"error": "No duplicate groups provided", "success": False}), 400
+        if len(groups) > 1000:
+            return jsonify({"error": "Maximum 1000 groups per request", "success": False}), 400
+
+        merged = 0
+        processed = 0
+        errors = []
+        for idx, group in enumerate(groups):
+            if not isinstance(group, dict):
+                errors.append({"index": idx, "error": "group must be an object"})
+                continue
+            keep_id = group.get("keep_id")
+            merge_ids = group.get("merge_ids", [])
+            if not isinstance(keep_id, str) or not keep_id:
+                errors.append({"index": idx, "error": "missing keep_id"})
+                continue
+            if not isinstance(merge_ids, list) or any(not isinstance(item, str) for item in merge_ids):
+                errors.append({"index": idx, "error": "merge_ids must be a list of strings"})
+                continue
+
+            merge_ids = [item for item in dict.fromkeys(merge_ids) if item != keep_id]
+            if not merge_ids:
+                continue
+
+            merge_result = kb.merge_learnings(keep_id, merge_ids)
+            if merge_result.get("status") != "success":
+                errors.append({"index": idx, "error": merge_result.get("message", "merge failed")})
+                continue
+
+            with sqlite3.connect(kb.db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ",".join(["?"] * len(merge_ids))
+                cursor.execute(
+                    f"DELETE FROM learnings WHERE learning_id IN ({placeholders})",
+                    merge_ids,
+                )
+                deleted = cursor.rowcount
+            merged += deleted
+            processed += 1
+
+        kb._semantic_index.invalidate()
+        return jsonify({
+            "success": True,
+            "processed_groups": processed,
+            "merged": merged,
+            "errors": errors,
+        })
+    except Exception:
+        logger.exception("Error bulk merging KB duplicates")
+        return jsonify({"error": "Internal error", "success": False}), 500
 
 
 @knowledge_base_bp.route('/batch-delete', methods=['POST'])
@@ -403,14 +637,16 @@ def api_kb_batch_delete():
         import sqlite3
 
         kb = get_knowledge_base()
-        data = request.get_json()
+        data = request.get_json(silent=True)
 
-        if not data:
+        if not isinstance(data, dict):
             return jsonify({"error": "Missing JSON body"}), 400
 
         learning_ids = data.get('learning_ids', [])
-        if not learning_ids:
+        if not isinstance(learning_ids, list) or not learning_ids:
             return jsonify({"error": "No learning IDs provided"}), 400
+        if any(not isinstance(learning_id, str) for learning_id in learning_ids):
+            return jsonify({"error": "learning_ids must be a list of strings"}), 400
 
         if len(learning_ids) > 100:
             return jsonify({"error": "Maximum 100 deletions per batch"}), 400
@@ -537,11 +773,31 @@ def api_kb_learning_chains():
         except (TypeError, ValueError):
             return jsonify({"error": "Invalid min_length value"}), 400
 
-        chains = kb.get_learning_chains(min_chain_length=min_length)
+        try:
+            limit = max(1, min(int(request.args.get('limit', 25)), 100))
+            per_chain = max(min_length, min(int(request.args.get('per_chain', 12)), 50))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid limit value"}), 400
+
+        stats = kb.get_statistics()
+        total_learnings = int(stats.get("total_learnings") or 0)
+        if total_learnings > 5000:
+            chains = _lightweight_learning_chains(
+                kb,
+                min_length=min_length,
+                limit=limit,
+                per_chain=per_chain,
+            )
+            bounded = True
+        else:
+            chains = kb.get_learning_chains(min_chain_length=min_length)
+            bounded = False
 
         return jsonify({
             "chains": chains,
-            "count": len(chains)
+            "count": len(chains),
+            "bounded": bounded,
+            "total_learnings": total_learnings,
         })
     except Exception:
         logger.exception("Error fetching learning chains")

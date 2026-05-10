@@ -69,35 +69,45 @@ _RESTRICTED_BUILTINS = types.MappingProxyType(
     {k: v for k, v in vars(_builtins_module).items() if k in _SAFE_BUILTINS_NAMES}
 )
 
+_FORBIDDEN_SANDBOX_CALLS = frozenset({
+    'getattr', 'setattr', 'delattr', 'hasattr',
+    'compile', 'vars', 'dir', 'locals', 'globals',
+    'eval', 'exec', 'open', 'input', 'breakpoint', '__import__',
+})
 
-def _validate_assertion(assertion: str) -> bool:
-    """PT-C3-1: Reject assertions containing dunder attribute access (__class__, __bases__, etc.).
 
-    Uses AST parsing to detect attribute nodes, name nodes starting with '__',
-    or getattr/setattr/delattr calls with dunder attribute names.
-    Returns False if any dunder access is found, True if safe.
-    """
+def _validate_untrusted_ast(source: str, mode: str) -> bool:
+    """Reject sandbox escapes in LLM-supplied assertion/eval code."""
+    if not isinstance(source, str):
+        return False
     try:
-        tree = _ast_module.parse(assertion, mode='eval')
+        tree = _ast_module.parse(source, mode=mode)
     except SyntaxError:
         return False
     for node in _ast_module.walk(tree):
         # PT-C3-2: block lambda expressions entirely — assertions never need lambdas
-        # and lambda bodies can be used to bypass dunder checks via deferred execution
+        # and lambda bodies can be used to bypass dunder checks via deferred execution.
         if isinstance(node, _ast_module.Lambda):
             return False
         if isinstance(node, _ast_module.Attribute) and node.attr.startswith('__'):
             return False
         if isinstance(node, _ast_module.Name) and node.id.startswith('__'):
             return False
-        # Bug fix: block getattr/setattr/delattr/hasattr unconditionally —
-        # dynamic attribute access is never needed in property assertions and any
-        # non-Constant attr argument (BinOp, Call, etc.) can bypass a name-based check.
         if isinstance(node, _ast_module.Call):
             func = node.func
-            if isinstance(func, _ast_module.Name) and func.id in ('getattr', 'setattr', 'delattr', 'hasattr'):
+            if isinstance(func, _ast_module.Name) and func.id in _FORBIDDEN_SANDBOX_CALLS:
                 return False
     return True
+
+
+def _validate_assertion(assertion: str) -> bool:
+    """PT-C3-1: Reject assertions containing sandbox escape primitives.
+
+    Uses AST parsing to detect attribute nodes, name nodes starting with '__',
+    dynamic attribute helpers, and dangerous introspection/eval builtins.
+    Returns False if an escape primitive is found, True if safe.
+    """
+    return _validate_untrusted_ast(assertion, mode='eval')
 
 
 _EVAL_TIMEOUT_SECONDS = 5  # PT-C5-1: max time for eval()/exec() of LLM-supplied code
@@ -220,6 +230,8 @@ def _subprocess_eval(code_str: str, globals_dict: dict, locals_dict: dict, *, ti
     # Cycle 2 Fix 2.2: validate mode parameter
     if mode not in ('eval', 'exec'):
         raise ValueError(f"mode must be 'eval' or 'exec', got {mode!r}")
+    if not _validate_untrusted_ast(code_str, mode=mode):
+        raise ValueError("unsafe sandbox code rejected")
 
     # Bug 1+2 fix: use JSON for IPC instead of pickle to eliminate ACE vector.
     # Only JSON-serializable primitives from globals/locals are passed through.

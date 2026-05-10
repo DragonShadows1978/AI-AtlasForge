@@ -15,6 +15,8 @@ Routes:
 
 import json
 import logging
+import re
+import threading
 import time
 from flask import Blueprint, jsonify, request
 from pathlib import Path
@@ -29,10 +31,14 @@ _MISSIONS_DIR = None
 _io_utils = None
 _emit_callback = None  # Optional: emit_widget_update injected from dashboard_v2
 
+_MAX_MISSION_ID_LENGTH = 255
+_MISSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
 # ---------------------------------------------------------------------------
 # History cache (30s TTL — avoids scanning 363+ dirs on every request)
 # ---------------------------------------------------------------------------
 _HISTORY_CACHE: dict = {"data": None, "ts": 0.0}
+_HISTORY_CACHE_LOCK = threading.Lock()
 HISTORY_CACHE_TTL: float = 30.0
 
 
@@ -115,7 +121,7 @@ def _load_audit_summary(mission_id: str):
     try:
         from af_engine.mission_config import load_audit_log
         if _MISSIONS_DIR:
-            mission_dir = _MISSIONS_DIR / mission_id
+            mission_dir = _resolve_mission_dir(mission_id)
             audit = load_audit_log(mission_dir)
             if audit:
                 return {
@@ -135,15 +141,56 @@ def _load_full_audit(mission_id: str):
     try:
         from af_engine.mission_config import load_audit_log
         if _MISSIONS_DIR:
-            return load_audit_log(_MISSIONS_DIR / mission_id)
+            return load_audit_log(_resolve_mission_dir(mission_id))
     except Exception as e:
         logger.warning("_load_full_audit(%r) failed: %s", mission_id, e)
     return None
 
 
+def _resolve_mission_dir(mission_id: str) -> Path:
+    """Resolve a mission directory and require it to stay under _MISSIONS_DIR."""
+    ok, reason = _validate_mission_id(mission_id)
+    if not ok:
+        raise ValueError(reason)
+    if _MISSIONS_DIR is None:
+        raise ValueError("missions directory not configured")
+    mission_dir = (_MISSIONS_DIR / mission_id).resolve()
+    missions_root = _MISSIONS_DIR.resolve()
+    mission_dir.relative_to(missions_root)
+    return mission_dir
+
+
+def _validate_mission_id(mission_id) -> tuple[bool, str]:
+    """Validate mission IDs before resolving them into filesystem paths."""
+    if not isinstance(mission_id, str) or not mission_id:
+        return False, "mission_id must be a non-empty string"
+    if len(mission_id) > _MAX_MISSION_ID_LENGTH:
+        return False, f"mission_id must be {_MAX_MISSION_ID_LENGTH} characters or fewer"
+    if not _MISSION_ID_PATTERN.fullmatch(mission_id):
+        return False, "mission_id: only alphanumeric, underscore, and hyphen allowed"
+    return True, ""
+
+
 def _now_iso() -> str:
     from datetime import datetime
     return datetime.now().isoformat()
+
+
+def _parse_live_int_param(raw, name: str) -> int:
+    """Parse live-edit integer params without truncating fractional values."""
+    if isinstance(raw, bool):
+        raise ValueError(f"{name} must be an integer, not bool")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if raw.is_integer():
+            return int(raw)
+        raise ValueError(f"{name} must be an integer")
+    if isinstance(raw, str):
+        value = raw.strip()
+        if re.fullmatch(r"[+-]?\d+", value):
+            return int(value)
+    raise ValueError(f"{name} must be an integer")
 
 
 # ---------------------------------------------------------------------------
@@ -210,12 +257,28 @@ def _build_history() -> list:
 def _get_cached_history(limit: int = 20) -> list:
     """Return cached history, rebuilding if TTL expired."""
     now = time.time()
-    if _HISTORY_CACHE["data"] is not None and now - _HISTORY_CACHE["ts"] < HISTORY_CACHE_TTL:
-        return _HISTORY_CACHE["data"][:limit]
-    data = _build_history()
-    _HISTORY_CACHE["data"] = data
-    _HISTORY_CACHE["ts"] = now
-    return data[:limit]
+    with _HISTORY_CACHE_LOCK:
+        if _HISTORY_CACHE["data"] is not None and now - _HISTORY_CACHE["ts"] < HISTORY_CACHE_TTL:
+            return _HISTORY_CACHE["data"][:limit]
+        data = _build_history()
+        _HISTORY_CACHE["data"] = data
+        _HISTORY_CACHE["ts"] = now
+        return data[:limit]
+
+
+def _history_cache_is_fresh() -> bool:
+    now = time.time()
+    with _HISTORY_CACHE_LOCK:
+        return (
+            _HISTORY_CACHE["data"] is not None
+            and now - _HISTORY_CACHE["ts"] < HISTORY_CACHE_TTL
+        )
+
+
+def _clear_history_cache() -> None:
+    with _HISTORY_CACHE_LOCK:
+        _HISTORY_CACHE['data'] = None
+        _HISTORY_CACHE['ts'] = 0.0
 
 
 def _compute_param_health(history: list) -> str:
@@ -283,15 +346,11 @@ def api_patch_mission_parameters():
 
     if "cycle_budget" in data:
         _raw_cb = data["cycle_budget"]
-        if isinstance(_raw_cb, bool):
-            errors.append("cycle_budget must be an integer, not bool")
+        try:
+            new_cb = _parse_live_int_param(_raw_cb, "cycle_budget")
+        except ValueError as exc:
+            errors.append(str(exc))
             new_cb = None
-        else:
-            try:
-                new_cb = int(_raw_cb)
-            except (TypeError, ValueError):
-                errors.append("cycle_budget must be an integer")
-                new_cb = None
 
         if new_cb is not None:
             if new_cb < MIN_CYCLE_BUDGET or new_cb > MAX_CYCLE_BUDGET:
@@ -312,15 +371,11 @@ def api_patch_mission_parameters():
 
     if "max_iterations" in data:
         _raw_mi = data["max_iterations"]
-        if isinstance(_raw_mi, bool):
-            errors.append("max_iterations must be an integer, not bool")
+        try:
+            new_mi = _parse_live_int_param(_raw_mi, "max_iterations")
+        except ValueError as exc:
+            errors.append(str(exc))
             new_mi = None
-        else:
-            try:
-                new_mi = int(_raw_mi)
-            except (TypeError, ValueError):
-                errors.append("max_iterations must be an integer")
-                new_mi = None
 
         if new_mi is not None:
             if new_mi < MIN_MAX_ITERATIONS or new_mi > MAX_MAX_ITERATIONS:
@@ -436,11 +491,7 @@ def api_mission_parameter_audit_history():
         limit = 20
 
     try:
-        now = time.time()
-        cached = (
-            _HISTORY_CACHE["data"] is not None
-            and now - _HISTORY_CACHE["ts"] < HISTORY_CACHE_TTL
-        )
+        cached = _history_cache_is_fresh()
         history = _get_cached_history(limit=limit)
         health = _compute_param_health(history)
         return jsonify({
@@ -456,9 +507,9 @@ def api_mission_parameter_audit_history():
 @mission_params_bp.route('/api/mission/parameter-audit/<mission_id>')
 def api_mission_parameter_audit_by_id(mission_id: str):
     """Get the full parameter audit log for a specific mission by ID."""
-    import re as _re
-    if not _re.match(r'^[a-zA-Z0-9_-]+$', mission_id):
-        return jsonify({'error': 'Invalid mission_id: only alphanumeric, underscore, and hyphen allowed'}), 400
+    ok, reason = _validate_mission_id(mission_id)
+    if not ok:
+        return jsonify({'error': f'Invalid {reason}'}), 400
     try:
         audit = _load_full_audit(mission_id)
         if audit is None:
@@ -516,8 +567,7 @@ def prune_audit_logs():
 
     # Invalidate history cache after a real prune so next request rescans
     if not dry_run:
-        _HISTORY_CACHE['data'] = None
-        _HISTORY_CACHE['ts'] = 0.0
+        _clear_history_cache()
 
     return jsonify({
         'pruned': pruned,

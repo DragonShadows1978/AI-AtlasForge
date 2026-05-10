@@ -24,6 +24,41 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+_VALID_SUGGESTION_CLASSIFICATIONS = {"BUGFIX", "TECH_DEBT", "COMPLETION", "EXPANSION", "MANUAL"}
+_VALID_MISSION_PROFILES = {
+    "full_rd", "plan_only", "build_only", "test_red_team",
+    "bug_hunt", "research_only", "review_existing",
+}
+_CLASSIFICATION_TO_PROFILE = {
+    "BUGFIX": "bug_hunt",
+    "TECH_DEBT": "build_only",
+    "EXPANSION": "plan_only",
+}
+
+
+def _resolve_suggestion_classification(recommendation: Dict[str, Any]) -> str:
+    raw = (
+        recommendation.get("classification")
+        or recommendation.get("mission_classification")
+        or recommendation.get("category")
+    )
+    if raw is None:
+        legacy = recommendation.get("mission_type")
+        if isinstance(legacy, str) and legacy.upper().strip() in _VALID_SUGGESTION_CLASSIFICATIONS:
+            raw = legacy
+    if not isinstance(raw, str):
+        return "EXPANSION"
+    normalized = raw.upper().strip()
+    return normalized if normalized in _VALID_SUGGESTION_CLASSIFICATIONS else "EXPANSION"
+
+
+def _resolve_suggestion_profile(recommendation: Dict[str, Any], classification: str) -> str:
+    for key in ("mission_type", "execution_profile"):
+        raw = recommendation.get(key)
+        if isinstance(raw, str) and raw in _VALID_MISSION_PROFILES:
+            return raw
+    return _CLASSIFICATION_TO_PROFILE.get(classification, "full_rd")
+
 # Directories for output
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 MISSIONS_DIR = BASE_DIR / "missions"
@@ -269,6 +304,8 @@ class MissionReportIntegration(BaseIntegrationHandler):
             logger.warning(f"[MissionReport] Skipping generic/placeholder recommendation title: '{title}'")
             return None
 
+        classification = _resolve_suggestion_classification(recommendation)
+        mission_profile = _resolve_suggestion_profile(recommendation, classification)
         rec_entry = {
             "id": f"rec_{uuid.uuid4().hex[:8]}",
             "mission_title": recommendation.get("mission_title", "Untitled Mission"),
@@ -280,8 +317,9 @@ class MissionReportIntegration(BaseIntegrationHandler):
             "created_at": datetime.now().isoformat(),
             "source_type": source_type,
             "priority_score": recommendation.get("priority_score", 50.0),
-            # v2 fields — passed through from continuation manifest or defaulted
-            "mission_type": recommendation.get("mission_type", "EXPANSION"),
+            "classification": classification,
+            "mission_type": mission_profile,
+            "execution_profile": mission_profile,
             "bug_references": recommendation.get("bug_references", []),
             "scope_context": recommendation.get("scope_context"),
         }
@@ -353,24 +391,24 @@ class MissionReportIntegration(BaseIntegrationHandler):
         Save all missions from the continuation manifest to SQLite.
 
         Each manifest mission is saved as a separate suggestion row with the
-        appropriate mission_type, bug_references, and scope_context set.
+        appropriate classification, mission profile, bug_references, and scope_context set.
         Priority 1 (BUGFIX) missions get a boosted priority_score so they
         sort to the top of the queue panel.
         """
-        # Map category → (mission_type, scope_context, base_priority_score)
+        # Map category → (classification, mission profile, scope_context, base_priority_score)
         category_map = {
-            "BUGFIX":      ("BUGFIX",      "out_of_scope", 90.0),
-            "TECH_DEBT":   ("TECH_DEBT",   "out_of_scope", 70.0),
-            "COMPLETION":  ("COMPLETION",  None,           65.0),
-            "EXPANSION":   ("EXPANSION",   None,           50.0),
+            "BUGFIX":      ("BUGFIX",      "bug_hunt",   "out_of_scope", 90.0),
+            "TECH_DEBT":   ("TECH_DEBT",   "build_only", "out_of_scope", 70.0),
+            "COMPLETION":  ("COMPLETION",  "full_rd",    None,           65.0),
+            "EXPANSION":   ("EXPANSION",   "plan_only",  None,           50.0),
         }
 
         saved = 0
         for mission in missions:
             try:
                 category = (mission.get("category") or "EXPANSION").upper()
-                mission_type, scope_context, base_score = category_map.get(
-                    category, ("EXPANSION", None, 50.0)
+                classification, mission_profile, scope_context, base_score = category_map.get(
+                    category, ("EXPANSION", "plan_only", None, 50.0)
                 )
                 # Higher priority number → lower in queue priority (invert manifest priority).
                 # Default to 1 (highest priority) when field is missing; clamp to [1, 10].
@@ -395,7 +433,9 @@ class MissionReportIntegration(BaseIntegrationHandler):
                     "rationale": mission.get("rationale", ""),
                     "source_type": "successful_completion",
                     "priority_score": priority_score,
-                    "mission_type": mission_type,
+                    "classification": classification,
+                    "mission_type": mission_profile,
+                    "execution_profile": mission_profile,
                     "bug_references": mission.get("source_bugs", []),
                     "scope_context": scope_context,
                 }

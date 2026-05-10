@@ -34,7 +34,7 @@ function escapeHtml(text) {
 function showToast(msg, duration = 3000) {
     const t = document.getElementById('toast');
     if (!t) return;
-    t.innerHTML = msg;
+    t.textContent = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), duration);
 }

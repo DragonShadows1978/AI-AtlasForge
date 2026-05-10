@@ -56,6 +56,44 @@ def test_codex_model_env_reaches_command(monkeypatch, tmp_path):
     assert "gpt-5.4-codex" in command
 
 
+def test_claude_persisted_custom_model_reaches_command(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({
+        "provider": "claude",
+        "selected": {
+            "claude": {"model": "claude-opus-4-6[1m]", "thinking": "high"},
+        },
+    }))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+    monkeypatch.delenv("CLAUDE_MODEL", raising=False)
+
+    command = conductor.build_llm_command("claude", model=conductor.get_llm_model("claude"))
+
+    assert command[0:2] == ["claude", "-p"]
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "claude-opus-4-6[1m]"
+
+
+def test_conductor_mission_model_wins_over_persisted_state(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({
+        "provider": "claude",
+        "selected": {
+            "claude": {"model": "sonnet", "thinking": "high"},
+        },
+    }))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+
+    assert (
+        conductor.get_llm_model("claude", mission={"llm_model": "claude-opus-4-6[1m]"})
+        == "claude-opus-4-6[1m]"
+    )
+
+
 def test_codex_planning_uses_read_only_stage_sandbox(monkeypatch):
     import atlasforge_conductor as conductor
 
@@ -211,6 +249,39 @@ def test_codex_native_search_is_explicit_opt_in(monkeypatch):
     command = conductor.build_llm_command("codex")
 
     assert "--search" in command
+
+
+def test_codex_fast_mode_uses_cli_service_tier(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    provider_path = tmp_path / "llm_provider.json"
+    provider_path.write_text(json.dumps({
+        "provider": "codex",
+        "selected": {
+            "codex": {"model": "gpt-5.5", "thinking": "fast"},
+        },
+    }))
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", provider_path)
+    monkeypatch.delenv("ATLASFORGE_CODEX_THINKING", raising=False)
+
+    command = conductor.build_llm_command("codex")
+
+    assert command[0] == "codex"
+    assert "--enable" in command
+    assert command[command.index("--enable") + 1] == "fast_mode"
+    assert 'service_tier="fast"' in command
+    assert not any("model_reasoning_effort" in item for item in command)
+
+
+def test_fast_thinking_is_codex_only(monkeypatch, tmp_path):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.setattr(conductor, "LLM_PROVIDER_PATH", tmp_path / "missing_llm_provider.json")
+    monkeypatch.setenv("ATLASFORGE_CLAUDE_THINKING", "fast")
+
+    command = conductor.build_llm_command("claude")
+
+    assert "--effort" not in command
 
 
 def test_blind_red_team_claude_combines_stage_bans_with_proxy(monkeypatch):

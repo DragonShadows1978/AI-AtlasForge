@@ -359,7 +359,7 @@ function getSelectedProvider() {
 const DEFAULT_LLM_PROVIDER_CONFIG = {
     provider: 'claude',
     selected: {
-        claude: { model: 'sonnet', thinking: 'high' },
+        claude: { model: 'claude-opus-4-6[1m]', thinking: 'high' },
         codex: { model: 'gpt-5.5', thinking: 'high' },
         gemini: { model: 'gemini-2.5-pro', thinking: 'default' }
     },
@@ -368,7 +368,8 @@ const DEFAULT_LLM_PROVIDER_CONFIG = {
             models: [
                 { value: 'haiku', label: 'Haiku' },
                 { value: 'sonnet', label: 'Sonnet' },
-                { value: 'opus', label: 'Opus' }
+                { value: 'opus', label: 'Opus' },
+                { value: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6' }
             ],
             thinking: [
                 { value: 'low', label: 'Low' },
@@ -381,6 +382,7 @@ const DEFAULT_LLM_PROVIDER_CONFIG = {
         codex: {
             models: [{ value: 'gpt-5.5', label: 'Best available' }],
             thinking: [
+                { value: 'fast', label: 'Fast' },
                 { value: 'low', label: 'Low' },
                 { value: 'medium', label: 'Medium' },
                 { value: 'high', label: 'High' },
@@ -395,6 +397,16 @@ const DEFAULT_LLM_PROVIDER_CONFIG = {
             thinking: [{ value: 'default', label: 'Default' }]
         }
     }
+};
+const REQUIRED_LLM_MODEL_OPTIONS = {
+    claude: [
+        { value: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6' }
+    ]
+};
+const REQUIRED_LLM_THINKING_OPTIONS = {
+    codex: [
+        { value: 'fast', label: 'Fast' }
+    ]
 };
 
 let llmProviderConfig = JSON.parse(JSON.stringify(DEFAULT_LLM_PROVIDER_CONFIG));
@@ -429,7 +441,17 @@ function normalizeLlmConfig(config) {
     ['claude', 'codex', 'gemini'].forEach((provider) => {
         const incomingOptions = config.options?.[provider] || {};
         next.options[provider].models = normalizeOptionList(incomingOptions.models, next.options[provider].models);
+        (REQUIRED_LLM_MODEL_OPTIONS[provider] || []).forEach((requiredModel) => {
+            if (!next.options[provider].models.some((option) => option.value === requiredModel.value)) {
+                next.options[provider].models.push({ ...requiredModel });
+            }
+        });
         next.options[provider].thinking = normalizeOptionList(incomingOptions.thinking, next.options[provider].thinking);
+        (REQUIRED_LLM_THINKING_OPTIONS[provider] || []).forEach((requiredThinking) => {
+            if (!next.options[provider].thinking.some((option) => option.value === requiredThinking.value)) {
+                next.options[provider].thinking.unshift({ ...requiredThinking });
+            }
+        });
 
         const selected = config.selected?.[provider] || {};
         const modelValues = new Set(next.options[provider].models.map((option) => option.value));
@@ -685,7 +707,7 @@ export async function startClaude(mode) {
         const _cbParsed0 = parseInt(document.getElementById('cycle-budget-input')?.value);
         const cycleBudget = Number.isNaN(_cbParsed0) ? 1 : _cbParsed0;
         const projectNameInput = document.getElementById('project-name-input');
-        const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+        const projectName = projectNameInput ? (projectNameInput.value.trim() || projectNameInput.dataset.suggested || '') : '';
 
         // If replacing an active mission, ask for confirmation
         if (!isComplete) {
@@ -782,7 +804,7 @@ export async function setMission() {
     const cycleBudget = Number.isNaN(_cbParsed1) ? 1 : _cbParsed1;
     const projectNameInput = document.getElementById('project-name-input');
     if (!projectNameInput) console.warn('setMission: project-name-input element not found');
-    const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+    const projectName = projectNameInput ? (projectNameInput.value.trim() || projectNameInput.dataset.suggested || '') : '';
 
     let currentMission;
     try {
@@ -861,7 +883,7 @@ export async function queueMission() {
     const cycleBudget = Number.isNaN(_cbParsed2) ? 1 : _cbParsed2;
     const maxIterations = parseInt(document.getElementById('max-iterations-input')?.value) || 10;
     const projectNameInput = document.getElementById('project-name-input');
-    const projectName = projectNameInput ? projectNameInput.value.trim() : '';
+    const projectName = projectNameInput ? (projectNameInput.value.trim() || projectNameInput.dataset.suggested || '') : '';
 
     // Add to queue via API
     try {
@@ -922,6 +944,13 @@ const MISSION_FILE_ALLOWED_MIME_PREFIXES = [
     'application/xml'
 ];
 const MISSION_FILE_ALLOWED_EXT_RE = /\.(txt|md|markdown|rst|csv|log|yaml|yml|json|xml|html|htm|js|ts|py|sh|css)$/i;
+const FILE_PREVIEW_IMAGE_MIME_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/bmp'
+]);
 
 function isMissionTextFile(file) {
     const mimeOk = file.type === ''
@@ -1117,6 +1146,17 @@ export function initProjectNameSuggestion() {
     const projectInput = document.getElementById('project-name-input');
 
     if (!missionInput || !projectInput) return;
+
+    api('/api/recommendations/projects?status=open')
+        .then(data => {
+            const datalist = document.getElementById('mission-project-list');
+            if (datalist && data.projects) {
+                datalist.innerHTML = data.projects
+                    .map(p => `<option value="${escapeHtml(p)}">`)
+                    .join('');
+            }
+        })
+        .catch(() => {});
 
     missionInput.addEventListener('input', function() {
         clearTimeout(projectSuggestTimeout);
@@ -1316,7 +1356,8 @@ export function openFilePreviewModal(name, contentUrl, downloadUrl, fileType) {
         .then(data => {
             if (data.error) throw new Error(data.error);
             if (data.file_type === 'image') {
-                body.innerHTML = `<img src="data:${data.mime_type};base64,${data.content}" alt="${_escFp(name)}">`;
+                const safeMimeType = FILE_PREVIEW_IMAGE_MIME_TYPES.has(data.mime_type) ? data.mime_type : 'image/png';
+                body.innerHTML = `<img src="data:${safeMimeType};base64,${data.content}" alt="${_escFp(name)}">`;
                 copyBtn.style.display = 'none';
             } else if (data.file_type === 'text') {
                 const truncNote = data.truncated
@@ -2822,12 +2863,14 @@ function renderStageAnalysis(stages) {
         const pct = ((data.total_tokens || 0) / maxTokens) * 100;
         const cost = data.cost || 0;
         const tokens = data.total_tokens || 0;
+        const safeStageName = escapeHtml(stageName);
+        const safeStageClass = String(stageName).replace(/[^a-zA-Z0-9_-]/g, '_');
 
         return `
             <div class="analytics-stage-bar">
-                <div class="analytics-stage-label">${stageName}</div>
+                <div class="analytics-stage-label">${safeStageName}</div>
                 <div class="analytics-stage-track">
-                    <div class="analytics-stage-fill ${stageName}" style="width: ${pct}%;">
+                    <div class="analytics-stage-fill ${safeStageClass}" style="width: ${pct}%;">
                         ${pct > 15 ? `<span>${formatNumber(tokens)}</span>` : ''}
                     </div>
                 </div>
@@ -2866,7 +2909,7 @@ function renderModelComparison(models) {
             <div class="analytics-model-card">
                 <div class="analytics-model-info">
                     <div class="analytics-model-name">
-                        ${displayName}
+                        ${escapeHtml(displayName)}
                         ${isPrimary ? '<span class="analytics-model-badge primary">Primary</span>' : ''}
                         ${isEfficient ? '<span class="analytics-model-badge efficient">Efficient</span>' : ''}
                     </div>
@@ -3315,11 +3358,11 @@ export async function refreshTokenIntegrityWidget() {
         badge.className = 'badge ' + (anomalyCt > 0 ? 'badge-danger' : 'badge-success');
 
         summary.innerHTML =
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + scanned + '</div><div class="atlasforge-stat-label">Scanned</div></div>' +
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + normal + '</div><div class="atlasforge-stat-label">Normal</div></div>' +
-            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value" style="color:' + (zeroCt > 0 ? 'var(--danger,#f85149)' : 'var(--accent-green,#3fb950)') + '">' + zeroCt + '</div><div class="atlasforge-stat-label">Zero-Token</div></div>';
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + escapeHtml(String(scanned)) + '</div><div class="atlasforge-stat-label">Scanned</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value">' + escapeHtml(String(normal)) + '</div><div class="atlasforge-stat-label">Normal</div></div>' +
+            '<div class="atlasforge-stat-box"><div class="atlasforge-stat-value" style="color:' + (zeroCt > 0 ? 'var(--danger,#f85149)' : 'var(--accent-green,#3fb950)') + '">' + escapeHtml(String(zeroCt)) + '</div><div class="atlasforge-stat-label">Zero-Token</div></div>';
 
-        const anomalies = (data.anomalies || []).filter(a => !a.mission_id.startsWith('test_'));
+        const anomalies = (data.anomalies || []).filter(a => !(a.mission_id || '').startsWith('test_'));
         if (anomalies.length === 0) {
             anomalyList.innerHTML = '<div style="color:var(--accent-green,#3fb950);font-size:0.85em;">All missions healthy</div>';
         } else {

@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import threading
 
@@ -31,8 +31,65 @@ from atlasforge_config import MISSION_QUEUE_PATH, STATE_DIR, BASE_DIR
 LLM_PROVIDER_PATH = STATE_DIR / "llm_provider.json"
 
 # Queue lock for thread safety
-_queue_lock = threading.Lock()
+_queue_lock = threading.RLock()
 _SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
+_VALID_QUEUE_MISSION_TYPES = frozenset({
+    "full_rd", "plan_only", "build_only", "test_red_team",
+    "bug_hunt", "research_only", "review_existing",
+})
+_DEFAULT_QUEUE_MISSION_TYPE = "full_rd"
+
+
+def _mark_recommendation_status(source, source_id, status: str, mission_id=None, closed_reason=None) -> None:
+    if source != "recommendation" or not source_id:
+        return
+    try:
+        from suggestion_lifecycle import mark_suggestion_status
+        mark_suggestion_status(
+            source_id,
+            status,
+            mission_id=mission_id,
+            closed_reason=closed_reason,
+        )
+    except Exception:
+        logger.warning(
+            "queue_scheduler: failed to mark recommendation %s as %s",
+            source_id,
+            status,
+            exc_info=True,
+        )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_iso() -> str:
+    return _utc_now().isoformat()
+
+
+def _parse_queue_datetime(value) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    ts = value.strip()
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(ts)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _queue_health_score(total_issues) -> int:
+    """Return a 0-100 score that degrades without saturating after a few issues."""
+    try:
+        issue_count = int(total_issues)
+    except (TypeError, ValueError, OverflowError):
+        issue_count = 0
+    issue_count = max(0, issue_count)
+    if issue_count == 0:
+        return 100
+    return max(1, round(100 / (1 + (issue_count / 6))))
 
 
 def _safe_priority_key(x):
@@ -56,7 +113,7 @@ def _normalize_llm_provider(provider) -> Optional[str]:
 
 def _safe_llm_option(value) -> Optional[str]:
     option = str(value or "").strip()
-    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,79}$", option):
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,79}$", option):
         return option
     return None
 
@@ -114,6 +171,27 @@ def _resolve_queue_llm_thinking(data: Dict[str, Any]) -> Optional[str]:
         or _safe_llm_option(data.get("thinking"))
         or _load_active_llm_selection(provider).get("thinking")
     )
+
+
+def _resolve_queue_mission_type(data: Dict[str, Any]) -> str:
+    """Resolve and strictly validate the queue execution profile."""
+    raw_mission_type = data.get("mission_type")
+    if not isinstance(raw_mission_type, str) or not raw_mission_type:
+        raw_mission_type = data.get("execution_profile")
+    if raw_mission_type is None or raw_mission_type == "":
+        return _DEFAULT_QUEUE_MISSION_TYPE
+    if not isinstance(raw_mission_type, str):
+        raise ValueError("mission_type must be a string")
+
+    try:
+        from af_engine.mission_profiles import is_valid_mission_type
+        is_valid = is_valid_mission_type(raw_mission_type)
+    except ImportError:
+        is_valid = raw_mission_type in _VALID_QUEUE_MISSION_TYPES
+
+    if not is_valid:
+        raise ValueError(f"Invalid mission_type: {raw_mission_type!r}")
+    return raw_mission_type
 
 
 # SocketIO instance (set by init function)
@@ -206,7 +284,7 @@ def _load_queue() -> Dict[str, Any]:
             "paused_at": None,
             "pause_reason": None
         },
-        "last_updated": datetime.now().isoformat()
+        "last_updated": _utc_now_iso()
     }
 
 
@@ -218,7 +296,7 @@ def _save_queue(queue: Dict[str, Any]) -> bool:
     """
     try:
         from io_utils import atomic_write_json
-        queue["last_updated"] = datetime.now().isoformat()
+        queue["last_updated"] = _utc_now_iso()
         # Keep both 'queue' and 'missions' keys in sync for compatibility
         if "missions" in queue:
             queue["queue"] = queue["missions"]
@@ -410,24 +488,12 @@ def add_to_queue():
                 priority = max(0, min(100, int(data.get("priority", 0))))
             except (ValueError, TypeError, OverflowError):
                 priority = 0
-            # Accept either `mission_type` (canonical for queue) or
-            # `execution_profile` (alias used by the suggestions UI). Treat
-            # None/empty/non-string in the canonical key as "fall through to
-            # alias" so callers sending `false` or `""` still get the intended
-            # profile.
-            _mt = data.get("mission_type")
-            if not isinstance(_mt, str) or not _mt:
-                _mt = data.get("execution_profile")
-            if not isinstance(_mt, str) or not _mt:
-                _mt = None
             try:
-                from af_engine.mission_profiles import is_valid_mission_type
-                if _mt is not None and not is_valid_mission_type(_mt):
-                    return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
-            except ImportError:
-                pass
+                mission_type = _resolve_queue_mission_type(data)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
             entry = {
-                "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+                "id": f"queue_{_utc_now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
                 "problem_statement": problem_statement,
                 "cycle_budget": cycle_budget,
                 "max_iterations": max_iterations,
@@ -435,11 +501,11 @@ def add_to_queue():
                 "llm_provider": _resolve_queue_llm_provider(data),
                 "llm_model": _resolve_queue_llm_model(data),
                 "llm_thinking": _resolve_queue_llm_thinking(data),
-                "mission_type": _mt if _mt is not None else "full_rd",
+                "mission_type": mission_type,
                 "source": data.get("source", "dashboard"),  # dashboard, email, recommendation
                 "source_id": data.get("source_id"),  # recommendation_id, email_id, etc.
                 "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
-                "added_at": datetime.now().isoformat(),
+                "added_at": _utc_now_iso(),
                 "status": "pending"
             }
             queue = _load_queue()
@@ -450,9 +516,13 @@ def add_to_queue():
                 key=lambda x: (_safe_priority_key(x), x.get("scheduled_start") or "9999", x.get("added_at", ""))
             )
             _save_queue(queue)
-
-        # Emit WebSocket update
-        _emit_queue_update(queue)
+            _mark_recommendation_status(
+                entry.get("source"),
+                entry.get("source_id"),
+                "queued",
+                closed_reason="queued",
+            )
+            _emit_queue_update(queue)
 
         return jsonify({
             "status": "added",
@@ -471,12 +541,20 @@ def remove_from_queue(queue_id):
         with _queue_lock:
             queue = _load_queue()
             original_length = len(queue["missions"])
+            removed_items = [m for m in queue["missions"] if m.get("id") == queue_id]
             queue["missions"] = [m for m in queue["missions"] if m.get("id") != queue_id]
 
             if len(queue["missions"]) == original_length:
                 return jsonify({"error": "Mission not found in queue"}), 404
 
             _save_queue(queue)
+            for item in removed_items:
+                _mark_recommendation_status(
+                    item.get("source"),
+                    item.get("source_id"),
+                    "open",
+                    closed_reason="queue_removed",
+                )
 
         # Emit WebSocket update
         _emit_queue_update(queue)
@@ -497,9 +575,17 @@ def clear_queue():
     try:
         with _queue_lock:
             queue = _load_queue()
+            cleared_items = list(queue["missions"])
             cleared_count = len(queue["missions"])
             queue["missions"] = []
             _save_queue(queue)
+            for item in cleared_items:
+                _mark_recommendation_status(
+                    item.get("source"),
+                    item.get("source_id"),
+                    "open",
+                    closed_reason="queue_cleared",
+                )
 
         # Emit WebSocket update
         _emit_queue_update(queue)
@@ -559,17 +645,23 @@ def reorder_queue():
 def start_next_mission():
     """Start the next mission in the queue (if AtlasForge is not busy)."""
     # Acquire queue processing lock to prevent race conditions
-    lock_acquired = False
+    processing_lock = None
     try:
         from queue_processing_lock import acquire_queue_lock, release_queue_lock
-        lock_acquired = acquire_queue_lock(source="queue_next_api", timeout=2, blocking=False)
-        if not lock_acquired:
+        if acquire_queue_lock(source="queue_next_api", timeout=2, blocking=False):
+            processing_lock = "external"
+        else:
             return jsonify({
                 "error": "Queue processing in progress",
                 "retry_after": 5
             }), 409
     except ImportError:
-        pass  # Lock module not available, proceed without lock
+        if not _queue_lock.acquire(blocking=False):
+            return jsonify({
+                "error": "Queue processing in progress",
+                "retry_after": 5
+            }), 409
+        processing_lock = "local"
 
     try:
         # Check if AtlasForge is currently running
@@ -599,10 +691,6 @@ def start_next_mission():
             queue["missions"] = queue["missions"][1:]
             _save_queue(queue)
 
-        # Start the mission by writing to mission.json
-        import uuid
-        from datetime import datetime
-
         mission_id = f"mission_{uuid.uuid4().hex[:8]}"
 
         # Determine workspace based on project_name (sanitized at add-time, but re-sanitize for defense-in-depth)
@@ -625,9 +713,9 @@ def start_next_mission():
             "max_iterations": next_mission.get("max_iterations", 10),
             "artifacts": {"plan": None, "code": [], "tests": []},
             "history": [],
-            "created_at": datetime.now().isoformat(),
-            "last_updated": datetime.now().isoformat(),
-            "cycle_started_at": datetime.now().isoformat(),
+            "created_at": _utc_now_iso(),
+            "last_updated": _utc_now_iso(),
+            "cycle_started_at": _utc_now_iso(),
             "cycle_budget": next_mission.get("cycle_budget", 3),
             "current_cycle": 1,
             "cycle_history": [],
@@ -643,6 +731,8 @@ def start_next_mission():
                 "queue_id": next_mission.get("id")
             }
         }
+        if next_mission.get("source") == "recommendation" and next_mission.get("source_id"):
+            new_mission["source_recommendation_id"] = next_mission.get("source_id")
         # Apply mission type profile (sets current_stage, enabled_stages, etc.)
         try:
             from af_engine.mission_profiles import apply_mission_type_profile
@@ -665,6 +755,13 @@ def start_next_mission():
         from io_utils import atomic_write_json
         try:
             atomic_write_json(STATE_DIR / "mission.json", new_mission)
+            _mark_recommendation_status(
+                next_mission.get("source"),
+                next_mission.get("source_id"),
+                "queued",
+                mission_id=mission_id,
+                closed_reason="mission_active",
+            )
         except Exception:
             try:
                 with _queue_lock:
@@ -697,7 +794,7 @@ def start_next_mission():
             "llm_provider": _resolve_queue_llm_provider(next_mission),
             "llm_model": _resolve_queue_llm_model(next_mission),
             "llm_thinking": _resolve_queue_llm_thinking(next_mission),
-            "signaled_at": datetime.now().isoformat(),
+            "signaled_at": _utc_now_iso(),
             "source": "queue_next_button"
         })
 
@@ -727,12 +824,17 @@ def start_next_mission():
         return jsonify({"error": "Internal error"}), 500
     finally:
         # Release queue processing lock
-        if lock_acquired:
+        if processing_lock == "external":
             try:
                 from queue_processing_lock import release_queue_lock
                 release_queue_lock()
             except ImportError:
                 logger.debug("queue_processing_lock not available; skipping release")
+        elif processing_lock == "local":
+            try:
+                _queue_lock.release()
+            except RuntimeError as e:
+                logger.debug("local queue processing lock release failed: %s", e)
 
 
 @queue_scheduler_bp.route('/settings', methods=['GET'])
@@ -848,18 +950,14 @@ def add_from_kb_recommendation():
         except (TypeError, ValueError, OverflowError):
             priority_val = 1
 
-        # Validate mission_type if provided
         try:
-            from af_engine.mission_profiles import is_valid_mission_type
-            _mt = data.get("mission_type")
-            if _mt is not None and not is_valid_mission_type(_mt):
-                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
-        except ImportError:
-            pass
+            mission_type = _resolve_queue_mission_type(data)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         # Add to queue
         entry = {
-            "id": f"queue_kbrec_{str(recommendation_id)[:8]}_{datetime.now().strftime('%H%M%S')}",
+            "id": f"queue_kbrec_{str(recommendation_id)[:8]}_{uuid.uuid4().hex[:8]}",
             "problem_statement": problem_statement,
             "mission_title": rec.get("title", problem_statement[:80]),
             "mission_description": problem_statement,
@@ -868,10 +966,10 @@ def add_from_kb_recommendation():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
-            "mission_type": data.get("mission_type", "full_rd"),
+            "mission_type": mission_type,
             "source": "kb_recommendation",
             "source_id": recommendation_id,
-            "added_at": datetime.now().isoformat(),
+            "added_at": _utc_now_iso(),
             "status": "pending"
         }
 
@@ -933,14 +1031,10 @@ def add_from_recommendation():
         except (TypeError, ValueError, OverflowError):
             priority_val = 1
 
-        # Validate mission_type if provided
         try:
-            from af_engine.mission_profiles import is_valid_mission_type
-            _mt = data.get("mission_type")
-            if _mt is not None and not is_valid_mission_type(_mt):
-                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
-        except ImportError:
-            pass
+            mission_type = _resolve_queue_mission_type(data)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         # Add to queue
         entry = {
@@ -951,10 +1045,10 @@ def add_from_recommendation():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
-            "mission_type": data.get("mission_type", "full_rd"),
+            "mission_type": mission_type,
             "source": "recommendation",
             "source_id": recommendation_id,
-            "added_at": datetime.now().isoformat(),
+            "added_at": _utc_now_iso(),
             "status": "pending"
         }
 
@@ -1211,17 +1305,13 @@ def add_to_queue_enhanced():
         scheduler = get_scheduler()
         estimated_minutes = scheduler.estimate_duration_from_history(problem_statement, cycle_budget)
 
-        # Validate mission_type if provided
         try:
-            from af_engine.mission_profiles import is_valid_mission_type
-            _mt = data.get("mission_type")
-            if _mt is not None and not is_valid_mission_type(_mt):
-                return jsonify({"error": f"Invalid mission_type: {_mt!r}"}), 400
-        except ImportError:
-            pass
+            mission_type = _resolve_queue_mission_type(data)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         # Create enhanced queue entry
         entry = {
-            "id": f"queue_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+            "id": f"queue_{_utc_now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
             "problem_statement": problem_statement,
             "mission_title": (problem_statement[:80] + "...") if len(problem_statement) > 80 else problem_statement,
             "mission_description": problem_statement,
@@ -1234,11 +1324,11 @@ def add_to_queue_enhanced():
             "llm_provider": _resolve_queue_llm_provider(data),
             "llm_model": _resolve_queue_llm_model(data),
             "llm_thinking": _resolve_queue_llm_thinking(data),
-            "mission_type": data.get("mission_type", "full_rd"),
+            "mission_type": mission_type,
             "source": data.get("source", "dashboard"),
             "source_id": data.get("source_id"),
             "project_name": _sanitize_project_name(data.get("project_name")),  # Sanitized to prevent path traversal
-            "added_at": datetime.now().isoformat(),
+            "added_at": _utc_now_iso(),
             "status": "pending",
             "tags": [t for t in data.get("tags", []) if isinstance(t, str)][:20] if isinstance(data.get("tags"), list) else []
         }
@@ -1482,7 +1572,7 @@ def get_queue_health():
     try:
         queue = _load_queue()
         missions = queue.get("missions", [])
-        now = datetime.now()
+        now = _utc_now()
         stale_threshold_hours = 24  # Configurable
 
         blocked = []
@@ -1534,12 +1624,9 @@ def get_queue_health():
             # Check if stale
             if m.get('added_at'):
                 try:
-                    ts = m['added_at']
-                    for suffix in ('+00:00', 'Z'):
-                        if ts.endswith(suffix):
-                            ts = ts[:-len(suffix)]
-                            break
-                    added = datetime.fromisoformat(ts)
+                    added = _parse_queue_datetime(m['added_at'])
+                    if added is None:
+                        continue
                     hours_queued = (now - added).total_seconds() / 3600
                     if hours_queued > stale_threshold_hours:
                         stale.append({
@@ -1556,18 +1643,10 @@ def get_queue_health():
         # Detect overlaps (within 30 min window)
         for i in range(len(scheduled) - 1):
             try:
-                ts1 = scheduled[i][1]
-                for suffix in ('+00:00', 'Z'):
-                    if ts1.endswith(suffix):
-                        ts1 = ts1[:-len(suffix)]
-                        break
-                t1 = datetime.fromisoformat(ts1)
-                ts2 = scheduled[i+1][1]
-                for suffix in ('+00:00', 'Z'):
-                    if ts2.endswith(suffix):
-                        ts2 = ts2[:-len(suffix)]
-                        break
-                t2 = datetime.fromisoformat(ts2)
+                t1 = _parse_queue_datetime(scheduled[i][1])
+                t2 = _parse_queue_datetime(scheduled[i+1][1])
+                if t1 is None or t2 is None:
+                    continue
                 diff_minutes = abs((t2 - t1).total_seconds() / 60)
                 if diff_minutes < 30:
                     conflicts.append({
@@ -1579,7 +1658,7 @@ def get_queue_health():
                 logger.debug(f"Error checking scheduling conflict: {e}")
 
         total_issues = len(blocked) + len(stale) + len(conflicts)
-        health_score = max(0, 100 - (total_issues * 15))  # -15 per issue
+        health_score = _queue_health_score(total_issues)
 
         return jsonify({
             'blocked': blocked,
@@ -1663,16 +1742,38 @@ def get_dependency_tree():
 
 @queue_scheduler_bp.route('/workspace-projects')
 def list_workspace_projects():
-    """List existing project directories in the workspace for autocomplete."""
-    try:
-        workspace_dir = BASE_DIR / "workspace"
-        if not workspace_dir.exists():
-            return jsonify({"projects": []})
+    """List existing projects for autocomplete.
 
-        projects = sorted([
-            d.name for d in workspace_dir.iterdir()
-            if d.is_dir() and not d.name.startswith('.')
-        ])
+    Prefer projects represented in the Mission Suggestion DB, then include
+    workspace directories as a fallback/source of additional options.
+    """
+    try:
+        projects = []
+        try:
+            from suggestion_storage import get_storage
+            storage = get_storage()
+            projects.extend(p.get("project_name") for p in storage.get_projects(status="open"))
+        except Exception:
+            logger.debug("Could not load suggestion DB projects", exc_info=True)
+
+        try:
+            from Mission_Manager.project_registry import workspace_projects, canonicalize_project_name, project_slug
+            projects.extend(workspace_projects())
+            deduped = {}
+            for project in projects:
+                canonical = canonicalize_project_name(project)
+                slug = project_slug(canonical)
+                if canonical and slug:
+                    deduped.setdefault(slug, canonical)
+            projects = sorted(deduped.values(), key=str.lower)
+        except Exception:
+            workspace_dir = BASE_DIR / "workspace"
+            if workspace_dir.exists():
+                projects.extend([
+                    d.name for d in workspace_dir.iterdir()
+                    if d.is_dir() and not d.name.startswith('.')
+                ])
+            projects = sorted(set(p for p in projects if p), key=str.lower)
         return jsonify({"projects": projects})
     except Exception as e:
         logger.error(f"Error listing workspace projects: {e}")

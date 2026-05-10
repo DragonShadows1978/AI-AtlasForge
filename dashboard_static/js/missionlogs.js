@@ -46,10 +46,10 @@ function renderMissionLogsList(logs) {
 
         return `
             <div class="missionlog-item ${log.mission_id === selectedMissionLogId ? 'selected' : ''}"
-                 onclick="selectMissionLog('${log.mission_id}')">
+                 data-mission-id="${escapeHtml(log.mission_id || '')}">
                 <div class="missionlog-header">
-                    <span class="missionlog-id">${shortId}</span>
-                    <span class="missionlog-status ${statusClass}">${log.outcome || 'Unknown'}</span>
+                    <span class="missionlog-id">${escapeHtml(shortId)}</span>
+                    <span class="missionlog-status ${statusClass}">${escapeHtml(log.outcome || 'Unknown')}</span>
                 </div>
                 <div class="missionlog-meta">
                     <span>${date}</span>
@@ -62,6 +62,9 @@ function renderMissionLogsList(logs) {
     }).join('');
 
     container.innerHTML = html;
+    container.querySelectorAll('.missionlog-item[data-mission-id]').forEach(item => {
+        item.addEventListener('click', () => selectMissionLog(item.dataset.missionId || ''));
+    });
 }
 
 async function selectMissionLog(missionId) {
@@ -103,7 +106,7 @@ function renderMissionLogDetails(data) {
             <div class="stages-timeline">
                 ${data.stage_history.map(s => `
                     <div class="stage-item">
-                        <span class="stage-name">${s.stage}</span>
+                        <span class="stage-name">${escapeHtml(s.stage || '')}</span>
                         <span class="stage-time">${formatDuration(s.duration || 0)}</span>
                     </div>
                 `).join('')}
@@ -118,7 +121,7 @@ function renderMissionLogDetails(data) {
             <div class="learnings-list">
                 ${data.learnings.slice(0, 5).map(l => `
                     <div class="learning-preview">
-                        <span class="learning-type-badge ${l.type || ''}">${l.type || 'unknown'}</span>
+                        <span class="learning-type-badge ${String(l.type || '').replace(/[^a-zA-Z0-9_-]/g, '_')}">${escapeHtml(l.type || 'unknown')}</span>
                         ${escapeHtml(l.title || 'Untitled')}
                     </div>
                 `).join('')}
@@ -130,7 +133,7 @@ function renderMissionLogDetails(data) {
     container.innerHTML = `
         <div class="missionlog-detail-header">
             <h3>${escapeHtml(data.mission_id || 'Unknown Mission')}</h3>
-            <span class="missionlog-status ${statusClass}">${data.outcome || 'Unknown'}</span>
+            <span class="missionlog-status ${statusClass}">${escapeHtml(data.outcome || 'Unknown')}</span>
         </div>
 
         <div class="missionlog-detail-section">
@@ -169,10 +172,12 @@ function renderMissionLogDetails(data) {
         ${learningsHtml}
 
         <div class="missionlog-actions">
-            <button class="btn" onclick="exportMissionLog('${data.mission_id}')">Export JSON</button>
-            <button class="btn" onclick="viewMissionLogRaw('${data.mission_id}')">View Raw</button>
+            <button class="btn" id="missionlog-export-btn">Export JSON</button>
+            <button class="btn" id="missionlog-raw-btn">View Raw</button>
         </div>
     `;
+    document.getElementById('missionlog-export-btn')?.addEventListener('click', () => exportMissionLog(data.mission_id || ''));
+    document.getElementById('missionlog-raw-btn')?.addEventListener('click', () => viewMissionLogRaw(data.mission_id || ''));
 }
 
 async function exportMissionLog(missionId) {

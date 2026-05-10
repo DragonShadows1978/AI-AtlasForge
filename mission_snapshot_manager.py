@@ -33,6 +33,18 @@ BASE_DIR = Path(__file__).parent
 STATE_DIR = BASE_DIR / "state"
 MISSION_PATH = STATE_DIR / "mission.json"
 SNAPSHOTS_DIR = BASE_DIR / ".git" / "mission_snapshots"
+ACTIVE_MISSION_STAGES = frozenset({
+    "PLANNING",
+    "BUILDING",
+    "TESTING",
+    "ANALYZING",
+    "CYCLE_END",
+})
+
+
+def _is_active_mission_stage(stage: Any) -> bool:
+    """Return True only for stages that can still produce mission progress."""
+    return isinstance(stage, str) and stage in ACTIVE_MISSION_STAGES
 
 
 @dataclass
@@ -611,7 +623,7 @@ class SnapshotScheduler:
                 mission = json.load(f)
 
             stage = mission.get('current_stage', '')
-            return stage not in (None, '', 'COMPLETE')
+            return _is_active_mission_stage(stage)
         except (FileNotFoundError, AttributeError, json.JSONDecodeError) as e:
             logger.debug(f"is_active_mission check failed: {e}")
             return False
@@ -701,7 +713,7 @@ class StaleBackupMonitor:
                     with open(MISSION_PATH, 'r') as f:
                         mission = json.load(f)
                     stage = mission.get('current_stage', '')
-                    return stage not in (None, '', 'COMPLETE')
+                    return _is_active_mission_stage(stage)
                 return False
 
             # Check if mission is active
@@ -709,7 +721,7 @@ class StaleBackupMonitor:
                 with open(MISSION_PATH, 'r') as f:
                     mission = json.load(f)
                 stage = mission.get('current_stage', '')
-                if stage in (None, '', 'COMPLETE'):
+                if not _is_active_mission_stage(stage):
                     return False  # Not stale if no active mission
             else:
                 return False  # No mission file means not stale
@@ -843,7 +855,7 @@ def check_recovery_needed() -> Optional[Dict[str, Any]]:
         mission_id = mission.get('mission_id', '')
 
         # Check if mission was in progress
-        if stage in (None, '', 'COMPLETE'):
+        if not _is_active_mission_stage(stage):
             return None
 
         # Check for recovery checkpoint
@@ -893,7 +905,7 @@ def get_backup_status_data() -> Dict[str, Any]:
             with open(MISSION_PATH, 'r') as f:
                 mission = json.load(f)
             stage = mission.get('current_stage', '')
-            is_active = stage not in (None, '', 'COMPLETE')
+            is_active = _is_active_mission_stage(stage)
 
         return {
             'type': 'backup_status',

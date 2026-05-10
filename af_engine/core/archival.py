@@ -592,7 +592,8 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
         "success": False,
         "transcripts_archived": 0,
         "archive_path": None,
-        "errors": []
+        "errors": [],
+        "warnings": []
     }
 
     if not isinstance(mission, dict):
@@ -609,13 +610,21 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
                 timestamp_clean = datetime.now(timezone.utc).isoformat().replace(":", "-").replace(".", "-")[:19]
             mission_id = f"mission_{timestamp_clean}"
         else:
-            mission_id = str(mission_id)  # Coerce to str for safe Path operations
+            if not isinstance(mission_id, str):
+                raise ValueError(f"mission_id must be a string, got {type(mission_id).__name__}")
             if '/' in mission_id or '\\' in mission_id:
                 raise ValueError("invalid mission_id: path separators not allowed")
             if '\x00' in mission_id:
                 raise ValueError("invalid mission_id: contains null bytes")
-            if any(ord(c) < 32 or ord(c) == 127 or ord(c) in (0x2028, 0x2029) for c in mission_id):
-                raise ValueError("invalid mission_id: contains control characters or Unicode line separators not valid in directory names")
+            if any(
+                ord(c) < 32
+                or ord(c) == 127
+                or ord(c) in (0x200E, 0x200F, 0x2028, 0x2029)
+                or 0x202A <= ord(c) <= 0x202E
+                or 0x2066 <= ord(c) <= 0x2069
+                for c in mission_id
+            ):
+                raise ValueError("invalid mission_id: contains control characters, Unicode line separators, or bidi controls")
             if not mission_id.strip():
                 raise ValueError("invalid mission_id: whitespace-only mission_id is not a valid directory name")
             if len(mission_id) > 255:
@@ -626,7 +635,7 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
 
         raw_created = mission.get("created_at")
         if not isinstance(raw_created, str) or not raw_created.strip():
-            result["errors"].append(f"Invalid or missing created_at: {raw_created!r}, using current time")
+            result["warnings"].append(f"Invalid or missing created_at: {raw_created!r}, using current time")
             start_dt = datetime.now(timezone.utc)
         else:
             try:
@@ -634,7 +643,7 @@ def archive_mission_transcripts(mission: Dict) -> Dict:
                 if start_dt.tzinfo is None:
                     start_dt = start_dt.replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
-                result["errors"].append(f"Unparseable created_at: {raw_created!r}, using current time")
+                result["warnings"].append(f"Unparseable created_at: {raw_created!r}, using current time")
                 start_dt = datetime.now(timezone.utc)
 
         raw_updated = mission.get("last_updated")

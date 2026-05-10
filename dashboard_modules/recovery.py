@@ -10,6 +10,7 @@ Contains routes for:
 from flask import Blueprint, jsonify, request, Response
 from datetime import datetime
 import json
+import re
 
 # Create Blueprint
 recovery_bp = Blueprint('recovery', __name__)
@@ -24,6 +25,13 @@ def init_recovery_blueprint(mission_path, io_utils_module):
     global MISSION_PATH, io_utils
     MISSION_PATH = mission_path
     io_utils = io_utils_module
+
+
+def _safe_export_filename_component(value: str) -> str:
+    """Return an HTTP-header-safe filename component."""
+    cleaned = re.sub(r'[\r\n\x00-\x1f\x7f]', '_', str(value or 'mission'))
+    cleaned = re.sub(r'[^A-Za-z0-9_.-]+', '_', cleaned).strip('._')
+    return cleaned[:120] or 'mission'
 
 
 def _get_snapshot_summary() -> dict:
@@ -310,7 +318,9 @@ def api_decision_graph_export(mission_id):
                 csv_content,
                 mimetype='text/csv',
                 headers={
-                    'Content-Disposition': f'attachment; filename={mission_id}_decision_graph.csv'
+                    'Content-Disposition': (
+                        f'attachment; filename={_safe_export_filename_component(mission_id)}_decision_graph.csv'
+                    )
                 }
             )
 

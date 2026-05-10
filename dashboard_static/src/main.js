@@ -140,6 +140,10 @@ window.toggleMergeSelection = modals.toggleMergeSelection;
 window.openMergeModal = modals.openMergeModal;
 window.closeMergeModal = modals.closeMergeModal;
 window.executeMerge = modals.executeMerge;
+// Manage suggestions functions
+window.openManageSuggestions = modals.openManageSuggestions;
+window.closeManageSuggestions = modals.closeManageSuggestions;
+window.filterManageSuggestions = modals.filterManageSuggestions;
 // Sorting and health functions
 window.sortRecommendations = modals.sortRecommendations;
 window.toggleSortDirection = modals.toggleSortDirection;
@@ -151,6 +155,8 @@ window.proceedToMerge = modals.proceedToMerge;
 window.addNewSuggestion = modals.addNewSuggestion;
 // Filter, pagination, and quick-add functions (Cycle 3)
 window.filterByTag = modals.filterByTag;
+window.filterByProject = modals.filterByProject;
+window.filterRecommendationsBySearch = modals.filterRecommendationsBySearch;
 window.filterByHealth = modals.filterByHealth;
 window.clearAllFilters = modals.clearAllFilters;
 window.submitQuickAdd = modals.submitQuickAdd;
@@ -390,6 +396,9 @@ async function lazyLoad(moduleName) {
             window.loadAllLessons = module.loadAllLessons;
             window.searchLessons = module.searchLessons;
             window.showLearningDetails = module.showLearningDetails;
+            window.onLessonsFilterChange = module.onLessonsFilterChange;
+            window.viewInvestigationReport = module.viewInvestigationReport;
+            window.closeInvestigationReportModal = module.closeInvestigationReportModal;
             window.showLessonsSubtab = module.showLessonsSubtab;
             window.loadLearningChains = module.loadLearningChains;
             window.toggleChain = module.toggleChain;
