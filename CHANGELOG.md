@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.6.2] - 2026-05-10
+
+### Other
+
+- Constrain Codex testing stage writes
+
+### Code Changes
+
+- **Modified** `WebProxy/mcp_server.py` — `_handle_atlasforge_write_mutation_artifact`
+- **Modified** `WebProxy/tests/test_mcp_stage_guard.py` — `test_testing_allows_testrunner_summary_artifact`, `test_testing_rejects_source_write_path`, `test_testing_allows_mutation_artifact_code_copy`, `test_testing_mutation_artifact_rejects_outside_mutation_folder`, `test_planning_rejects_mutation_artifact_tool`
+- **Modified** `af_engine/stages/testing_runner.py`
+- **Modified** `atlasforge_conductor.py`
+- **Modified** `tests/test_llm_provider_selection.py` — `test_codex_testing_uses_read_only_stage_sandbox`
+
+### Stats
+
+```
+ WebProxy/tests/test_mcp_stage_guard.py | 73 ++++++++++++++++++++++++++++
+ af_engine/stages/testing_runner.py     |  6 ++-
+ atlasforge_conductor.py                |  8 +++-
+ tests/test_llm_provider_selection.py   | 13 +++++
+ 5 files changed, 177 insertions(+), 10 deletions(-)
+```
+
+_Full diff: `git diff v2.6.1..v2.6.2`_
+
+
 ## [2.6.1] - 2026-05-10
 
 ### Other
