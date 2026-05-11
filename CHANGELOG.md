@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.7.1] - 2026-05-10
+
+### Fixed
+
+- Bug fix patch
+
+### Code Changes
+
+- **Modified** `WebProxy/cli.py`
+- **Added** `af_engine/agent_process_guard.py` — `_joined_args`, `_mentions_atlasforge`, `targets_protected_process`, `blocked_reason`, `_real_command_path`
+- **Modified** `af_engine/mission_profiles.py`
+- **Modified** `af_engine/stages/analyzing.py`
+- **Modified** `af_engine/stages/planning.py` — `_as_list`, `_render_bullets`, `_render_planning_artifact`, `_render_research_artifact`, `_ensure_planning_artifacts_from_response`
+- **Modified** `af_engine/stages/testing_runner.py`
+- **Modified** `af_engine/tests/test_e2e_integration.py` — `test_planning_handler_materializes_missing_artifacts_from_response`, `test_plan_only_planning_transitions_to_analyzing`
+- **Modified** `af_engine/tests/test_mission_profiles.py` — `test_plan_only_building_target_redirects_to_analyzing`
+- **Modified** `atlasforge_conductor.py` — `apply_agent_process_guard_env`
+- **Modified** `dashboard_modules/__init__.py`
+- **Modified** `dashboard_modules/core.py`
+- **Added** `dashboard_modules/pattern_quality.py` — `init_pattern_quality_blueprint`, `_empty_payload`, `_candidate_afterimage_paths`, `_get_backend`, `_with_backend`
+- **Modified** `dashboard_static/css/main.css`
+- **Modified** `dashboard_static/src/drag-drop.js` — `sortByLabel`, `renderWidget`
+- **Modified** `dashboard_static/src/main.js`
+- **Added** `dashboard_static/src/modules/pattern-quality.js` — `escapeHtml`, `setText`, `number`, `quality`, `renderDecayCurve`
+- **Modified** `dashboard_templates/main_bundled.html`
+- **Modified** `dashboard_v2.py`
+- **Modified** `investigation_engine.py` — `_stream_label`, `_apply_agent_process_guard_env`
+- **Added** `tests/test_agent_process_guard.py` — `test_blocks_pkill_pattern_that_targets_dashboard`, `test_blocks_mutating_systemctl_for_atlasforge_service`, `test_allows_unrelated_pkill_pattern`, `test_detects_atlasforge_service_names`
+
+### Stats
+
+```
+ tests/test_investigation_codex_streaming.py     |  70 ++++++++++
+ tests/test_llm_provider_selection.py            |  26 ++++
+ tests/test_pattern_quality_dashboard.py         | 116 ++++++++++++++++
+ tests/test_recommendations_api_validation.py    |  53 +++++++-
+ 28 files changed, 1341 insertions(+), 48 deletions(-)
+```
+
+_Full diff: `git diff v2.7.0..v2.7.1`_
+
+
 ## [2.7.0] - 2026-05-10
 
 ### Fixed
