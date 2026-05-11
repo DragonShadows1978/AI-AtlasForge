@@ -39,11 +39,11 @@ MISSION_TYPE_PROFILES: Dict[str, Dict[str, Any]] = {
     "plan_only": {
         "label": "Plan Only",
         "start_stage": "PLANNING",
-        "enabled_stages": ["PLANNING"],
+        "enabled_stages": ["PLANNING", "ANALYZING"],
         "stop_after_profile_complete": True,
         "allow_code_writes": False,
         "prompt_modifier": (
-            "Produce a clear implementation plan and stop. "
+            "Produce a clear implementation plan, then analyze it into a gated build follow-up. "
             "Do not implement code changes."
         ),
     },

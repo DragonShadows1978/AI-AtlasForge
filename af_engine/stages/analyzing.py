@@ -33,7 +33,7 @@ class AnalyzingStageHandler(BaseStageHandler):
     """
 
     stage_name = "ANALYZING"
-    valid_from_stages = ["TESTING"]
+    valid_from_stages = ["TESTING", "PLANNING"]
 
     def get_prompt(self, context: StageContext) -> str:
         """Generate the ANALYZING stage prompt."""

@@ -74,6 +74,7 @@ from .artifact_health import artifact_health_bp, init_artifact_health_blueprint
 from .mission_params import mission_params_bp, init_mission_params_blueprint, get_mission_params
 from .pool_manager import pool_manager_bp, init_pool_manager_blueprint
 from .conductor_status import conductor_status_bp, init_conductor_status_blueprint
+from .pattern_quality import pattern_quality_bp, init_pattern_quality_blueprint
 
 __all__ = [
     # Blueprints
@@ -88,6 +89,7 @@ __all__ = [
     'url_handlers_bp',
     'queue_scheduler_bp',
     'semantic_bp',
+    'pattern_quality_bp',
     # Initialization functions
     'init_core_blueprint',
     'init_analytics_blueprint',
@@ -95,6 +97,7 @@ __all__ = [
     'init_investigation_blueprint',
     'init_queue_scheduler_blueprint',
     'init_semantic_blueprint',
+    'init_pattern_quality_blueprint',
     'version_bp',
     'init_version_blueprint',
     # Bundle version (cache-busting)

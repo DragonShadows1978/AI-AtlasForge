@@ -154,6 +154,7 @@ BASE_DIR = Path(os.environ.get("ATLASFORGE_ROOT", str(_SCRIPT_DIR)))
 STATE_DIR = BASE_DIR / "state"
 WORKSPACE_DIR = BASE_DIR / "workspace"
 LOG_DIR = BASE_DIR / "logs"
+AGENT_SAFE_BIN_DIR = BASE_DIR / "agent_safe_bin"
 
 # State files
 CLAUDE_STATE_PATH = STATE_DIR / "claude_state.json"
@@ -593,6 +594,15 @@ structured summary through `AtlasForgeSubmitPatchSummary` when useful.
 You are running under AtlasForge as Codex for mission `{mission_id}`.
 Use `AtlasForgeGetStagePolicy` before writing any stage artifact through MCP.
 """
+
+
+def apply_agent_process_guard_env(env: Dict[str, str]) -> Dict[str, str]:
+    """Prepend wrappers that prevent mission agents from killing AtlasForge."""
+    if AGENT_SAFE_BIN_DIR.is_dir():
+        existing_path = env.get("PATH") or os.defpath
+        env["PATH"] = f"{AGENT_SAFE_BIN_DIR}{os.pathsep}{existing_path}"
+        env["ATLASFORGE_AGENT_PROCESS_GUARD"] = "1"
+    return env
 
 
 def build_llm_command(
@@ -1161,6 +1171,7 @@ def invoke_llm(
         if provider == "codex":
             # Give the MCP stage-guard server explicit runtime context. This is
             # Codex-only and leaves Claude's native InitGuard/tool path alone.
+            env = apply_agent_process_guard_env(env)
             _write_codex_stage_guard_context(stage, mission)
             env["ATLASFORGE_ROOT"] = str(BASE_DIR)
             env["ATLASFORGE_ACTIVE_PROVIDER"] = "codex"
@@ -1234,7 +1245,7 @@ def invoke_llm(
                 elif provider == "codex":
                     _stream_thread = threading.Thread(
                         target=_stream_codex_fn,
-                        args=(proc, _stream_file, str(cwd), _process_started_at),
+                        args=(proc, _stream_file, str(cwd), _process_started_at, _agent_id),
                         daemon=True,
                         name=f"stream-{_agent_id}"
                     )

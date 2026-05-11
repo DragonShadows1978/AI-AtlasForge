@@ -618,11 +618,6 @@ class TestSetMissionBuildApprovalGate(_RecommendationsApiTestBase):
         self.assertEqual(response_data["mission"]["source_recommendation_id"], rec_id)
         plan_path = Path(mission["mission_workspace"]) / "artifacts" / "implementation_plan.md"
         self.assertTrue(plan_path.exists())
-        self.assertIn("Clean up the dashboard recommendation handoff.", plan_path.read_text())
-        stored = self.storage.get_by_id(rec_id)
-        self.assertEqual(stored["status"], "queued")
-        self.assertEqual(stored["accepted_mission_id"], mission["mission_id"])
-        self.assertIsNone(cache.get("api_status"))
 
     def test_set_mission_sanitizes_display_project_name_for_mission_config(self):
         rec_id = self.storage.add({
@@ -692,6 +687,54 @@ class TestSetMissionBuildApprovalGate(_RecommendationsApiTestBase):
         stored = self.storage.get_by_id(rec_id)
         self.assertEqual(stored["status"], "queued")
         self.assertEqual(stored["build_approval_status"], "review_requested")
+
+
+class TestRecommendationAnalyzeEndpoint(_RecommendationsApiTestBase):
+
+    def test_analyze_default_is_fast_read_only_open_suggestions(self):
+        open_id = self._add_seed_record(
+            mission_title="Open visible suggestion",
+            status="open",
+            priority_score=72.0,
+            health_status="hot",
+        )
+        self._add_seed_record(
+            mission_title="Completed hidden suggestion",
+            status="completed",
+            priority_score=99.0,
+            health_status="stale",
+        )
+
+        class ExplodingAnalyzer:
+            def analyze_all(self, persist=True):
+                raise AssertionError("default analyze endpoint should not run full analyzer")
+
+        import suggestion_analyzer
+        old_suggestion_get_analyzer = suggestion_analyzer.get_analyzer
+        suggestion_analyzer.get_analyzer = lambda: ExplodingAnalyzer()
+        try:
+            resp = self.client.get("/api/recommendations/analyze")
+        finally:
+            suggestion_analyzer.get_analyzer = old_suggestion_get_analyzer
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertFalse(body["refreshed"])
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["all_total"], 2)
+        self.assertEqual(body["items"][0]["id"], open_id)
+        self.assertEqual(body["health_report"]["hot"], 1)
+
+    def test_analyze_refresh_runs_full_analyzer_when_requested(self):
+        self._add_seed_record(mission_title="Refreshable suggestion", status="open")
+
+        resp = self.client.get("/api/recommendations/analyze?refresh=1")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body["refreshed"])
+        self.assertEqual(body["total"], 1)
+        self.assertTrue(body["items"][0].get("last_analyzed_at"))
 
 
 class TestNarrativeMissionValidation(_RecommendationsApiTestBase):

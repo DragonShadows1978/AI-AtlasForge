@@ -173,6 +173,85 @@ class TestStageHandlerProcessing:
         assert result.status == "plan_complete"
 
     @pytest.mark.unit
+    def test_planning_handler_materializes_missing_artifacts_from_response(
+        self,
+        planning_handler,
+        stage_context_factory,
+        claude_response_factory
+    ):
+        """A valid plan response should not loop forever if the agent artifact write path failed."""
+        from pathlib import Path
+
+        context = stage_context_factory()
+        response = claude_response_factory(
+            "PLANNING",
+            status="plan_complete",
+            understanding="Build the requested feature in scoped increments.",
+            research_conducted=["codebase scan: existing stage handlers own transitions"],
+            sources_consulted=["local codebase"],
+            research_summary={
+                "topics_researched": ["stage artifact persistence"],
+                "key_findings": ["The conductor can persist structured planning responses."],
+                "knowledge_gaps_identified": [],
+                "confidence_level": "medium",
+            },
+            key_requirements=["Persist implementation plan", "Persist research notes"],
+            approach="Materialize artifacts from the structured planning response.",
+            steps=[
+                {"step": 1, "description": "Write fallback research artifact", "files": ["research/research_findings.md"]},
+                {"step": 2, "description": "Write fallback plan artifact", "files": ["artifacts/implementation_plan.md"]},
+            ],
+            success_criteria=["Planning advances after artifacts are materialized"],
+        )
+
+        result = planning_handler.process_response(response, context)
+
+        findings_path = Path(context.research_dir) / "research_findings.md"
+        plan_path = Path(context.artifacts_dir) / "implementation_plan.md"
+        assert result.success is True
+        assert result.next_stage == "BUILDING"
+        assert findings_path.exists()
+        assert findings_path.stat().st_size >= 500
+        assert plan_path.exists()
+        assert plan_path.stat().st_size >= 200
+
+    @pytest.mark.unit
+    def test_plan_only_planning_transitions_to_analyzing(
+        self,
+        planning_handler,
+        stage_context_factory,
+        claude_response_factory
+    ):
+        """Plan-only missions must reach ANALYZING to create the gated Build Only follow-up."""
+        from pathlib import Path
+        mission = {
+            "mission_id": "plan_only_test",
+            "problem_statement": "Create a plan for a build-only follow-up",
+            "original_problem_statement": "Create a plan for a build-only follow-up",
+            "mission_type": "plan_only",
+            "current_stage": "PLANNING",
+            "enabled_stages": ["PLANNING", "ANALYZING"],
+            "max_iterations": 10,
+            "history": [],
+            "cycle_history": [],
+            "preferences": {},
+            "success_criteria": [],
+        }
+        context = stage_context_factory(mission=mission)
+        response = claude_response_factory("PLANNING", status="plan_complete")
+
+        Path(context.research_dir).mkdir(parents=True, exist_ok=True)
+        Path(context.artifacts_dir).mkdir(parents=True, exist_ok=True)
+        (Path(context.research_dir) / "research_findings.md").write_text("# Research\n\n" + "Findings. " * 60)
+        (Path(context.artifacts_dir) / "implementation_plan.md").write_text("# Plan\n\n" + "Steps. " * 40)
+
+        result = planning_handler.process_response(response, context)
+
+        assert result.success is True
+        assert result.next_stage == "ANALYZING"
+        assert result.status == "plan_complete"
+
+    @pytest.mark.unit
     def test_building_handler_transitions_to_testing(
         self,
         building_handler,

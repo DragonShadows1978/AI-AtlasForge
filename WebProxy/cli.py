@@ -40,6 +40,20 @@ _REPO_MCP_CONFIG = _REPO_ROOT / "WebProxy" / "configs" / "mcp.json"
 # Built-in tools whose calls must be redirected to the MCP proxy.
 _REDIRECTED_TOOLS = frozenset({"WebSearch", "WebFetch"})
 
+# AtlasForge-owned MCP tools used by non-interactive Codex mission runs.
+# Without explicit auto-approval, `codex exec` can treat these as approval
+# requests and return "user cancelled MCP tool call" in headless missions.
+_CODEX_AUTO_APPROVED_MCP_TOOLS = (
+    "WebSearch",
+    "WebFetch",
+    "WebResearch",
+    "AtlasForgeGetStagePolicy",
+    "AtlasForgeSubmitPlan",
+    "AtlasForgeWriteStageNote",
+    "AtlasForgeSubmitReview",
+    "AtlasForgeSubmitPatchSummary",
+)
+
 
 def _resolve_mcp_config_path() -> str:
     """Resolve the MCP config path at call-time.
@@ -118,6 +132,14 @@ def codex_proxy_cli_args(server_name: str = "atlasforge-web-proxy") -> list[str]
     return [
         "-c", f"mcp_servers.{server_name}.command={json.dumps(command)}",
         "-c", f"mcp_servers.{server_name}.args={json.dumps(args)}",
+        *[
+            item
+            for tool_name in _CODEX_AUTO_APPROVED_MCP_TOOLS
+            for item in (
+                "-c",
+                f"mcp_servers.{server_name}.tools.{tool_name}.approval_mode=\"approve\"",
+            )
+        ],
     ]
 
 

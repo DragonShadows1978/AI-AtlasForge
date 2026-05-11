@@ -1435,14 +1435,17 @@ def api_merge_recommendations():
 @core_bp.route('/api/recommendations/analyze', methods=['GET'])
 def api_analyze_recommendations():
     """
-    Analyze all recommendations: auto-tag, prioritize, and health-check.
+    Return analyzed recommendations for the widget.
+
+    The default path is intentionally read-only and fast: it returns already
+    stored analyzer fields for open suggestions. Use ?refresh=1 for the
+    expensive full analyzer pass that recomputes tags, priorities, health, and
+    writes analyzer metadata back to SQLite.
 
     Returns:
         JSON with items sorted by priority, health_report, and total count
     """
     try:
-        from suggestion_analyzer import get_analyzer
-        analyzer = get_analyzer()
         storage = _get_suggestion_storage()
         if storage:
             try:
@@ -1450,14 +1453,57 @@ def api_analyze_recommendations():
                 reconcile_suggestion_statuses(storage)
             except Exception:
                 logger.debug("analyze status reconciliation failed", exc_info=True)
-        result = analyzer.analyze_all(persist=True)
-        all_items = result.get("items", [])
-        visible_items = [
-            item for item in all_items
-            if item.get("status", "open") == "open"
-        ]
         project_filter = request.args.get("project") or request.args.get("project_name")
-        if project_filter:
+
+        refresh = str(request.args.get("refresh", "")).strip().lower() in {"1", "true", "yes", "on"}
+        if refresh:
+            from suggestion_analyzer import get_analyzer
+            analyzer = get_analyzer()
+            result = analyzer.analyze_all(persist=True)
+            all_items = result.get("items", [])
+            visible_items = [
+                item for item in all_items
+                if item.get("status", "open") == "open"
+            ]
+        elif storage:
+            project_slug_value = None
+            if project_filter:
+                try:
+                    _, project_slug, _ = _project_registry_helpers()
+                    project_slug_value = project_slug(project_filter)
+                except Exception:
+                    project_slug_value = None
+            visible_items = storage.get_filtered(status="open", project_slug=project_slug_value)
+            all_items = storage.get_all()
+            health_counts = {
+                'healthy': 0,
+                'stale': 0,
+                'orphaned': 0,
+                'needs_review': 0,
+                'hot': 0,
+            }
+            for item in visible_items:
+                status = item.get('health_status', 'healthy')
+                health_counts[status] = health_counts.get(status, 0) + 1
+            result = {
+                "items": visible_items,
+                "health_report": health_counts,
+                "total": len(visible_items),
+            }
+        else:
+            recommendations = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
+            all_items = recommendations.get("items", [])
+            visible_items = [
+                item for item in all_items
+                if item.get("status", "open") == "open"
+            ]
+            result = {
+                "items": visible_items,
+                "health_report": {},
+                "total": len(visible_items),
+            }
+
+        if project_filter and refresh:
             try:
                 _, project_slug, _ = _project_registry_helpers()
                 wanted = project_slug(project_filter)
@@ -1468,6 +1514,7 @@ def api_analyze_recommendations():
         result["items"] = visible_items
         result["total"] = len(visible_items)
         result["all_total"] = len(all_items)
+        result["refreshed"] = refresh
         return jsonify(result)
     except Exception:
         logger.exception("analyze_recommendations failed")

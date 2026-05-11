@@ -191,6 +191,7 @@ class TestingRunner:
             model=self.config.lead_model,
             timeout=timeout,
             cwd=self.config.workspace_dir,
+            artifact_label="Testing Lead",
             stream_context="mission",
         )
         self._log(f"Testing lead completed in {elapsed:.1f}s")
@@ -452,7 +453,7 @@ Required behavior:
             cwd=self.config.workspace_dir,
             artifact_event_file=events_path,
             artifact_sources_file=sources_path,
-            artifact_label=lane_id,
+            artifact_label=f"TEST {lane_type}: {focus}",
             stream_context="mission",
         )
         elapsed = time.time() - start

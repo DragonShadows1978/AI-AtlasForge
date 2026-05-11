@@ -107,6 +107,32 @@ def test_codex_planning_uses_read_only_stage_sandbox(monkeypatch):
     assert "--dangerously-bypass-approvals-and-sandbox" not in command
 
 
+def test_codex_mcp_tools_are_auto_approved(monkeypatch):
+    import atlasforge_conductor as conductor
+
+    monkeypatch.delenv("ATLASFORGE_CODEX_STAGE_GUARD", raising=False)
+
+    command = conductor.build_llm_command("codex", stage="PLANNING")
+    joined = " ".join(command)
+
+    assert "--sandbox" in command
+    assert command[command.index("--sandbox") + 1] == "read-only"
+    for tool_name in (
+        "WebSearch",
+        "WebFetch",
+        "WebResearch",
+        "AtlasForgeGetStagePolicy",
+        "AtlasForgeSubmitPlan",
+        "AtlasForgeWriteStageNote",
+        "AtlasForgeSubmitReview",
+        "AtlasForgeSubmitPatchSummary",
+    ):
+        assert (
+            f"mcp_servers.atlasforge-web-proxy.tools.{tool_name}.approval_mode=\"approve\""
+            in joined
+        )
+
+
 def test_codex_building_keeps_full_send_by_default(monkeypatch):
     import atlasforge_conductor as conductor
 

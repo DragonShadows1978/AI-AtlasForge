@@ -2043,7 +2043,20 @@ function populateWidgetVisibilityDropdown() {
     if (!dropdown) return;
 
     const hidden = getHiddenWidgets();
-    const existingWidgets = getWidgetRegistry();
+    const sortByLabel = (a, b) => (
+        a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    const registry = getWidgetRegistry();
+    const activeWidgets = registry.filter(widget => !hidden.includes(widget.id)).sort(sortByLabel);
+    const inactiveWidgets = registry.filter(widget => hidden.includes(widget.id)).sort(sortByLabel);
+    const renderWidget = widget => {
+        const checked = !hidden.includes(widget.id) ? 'checked' : '';
+        let itemHtml = `<div class="widget-vis-item" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
+        itemHtml += `<input type="checkbox" id="vis-cb-${widget.id}" ${checked} tabindex="-1" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
+        itemHtml += `<label for="vis-cb-${widget.id}" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">${widget.label}</label>`;
+        itemHtml += '</div>';
+        return itemHtml;
+    };
 
     let html = '';
 
@@ -2053,13 +2066,16 @@ function populateWidgetVisibilityDropdown() {
     html += '</div>';
     html += '<div class="widget-vis-divider"></div>';
 
-    existingWidgets.forEach(widget => {
-        const checked = !hidden.includes(widget.id) ? 'checked' : '';
-        html += `<div class="widget-vis-item" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
-        html += `<input type="checkbox" id="vis-cb-${widget.id}" ${checked} tabindex="-1" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">`;
-        html += `<label for="vis-cb-${widget.id}" onclick="event.stopPropagation(); toggleWidgetCheckbox('${widget.id}')">${widget.label}</label>`;
-        html += '</div>';
-    });
+    if (activeWidgets.length) {
+        html += '<div class="widget-vis-section-header">Active</div>';
+        activeWidgets.forEach(widget => { html += renderWidget(widget); });
+    }
+
+    if (inactiveWidgets.length) {
+        if (activeWidgets.length) html += '<div class="widget-vis-divider"></div>';
+        html += '<div class="widget-vis-section-header">Inactive</div>';
+        inactiveWidgets.forEach(widget => { html += renderWidget(widget); });
+    }
 
     dropdown.innerHTML = html;
 }

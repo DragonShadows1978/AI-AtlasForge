@@ -742,6 +742,7 @@ from dashboard_modules import (
     mission_params_bp, init_mission_params_blueprint, get_mission_params,
     pool_manager_bp, init_pool_manager_blueprint,
     conductor_status_bp, init_conductor_status_blueprint,
+    pattern_quality_bp, init_pattern_quality_blueprint,
 )
 
 # Initialize blueprints with dependencies
@@ -778,7 +779,7 @@ init_queue_scheduler_blueprint(socketio)
 # Default to the current mission workspace if available, using centralized resolver
 current_mission_workspace = None
 try:
-    mission_data = io_utils.read_json(MISSION_PATH)
+    mission_data = io_utils.atomic_read_json(MISSION_PATH, {})
     if mission_data and 'mission_id' in mission_data:
         # Use centralized workspace resolver for correct path with shared/legacy support
         from dashboard_modules.workspace_resolver import resolve_mission_workspace
@@ -816,6 +817,7 @@ init_artifact_health_blueprint(WORKSPACE_DIR / "artifacts")
 init_mission_params_blueprint(MISSION_PATH, BASE_DIR / "missions", io_utils, emit_callback=lambda room, data: emit_widget_update(room, data))
 init_pool_manager_blueprint(socketio)
 init_conductor_status_blueprint(BASE_DIR, STATE_DIR, LOG_DIR)
+init_pattern_quality_blueprint(BASE_DIR)
 
 # Register blueprints
 app.register_blueprint(core_bp)
@@ -834,6 +836,7 @@ app.register_blueprint(artifact_health_bp)
 app.register_blueprint(mission_params_bp)
 app.register_blueprint(pool_manager_bp)
 app.register_blueprint(conductor_status_bp)
+app.register_blueprint(pattern_quality_bp)
 print("[Dashboard] pool_manager_bp registered successfully at /api/pool/*")
 
 # SSE transport for agent activity streams (replaces flask-socketio rooms
@@ -1794,8 +1797,9 @@ def check_and_emit_widget_updates():
     try:
         TTL = 600
         with _widget_state_lock:
+            persistent_keys = {'_tracked_mission_id', 'recommendations_key'}
             stale_keys = [k for k, ts in list(_widget_state_ts.items())
-                          if now - ts > TTL and k != '_tracked_mission_id']
+                          if now - ts > TTL and k not in persistent_keys]
             for k in stale_keys:
                 _widget_state.pop(k, None)
                 _widget_state_ts.pop(k, None)
@@ -1871,29 +1875,33 @@ def check_and_emit_widget_updates():
         try:
             from suggestion_storage import get_storage
             storage = get_storage()
-            items = storage.get_all()
+            items = storage.get_filtered(status="open")
         except Exception as e:
             logger.debug("Recommendations SQLite read failed, falling back to JSON: %s", e)
             recommendations_data = io_utils.atomic_read_json(RECOMMENDATIONS_PATH, {"items": []})
-            items = recommendations_data.get("items", [])
+            items = [
+                item for item in recommendations_data.get("items", [])
+                if item.get("status", "open") == "open"
+            ]
 
         rec_count = len(items)
-        latest_rec_id = items[0].get("id") if items else None  # SQLite returns sorted by priority
+        latest = max(items, key=lambda x: x.get('created_at', '')) if items else None
+        latest_rec_id = latest.get("id") if latest else None
         rec_key = f"{rec_count}:{latest_rec_id}"
 
         with _widget_state_lock:
-            _rec_changed = _widget_state.get('recommendations_key') != rec_key and rec_count > 0
-            _prev_rec_key = _widget_state.get('recommendations_key', '0:')
+            _prev_rec_key = _widget_state.get('recommendations_key')
+            _rec_changed = _prev_rec_key != rec_key
             if _rec_changed:
                 _widget_state['recommendations_key'] = rec_key
                 _widget_state_ts['recommendations_key'] = now
-        if _rec_changed:
-            # New recommendation detected
+        if _rec_changed and _prev_rec_key is not None:
+            # New open recommendation detected. Initial dashboard startup and
+            # state-cache rehydration are intentionally silent to avoid replaying
+            # historical suggestions into the Activity log.
             prev_count = int(_prev_rec_key.split(':')[0]) if _prev_rec_key else 0
             if rec_count > prev_count and items:
                 # There's a new recommendation - emit notification
-                # Find most recently created item (not highest priority)
-                latest = max(items, key=lambda x: x.get('created_at', ''))
                 emit_widget_update('recommendations', {
                     'event': 'new_recommendation',
                     'recommendation': {

@@ -6,6 +6,7 @@ It injects KB context and AfterImage code memory for informed planning.
 """
 
 import logging
+import json
 import re as _re
 import unicodedata as _unicodedata
 from pathlib import Path
@@ -67,6 +68,131 @@ def _sanitize_resumption_content(text: str, max_len: int = 8000) -> str:
     except (TypeError, ValueError, OverflowError):
         limit = 8000
     return "\n".join(clean_lines)[:limit]
+
+
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _render_bullets(values: Any) -> str:
+    items = [str(item).strip() for item in _as_list(values) if str(item).strip()]
+    return "\n".join(f"- {item}" for item in items) if items else "- None recorded."
+
+
+def _render_planning_artifact(response: Dict[str, Any]) -> str:
+    steps = []
+    for idx, step in enumerate(_as_list(response.get("steps")), start=1):
+        if isinstance(step, dict):
+            desc = str(step.get("description") or step.get("step") or "Planned work").strip()
+            files = _as_list(step.get("files"))
+            file_note = f" Files: {', '.join(str(f) for f in files)}." if files else ""
+            steps.append(f"{idx}. {desc}.{file_note}")
+        else:
+            steps.append(f"{idx}. {str(step).strip()}")
+
+    return "\n".join([
+        "# Implementation Plan",
+        "",
+        "## Understanding",
+        str(response.get("understanding") or "Mission requirements understood from planning response.").strip(),
+        "",
+        "## Approach",
+        str(response.get("approach") or "Use the planned incremental implementation approach.").strip(),
+        "",
+        "## Rationale",
+        str(response.get("approach_rationale") or "Generated from the PLANNING response after direct artifact writes were unavailable.").strip(),
+        "",
+        "## Requirements",
+        _render_bullets(response.get("key_requirements")),
+        "",
+        "## Steps",
+        "\n".join(steps) if steps else "1. Implement the scoped mission work described in the planning response.",
+        "",
+        "## Estimated Files",
+        _render_bullets(response.get("estimated_files")),
+        "",
+        "## Success Criteria",
+        _render_bullets(response.get("success_criteria")),
+        "",
+        "## Assumptions",
+        _render_bullets(response.get("assumptions")),
+        "",
+        "## Structured Planning Response",
+        "",
+        "```json",
+        json.dumps(response, indent=2, sort_keys=True, default=str),
+        "```",
+        "",
+    ])
+
+
+def _render_research_artifact(response: Dict[str, Any]) -> str:
+    research_summary = response.get("research_summary")
+    if not isinstance(research_summary, dict):
+        research_summary = {}
+
+    return "\n".join([
+        "# Research Findings",
+        "",
+        "This artifact was materialized by AtlasForge from the PLANNING response because the planning agent completed but did not leave the required research file.",
+        "",
+        "## Research Conducted",
+        _render_bullets(response.get("research_conducted")),
+        "",
+        "## Sources Consulted",
+        _render_bullets(response.get("sources_consulted")),
+        "",
+        "## Topics Researched",
+        _render_bullets(research_summary.get("topics_researched")),
+        "",
+        "## Key Findings",
+        _render_bullets(research_summary.get("key_findings")),
+        "",
+        "## Knowledge Gaps",
+        _render_bullets(research_summary.get("knowledge_gaps_identified")),
+        "",
+        "## KB Learnings Applied",
+        _render_bullets(response.get("kb_learnings_applied")),
+        "",
+        "## Confidence",
+        str(research_summary.get("confidence_level") or "not specified"),
+        "",
+        "## Structured Research Summary",
+        "",
+        "```json",
+        json.dumps(research_summary or response, indent=2, sort_keys=True, default=str),
+        "```",
+        "",
+    ])
+
+
+def _ensure_planning_artifacts_from_response(response: Dict[str, Any], context: StageContext) -> None:
+    """Materialize required planning artifacts when the LLM returned valid plan data.
+
+    Codex stages may run in a read-only filesystem sandbox and submit artifacts
+    through MCP. If that MCP path is cancelled or unavailable, the conductor can
+    still persist the structured response it received instead of retrying
+    PLANNING forever.
+    """
+    if context.research_dir:
+        findings_path = Path(context.research_dir) / "research_findings.md"
+        if not findings_path.exists() or findings_path.stat().st_size < 500:
+            findings_path.parent.mkdir(parents=True, exist_ok=True)
+            findings_path.write_text(_render_research_artifact(response), encoding="utf-8")
+            logger.info("PLANNING materialized missing research artifact: %s", findings_path)
+
+    if context.artifacts_dir:
+        plan_path = Path(context.artifacts_dir) / "implementation_plan.md"
+        if not plan_path.exists() or plan_path.stat().st_size < 200:
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+            plan_path.write_text(_render_planning_artifact(response), encoding="utf-8")
+            logger.info("PLANNING materialized missing implementation plan artifact: %s", plan_path)
 
 
 class PlanningStageHandler(BaseStageHandler):
@@ -195,6 +321,8 @@ Respond with JSON:
         status = str(response.get("status") or "")
 
         if status.lower().strip() == "plan_complete":
+            _ensure_planning_artifacts_from_response(response, context)
+
             # Enforce two-phase completion: both artifacts must exist before BUILDING
             missing = []
             if not context.research_dir:
@@ -240,13 +368,21 @@ Respond with JSON:
                 )
             ]
 
+            mission_type = (context.mission or {}).get("mission_type")
+            next_stage = "ANALYZING" if mission_type == "plan_only" else "BUILDING"
+            default_message = (
+                "Plan complete, moving to analysis for build follow-up"
+                if next_stage == "ANALYZING"
+                else "Plan complete, moving to building"
+            )
+
             return StageResult(
                 success=True,
-                next_stage="BUILDING",
+                next_stage=next_stage,
                 status=status,
                 output_data=response,
                 events_to_emit=events,
-                message=response.get("message_to_human", "Plan complete, moving to building")
+                message=response.get("message_to_human", default_message)
             )
         else:
             logger.warning(f"PLANNING: Unexpected status '{status}', staying in PLANNING")

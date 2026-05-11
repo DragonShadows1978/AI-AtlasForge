@@ -25,6 +25,7 @@ import * as queue from './modules/queue.js';
 import * as backupStatus from './modules/backup-status.js';
 import * as activityFeed from './modules/activity-feed.js';
 import * as conductorStatus from './modules/conductor-status.js';
+import * as patternQuality from './modules/pattern-quality.js';
 import { initActivityPanelBar } from './modules/activity-panel-bar.js';
 import { initMissionPanel, handleResearchProgress } from './modules/activity-mission.js';
 import { initInvestigationPanel } from './modules/activity-investigation.js';
@@ -595,6 +596,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         handleResearchProgress(data);
     });
 
+    // Load this widget before the broad dashboard refresh; it has an isolated
+    // API path and should remain visible even if another widget is slow.
+    patternQuality.initPatternQualityWidget();
+
     // Initial data refresh
     await widgets.refresh();
 
@@ -1051,6 +1056,11 @@ function setupMinimalPolling() {
         widgets.refreshTokenIntegrityWidget();
     }, 60000));
 
+    patternQuality.refreshPatternQualityWidget();
+    pollingIntervals.push(setInterval(() => {
+        patternQuality.refreshPatternQualityWidget();
+    }, 60000));
+
     // Git widgets backup polling (infrequent when WebSocket is connected)
     pollingIntervals.push(setInterval(() => {
         const state = getConnectionState();
@@ -1085,6 +1095,9 @@ function setupFullPolling() {
     // Token integrity widget - every 60 seconds
     widgets.refreshTokenIntegrityWidget();
     pollingIntervals.push(setInterval(widgets.refreshTokenIntegrityWidget, 60000));
+
+    patternQuality.refreshPatternQualityWidget();
+    pollingIntervals.push(setInterval(patternQuality.refreshPatternQualityWidget, 60000));
 
     // Decision graph refresh - every 10 seconds
     decisionGraph.refreshDecisionGraph();

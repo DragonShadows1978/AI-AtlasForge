@@ -55,6 +55,13 @@ def _next_investigation_agent_id() -> tuple:
     label = f"Sub-{n}"
     return agent_id, label
 
+
+def _stream_label(default_label: str, artifact_label: Optional[str]) -> str:
+    """Prefer explicit runner labels for Mission Activity visibility."""
+    label = str(artifact_label or "").strip()
+    return label or default_label
+
+
 # Shared provider routing (dashboard toggle)
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
@@ -83,6 +90,15 @@ def _codex_web_search_enabled() -> bool:
 def _codex_autonomous_enabled() -> bool:
     """Run Codex with no approval/sandbox prompts by default."""
     return _env_flag_enabled("ATLASFORGE_CODEX_AUTONOMOUS", default=True)
+
+
+def _apply_agent_process_guard_env(env: Dict[str, str]) -> Dict[str, str]:
+    """Prepend AtlasForge-owned process guard wrappers for autonomous agents."""
+    guard_dir = BASE_DIR / "agent_safe_bin"
+    if guard_dir.is_dir():
+        env["PATH"] = f"{guard_dir}{os.pathsep}{env.get('PATH') or os.defpath}"
+        env["ATLASFORGE_AGENT_PROCESS_GUARD"] = "1"
+    return env
 
 
 def _gemini_autonomous_enabled() -> bool:
@@ -724,6 +740,7 @@ def invoke_claude(
     start_time = time.time()
     provider = _get_active_llm_provider()
     env = os.environ.copy()
+    env = _apply_agent_process_guard_env(env)
     # Prevent "Claude Code cannot be launched inside another Claude Code session" error
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
@@ -810,6 +827,7 @@ def invoke_claude(
     # Claude provider: use streaming Popen for real-time agent activity
     if provider == "claude":
         _agent_id, _agent_label = _next_investigation_agent_id()
+        _agent_label = _stream_label(_agent_label, artifact_label)
         _stream_file = None
         _comp = None
         _recon = None
@@ -916,6 +934,93 @@ def invoke_claude(
                 try: _comp(_agent_id, error=f'rc:{proc.returncode}')
                 except Exception: pass
             return f"ERROR: {stderr_text}", elapsed
+
+    if provider == "codex":
+        _agent_id, _agent_label = _next_investigation_agent_id()
+        _agent_label = _stream_label(_agent_label, artifact_label)
+        _stream_file = None
+        _comp = None
+        _stream_thread = None
+        try:
+            from agent_stream_manager import (
+                register_agent as _reg,
+                update_agent_pid as _upd_pid,
+                complete_agent as _comp_fn,
+                stream_codex_session_to_file as _stream_codex_fn,
+            )
+            if stream_context not in {"mission", "investigation"}:
+                stream_context = "investigation"
+            _stream_file = _reg(stream_context, _agent_id, _agent_label, pid=None)
+            _comp = _comp_fn
+        except Exception as e:
+            logger.warning(f"Stream registration failed: {e}")
+            _agent_id = None
+            _stream_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(cwd),
+                env=env,
+                start_new_session=True,
+            )
+        except Exception as e:
+            return f"ERROR: {str(e)}", time.time() - start_time
+
+        if _stream_file and _agent_id:
+            try:
+                _upd_pid(_agent_id, proc.pid)
+                _stream_thread = _threading.Thread(
+                    target=_stream_codex_fn,
+                    args=(proc, _stream_file, str(cwd), start_time, _agent_id),
+                    daemon=True,
+                    name=f"stream-{_agent_id}",
+                )
+                _stream_thread.start()
+            except Exception as e:
+                logger.warning(f"Streaming thread setup failed: {e}")
+                _stream_file = None
+                _agent_id = None
+                _stream_thread = None
+
+        try:
+            stdout, stderr = proc.communicate(input=full_prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception as e:
+                logger.warning(f"Failed to kill subprocess: {e}")
+            if _stream_thread:
+                _stream_thread.join(timeout=3)
+            if _agent_id and _comp:
+                try:
+                    _comp(_agent_id, error="timeout")
+                except Exception:
+                    pass
+            return "ERROR: Timeout", time.time() - start_time
+
+        elapsed = time.time() - start_time
+        if _stream_thread:
+            _stream_thread.join(timeout=3)
+        if proc.returncode == 0:
+            if _agent_id and _comp:
+                try:
+                    _comp(_agent_id)
+                except Exception:
+                    pass
+            return (stdout or "").strip(), elapsed
+
+        if _agent_id and _comp:
+            try:
+                _comp(_agent_id, error=f"rc:{proc.returncode}")
+            except Exception:
+                pass
+        return f"ERROR: {stderr or ''}", elapsed
 
     # Non-Claude providers: use original subprocess.run() path
     try:

@@ -95,11 +95,11 @@ def test_apply_profile_review_existing():
 
 
 def test_apply_profile_plan_only():
-    """plan_only: PLANNING start, [PLANNING] only, no code writes."""
+    """plan_only: PLANNING start, then ANALYZING creates the gated build follow-up."""
     mission = {}
     apply_mission_type_profile(mission, "plan_only")
     assert mission["current_stage"] == "PLANNING"
-    assert mission["enabled_stages"] == ["PLANNING"]
+    assert mission["enabled_stages"] == ["PLANNING", "ANALYZING"]
     assert mission["stop_after_profile_complete"] is True
     assert mission["mission_profile"].get("allow_code_writes") is False
 
@@ -307,7 +307,7 @@ def test_to_mission_dict_applies_profile_plan_only():
     )
     assert mission["mission_type"] == "plan_only"
     assert mission["current_stage"] == "PLANNING"
-    assert mission["enabled_stages"] == ["PLANNING"]
+    assert mission["enabled_stages"] == ["PLANNING", "ANALYZING"]
     assert mission["stop_after_profile_complete"] is True
     assert mission["mission_profile"]["prompt_modifier"]
 
@@ -431,6 +431,16 @@ def test_conductor_skip_logic_for_bug_hunt_from_planning():
             mission["current_stage"] = nxt
 
     assert mission["current_stage"] == "TESTING"
+
+
+def test_plan_only_building_target_redirects_to_analyzing():
+    """Planning completion for plan_only must reach ANALYZING so build follow-up is created."""
+    mission = {}
+    apply_mission_type_profile(mission, "plan_only")
+
+    handler_target = "BUILDING"
+    assert stage_allowed_for_mission(mission, handler_target) is False
+    assert next_enabled_stage(mission, handler_target) == "ANALYZING"
 
 
 def test_full_rd_does_not_trigger_skip_or_stop():

@@ -16,6 +16,14 @@ These rules apply when the active provider is `codex` and are appended to the ba
   - `/home/vader/AI-AtlasForge/WebProxy/scripts/codex_proxy_interactive.sh`
 - Do not block waiting for approval/confirmation prompts.
 
+## AtlasForge Process Safety
+- Do not stop, restart, kill, or `pkill` AtlasForge services, including the
+  dashboard, conductor, tray, WebProxy, or Codex parent process.
+- Do not use broad process cleanup patterns such as `pkill -f dashboard_v2.py`,
+  `pkill -f atlasforge`, or `killall` against shared service names.
+- If you start a temporary test process, record its exact PID and clean up only
+  that PID after verification.
+
 ## Web Research Requirement
 - Treat web research as enabled through the AtlasForge WebProxy only.
 - Do not use native Codex web search unless `ATLASFORGE_CODEX_WEB_SEARCH=1` is explicitly set.

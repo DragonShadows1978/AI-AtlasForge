@@ -5765,6 +5765,14 @@ h1 { color: var(--accent); font-size: 1.3em; }
     margin: 4px 10px;
 }
 
+.widget-vis-section-header {
+    padding: 6px 14px 4px;
+    color: var(--text-dim);
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
 .widget-vis-actions {
     display: flex;
     gap: 6px;
@@ -13010,4 +13018,92 @@ body.modal-open {
     font-size: 0.8em;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+}
+
+/* ============================================================
+   Pattern Quality Widget
+   ============================================================ */
+.pattern-quality-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.pattern-quality-section-title {
+    color: var(--text-dim);
+    font-size: 0.76em;
+    margin: 10px 0 5px;
+    text-transform: uppercase;
+}
+
+.pattern-quality-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.pattern-quality-row,
+.pattern-quality-cluster {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px;
+    background: var(--surface2);
+}
+
+.pattern-quality-row-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.pattern-quality-score {
+    color: var(--accent);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.pattern-quality-path {
+    color: var(--text);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pattern-quality-tag {
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: var(--accent);
+    font-size: 0.7em;
+    padding: 1px 4px;
+}
+
+.pattern-quality-meta,
+.pattern-quality-empty {
+    color: var(--text-dim);
+    font-size: 0.78em;
+    margin-top: 3px;
+}
+
+.pattern-quality-cluster code {
+    display: block;
+    color: var(--text-dim);
+    font-size: 0.76em;
+    margin-top: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pattern-quality-decay {
+    color: var(--accent);
+    min-height: 58px;
+}
+
+.pattern-quality-curve {
+    width: 100%;
+    height: 58px;
+    display: block;
 }
