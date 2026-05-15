@@ -815,13 +815,59 @@ class SearchProvider:
         count = self._normalize_count(count, max_value=20)
         provider = (provider or "auto").strip().lower()
         if provider == "auto":
-            provider = "brave" if self._brave_api_key() else "duckduckgo"
+            if self._brave_api_key():
+                try:
+                    return self.search_brave(query, count=count)
+                except Exception as exc:
+                    if not self._should_fallback_from_brave_error(exc):
+                        raise
+                    logger.warning("Brave search unavailable; falling back to DuckDuckGo: %s", exc)
+                    result = self.search_duckduckgo(query, count=count)
+                    result["fallback_from"] = "brave"
+                    result["fallback_reason"] = self._safe_brave_error_summary(exc)
+                    return result
+            provider = "duckduckgo"
 
         if provider == "brave":
             return self.search_brave(query, count=count)
         if provider in {"duckduckgo", "ddg"}:
             return self.search_duckduckgo(query, count=count)
         raise ValueError(f"Unsupported search provider: {provider}")
+
+    @staticmethod
+    def _should_fallback_from_brave_error(exc: Exception) -> bool:
+        """Return True for Brave quota/payment/rate failures that should use DDG."""
+        if not isinstance(exc, requests.HTTPError):
+            return False
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code in {402, 403, 429}:
+            return True
+        text = ""
+        if response is not None:
+            try:
+                text = response.text or ""
+            except Exception:
+                text = ""
+        lowered = f"{exc} {text}".lower()
+        return any(marker in lowered for marker in (
+            "out of funds",
+            "insufficient funds",
+            "quota",
+            "rate limit",
+            "too many requests",
+            "payment",
+            "subscription",
+            "billing",
+        ))
+
+    @staticmethod
+    def _safe_brave_error_summary(exc: Exception) -> str:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code:
+            return f"brave_http_{status_code}"
+        return type(exc).__name__
 
     def search_brave(self, query: str, count: Any = 5) -> Dict[str, Any]:
         count = self._normalize_count(count, max_value=20)
@@ -861,7 +907,19 @@ class SearchProvider:
                       safesearch: str = "off") -> Dict[str, Any]:
         provider = (provider or "auto").strip().lower()
         if provider == "auto":
-            provider = "brave" if self._brave_api_key() else "duckduckgo"
+            if self._brave_api_key():
+                count = self._normalize_count(count, max_value=20)
+                try:
+                    return self.search_images_brave(query, count=count)
+                except Exception as exc:
+                    if not self._should_fallback_from_brave_error(exc):
+                        raise
+                    logger.warning("Brave image search unavailable; falling back to DuckDuckGo: %s", exc)
+                    result = self.search_images_duckduckgo(query, count=count, safesearch=safesearch)
+                    result["fallback_from"] = "brave_images"
+                    result["fallback_reason"] = self._safe_brave_error_summary(exc)
+                    return result
+            provider = "duckduckgo"
 
         if provider == "brave":
             count = self._normalize_count(count, max_value=20)

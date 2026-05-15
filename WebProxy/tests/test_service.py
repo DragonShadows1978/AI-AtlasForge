@@ -9,6 +9,7 @@ import logging
 from contextlib import contextmanager
 
 import pytest
+import requests
 
 from WebProxy import service as web_proxy_service
 from WebProxy.service import (
@@ -723,6 +724,51 @@ class TestSearchCountNoneCoerced:
         provider.session = _FakeSession()
         result = provider.search("q", count=None, provider="duckduckgo")
         assert result["count"] == 0
+
+    def test_auto_search_falls_back_to_duckduckgo_when_brave_quota_exhausted(self, monkeypatch):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+
+        class _FakeBraveResponse:
+            status_code = 402
+            text = '{"error":"out of funds"}'
+
+        def _fake_brave(*args, **kwargs):
+            raise requests.HTTPError("402 Client Error: out of funds", response=_FakeBraveResponse())
+
+        def _fake_duckduckgo(query, count=5):
+            return {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [{"title": "fallback", "url": "https://example.com"}],
+                "count": 1,
+            }
+
+        monkeypatch.setattr(provider, "search_brave", _fake_brave)
+        monkeypatch.setattr(provider, "search_duckduckgo", _fake_duckduckgo)
+
+        result = provider.search("q", count=5, provider="auto")
+
+        assert result["provider"] == "duckduckgo"
+        assert result["fallback_from"] == "brave"
+        assert result["fallback_reason"] == "brave_http_402"
+        assert result["count"] == 1
+
+    def test_explicit_brave_search_does_not_fallback(self, monkeypatch):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+
+        class _FakeBraveResponse:
+            status_code = 402
+            text = '{"error":"out of funds"}'
+
+        def _fake_brave(*args, **kwargs):
+            raise requests.HTTPError("402 Client Error: out of funds", response=_FakeBraveResponse())
+
+        monkeypatch.setattr(provider, "search_brave", _fake_brave)
+
+        with pytest.raises(requests.HTTPError):
+            provider.search("q", count=5, provider="brave")
 
 
 class TestImageSearchNegativeFetchTopN:
