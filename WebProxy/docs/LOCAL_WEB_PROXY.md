@@ -6,7 +6,7 @@ AtlasForge. Returns unfiltered, verbatim content with caching.
 
 ## Why
 
-- one local search/fetch service with **provider swapping** (Brave ↔ DuckDuckGo)
+- one local search/fetch service with **provider swapping** (Brave -> DuckDuckGo -> DDGS fallback backends)
 - **~22× more content per query** vs Claude's filtered built-ins
 - **survives domain blocks** (Reddit, niche forums, etc.)
 - caching, logging, and sanitization in one place
@@ -117,10 +117,17 @@ Returns live counters consumed by the dashboard widget:
 `provider=auto`:
 
 - uses **Brave** if `ATLASFORGE_BRAVE_API_KEY` or `BRAVE_API_KEY` is set
-- otherwise falls back to **DuckDuckGo** HTML scraping
+- falls back to **DuckDuckGo** if Brave returns quota/rate-limit errors (`402` or `429`)
+- falls back again to **DDGS** multi-backend search if DuckDuckGo errors or returns no results
+- otherwise starts with **DuckDuckGo** HTML scraping, then DDGS if needed
 
 Set the key via `.env`, shell export, or systemd drop-in
 (`systemctl --user edit atlasforge-web-proxy`).
+
+The DDGS fallback backend list defaults to
+`google,bing,yahoo,mojeek,wikipedia` for web search and `bing` for image
+search. Override with `ATLASFORGE_WEB_PROXY_DDGS_BACKENDS` or
+`ATLASFORGE_WEB_PROXY_DDGS_IMAGE_BACKENDS`.
 
 ## Thin MCP integration
 

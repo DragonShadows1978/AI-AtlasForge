@@ -725,6 +725,265 @@ class TestSearchCountNoneCoerced:
         assert result["count"] == 0
 
 
+class TestBraveFallback:
+    def _http_error(self, status_code):
+        response = web_proxy_service.requests.Response()
+        response.status_code = status_code
+        return web_proxy_service.requests.HTTPError(
+            f"{status_code} from Brave",
+            response=response,
+        )
+
+    def test_auto_search_falls_back_to_duckduckgo_on_brave_quota(self, monkeypatch):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+
+        def _raise_brave(query, count=5):
+            raise self._http_error(402)
+
+        def _ddg(query, count=5):
+            return {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [{"title": "fallback", "url": "https://example.com"}],
+                "count": 1,
+            }
+
+        monkeypatch.setattr(provider, "search_brave", _raise_brave)
+        monkeypatch.setattr(provider, "search_duckduckgo", _ddg)
+
+        result = provider.search("quota test", provider="auto")
+
+        assert result["provider"] == "duckduckgo"
+        assert result["fallback_from"] == "brave"
+        assert result["fallback_reason"] == "brave_quota_or_rate_limit"
+        assert result["results"][0]["title"] == "fallback"
+
+    def test_auto_search_falls_back_to_duckduckgo_on_brave_rate_limit(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(429)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_duckduckgo",
+            lambda query, count=5: {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [{"title": "fallback", "url": "https://example.com"}],
+                "count": 1,
+            },
+        )
+
+        result = provider.search("rate test", provider="auto")
+
+        assert result["provider"] == "duckduckgo"
+        assert result["fallback_from"] == "brave"
+
+    def test_auto_search_falls_back_to_ddgs_when_duckduckgo_raises_after_brave_quota(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(429)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_duckduckgo",
+            lambda query, count=5: (_ for _ in ()).throw(RuntimeError("ddg down")),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_ddgs_fallback",
+            lambda query, count=5: {
+                "provider": "ddgs",
+                "query": query,
+                "results": [{"title": "ddgs", "url": "https://example.org"}],
+                "count": 1,
+                "backends": ["google"],
+            },
+        )
+
+        result = provider.search("backup test", provider="auto")
+
+        assert result["provider"] == "ddgs"
+        assert result["fallback_from"] == "brave"
+        assert result["fallback_reason"] == "brave_quota_or_rate_limit"
+
+    def test_auto_search_falls_back_to_duckduckgo_on_any_brave_error(self, monkeypatch):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(500)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_duckduckgo",
+            lambda query, count=5: {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [{"title": "fallback", "url": "https://example.com"}],
+                "count": 1,
+            },
+        )
+
+        result = provider.search("brave down", provider="auto")
+
+        assert result["provider"] == "duckduckgo"
+        assert result["fallback_from"] == "brave"
+        assert result["fallback_reason"] == "brave_error"
+
+    def test_auto_search_without_brave_falls_back_to_ddgs_when_duckduckgo_empty(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: None)
+        monkeypatch.setattr(
+            provider,
+            "search_duckduckgo",
+            lambda query, count=5: {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [],
+                "count": 0,
+            },
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_ddgs_fallback",
+            lambda query, count=5: {
+                "provider": "ddgs",
+                "query": query,
+                "results": [{"title": "ddgs", "url": "https://example.org"}],
+                "count": 1,
+                "backends": ["bing"],
+            },
+        )
+
+        result = provider.search("empty ddg", provider="auto")
+
+        assert result["provider"] == "ddgs"
+        assert result["fallback_from"] == "duckduckgo"
+        assert result["fallback_reason"] == "duckduckgo_unavailable_or_empty"
+
+    def test_explicit_brave_search_does_not_fallback(self, monkeypatch):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(402)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_duckduckgo",
+            lambda query, count=5: pytest.fail("explicit brave should not fallback"),
+        )
+
+        with pytest.raises(web_proxy_service.requests.HTTPError):
+            provider.search("quota test", provider="brave")
+
+    def test_auto_image_search_falls_back_to_duckduckgo_on_brave_quota(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+
+        monkeypatch.setattr(
+            provider,
+            "search_images_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(402)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_images_duckduckgo",
+            lambda query, count=5, safesearch="off": {
+                "provider": "duckduckgo_images",
+                "query": query,
+                "results": [{"title": "img", "url": "https://example.com/img.jpg"}],
+                "count": 1,
+            },
+        )
+
+        result = provider.search_images("cats", provider="auto")
+
+        assert result["provider"] == "duckduckgo_images"
+        assert result["fallback_from"] == "brave_images"
+        assert result["fallback_reason"] == "brave_quota_or_rate_limit"
+
+    def test_auto_image_search_falls_back_to_ddgs_when_duckduckgo_raises(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_images_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(402)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_images_duckduckgo",
+            lambda query, count=5, safesearch="off": (_ for _ in ()).throw(
+                RuntimeError("ddg images down")
+            ),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_images_ddgs_fallback",
+            lambda query, count=5, safesearch="off": {
+                "provider": "ddgs_images",
+                "query": query,
+                "results": [{"title": "img", "url": "https://example.org/img.jpg"}],
+                "count": 1,
+                "backends": ["bing"],
+            },
+        )
+
+        result = provider.search_images("cats", provider="auto")
+
+        assert result["provider"] == "ddgs_images"
+        assert result["fallback_from"] == "brave_images"
+        assert result["fallback_reason"] == "brave_quota_or_rate_limit"
+
+    def test_auto_image_search_falls_back_to_duckduckgo_on_any_brave_error(
+        self, monkeypatch
+    ):
+        provider = SearchProvider()
+        monkeypatch.setattr(provider, "_brave_api_key", lambda: "fake-key")
+        monkeypatch.setattr(
+            provider,
+            "search_images_brave",
+            lambda query, count=5: (_ for _ in ()).throw(self._http_error(500)),
+        )
+        monkeypatch.setattr(
+            provider,
+            "search_images_duckduckgo",
+            lambda query, count=5, safesearch="off": {
+                "provider": "duckduckgo_images",
+                "query": query,
+                "results": [{"title": "img", "url": "https://example.com/img.jpg"}],
+                "count": 1,
+            },
+        )
+
+        result = provider.search_images("cats", provider="auto")
+
+        assert result["provider"] == "duckduckgo_images"
+        assert result["fallback_from"] == "brave_images"
+        assert result["fallback_reason"] == "brave_error"
+
+
 class TestImageSearchNegativeFetchTopN:
     """HIGH-3: negative fetch_top_n must return 400 (no reverse slice, no
     silent clamp). Previously silently clamped to 0; now rejected at the

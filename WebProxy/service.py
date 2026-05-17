@@ -97,6 +97,22 @@ USER_AGENT = _header_env(
 )
 
 BRAVE_API_KEY_ENV_NAMES = ("ATLASFORGE_BRAVE_API_KEY", "BRAVE_API_KEY")
+DDGS_FALLBACK_BACKENDS = tuple(
+    backend.strip()
+    for backend in os.environ.get(
+        "ATLASFORGE_WEB_PROXY_DDGS_BACKENDS",
+        "google,bing,yahoo,mojeek,wikipedia",
+    ).split(",")
+    if backend.strip()
+)
+DDGS_IMAGE_FALLBACK_BACKENDS = tuple(
+    backend.strip()
+    for backend in os.environ.get(
+        "ATLASFORGE_WEB_PROXY_DDGS_IMAGE_BACKENDS",
+        "bing",
+    ).split(",")
+    if backend.strip()
+)
 
 REQUEST_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -797,6 +813,36 @@ class SearchProvider:
         return _first_env(BRAVE_API_KEY_ENV_NAMES)
 
     @staticmethod
+    def _brave_fallback_reason(exc: BaseException) -> str:
+        if not isinstance(exc, requests.HTTPError):
+            return "brave_error"
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if status_code in {402, 429}:
+            return "brave_quota_or_rate_limit"
+        body = getattr(response, "text", "") or ""
+        if re.search(r"\b(credit|quota|rate.?limit|subscription|exhaust)", body, re.I):
+            return "brave_quota_or_rate_limit"
+        return "brave_error"
+
+    @staticmethod
+    def _with_fallback_metadata(
+        result: Dict[str, Any],
+        *,
+        from_provider: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        out = dict(result)
+        out["fallback_from"] = from_provider
+        out["fallback_reason"] = reason
+        return out
+
+    @staticmethod
+    def _results_are_empty(result: Dict[str, Any]) -> bool:
+        results = result.get("results")
+        return isinstance(results, list) and len(results) == 0
+
+    @staticmethod
     def _normalize_count(count: Any, default: int = 5, max_value: int = 20) -> int:
         """Coerce count to a clamped int. None/garbage -> default; float -> int().
 
@@ -815,13 +861,65 @@ class SearchProvider:
         count = self._normalize_count(count, max_value=20)
         provider = (provider or "auto").strip().lower()
         if provider == "auto":
-            provider = "brave" if self._brave_api_key() else "duckduckgo"
+            if self._brave_api_key():
+                try:
+                    return self.search_brave(query, count=count)
+                except Exception as exc:
+                    fallback_reason = self._brave_fallback_reason(exc)
+                    logger.warning(
+                        "Brave search failed; falling back to DuckDuckGo: %s",
+                        exc,
+                    )
+                    return self._search_duckduckgo_or_ddgs_fallback(
+                        query=query,
+                        count=count,
+                        from_provider="brave",
+                        reason=fallback_reason,
+                    )
+            provider = "duckduckgo"
+            return self._search_duckduckgo_or_ddgs_fallback(
+                query=query,
+                count=count,
+                from_provider="duckduckgo",
+                reason="duckduckgo_unavailable_or_empty",
+            )
 
         if provider == "brave":
             return self.search_brave(query, count=count)
         if provider in {"duckduckgo", "ddg"}:
             return self.search_duckduckgo(query, count=count)
+        if provider in {"ddgs", "fallback"}:
+            return self.search_ddgs_fallback(query, count=count)
         raise ValueError(f"Unsupported search provider: {provider}")
+
+    def _search_duckduckgo_or_ddgs_fallback(
+        self,
+        *,
+        query: str,
+        count: int,
+        from_provider: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        try:
+            result = self.search_duckduckgo(query, count=count)
+        except Exception as exc:
+            logger.warning("DuckDuckGo search failed; falling back to DDGS: %s", exc)
+        else:
+            if not self._results_are_empty(result):
+                if from_provider == "duckduckgo":
+                    return result
+                return self._with_fallback_metadata(
+                    result,
+                    from_provider=from_provider,
+                    reason=reason,
+                )
+            logger.warning("DuckDuckGo returned no results; falling back to DDGS")
+
+        return self._with_fallback_metadata(
+            self.search_ddgs_fallback(query, count=count),
+            from_provider=from_provider,
+            reason=reason,
+        )
 
     def search_brave(self, query: str, count: Any = 5) -> Dict[str, Any]:
         count = self._normalize_count(count, max_value=20)
@@ -857,43 +955,147 @@ class SearchProvider:
             "count": len(results),
         }
 
-    def search_images(self, query: str, count: Any = 5, provider: str = "auto",
-                      safesearch: str = "off") -> Dict[str, Any]:
+    def search_images(
+        self,
+        query: str,
+        count: Any = 5,
+        provider: str = "auto",
+        safesearch: str = "off",
+    ) -> Dict[str, Any]:
         provider = (provider or "auto").strip().lower()
         if provider == "auto":
-            provider = "brave" if self._brave_api_key() else "duckduckgo"
+            if self._brave_api_key():
+                count = self._normalize_count(count, max_value=20)
+                try:
+                    return self.search_images_brave(query, count=count)
+                except Exception as exc:
+                    fallback_reason = self._brave_fallback_reason(exc)
+                    logger.warning(
+                        "Brave image search failed; falling back to DuckDuckGo: %s",
+                        exc,
+                    )
+                    return self._image_duckduckgo_or_ddgs_fallback(
+                        query=query,
+                        count=count,
+                        safesearch=safesearch,
+                        from_provider="brave_images",
+                        reason=fallback_reason,
+                    )
+            provider = "duckduckgo"
+            count = self._normalize_count(count, max_value=50)
+            return self._image_duckduckgo_or_ddgs_fallback(
+                query=query,
+                count=count,
+                safesearch=safesearch,
+                from_provider="duckduckgo_images",
+                reason="duckduckgo_unavailable_or_empty",
+            )
 
         if provider == "brave":
             count = self._normalize_count(count, max_value=20)
             return self.search_images_brave(query, count=count)
         if provider in {"duckduckgo", "ddg"}:
             count = self._normalize_count(count, max_value=50)
-            return self.search_images_duckduckgo(query, count=count, safesearch=safesearch)
-        return {"provider": provider, "query": query, "results": [], "count": 0,
-                "error": f"Unsupported image search provider: {provider}"}
+            return self.search_images_duckduckgo(
+                query,
+                count=count,
+                safesearch=safesearch,
+            )
+        if provider in {"ddgs", "fallback"}:
+            count = self._normalize_count(count, max_value=50)
+            return self.search_images_ddgs_fallback(
+                query,
+                count=count,
+                safesearch=safesearch,
+            )
+        return {
+            "provider": provider,
+            "query": query,
+            "results": [],
+            "count": 0,
+            "error": f"Unsupported image search provider: {provider}",
+        }
 
-    def search_images_duckduckgo(self, query: str, count: Any = 5,
-                                  safesearch: str = "off") -> Dict[str, Any]:
+    def _image_duckduckgo_or_ddgs_fallback(
+        self,
+        *,
+        query: str,
+        count: int,
+        safesearch: str,
+        from_provider: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        try:
+            result = self.search_images_duckduckgo(
+                query,
+                count=count,
+                safesearch=safesearch,
+            )
+        except Exception as exc:
+            logger.warning(
+                "DuckDuckGo image search failed; falling back to DDGS: %s", exc
+            )
+        else:
+            if not self._results_are_empty(result):
+                if from_provider == "duckduckgo_images":
+                    return result
+                return self._with_fallback_metadata(
+                    result,
+                    from_provider=from_provider,
+                    reason=reason,
+                )
+            logger.warning(
+                "DuckDuckGo image search returned no results; falling back to DDGS"
+            )
+
+        return self._with_fallback_metadata(
+            self.search_images_ddgs_fallback(
+                query,
+                count=count,
+                safesearch=safesearch,
+            ),
+            from_provider=from_provider,
+            reason=reason,
+        )
+
+    def search_images_duckduckgo(
+        self,
+        query: str,
+        count: Any = 5,
+        safesearch: str = "off",
+    ) -> Dict[str, Any]:
         count = self._normalize_count(count, max_value=50)
         try:
             from ddgs import DDGS
         except ImportError:
-            return {"provider": "duckduckgo", "query": query, "results": [], "count": 0,
-                    "error": "ddgs package not installed (pip install ddgs)"}
+            return {
+                "provider": "duckduckgo",
+                "query": query,
+                "results": [],
+                "count": 0,
+                "error": "ddgs package not installed (pip install ddgs)",
+            }
 
-        raw = list(DDGS().images(query, max_results=count,
-                                  safesearch=safesearch))
+        raw = list(
+            DDGS().images(
+                query,
+                max_results=count,
+                safesearch=safesearch,
+            )
+        )
         results: List[Dict[str, Any]] = []
         for item in raw:
-            results.append({
-                "title": item.get("title", ""),
-                "url": item.get("image", ""),
-                "source_url": item.get("url", ""),
-                "thumbnail": item.get("thumbnail", ""),
-                "width": item.get("width"),
-                "height": item.get("height"),
-                "source": "duckduckgo_images",
-            })
+            results.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("image", ""),
+                    "source_url": item.get("url", ""),
+                    "thumbnail": item.get("thumbnail", ""),
+                    "width": item.get("width"),
+                    "height": item.get("height"),
+                    "source": "duckduckgo_images",
+                }
+            )
         return {
             "provider": "duckduckgo_images",
             "query": query,
@@ -935,6 +1137,86 @@ class SearchProvider:
             "query": query,
             "results": results,
             "count": len(results),
+        }
+
+    def search_images_ddgs_fallback(
+        self,
+        query: str,
+        count: Any = 5,
+        safesearch: str = "off",
+    ) -> Dict[str, Any]:
+        count = self._normalize_count(count, max_value=50)
+        if not DDGS_IMAGE_FALLBACK_BACKENDS:
+            raise RuntimeError(
+                "DDGS image fallback selected but no backends are configured"
+            )
+        try:
+            from ddgs import DDGS
+        except ImportError as exc:
+            raise RuntimeError("ddgs package not installed (pip install ddgs)") from exc
+
+        backend = ",".join(DDGS_IMAGE_FALLBACK_BACKENDS)
+        raw = DDGS(timeout=DEFAULT_TIMEOUT_S).images(
+            query,
+            max_results=count,
+            backend=backend,
+            safesearch=safesearch,
+        )
+        results: List[Dict[str, Any]] = []
+        for item in raw:
+            results.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("image", ""),
+                    "source_url": item.get("url", ""),
+                    "thumbnail": item.get("thumbnail", ""),
+                    "width": item.get("width"),
+                    "height": item.get("height"),
+                    "source": item.get("source") or "ddgs_images",
+                }
+            )
+
+        return {
+            "provider": "ddgs_images",
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "backends": list(DDGS_IMAGE_FALLBACK_BACKENDS),
+        }
+
+    def search_ddgs_fallback(self, query: str, count: Any = 5) -> Dict[str, Any]:
+        count = self._normalize_count(count, max_value=20)
+        if not DDGS_FALLBACK_BACKENDS:
+            raise RuntimeError("DDGS fallback selected but no backends are configured")
+        try:
+            from ddgs import DDGS
+        except ImportError as exc:
+            raise RuntimeError("ddgs package not installed (pip install ddgs)") from exc
+
+        backend = ",".join(DDGS_FALLBACK_BACKENDS)
+        raw = DDGS(timeout=DEFAULT_TIMEOUT_S).text(
+            query,
+            max_results=count,
+            backend=backend,
+        )
+        results: List[Dict[str, Any]] = []
+        for item in raw:
+            url = item.get("href") or item.get("url") or ""
+            results.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": url,
+                    "snippet": item.get("body") or item.get("snippet", ""),
+                    "source": item.get("source") or "ddgs",
+                }
+            )
+
+        return {
+            "provider": "ddgs",
+            "query": query,
+            "results": results,
+            "count": len(results),
+            "backends": list(DDGS_FALLBACK_BACKENDS),
         }
 
     def search_duckduckgo(self, query: str, count: Any = 5) -> Dict[str, Any]:

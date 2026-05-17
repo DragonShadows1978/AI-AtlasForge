@@ -1999,7 +1999,7 @@ def api_context_watcher_stats():
     - metrics: Detailed timing and token metrics
     """
     try:
-        from workspace.ContextWatcher.context_watcher import get_context_watcher
+        from context_watcher import get_context_watcher
         watcher = get_context_watcher()
         stats = watcher.get_all_stats()
         stats['timestamp'] = datetime.now().isoformat()
