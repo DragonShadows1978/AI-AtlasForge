@@ -15,21 +15,8 @@
     <link rel="modulepreload" href="/static/dist/bundle.min.js?v={{ bundle_js_version }}" fetchpriority="high">
     <link rel="preload" href="/static/vendor/socket.io.min.js" as="script" fetchpriority="high">
 
-    <!--
-        Prefetch commonly-used lazy chunks (loaded on idle)
-
-        MAINTENANCE: After rebuilding the bundle, update these hashes:
-        1. Run: ls dashboard_static/dist/chunks/
-        2. Note new hash suffixes for kb-analytics, lessons
-        3. Update the hrefs below to match
-
-        These prefetch hints are optional - if stale, lazy loading still works,
-        but users experience a brief delay on first tab access.
-    -->
-    <link rel="prefetch" href="/static/dist/chunks/kb-analytics-DAR6EAMH.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/lessons-5RS46Q5D.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/missionlogs-5YZZOTOT.js" as="script">
-    <link rel="prefetch" href="/static/dist/chunks/investigation-history-TUJZYVXC.js" as="script">
+    <!-- Lazy chunks are loaded by the ES module bundle on demand. Avoid hard-coded
+         hashed prefetch filenames here because each production build can rename them. -->
 
     <!-- Local vendor libraries (bundled for performance - no CDN roundtrips) -->
     <!-- Socket.io - critical, must load before ES6 bundle -->

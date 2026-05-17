@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -18,6 +19,8 @@ from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 pattern_quality_bp = Blueprint("pattern_quality", __name__, url_prefix="/api/pattern-quality")
+MAX_PATTERN_TEXT = 1200
+MAX_PATTERN_TOKENS = 80
 
 _config: Dict[str, Any] = {
     "base_dir": None,
@@ -99,6 +102,111 @@ def _with_backend(operation: Callable[[Any], Any], fallback: Any):
             pass
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively coerce backend payloads into strict JSON-safe values."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _number(value: Any, default: float = 0.0, low: Optional[float] = None, high: Optional[float] = None) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = float(value)
+    except Exception:
+        return default
+    if not math.isfinite(parsed):
+        return default
+    if low is not None:
+        parsed = max(low, parsed)
+    if high is not None:
+        parsed = min(high, parsed)
+    return parsed
+
+
+def _integer(value: Any, default: int = 0, low: int = 0, high: int = 1_000_000_000) -> int:
+    return int(_number(value, float(default), float(low), float(high)))
+
+
+def _short_text(value: Any, limit: int = MAX_PATTERN_TEXT) -> str:
+    text = value if isinstance(value, str) else str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...[truncated]"
+
+
+def _sanitize_summary(summary: Any) -> Dict[str, Any]:
+    source = summary if isinstance(summary, dict) else {}
+    return {
+        "total_clusters": _integer(source.get("total_clusters")),
+        "canonical_clusters": _integer(source.get("canonical_clusters")),
+        "duplicate_clusters": _integer(source.get("duplicate_clusters")),
+        "total_occurrences": _integer(source.get("total_occurrences")),
+        "average_quality_score": _number(source.get("average_quality_score"), 0.0, 0.0, 10.0),
+    }
+
+
+def _sanitize_pattern(pattern: Any) -> Dict[str, Any]:
+    source = pattern if isinstance(pattern, dict) else {}
+    tokens = source.get("normalized_tokens") or []
+    if not isinstance(tokens, list):
+        tokens = []
+    return {
+        **{str(key): _json_safe(value) for key, value in source.items() if key not in {"normalized_code", "normalized_tokens"}},
+        "quality_score": _number(source.get("quality_score"), 0.0, 0.0, 10.0),
+        "occurrence_count": _integer(source.get("occurrence_count")),
+        "distinct_mission_count": _integer(source.get("distinct_mission_count")),
+        "is_canonical": source.get("is_canonical") is True,
+        "decay_factor": _number(source.get("decay_factor"), 0.0, 0.0, 1.0),
+        "duplicate_score": _number(source.get("duplicate_score"), 0.0, 0.0, 1.0),
+        "normalized_code": _short_text(source.get("normalized_code")),
+        "normalized_tokens": [str(token) for token in tokens[:MAX_PATTERN_TOKENS]],
+    }
+
+
+def _sanitize_cluster(cluster: Any) -> Dict[str, Any]:
+    sanitized = _sanitize_pattern(cluster)
+    members = cluster.get("members") if isinstance(cluster, dict) else []
+    safe_members = []
+    if isinstance(members, list):
+        for member in members[:8]:
+            item = member if isinstance(member, dict) else {}
+            safe_members.append({
+                **{str(key): _json_safe(value) for key, value in item.items() if key != "similarity_score"},
+                "similarity_score": _number(item.get("similarity_score"), 0.0, 0.0, 1.0),
+            })
+    sanitized["members"] = safe_members
+    return sanitized
+
+
+def _sanitize_curve(curve: Any) -> List[Dict[str, Any]]:
+    if not isinstance(curve, list):
+        return []
+    safe = []
+    for point in curve[:120]:
+        source = point if isinstance(point, dict) else {}
+        safe.append({
+            "age_days": _number(source.get("age_days"), 0.0, 0.0, 100_000.0),
+            "decay_factor": _number(source.get("decay_factor"), 0.0, 0.0, 1.0),
+            "is_canonical": source.get("is_canonical") is True,
+        })
+    return safe
+
+
 def _int_arg(name: str, default: int, low: int = 1, high: int = 100) -> int:
     raw = request.args.get(name)
     if raw is None:
@@ -120,16 +228,16 @@ def _bad_request(message: str):
 def api_pattern_quality_summary():
     """Return aggregate quality statistics plus compact previews."""
     def load(backend):
-        summary = backend.get_pattern_quality_summary()
+        summary = _sanitize_summary(backend.get_pattern_quality_summary())
         return {
             "available": True,
             "summary": summary,
-            "top_patterns": backend.get_top_patterns(limit=5),
-            "duplicate_clusters": backend.get_duplicate_clusters(limit=5),
-            "decay_curve": backend.get_decay_curve(days=180, points=12),
+            "top_patterns": [_sanitize_pattern(row) for row in backend.get_top_patterns(limit=5)],
+            "duplicate_clusters": [_sanitize_cluster(row) for row in backend.get_duplicate_clusters(limit=5)],
+            "decay_curve": _sanitize_curve(backend.get_decay_curve(days=180, points=12)),
         }
 
-    return jsonify(_with_backend(load, _empty_payload("AfterImage backend unavailable")))
+    return jsonify(_json_safe(_with_backend(load, _empty_payload("AfterImage backend unavailable"))))
 
 
 @pattern_quality_bp.route("/top")
@@ -142,9 +250,9 @@ def api_pattern_quality_top():
     canonical_only = request.args.get("canonical", "").lower() in {"1", "true", "yes"}
     data = _with_backend(
         lambda backend: backend.get_top_patterns(limit=limit, canonical_only=canonical_only),
-        [],
+        None,
     )
-    return jsonify({"available": bool(data), "top_patterns": data})
+    return jsonify(_json_safe({"available": data is not None, "top_patterns": [_sanitize_pattern(row) for row in (data or [])]}))
 
 
 @pattern_quality_bp.route("/clusters")
@@ -154,8 +262,8 @@ def api_pattern_quality_clusters():
         limit = _int_arg("limit", 10, high=50)
     except ValueError as exc:
         return _bad_request(str(exc))
-    data = _with_backend(lambda backend: backend.get_duplicate_clusters(limit=limit), [])
-    return jsonify({"available": bool(data), "duplicate_clusters": data})
+    data = _with_backend(lambda backend: backend.get_duplicate_clusters(limit=limit), None)
+    return jsonify(_json_safe({"available": data is not None, "duplicate_clusters": [_sanitize_cluster(row) for row in (data or [])]}))
 
 
 @pattern_quality_bp.route("/decay")
@@ -169,6 +277,6 @@ def api_pattern_quality_decay():
     cluster_id = request.args.get("cluster") or None
     data = _with_backend(
         lambda backend: backend.get_decay_curve(cluster_id=cluster_id, days=days, points=points),
-        [],
+        None,
     )
-    return jsonify({"available": bool(data), "decay_curve": data})
+    return jsonify(_json_safe({"available": data is not None, "decay_curve": _sanitize_curve(data or [])}))

@@ -109,6 +109,10 @@ MODEL_CONTEXT_WINDOWS = {
     "claude-3-haiku-20240307": 200_000,
 }
 
+CODEX_MODEL_CONTEXT_WINDOWS = {
+    "gpt-5": 1_000_000,
+}
+
 # Cache pattern indicating context exhaustion
 # When cache_read is low, Claude is NOT reusing context (hitting the wall)
 LOW_CACHE_READ_THRESHOLD = 5_000
@@ -264,7 +268,7 @@ CODEX_SCAN_INTERVAL_SECONDS = 10.0
 CODEX_MAX_CANDIDATE_FILES = 500
 CODEX_TRANSCRIPT_START_SLOP_SECONDS = _safe_nonneg_int_env("CODEX_TRANSCRIPT_START_SLOP_SECONDS", 30)
 CODEX_CONTEXT_HANDOFF_ENABLED = os.environ.get(
-    "CODEX_CONTEXT_HANDOFF_ENABLED", "0"
+    "CODEX_CONTEXT_HANDOFF_ENABLED", "1"
 ).lower() in ("1", "true", "yes", "on")
 CODEX_GRACEFUL_CONTEXT_RATIO = _safe_float_env("CODEX_GRACEFUL_CONTEXT_RATIO", 0.92)
 CODEX_EMERGENCY_CONTEXT_RATIO = _safe_float_env("CODEX_EMERGENCY_CONTEXT_RATIO", 0.97)
@@ -313,6 +317,25 @@ def get_active_provider(provider: Optional[str] = None) -> str:
         return _normalize_provider(state_provider)
 
     return DEFAULT_LLM_PROVIDER
+
+
+def _codex_context_window_for_model(model_name: str, reported_window: int = 0) -> int:
+    """Return the effective Codex context window for threshold decisions."""
+    normalized = str(model_name or "").strip().lower()
+    for key in sorted(CODEX_MODEL_CONTEXT_WINDOWS, key=len, reverse=True):
+        if normalized == key or normalized.startswith(f"{key}.") or normalized.startswith(f"{key}-"):
+            return CODEX_MODEL_CONTEXT_WINDOWS[key]
+    return reported_window
+
+
+def _safe_nonnegative_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(default, parsed)
 
 
 # =============================================================================
@@ -1318,6 +1341,9 @@ class SessionMonitor:
         self.current_jsonl: Optional[Path] = None
         self.file_offset: int = 0
         self.file_mtime: float = 0
+        self._file_offsets: Dict[str, int] = {}
+        self._file_mtimes: Dict[str, float] = {}
+        self._logged_jsonl_files: Set[str] = set()
 
         # Token state
         self.last_tokens: Optional[TokenState] = None
@@ -1427,6 +1453,9 @@ class SessionMonitor:
         Returns:
             List of new parsed JSON records
         """
+        if self.provider == "codex":
+            return self._read_codex_new_entries()
+
         active_jsonl = self._find_active_jsonl()
 
         if not active_jsonl:
@@ -1496,6 +1525,128 @@ class SessionMonitor:
 
         return entries
 
+    def _read_entries_from_jsonl(
+        self,
+        jsonl_path: Path,
+        *,
+        offset: int,
+        last_mtime: float,
+    ) -> Tuple[List[Dict[str, Any]], int, float]:
+        """Read new JSONL records from one file without mutating monitor state."""
+        try:
+            current_stat = jsonl_path.stat()
+        except OSError:
+            return [], offset, last_mtime
+
+        current_mtime = current_stat.st_mtime
+        current_size = current_stat.st_size
+        if current_size < offset:
+            offset = 0
+            last_mtime = 0
+
+        if current_mtime <= last_mtime and current_size <= offset:
+            return [], offset, last_mtime
+
+        entries: List[Dict[str, Any]] = []
+        processed_bytes = 0
+        try:
+            with open(jsonl_path, "r", encoding="utf-8") as f:
+                f.seek(offset)
+                content = f.read()
+
+            lines = content.split("\n")
+            for i, line in enumerate(lines):
+                line_bytes = len(line.encode("utf-8")) + (1 if i < len(lines) - 1 else 0)
+                stripped = line.strip()
+
+                if not stripped:
+                    processed_bytes += line_bytes
+                    continue
+
+                try:
+                    record = json.loads(stripped)
+                    entries.append(record)
+                    processed_bytes += line_bytes
+                except json.JSONDecodeError:
+                    if i == len(lines) - 1 and not content.endswith("\n"):
+                        logger.debug("Partial JSON line at EOF, will retry on next read")
+                        break
+                    logger.debug("Malformed JSON line skipped: %s...", stripped[:100])
+                    processed_bytes += line_bytes
+
+        except (IOError, OSError, UnicodeDecodeError) as e:
+            logger.debug("Error reading JSONL %s: %s", jsonl_path, e)
+            return [], offset, last_mtime
+
+        return entries, offset + processed_bytes, current_mtime
+
+    def _read_codex_new_entries(self) -> List[Dict[str, Any]]:
+        """Read new records from all matching Codex session transcripts.
+
+        Codex can create multiple exec transcripts for one workspace during a
+        single AtlasForge stage. Tracking only the newest file causes the
+        monitor to bounce between files and reset offsets, so each matching
+        transcript gets its own offset.
+        """
+        self._refresh_codex_candidates()
+        if not self._codex_candidates:
+            return []
+
+        def _mtime(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        ordered_candidates = sorted(self._codex_candidates, key=_mtime)
+        newest = max(ordered_candidates, key=_mtime)
+        self.current_jsonl = newest
+
+        entries: List[Dict[str, Any]] = []
+        active_keys = set()
+        for jsonl_path in ordered_candidates:
+            key = str(jsonl_path)
+            active_keys.add(key)
+            try:
+                stat = jsonl_path.stat()
+            except OSError:
+                continue
+
+            if key not in self._file_offsets and stat.st_mtime < self.started_at.timestamp():
+                self._file_offsets[key] = stat.st_size
+                self._file_mtimes[key] = stat.st_mtime
+                if key not in self._logged_jsonl_files:
+                    logger.info(
+                        "Session %s: Ignoring pre-existing Codex JSONL file: %s",
+                        self.session_id,
+                        jsonl_path.name,
+                    )
+                    self._logged_jsonl_files.add(key)
+                continue
+
+            if key not in self._logged_jsonl_files:
+                logger.info("Session %s: Tracking Codex JSONL file: %s", self.session_id, jsonl_path.name)
+                self._logged_jsonl_files.add(key)
+
+            file_entries, new_offset, new_mtime = self._read_entries_from_jsonl(
+                jsonl_path,
+                offset=self._file_offsets.get(key, 0),
+                last_mtime=self._file_mtimes.get(key, 0),
+            )
+            self._file_offsets[key] = new_offset
+            self._file_mtimes[key] = new_mtime
+            entries.extend(file_entries)
+
+        # Keep tracking maps bounded to current candidates.
+        for stale_key in list(self._file_offsets):
+            if stale_key not in active_keys:
+                self._file_offsets.pop(stale_key, None)
+                self._file_mtimes.pop(stale_key, None)
+
+        self.file_offset = sum(self._file_offsets.values())
+        self.file_mtime = max(self._file_mtimes.values(), default=0)
+        return entries
+
     def _extract_token_state(self, record: Dict[str, Any]) -> Optional[TokenState]:
         """Extract TokenState from JSONL record if it has usage data."""
         # Ensure record is a dict (malformed entries might be arrays or other types)
@@ -1506,6 +1657,22 @@ class SessionMonitor:
         request_id: Optional[str] = None
 
         if self.provider == "codex":
+            if record.get("type") == "turn_context":
+                payload = record.get("payload", {})
+                if isinstance(payload, dict):
+                    model_name = str(payload.get("model") or "").strip()
+                    if model_name and not self._detected_model:
+                        self._detected_model = model_name
+                        context_window = _codex_context_window_for_model(model_name)
+                        if context_window > 0:
+                            logger.info(
+                                "Session %s: Detected Codex model %r with %d token context window",
+                                self.session_id,
+                                model_name,
+                                context_window,
+                            )
+                return None
+
             if record.get("type") != "event_msg":
                 return None
 
@@ -1536,7 +1703,10 @@ class SessionMonitor:
                 ),
                 "cache_creation_input_tokens": 0,
                 "total_tokens": total_usage.get("total_tokens", 0),
-                "model_context_window": info.get("model_context_window", 0),
+                "model_context_window": _codex_context_window_for_model(
+                    self._detected_model,
+                    _safe_nonnegative_int(info.get("model_context_window", 0)),
+                ),
             }
             request_id = (
                 f"token_count:{total_usage.get('total_tokens', 0)}:"

@@ -19,6 +19,7 @@ psutil>=5.9.0
 numpy>=1.21.0
 scikit-learn>=1.0.0  # Used for TF-IDF in knowledge base
 pypdf>=6.0.0  # Used by WebProxy PaperFetch and investigation source validation
+ddgs>=9.14.0  # Used by WebProxy fallback search backends
 
 # Optional: GUI system tray (Linux)
 # Uncomment to enable system tray indicator:

@@ -22,7 +22,8 @@ How it works:
 - `WebProxy/service.py` — the actual proxy (localhost:8765). Starts
   automatically alongside the dashboard (via `WebProxy.supervisor`), and
   can also run under the `atlasforge-web-proxy` systemd user unit. Exposes
-  `/search /fetch /research /image_search /cache /stats /health`.
+  `/search /fetch /research /image_search /cache /stats /health`. Search
+  auto-routing is Brave API -> DuckDuckGo HTML -> DDGS fallback backends.
 
 Spawn sites that route through the proxy:
 - `atlasforge_conductor.build_llm_command()` — R&D stage subagents
