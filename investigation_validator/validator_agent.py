@@ -21,6 +21,7 @@ try:
         ValidationResult,
         ValidationVerdict,
         ValidationConfig,
+        FilterMode,
     )
 except ImportError:
     from models import (
@@ -29,6 +30,7 @@ except ImportError:
         ValidationResult,
         ValidationVerdict,
         ValidationConfig,
+        FilterMode,
     )
 
 logger = logging.getLogger("validator_agent")
@@ -101,6 +103,9 @@ def validate_claim(
     config = config or ValidationConfig()
     start_time = time.time()
 
+    if config.filter_mode == FilterMode.SOURCE_EXISTS:
+        return _validate_source_exists(claim, source, config, start_time)
+
     # Handle missing or inaccessible source
     if not source or not source.accessible or not source.content:
         return ValidationResult(
@@ -138,6 +143,68 @@ def validate_claim(
             elapsed_seconds=time.time() - start_time,
             error=str(e),
         )
+
+
+def _validate_source_exists(
+    claim: Claim,
+    source: Optional[FetchedSource],
+    config: ValidationConfig,
+    start_time: float,
+) -> ValidationResult:
+    """
+    Programmatic source validation.
+
+    This mode only verifies that the cited source was resolved and content was
+    captured. It deliberately does not decide whether the source supports,
+    refutes, or merely contextualizes the claim.
+    """
+    validator_model = "programmatic-source-existence"
+
+    if not claim.source_url:
+        return ValidationResult(
+            claim_id=claim.id,
+            verdict=ValidationVerdict.UNVERIFIABLE,
+            confidence=0.0,
+            reasoning="No cited source URL was provided",
+            validator_model=validator_model,
+            elapsed_seconds=time.time() - start_time,
+        )
+
+    if not source:
+        return ValidationResult(
+            claim_id=claim.id,
+            verdict=ValidationVerdict.UNVERIFIABLE,
+            confidence=0.0,
+            reasoning="Cited source was not loaded or fetched",
+            validator_model=validator_model,
+            elapsed_seconds=time.time() - start_time,
+        )
+
+    if not source.accessible or not source.content:
+        detail = f": {source.error}" if source.error else ""
+        return ValidationResult(
+            claim_id=claim.id,
+            verdict=ValidationVerdict.UNVERIFIABLE,
+            confidence=0.0,
+            reasoning=f"Cited source could not be accessed or had no captured content{detail}",
+            validator_model=validator_model,
+            elapsed_seconds=time.time() - start_time,
+            error=source.error,
+        )
+
+    excerpt = _sanitize_source_content(source.content)[:500].strip()
+    return ValidationResult(
+        claim_id=claim.id,
+        verdict=ValidationVerdict.SUPPORTED,
+        confidence=1.0,
+        supporting_quote=excerpt,
+        reasoning=(
+            "Cited source exists and content was captured; this programmatic "
+            "check did not adjudicate whether the source supports or refutes the claim"
+        ),
+        validator_model=validator_model,
+        elapsed_seconds=time.time() - start_time,
+    )
 
 
 def validate_claims_parallel(

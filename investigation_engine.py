@@ -169,8 +169,8 @@ class InvestigationConfig:
     skip_global_state: bool = False  # When True, don't write to investigation_state.json (for email concurrency)
 
     # Adversarial validation settings
-    enable_validation: bool = True  # Enable fact-checking before synthesis
-    validation_filter_mode: str = "balanced"  # "strict", "annotated", or "balanced"
+    enable_validation: bool = True  # Enable citation validation before synthesis
+    validation_filter_mode: str = "source_exists"  # "source_exists", "strict", "annotated", or "balanced"
 
     def __post_init__(self):
         if self.timeout_minutes < 1:
@@ -1479,8 +1479,10 @@ def build_synthesis_prompt_validated(
 ) -> str:
     """Build the prompt for synthesizing VALIDATED subagent findings.
 
-    This version uses pre-validated findings where claims have been fact-checked
-    and filtered/annotated based on source verification.
+    This version uses pre-validated findings where claims have been checked
+    according to the configured validation mode. The default source-existence
+    mode verifies citations without judging whether each source supports the
+    associated claim.
 
     Args:
         query: The original investigation query
@@ -1505,8 +1507,31 @@ def build_synthesis_prompt_validated(
     supported = validation_stats.get("supported_claims", 0)
     unsupported = validation_stats.get("unsupported_claims", 0)
     unverifiable = validation_stats.get("unverifiable_claims", 0)
+    filter_mode = validation_stats.get("filter_mode", "balanced")
 
-    validation_note = f"""
+    source_check_mode = filter_mode in ("source_exists", "source_only", "hallucination_guard")
+    prompt_subject = "SOURCE-CHECKED" if source_check_mode else "VALIDATED"
+    findings_heading = "Source-Checked Subagent Findings" if source_check_mode else "Validated Subagent Findings"
+    research_basis = "source-checked information" if source_check_mode else "VERIFIED information"
+    priority_basis = "source-checked information" if source_check_mode else "verified information"
+
+    if source_check_mode:
+        validation_note = f"""
+## IMPORTANT: Citation Source Validation Applied
+
+These findings were checked for citation/source existence, not for whether each source supports or refutes the claim:
+- **{supported}/{total}** claims cite sources that were accessible and had captured content
+- **{unverifiable}** claims cite sources that were unavailable, missing, or had no captured content
+
+Use source-checked findings as investigation material. A cited source may support,
+refute, or contextualize the associated claim. Do not discard refuting evidence
+merely because it does not support a subagent's wording.
+
+Findings marked as source unavailable may still be useful for orientation, but
+must be caveated and must not be cited as verified evidence.
+"""
+    else:
+        validation_note = f"""
 ## IMPORTANT: Citation Validation Applied
 
 These findings have been fact-checked by independent validator agents:
@@ -1523,6 +1548,25 @@ Findings marked with:
 ONLY synthesize information that has been verified or partially verified.
 Treat unverified claims with appropriate skepticism.
 Do NOT include disputed claims in your synthesis.
+"""
+
+    if source_check_mode:
+        important_instructions = """
+- Prioritize source-checked claims over source-unavailable ones
+- Include refuting evidence when it is relevant and source-checked
+- If critical information is unverified, note this caveat
+- The validation ensures citations were checked; in source-existence mode it does not prove a source supports the claim
+- Use the Investigation-Owned Source Evidence index as the audit trail for fetched sources.
+- Do not quote a source unless the quoted material is present in validated findings and traceable to a listed evidence payload.
+"""
+    else:
+        important_instructions = """
+- Prioritize VERIFIED claims over unverified ones
+- Do NOT include disputed/unsupported claims in your synthesis
+- If critical information is unverified, note this caveat
+- The validation ensures you're working with fact-checked information
+- Use the Investigation-Owned Source Evidence index as the audit trail for fetched sources.
+- Do not quote a source unless the quoted material is present in validated findings and traceable to a listed evidence payload.
 """
 
     # Build format-specific instructions (reuse same logic)
@@ -1578,17 +1622,17 @@ Create a comprehensive markdown report with:
 ## Data Quality Note (mention validation stats)
 """
 
-    return f"""{ground_rules_section}You are synthesizing VALIDATED research findings.
+    return f"""{ground_rules_section}You are synthesizing {prompt_subject} research findings.
 
 ## SCOPE: UNRESTRICTED RESEARCH
 
 You are a GENERAL RESEARCH synthesizer. Produce a complete, useful deliverable
-that answers the original query based on VERIFIED information.
+that answers the original query based on {research_basis}.
 
 ## Original Investigation Query
 {query}
 {validation_note}
-## Validated Subagent Findings
+## {findings_heading}
 
 {validated_findings_text}
 
@@ -1598,17 +1642,11 @@ that answers the original query based on VERIFIED information.
 
 ## Your Task
 
-Synthesize these VALIDATED findings into a comprehensive deliverable.
-Prioritize verified information. Note confidence levels where relevant.
+Synthesize these {prompt_subject} findings into a comprehensive deliverable.
+Prioritize {priority_basis}. Note confidence levels where relevant.
 {format_instruction}
 ## Important
-
-- Prioritize VERIFIED claims over unverified ones
-- Do NOT include disputed/unsupported claims in your synthesis
-- If critical information is unverified, note this caveat
-- The validation ensures you're working with fact-checked information
-- Use the Investigation-Owned Source Evidence index as the audit trail for fetched sources.
-- Do not quote a source unless the quoted material is present in validated findings and traceable to a listed evidence payload.
+{important_instructions}
 """
 
 
@@ -2805,13 +2843,16 @@ class InvestigationRunner:
 
             # Create validation config from investigation config
             filter_mode_map = {
+                "source_exists": FilterMode.SOURCE_EXISTS,
+                "source_only": FilterMode.SOURCE_EXISTS,
+                "hallucination_guard": FilterMode.SOURCE_EXISTS,
                 "strict": FilterMode.STRICT,
                 "annotated": FilterMode.ANNOTATED,
                 "balanced": FilterMode.BALANCED,
             }
             filter_mode = filter_mode_map.get(
                 self.config.validation_filter_mode,
-                FilterMode.BALANCED
+                FilterMode.SOURCE_EXISTS
             )
 
             val_config = ValidationConfig(
@@ -2831,7 +2872,10 @@ class InvestigationRunner:
 
             # Log stats
             stats = orchestrator.get_stats()
-            self._log(f"Validation stats: {stats.supported}/{stats.total_claims} claims supported")
+            if filter_mode == FilterMode.SOURCE_EXISTS:
+                self._log(f"Source validation stats: {stats.supported}/{stats.total_claims} claims have accessible cited sources")
+            else:
+                self._log(f"Validation stats: {stats.supported}/{stats.total_claims} claims supported")
 
             return validated
 
@@ -2859,10 +2903,12 @@ class InvestigationRunner:
             evidence_index = self._build_pinned_evidence_index()
             # Use validated findings text if available, otherwise use raw findings
             if validated_findings and validated_findings.filtered_findings_text:
+                validation_stats = validated_findings.to_dict()
+                validation_stats["filter_mode"] = self.config.validation_filter_mode
                 prompt = build_synthesis_prompt_validated(
                     self.config.query,
                     validated_findings.filtered_findings_text,
-                    validated_findings.to_dict(),
+                    validation_stats,
                     self.config.deliverable_format,
                     self.config.source,
                     self.ground_rules,

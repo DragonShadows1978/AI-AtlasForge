@@ -33,6 +33,7 @@ class FilterMode(Enum):
     STRICT = "strict"  # Only supported claims pass
     ANNOTATED = "annotated"  # All claims pass with validation flags
     BALANCED = "balanced"  # Remove unsupported, keep unverifiable with warnings
+    SOURCE_EXISTS = "source_exists"  # Verify cited sources exist; do not adjudicate claim support
 
 
 @dataclass
@@ -219,7 +220,7 @@ class ValidationConfig:
     cache_ttl_hours: int = 24
 
     # Filtering mode
-    filter_mode: FilterMode = FilterMode.BALANCED
+    filter_mode: FilterMode = FilterMode.SOURCE_EXISTS
 
     # Thresholds
     min_confidence_to_keep: float = 0.3

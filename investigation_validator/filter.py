@@ -123,6 +123,8 @@ def filter_findings(
             filtered = _filter_strict(focus_area, subagent_claims, original_findings)
         elif filter_mode == FilterMode.ANNOTATED:
             filtered = _filter_annotated(focus_area, subagent_claims, original_findings)
+        elif filter_mode == FilterMode.SOURCE_EXISTS:
+            filtered = _filter_source_exists(focus_area, subagent_claims, original_findings)
         else:  # BALANCED
             filtered = _filter_balanced(focus_area, subagent_claims, original_findings)
 
@@ -239,6 +241,47 @@ def _filter_balanced(focus_area: str, claims: List[Claim], original: str) -> str
     return output
 
 
+def _filter_source_exists(focus_area: str, claims: List[Claim], original: str) -> str:
+    """
+    Source-existence filtering - keep claims whose citations were checked.
+
+    This mode guards against hallucinated/missing sources without deciding
+    whether the source supports or refutes the claim.
+    """
+    if not claims:
+        return f"### {focus_area}\n\n{original}"
+
+    output = f"### {focus_area}\n\n"
+
+    source_checked = []
+    source_unavailable = []
+
+    for claim in claims:
+        if claim.validated and not claim.flagged:
+            source_checked.append(claim)
+        else:
+            source_unavailable.append(claim)
+
+    if source_checked:
+        output += "**Source Checked:**\n"
+        for c in source_checked:
+            output += f"- {c.text}\n"
+            if c.source_url:
+                output += f"  - Source: {c.source_url}\n"
+        output += "\n"
+
+    if source_unavailable:
+        output += "**Source Unavailable or Missing (use only with caveat):**\n"
+        for c in source_unavailable:
+            note = c.validation_note or c.flag_reason or "Source was not verified"
+            output += f"- {c.text} *(source note: {note})*\n"
+            if c.source_url:
+                output += f"  - Source: {c.source_url}\n"
+        output += "\n"
+
+    return output
+
+
 def _get_verdict_icon(claim: Claim) -> str:
     """Get an icon representing the claim's validation status."""
     if claim.validated and not claim.flagged:
@@ -329,6 +372,8 @@ def filter_json_findings(
                     elif filter_mode == FilterMode.ANNOTATED:
                         icon = _get_verdict_icon(claim)
                         filtered_findings.append(f"{icon} {finding}")
+                    elif filter_mode == FilterMode.SOURCE_EXISTS:
+                        filtered_findings.append(finding)
                     else:  # BALANCED
                         if not claim.flagged:
                             filtered_findings.append(finding)

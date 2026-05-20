@@ -17,6 +17,7 @@ try:
         ValidationConfig,
         ValidatedFindings,
         ValidationVerdict,
+        FilterMode,
     )
     from .claim_extractor import extract_claims
     from .source_fetcher import SourceFetcher
@@ -30,6 +31,7 @@ except ImportError:
         ValidationConfig,
         ValidatedFindings,
         ValidationVerdict,
+        FilterMode,
     )
     from claim_extractor import extract_claims
     from source_fetcher import SourceFetcher
@@ -173,7 +175,10 @@ class ValidationOrchestrator:
         self._log(f"  Loaded/fetched {self.stats.urls_accessible}/{len(urls)} sources successfully")
 
         # Step 4: Validate claims
-        self._log("Step 3: Running blind validation agents...")
+        if self.config.filter_mode == FilterMode.SOURCE_EXISTS:
+            self._log("Step 3: Verifying cited sources exist...")
+        else:
+            self._log("Step 3: Running blind validation agents...")
         validation_start = time.time()
         validation_results = validate_claims_parallel(claims, sources, self.config)
         self.stats.validation_time = time.time() - validation_start
