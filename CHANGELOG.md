@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.7.3] - 2026-05-20
+
+### Changed
+
+- Investigation Engine improvements
+- Enhancement updates with improved WebProxy fallback logic
+
+### Other
+
+- Release v2.7.2 - automated release pipeline
+- Fallback from Brave quota errors to DuckDuckGo
+
+### Code Changes
+
+- **Modified** `WebProxy/service.py` — `_brave_fallback_reason`, `_with_fallback_metadata`, `_results_are_empty`, `_search_duckduckgo_or_ddgs_fallback`, `search_images`
+- **Modified** `WebProxy/tests/test_service.py` — `TestBraveFallback`, `_http_error`, `test_auto_search_falls_back_to_duckduckgo_on_brave_quota`, `_raise_brave`, `_ddg`
+- **Modified** `context_watcher/context_watcher.py` — `_codex_context_window_for_model`, `_safe_nonnegative_int`, `_read_entries_from_jsonl`, `_read_codex_new_entries`, `_mtime`
+- **Modified** `context_watcher/tests/test_codex_provider.py` — `test_codex_gpt5_uses_one_million_window_when_cli_reports_smaller_window`, `test_codex_monitor_tracks_multiple_matching_transcripts_without_rereading`, `test_codex_monitor_tails_preexisting_matching_transcripts_from_eof`, `test_codex_context_handoff_disabled_by_default`, `test_codex_context_handoff_can_be_disabled`
+- **Modified** `dashboard_modules/pattern_quality.py` — `_json_safe`, `_number`, `_integer`, `_short_text`, `_sanitize_summary`
+- **Modified** `dashboard_templates/main_bundled.html`
+- **Modified** `dashboard_v2.py`
+- **Modified** `investigation_engine.py`
+- **Modified** `investigation_validator/filter.py` — `_filter_source_exists`
+- **Modified** `investigation_validator/models.py`
+- **Modified** `investigation_validator/orchestrator.py`
+- **Added** `investigation_validator/tests/test_source_exists_validation.py` — `test_source_exists_mode_is_programmatic`, `fail_if_llm_called`, `test_source_exists_filter_keeps_refuting_findings`, `Result`, `test_source_exists_prompt_does_not_block_refuting_data`
+- **Modified** `investigation_validator/validator_agent.py` — `_validate_source_exists`
+- **Modified** `tests/test_pattern_quality_dashboard.py` — `EmptyPatternBackend`, `close`, `get_pattern_quality_summary`, `get_top_patterns`, `get_duplicate_clusters`
+
+### Stats
+
+```
+ investigation_validator/validator_agent.py         |  67 +++++
+ pyproject.toml                                     |   3 +-
+ requirements.txt                                   |   1 +
+ tests/test_pattern_quality_dashboard.py            | 232 +++++++++++++++
+ 19 files changed, 1677 insertions(+), 122 deletions(-)
+```
+
+_Full diff: `git diff v2.7.1..v2.7.3`_
+
+
 ## [2.7.2] - 2026-05-17
 
 ### Changed
