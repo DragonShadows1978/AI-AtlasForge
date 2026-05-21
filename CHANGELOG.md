@@ -1,5 +1,64 @@
 # Changelog
 
+## [2.7.4] - 2026-05-21
+
+### Added
+
+- feat: add vision module and claude_hooks as integrated repo components
+- docs: update v1.11.0 changelog with full feature list
+
+### Changed
+
+- Investigation Engine improvements
+- Enhancement updates with improved WebProxy fallback logic
+- Ship AtlasForge widget and service updates
+- chore: bump version to 2.2.0 for PyPI release
+
+### Fixed
+
+- Bug fix patch
+- Bug fixes and dashboard updates
+- fix: update stale workspace/glassbox paths after glassbox move to repo root
+- fix: update backup-core-files.py paths from mini-mind-v2 to AI-AtlasForge
+- Release v1.10.0 - Automated release pipeline, clean push, conductor fixes
+- Release v1.9.1 - Dashboard persistence and stage gate fixes
+
+### Other
+
+- Release v2.7.3 - automated release pipeline
+- Release v2.7.2 - automated release pipeline
+- Fallback from Brave quota errors to DuckDuckGo
+- Release v2.7.1 - automated release pipeline
+- Release v2.7.0 - automated release pipeline
+- Release v2.6.2 - automated release pipeline
+- Constrain Codex testing stage writes
+- Release v2.6.1 - automated release pipeline
+- Gate mission suggestion generation
+- Release v2.6.0 - major architecture overhaul, dashboard redesign, testing infrastructure hardening
+- Tighten AtlasForge dashboard columns
+- Separate Codex fast mode from thinking
+- Release v2.5.0 - automated release pipeline
+- feat: investigation pipeline v2.5 — staggered waves, Opus synthesis, blind validator restored
+- Release v2.4.3 - automated release pipeline
+- Release v2.4.2 - automated release pipeline
+- Release v2.4.1 - automated release pipeline
+- Release v2.4.0 - automated release pipeline
+- Release v2.3.0 - automated release pipeline
+- Release v2.3.0 — WebProxy package, transparent MCP interception, hardening
+
+### Stats
+
+```
+ vision/desktop_vision.py                           |  253 +
+ vision/screen_capture.py                           |  279 +
+ vision/x11_bindings.py                             |  401 ++
+ websocket_events.py                                |  265 +-
+ 14934 files changed, 73894 insertions(+), 234242 deletions(-)
+```
+
+_Full diff: `git diff v2.7.3..v2.7.4`_
+
+
 ## [2.7.3] - 2026-05-20
 
 ### Changed
