@@ -1,0 +1,290 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_70ecd3784d3e874eef56760c0402b359156c155abe7cd70d56ef0124889a9282",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_70ecd3784d3e874eef56760c0402b359156c155abe7cd70d56ef0124889a9282.json",
+  "_cached_at": 1779337683,
+  "content_type": "text/html;charset=utf-8",
+  "fetched_at": 1779337683,
+  "headings": [
+    "What is quantization aware training?",
+    "Authors",
+    "What is quantization aware training (qat)?",
+    "What is quantization?",
+    "The latest AI News + Insights",
+    "How does QAT work?",
+    "QAT Steps",
+    "QAT with PyTorch and Tensorflow",
+    "How enterprises excel in the AI era",
+    "Use cases for QAT",
+    "What's next?",
+    "Resources"
+  ],
+  "links": [
+    {
+      "text": "Artificial Intelligence",
+      "url": "https://www.ibm.com/think/artificial-intelligence"
+    },
+    {
+      "text": "Compute and servers",
+      "url": "https://www.ibm.com/think/compute"
+    },
+    {
+      "text": "IT automation",
+      "url": "https://www.ibm.com/think/it-automation"
+    },
+    {
+      "text": "Bryan Clark",
+      "url": "https://www.ibm.com/think/author/bryan-clark"
+    },
+    {
+      "text": "quantization",
+      "url": "https://www.ibm.com/think/topics/quantization"
+    },
+    {
+      "text": "large language models (LLMs)",
+      "url": "https://www.ibm.com/think/topics/large-language-models"
+    },
+    {
+      "text": "post-training quantization (PTQ)",
+      "url": "https://www.ibm.com/think/tutorials/post-training-quantization"
+    },
+    {
+      "text": "1",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f01"
+    },
+    {
+      "text": "machine learning",
+      "url": "https://www.ibm.com/think/topics/machine-learning"
+    },
+    {
+      "text": "inference",
+      "url": "https://www.ibm.com/think/topics/ai-inference"
+    },
+    {
+      "text": "2",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f02"
+    },
+    {
+      "text": "Subscribe today",
+      "url": "https://www.ibm.com/us-en/forms/news-mkt-52954"
+    },
+    {
+      "text": "parameters",
+      "url": "https://www.ibm.com/think/topics/model-parameters"
+    },
+    {
+      "text": "3",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f03"
+    },
+    {
+      "text": "benchmarking",
+      "url": "https://www.ibm.com/think/topics/llm-benchmarks"
+    },
+    {
+      "text": "F1 score",
+      "url": "https://www.ibm.com/think/topics/llm-benchmarks#:~:text=The%20F1%20score%20blends%20both%20accuracy%20and%20recall%20into%20one%20metric.%20It%20considers%20the%20two%20measures%20to%20be%20of%20equal%20weight%20to%20balance%20out%20any%20false%20positives%20or%20false%20negatives.%20F1%20scores%20range%20from%200%20to%201%2C%20with%201%20signifying%20excellent%20recall%20and%20precision."
+    },
+    {
+      "text": "4",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f04"
+    },
+    {
+      "text": "5",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f05"
+    },
+    {
+      "text": "6",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f06"
+    },
+    {
+      "text": "PyTorch",
+      "url": "https://pytorch.org/blog/quantization-aware-training/"
+    },
+    {
+      "text": "TensorFlow",
+      "url": "https://www.tensorflow.org/model_optimization/guide/quantization/training"
+    },
+    {
+      "text": "Pytorch",
+      "url": "https://github.com/pytorch/ao/blob/main/torchao/quantization/qat/README.md"
+    },
+    {
+      "text": "Tensorflow",
+      "url": "https://github.com/tensorflow/model-optimization/blob/master/tensorflow_model_optimization/g3doc/guide/quantization/training_example.ipynb"
+    },
+    {
+      "text": "7",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f07"
+    },
+    {
+      "text": "8",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f08"
+    },
+    {
+      "text": "Build with watsonx Orchestrate®",
+      "url": "https://www.ibm.com/products/watsonx-orchestrate"
+    },
+    {
+      "text": "9",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f09"
+    },
+    {
+      "text": "convolutional neural networks (CCNs)",
+      "url": "https://www.ibm.com/think/topics/convolutional-neural-networks"
+    },
+    {
+      "text": "10",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f10"
+    },
+    {
+      "text": "11",
+      "url": "https://www.ibm.com/think/topics/quantization-aware-training#f11"
+    },
+    {
+      "text": "",
+      "url": "https://www.linkedin.com/shareArticle?url=https://www.ibm.com/think/topics/quantization-aware-training&title=Quantization%20Aware%20Training"
+    },
+    {
+      "text": "",
+      "url": "https://www.facebook.com/share.php?u=https://www.ibm.com/think/topics/quantization-aware-training"
+    },
+    {
+      "text": "",
+      "url": "https://x.com/intent/tweet?text=Quantization%20Aware%20Training&url=https://www.ibm.com/think/topics/quantization-aware-training"
+    },
+    {
+      "text": "Ebook How to choose the right AI foundation model Learn how to choose the right approach in preparing datasets and employing AI models.",
+      "url": "https://www.ibm.com/us-en/forms/mkt-52620"
+    },
+    {
+      "text": "IBV Report The enterprise in 2030: Engineered for perpetual innovation Discover our five predictions about what will define the most successful enterprises in 2",
+      "url": "https://www.ibm.com/thought-leadership/institute-business-value/report/enterprise-2030"
+    },
+    {
+      "text": "Report AI governance imperative: evolving regulations and emergence of agentic AI Learn how evolving regulations and the emergence of AI agents are reshaping th",
+      "url": "https://www.ibm.com/forms/mkt-54070"
+    },
+    {
+      "text": "Techsplainers podcast Agentic AI explained Techsplainers by IBM breaks down the essentials of agentic AI, from key concepts to real‑world use cases. Clear, quic",
+      "url": "https://www.ibm.com/think/podcasts/techsplainers#tabs-fw-44e285b2cc-item-a3ea4f0927-tab"
+    },
+    {
+      "text": "Guidebook Unlock AI ROI: A tactical guide to enterprise productivity Learn proven strategies to boost productivity and power enterprise transformation with AI a",
+      "url": "https://www.ibm.com/account/reg/signup?formid=urx-54227"
+    },
+    {
+      "text": "Buyer guide How AI agents and assistants can benefit your organization Dive into this comprehensive guide that breaks down key use cases and core capabilities, ",
+      "url": "https://www.ibm.com/forms/mkt-53811"
+    },
+    {
+      "text": "Video Reimagine business productivity with AI agents and assistants Learn how AI agents and AI assistants can work together to achieve new levels of productivit",
+      "url": "https://www.ibm.com/think/videos/ai-academy/reimagine-business-productivity-with-ai"
+    },
+    {
+      "text": "Demo Try watsonx Orchestrate® Explore how generative AI assistants can lighten your workload and improve productivity. Start the demo",
+      "url": "https://www.ibm.com/products/watsonx-orchestrate/demos"
+    },
+    {
+      "text": "Report From AI projects to profits: How agentic AI can sustain financial returns Learn how organizations are shifting from launching AI in disparate pilots to u",
+      "url": "https://www.ibm.com/thought-leadership/institute-business-value/report/agentic-ai-profits"
+    },
+    {
+      "text": "Report Omdia Report on empowered intelligence: The impact of AI agents Discover how you can unlock the full potential of gen AI with AI agents. Read the report",
+      "url": "https://www.ibm.com/forms/mkt-53501"
+    },
+    {
+      "text": "Podcast How AI agents will reinvent productivity Learn ways to use AI to be more creative, efficient and start adapting to a future that involves working closel",
+      "url": "https://www.ibm.com/think/podcasts/ai-in-action/how-ai-agents-will-reinvent-productivity"
+    },
+    {
+      "text": "News Ushering in the agentic enterprise: Putting AI to work across your entire technology estate Stay updated about the new emerging AI agents, a fundamental br",
+      "url": "https://www.ibm.com/new/announcements/productivity-revolution-with-ai-agents-that-work-across-stack"
+    },
+    {
+      "text": "Podcast The future of agents, AI energy consumption, Anthropic computer use and Google watermarking AI-generated text Stay ahead of the curve with our AI expert",
+      "url": "https://www.ibm.com/think/podcasts/mixture-of-experts/future-of-ai-agents-ai-energy-consumption-anthropic-computer-use-google-watermarking-ai"
+    },
+    {
+      "text": "Case study How Comparus is using a \"banking assistant\" Comparus used solutions from watsonx.ai® and impressively demonstrated the potential of conversational ba",
+      "url": "https://www.ibm.com/case-studies/comparus-gmbh"
+    },
+    {
+      "text": "Explore watsonx Orchestrate",
+      "url": "https://www.ibm.com/products/watsonx-orchestrate"
+    },
+    {
+      "text": "Explore AI agent solutions",
+      "url": "https://www.ibm.com/solutions/ai-agents"
+    },
+    {
+      "text": "Explore artificial intelligence services",
+      "url": "https://www.ibm.com/consulting/artificial-intelligence"
+    },
+    {
+      "text": "",
+      "url": "https://www.ibm.com/products/watsonx-orchestrate"
+    },
+    {
+      "text": "Explore watsonx Orchestrate",
+      "url": "https://www.ibm.com/products/watsonx-orchestrate"
+    },
+    {
+      "text": "",
+      "url": "https://www.ibm.com/products/watsonx-ai"
+    },
+    {
+      "text": "Explore watsonx.ai",
+      "url": "https://www.ibm.com/products/watsonx-ai"
+    },
+    {
+      "text": "https://arxiv.org/abs/2411.06084",
+      "url": "https://arxiv.org/abs/2411.06084"
+    },
+    {
+      "text": "https://arxiv.org/abs/2103.13630",
+      "url": "https://arxiv.org/abs/2103.13630"
+    },
+    {
+      "text": "https://arxiv.org/abs/1806.08342",
+      "url": "https://arxiv.org/abs/1806.08342"
+    },
+    {
+      "text": "https://search.arxiv.org/paper.jsp?r=2411.11038&qid=1745420378770ler_nCnN_-2014381916&qs=quantization+aware+training+steps",
+      "url": "https://search.arxiv.org/paper.jsp?r=2411.11038&qid=1745420378770ler_nCnN_-2014381916&qs=quantization+aware+training+steps"
+    },
+    {
+      "text": "https://doi.org/10.48550/arXiv.1902.08153",
+      "url": "https://arxiv.org/abs/1902.08153"
+    },
+    {
+      "text": "https://arxiv.org/abs/2307.04347",
+      "url": "https://arxiv.org/abs/2307.04347"
+    },
+    {
+      "text": "https://pytorch.org/docs/stable/quantization.html",
+      "url": "https://pytorch.org/docs/stable/quantization.html"
+    },
+    {
+      "text": "https://www.tensorflow.org/model_optimization/guide/quantization/training",
+      "url": "https://www.tensorflow.org/model_optimization/guide/quantization/training"
+    },
+    {
+      "text": "https://arxiv.org/abs/2408.13933",
+      "url": "https://arxiv.org/abs/2408.13933"
+    },
+    {
+      "text": "https://arxiv.org/abs/1502.02551",
+      "url": "https://arxiv.org/abs/1502.02551"
+    },
+    {
+      "text": "https://doi.org/10.1109/ccci49893.2020.9256498",
+      "url": "https://ieeexplore.ieee.org/document/9256498"
+    }
+  ],
+  "meta_description": "Learn how Quantization Aware Training (QAT) improves large language model efficiency by simulating low-precision effects during training. Explore QAT steps, implementations in PyTorch and TensorFlow, and key use cases that help deploy accurate, optimized models on edge and resource-limited devices.",
+  "status_code": 200,
+  "text": "What is quantization aware training?\n\nAuthors\n\nSenior Technology Advocate\n\nWhat is quantization aware training (qat)?\n\nQuantization aware training (QAT) is a method of quantization that integrates weight precision reduction directly into the pretraining or fine-tuning process of large language models (LLMs) . This process differs from post-training quantization (PTQ) that performs quantization on the LLM to a pretrained model with no additional training or fine-tuning taking place in the process. While QAT yields improved performance outcomes, it requires significant computational resources and needs access to representative datasets for training purposes. 1\n\nWhat is quantization?\n\nQuantization is a machine learning compression technique that when applied to LLMs converts high-precision data formats (like 32-bit or 16-bit floating point numbers) to lower-precision formats (such as 8-bit or even 4-bit integers). This process reduces the computational demands, memory footprint and overall model size of LLMs while accelerating inference speed. Though quantization inevitably introduces some accuracy loss (quantization error) as values are compressed to fewer bits, the goal is to maintain nearly identical model performance and integrity despite the reduced precision. By shrinking the number of bits that need to be processed during each model run, quantization significantly decreases computational costs and allows LLMs to generate responses more quickly, making it a valuable optimization strategy for deployment. 2\n\nThe latest AI News + Insights\n\nDiscover expertly curated insights and news on AI, cloud and more in the weekly Think Newsletter.\n\nHow does QAT work?\n\nQuantization aware training (QAT) works by simulating the effects of low-precision arithmetic during training. It inserts fake quantization operations into the computation graph, which mimic how weights and activations would behave under reduced precision (for example, 8-bit or 4-bit). By introducing quantization effects during training, QAT enables the model to optimize its parameters with awareness of reduced numerical precision, leading to better performance under quantized inference.\n\nIn QAT, the standard quantizer function transforms continuous, high-precision values into discrete, lower-precision representations by applying an elementwise operation to weight tensors. This function follows the uniform quantization approach, which is defined in the following algorithm:\n\nQ ( x ) = Δ · r o u n d ( c l i p ( x / Δ , l , u ) )\n\nWhere:\n\nΔ represents the quantization step size\n\nThe clip function constrains values between lower bound l and upper bound u :\n\nc l i p ( x , l , u ) = l i f x < l\n\nc l i p ( x , l , u ) = l i f x < l\n\nc l i p ( x , l , u ) = u i f x > u\n\nForward and backward passes use these replicated quantized values for computation. The forward pass of QAT refers to fake quantization being applied to weights and activations during inference. The backward pass refers to gradients being computed and weights being updated. Gradients are computed by using the straight through estimator (STE), which overcomes the nondifferentiability of quantization functions by using the identity function's gradient (Qˆ'(x) = 1) during backpropagation. This enables weight updates in quantized neural networks despite the true gradient being zero almost everywhere. However, model weights are maintained in full precision (floating-point), ensuring they can be updated smoothly without numerical instability. This means that each training step uses quantized versions for calculations but updates the precise weights, which are then requantized for the next step. 3\n\nIn general, this concept can be a bit confusing, especially if one is new to the world of quantization. Let’s imagine for a moment that you are the driver for a racing team and you are navigating an off-road course for the first time. The terrain is narrow and can be very difficult to traverse. The first time that you navigate this course you might drive a bit slower to avoid crashing. Think of this as the forward pass the model will input under quantized conditions and grasp the ruggedness being introduced by quantization noise. After the first lap your driving coach instructs you on how to improve your methods for navigating the course more efficiently based on your initial run. We imagine the backwards pass as your driving coach’s critiques and corrections as it calculates the gradient and updates the weights based on its review of the forward pass (your first go around the rocky racecourse). Now, imagine your driving coach giving you feedback to improve your driving by pretending the rugged terrain was a smooth racetrack. This guidance allows you to improve your driving technique without getting hungup on the details of the rough terrain. Like this advice, the STE ignores nondifferentiable quantization steps and passes gradients through as if the quantization were a smooth operation. To recap the forward pass is like navigating a rugged racecourse. The backward pass is similar to your driving coach’s instructions based on the performance of your first lap, and STE is advice to pretend the rocky course were a smooth track.\n\nQAT Steps\n\nSimulated quantization: Both the forward passes and backward passes are executed in floating-point precision. It is crucial to maintain the floating-point precision during the backward pass, as gradient accumulation in quantized formats can lead to gradient vanishing or significant error propagation, particularly when working with low-precision representations. However, the model weights and activations are quantized after each gradient update, like a projected gradient descent approach. This method ensures that the model can converge to a better loss point, even after quantization introduces a perturbation to the model parameters.\n\nGradient calculation: Straight-through estimator (STE) is used to approximate the gradient by treating the quantization operation as an identity function. This approximation allows the gradient to pass through the quantization step, facilitating model updates during training.\n\n* STE has been shown to work effectively in practice, except in extreme cases like binary quantization, where the gradient approximation is less accurate.\n\nQuantization of parameters: After each gradient update, the model weights are quantized. This projection step ensures that the updated quantized weights adhere to the quantization scheme (for example, 8-bit or 4-bit). The model parameters remain in floating-point precision during training to avoid issues like underflow from small gradient updates.\n\nLearning quantization parameters: In some advanced versions of QAT, the quantization parameters (such as clipping ranges or step sizes) are learned during training. For example, methods like parameterized clipping activation (PACT) learns clipping ranges for activations)or learned step size quantization (LSQ) learns scaling factors for activations help in fine-tuning the quantization process to enhance accuracy. (add PACT & LSQ citation).\n\nRetraining overhead: QAT requires extensive retraining, sometimes over hundreds of epochs, to recover the lost accuracy, particularly at low-bit precision. This makes QAT computationally expensive, but for models that require high accuracy and long lifetimes, the retraining is often worthwhile. In contrast, for models with shorter lifespans or less critical accuracy needs, the computational cost might not justify the benefits.\n\nValidation and benchmarking : The fully quantized model is validated against a test dataset to ensure that the accuracy remains acceptable. During this step metrics like accuracy, precision, recall and F1 score are compared against the original floating-point model. If for example, the accuracy drops beneath a predetermined threshold, it might be necessary to return to the previous steps for additional training. However, if the model passes it will move on to deployment. 4 , 5 , 6\n\nQAT with PyTorch and Tensorflow\n\nAt a high level, both PyTorch and TensorFlow implement QAT within Python environments by simulating quantization effects or “fake quants” during training to maintain model accuracy after conversion. PyTorch's approach centers on model preparation through annotation and specifying quantization configurations, followed by inserting observer modules to collect tensor statistics during calibration. PyTorch QAT then replaces floating-point operations with quantized equivalents while maintaining backpropagation compatibility. TensorFlow's QAT works through the Keras Model Optimization Toolkit, which creates a quantization-aware model wrapper that emulates the quantization math through fake nodes, by using a straightforward apply_quantization_aware_training() API that requires minimal code changes to existing models.\n\nPyTorch's QAT framework offers two paths: eager mode quantization with torch.quantization for rapid prototyping and fx graph mode for more comprehensive model transformations. It provides fine-grained control through customizable observers and supports both symmetric and asymmetric quantization schemes. TensorFlow's QAT implementation follows a clear workflow where the quantized Keras model is trained, then converted to a fully quantized model for inference by using the TFLite converter. TensorFlow specializes in 8-byte integer (int8) quantization targeting mobile and edge devices. Both Pytorch and Tensorflow frameworks simulate quantization during training with floating-point computations that mimic fixed-point math but differ in their integration approaches. PyTorch emphasizing flexibility with its modular design versus TensorFlow focusing on deployment-ready optimization with stronger mobile acceleration support. For more information, check out the Pytorch and Tensorflow repos on GitHub for some tutorials. 7 , 8\n\nHow enterprises excel in the AI era\n\nMove beyond AI hype to measurable value. See how IBM is transforming into an AI-first enterprise and turning agentic AI into productivity, reinvestment and real business impact.\n\nUse cases for QAT\n\nModel deployment on edge devices and mobile phones: QAT is pivotal in the use of LLMs on devices where memory, compute and power are limited. It enables the use of efficient INT8 or even INT4 arithmetic, which accelerates inference and reduces model size without considerable loss in accuracy. For example, modern mobile devices are already optimized for low-precision operations making QAT models more feasible for these platforms. 9\n\nComputer vision tasks: QAT can be applied to convolutional neural networks (CCNs) for image classification tasks. CCNs are a type of deep learning model that are designed to process data by using a grid-like method. For example, using the MNIST digit classification task QAT enables CCN to achieve accuracy close to the original floating-point model. 10 , 11\n\nWhat's next?\n\nQuantization aware training (QAT) is a critical technique for achieving efficient large language model deployment without significant accuracy loss. By integrating quantization during training, QAT enables reliable inference on resource-constrained devices, making it essential for edge computing and mobile applications. As hardware improves, QAT will unlock AI applications in IoT, real-time analytics and more personalized experiences. Its growing adoption, already supported by frameworks like PyTorch and TensorFlow, emphasizes its critical role in advancing scalable, energy-efficient AI systems.\n\nLearn how to choose the right approach in preparing datasets and employing AI models.\n\nResources\n\nDiscover our five predictions about what will define the most successful enterprises in 2030, and the steps leaders can take to gain an AI-first advantage.\n\nLearn how evolving regulations and the emergence of AI agents are reshaping the need for robust AI governance frameworks.\n\nTechsplainers by IBM breaks down the essentials of agentic AI, from key concepts to real‑world use cases. Clear, quick episodes help you learn the fundamentals fast.\n\nLearn proven strategies to boost productivity and power enterprise transformation with AI and innovation at the core.\n\nDive into this comprehensive guide that breaks down key use cases and core capabilities, providing step-by-step recommendations to help you choose the right solutions for your business.\n\nLearn how AI agents and AI assistants can work together to achieve new levels of productivity.\n\nExplore how generative AI assistants can lighten your workload and improve productivity.\n\nLearn how organizations are shifting from launching AI in disparate pilots to using it to drive transformation at the core.\n\nDiscover how you can unlock the full potential of gen AI with AI agents.\n\nLearn ways to use AI to be more creative, efficient and start adapting to a future that involves working closely with AI agents.\n\nStay updated about the new emerging AI agents, a fundamental breaking point in the AI revolution.\n\nStay ahead of the curve with our AI experts on this episode of Mixture of Experts as they dive deep into the future of AI agents and more.\n\nComparus used solutions from watsonx.ai® and impressively demonstrated the potential of conversational banking as a new interaction model.\n\nBuild, deploy and manage powerful AI assistants and agents that automate workflows and processes with generative AI.\n\nBuild the future of your business with AI solutions that you can trust.\n\nIBM Consulting AI services help reimagine how businesses work with AI for transformation.\n\nWhether you choose to customize pre-built apps and skills or build and deploy custom agentic services using an AI studio, the IBM watsonx platform has you covered.\n\nExplore watsonx Orchestrate\n\nExplore watsonx.ai\n\n1 Hasan, Jahid. 2024. “Optimizing Large Language Models through Quantization: A Comparative Analysis of PTQ and QAT Techniques.” ArXiv.org. 2024. https://arxiv.org/abs/2411.06084\n\n2 Gholami, Amir, Sehoon Kim, Zhen Dong, Zhewei Yao, Michael W. Mahoney, and Kurt Keutzer. 2021. “A Survey of Quantization Methods for Efficient Neural Network Inference.” ArXiv:2103.13630 [Cs], June. https://arxiv.org/abs/2103.13630\n\n3 Krishnamoorthi, Raghuraman. 2018. “Quantizing Deep Convolutional Networks for Efficient Inference: A Whitepaper.” ArXiv:1806.08342 [Cs, Stat], June. https://arxiv.org/abs/1806.08342\n\n4 Ashkboos, Saleh, Bram Verhoef, Torsten Hoefler, Evangelos Eleftheriou, and Martino Dazzi. 2024. “EfQAT: An Efficient Framework for Quantization-Aware Training.” ArXiv.org. 2024. https://search.arxiv.org/paper.jsp?r=2411.11038&qid=1745420378770ler_nCnN_-2014381916&qs=quantization+aware+training+steps\n\n5 Esser, Steven K., Jeffrey L. McKinstry, Deepika Bablani, Rathinakumar Appuswamy, and Dharmendra S. Modha. 2020. “Learned Step Size Quantization.” ArXiv.org. May 6, 2020. https://doi.org/10.48550/arXiv.1902.08153\n\n6 Yang, Zhun, et al. “Injecting Logical Constraints into Neural Networks via Straight-through Estimators.” ArXiv.org, 2023, https://arxiv.org/abs/2307.04347\n\n7 “Quantization — PyTorch Master Documentation.” 2019. Pytorch.org. 2019. https://pytorch.org/docs/stable/quantization.html\n\n8 “Quantization Aware Training | TensorFlow Model Optimization.” n.d. TensorFlow. https://www.tensorflow.org/model_optimization/guide/quantization/training\n\n9 Tan, Fuwen, Royson Lee, Łukasz Dudziak, Shell Xu Hu, Sourav Bhattacharya, Timothy Hospedales, Georgios Tzimiropoulos, and Brais Martinez. 2024. “MobileQuant: Mobile-Friendly Quantization for On-Device Language Models.” ArXiv.org. 2024. https://arxiv.org/abs/2408.13933\n\n10 Gupta, Suyog, Ankur Agrawal, Kailash Gopalakrishnan, and Pritish Narayanan. 2015. “Deep Learning with Limited Numerical Precision.” ArXiv.org. 2015. https://arxiv.org/abs/1502.02551\n\n11 Kaziha, Omar, and Talal Bonny. 2020. “Exploring Quantization-Aware Training on a Convolution Neural Network,” November, 1–5. https://doi.org/10.1109/ccci49893.2020.9256498",
+  "text_length": 15989,
+  "title": "What is Quantization Aware Training? | IBM",
+  "url": "https://www.ibm.com/think/topics/quantization-aware-training"
+}

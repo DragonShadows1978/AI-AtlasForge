@@ -1,0 +1,344 @@
+================================================================================
+PyTorch CUDA Error Handling - GitHub Source Files
+================================================================================
+
+RESEARCH DATE: 2026-07-07
+REPOSITORY: pytorch/pytorch (master branch)
+
+================================================================================
+TOP 5 FILES ANALYZED
+================================================================================
+
+1. CORE ERROR HANDLING MACROS
+   File: c10/cuda/CUDAException.h
+   URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAException.h
+
+   Key Content:
+   - C10_CUDA_CHECK macro (primary error checking)
+   - C10_CUDA_CHECK_WARN macro (warning-only)
+   - C10_CUDA_KERNEL_LAUNCH_CHECK macro
+   - TORCH_DSA_KERNEL_LAUNCH macro (device assertions)
+   - C10_CUDA_ERROR_HANDLED macro
+   - C10_CUDA_IGNORE_ERROR macro
+   - C10_CUDA_CLEAR_ERROR macro
+   - Error type definitions (CUDAError class)
+
+================================================================================
+
+2. ERROR IMPLEMENTATION & PROCESSING
+   File: c10/cuda/CUDAException.cpp
+   URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAException.cpp
+
+   Key Content:
+   - c10_cuda_check_implementation() function
+   - Error message assembly pipeline
+   - Fast-path optimization
+   - Device-side assertion retrieval
+   - Error state management
+
+================================================================================
+
+3. DEVICE-SIDE ASSERTION TRACKING
+   File: c10/cuda/CUDADeviceAssertionHost.h
+   URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDADeviceAssertionHost.h
+
+   Key Content:
+   - DeviceAssertionData struct (single assertion)
+   - DeviceAssertionsData struct (array holder)
+   - CUDAKernelLaunchInfo struct (launch metadata)
+   - CUDAKernelLaunchRegistry class (singleton)
+   - Circular buffer (1024 max launches)
+   - Managed memory (UVM) integration
+   - Thread-safe registry with mutex
+
+================================================================================
+
+4. LIBRARY-SPECIFIC ERROR HANDLERS
+   File: aten/src/ATen/cuda/Exceptions.h
+   URL: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/Exceptions.h
+
+   Key Content:
+   Libraries Covered (7 total):
+
+   a) cuDNN
+      - AT_CUDNN_FRONTEND_CHECK macro (frontend)
+      - AT_CUDNN_CHECK macro (legacy)
+      - Non-contiguous tensor error detection
+      - CuDNNError exception class
+
+   b) cuBLAS
+      - TORCH_CUDABLAS_CHECK macro
+      - Error enum mapping via _cublasGetErrorEnum()
+
+   c) cuSPARSE
+      - TORCH_CUDASPARSE_CHECK macro
+      - cusparseGetErrorString support
+
+   d) cuSOLVER
+      - TORCH_CUSOLVER_CHECK macro
+      - INVALID_VALUE (NaN matrix) special handling
+      - cusolverGetErrorMessage() helper
+      - Backend suggestion message
+
+   e) cuDSS
+      - TORCH_CUDSS_CHECK macro
+      - EXECUTION_FAILED detection
+      - cudssGetErrorMessage() helper
+
+   f) CUDA Driver API
+      - AT_CUDA_DRIVER_CHECK macro
+      - Dynamic NVRTC error string loading
+
+   g) CUDA Runtime (backward compat)
+      - AT_CUDA_CHECK macro (alias to C10_CUDA_CHECK)
+
+================================================================================
+
+5. RESOURCE CLEANUP & GUARDS (RAII)
+   File: c10/cuda/CUDAGuard.h
+   URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAGuard.h
+
+   Key Content:
+   Guard Classes (3 total):
+
+   a) CUDAGuard
+      - Manages current device context
+      - Restores original device on scope exit
+      - Non-copyable, non-movable
+
+   b) OptionalCUDAGuard
+      - Optional device context management
+      - Reset capability
+      - Uninitialized state support
+
+   c) CUDAStreamGuard
+      - Manages current stream and device
+      - Restores both on scope exit
+      - Stream-specific operations
+
+   Related Classes:
+   - InlineDeviceGuard (underlying implementation)
+   - InlineStreamGuard (stream implementation)
+   - InlineOptionalDeviceGuard (optional variant)
+
+================================================================================
+SUPPORTING FILES (Referenced in Main Files)
+================================================================================
+
+c10/cuda/CUDAMacros.h
+URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAMacros.h
+Purpose: Export macros, build configuration
+
+c10/cuda/CUDAFunctions.h
+URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAFunctions.h
+Purpose: Device management, memory copy, stream sync utilities
+Key Functions:
+  - device_count()
+  - device_count_ensure_non_zero()
+  - current_device()
+  - set_device()
+  - device_synchronize()
+  - memcpy_and_sync()
+  - stream_synchronize()
+
+c10/cuda/impl/CUDAGuardImpl.h
+URL: https://github.com/pytorch/pytorch/blob/master/c10/cuda/impl/CUDAGuardImpl.h
+Purpose: Guard implementation details
+
+================================================================================
+ERROR HANDLING MACRO SUMMARY
+================================================================================
+
+MACRO                          | PURPOSE                      | SEVERITY
+-------------------------------|------------------------------|----------
+C10_CUDA_CHECK(expr)          | Primary error check          | Exception
+C10_CUDA_CHECK_WARN(expr)     | Non-fatal warning            | Warn only
+C10_CUDA_KERNEL_LAUNCH_CHECK()| Validate kernel launch       | Exception
+C10_HIP_CHECK(expr)           | HIP equivalent (hipify)      | Exception
+C10_CUDA_ERROR_HANDLED(expr)  | Mark as already handled      | None
+C10_CUDA_IGNORE_ERROR(expr)   | Intentionally ignore         | None
+C10_CUDA_CLEAR_ERROR()        | Clear error state            | None
+TORCH_DSA_KERNEL_LAUNCH(...)  | DSA-enabled kernel launch    | Exception
+AT_CUDNN_CHECK(expr)          | cuDNN error check            | Exception
+AT_CUDNN_FRONTEND_CHECK(expr) | cuDNN frontend error check   | Exception
+TORCH_CUDABLAS_CHECK(expr)    | cuBLAS error check           | Exception
+TORCH_CUDASPARSE_CHECK(expr)  | cuSPARSE error check         | Exception
+TORCH_CUSOLVER_CHECK(expr)    | cuSOLVER error check         | Exception
+TORCH_CUDSS_CHECK(expr)       | cuDSS error check            | Exception
+AT_CUDA_DRIVER_CHECK(expr)    | CUDA Driver API check        | Exception
+AT_CUDA_CHECK(expr)           | Backward compat alias        | Exception
+
+================================================================================
+ERROR CONTEXT CAPTURED PER ERROR
+================================================================================
+
+Each CUDA error exception includes:
+- Source filename
+- Function name
+- Exact line number
+- CUDA error code (enum value)
+- Error string (from cudaGetErrorString)
+- Context-specific help text
+- Async error information (if applicable)
+- Device-side assertion details (if DSA enabled)
+- Kernel launch information
+- Thread/block coordinates (from device-side code)
+
+================================================================================
+BUILD CONFIGURATION FLAGS
+================================================================================
+
+COMPILE-TIME CONTROL:
+
+-DSTRIP_ERROR_MESSAGES
+  Purpose: Remove detailed error messages for binary size reduction
+  Default: Messages included
+
+-DTORCH_USE_CUDA_DSA
+  Purpose: Enable device-side assertions at compile time
+  Default: Disabled (adds ~64KB overhead)
+
+-DFBCODE_CAFFE2
+  Purpose: Set maximum GPU count to 16 (Meta/Caffe2 internal)
+  Default: 120 GPUs (public PyTorch)
+
+================================================================================
+RUNTIME CONFIGURATION
+================================================================================
+
+Environment Variables:
+  TORCH_USE_CUDA_DSA=1            Enable device-side assertions at runtime
+  TORCH_CUDA_DSA_STACKTRACE=1     Capture kernel launch stack traces
+
+API Control:
+  CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = true/false
+  CUDAKernelLaunchRegistry::get_singleton_ref().gather_launch_stacktrace = true
+  c10::cuda::warning_state().set_sync_debug_mode(SyncDebugMode::L_WARN)
+
+================================================================================
+REPOSITORY STATISTICS
+================================================================================
+
+Files Analyzed:        5 primary + 3 supporting
+Total Lines:           ~1,800+ lines of comprehensive documentation
+Error Macros:          20+
+Library Handlers:      7 (cuDNN, cuBLAS, cuSPARSE, cuSOLVER, cuDSS, Driver, Frontend)
+RAII Guard Types:      3
+Error Context Fields:  8+
+Circular Buffer:       1024 max launches per process
+Max DSA Recordings:    10 assertions per error event
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. ERROR DETECTION
+   - Macro-based with immediate context capture
+   - No automatic retry (caller responsibility)
+   - Fast-path optimization for success case
+
+2. ERROR PROPAGATION
+   - Exception-based (c10::AcceleratorError)
+   - Rich context in every exception
+
+3. RESOURCE CLEANUP
+   - RAII guards guarantee restoration
+   - Device/stream contexts always restored
+   - No leaks on exception
+
+4. DEVICE DEBUGGING
+   - Managed memory + circular buffer
+   - Post-mortem kernel launch inspection
+   - Thread/block coordinates captured
+
+5. LIBRARY COVERAGE
+   - 7 CUDA libraries directly supported
+   - Specialized error messages per library
+   - Custom handling (e.g., NaN detection)
+
+================================================================================
+RESEARCH OUTPUT FILES
+================================================================================
+
+1. PYTORCH_CUDA_ERROR_HANDLING_RESEARCH.md (27 KB, 766 lines)
+   - Comprehensive 13-section analysis with code snippets
+   - Error flow diagrams
+   - Performance considerations
+   - Best practices and patterns
+
+2. PYTORCH_CUDA_ERROR_QUICK_REFERENCE.md (9.1 KB, 319 lines)
+   - One-page developer guide
+   - Quick lookup tables
+   - Pattern examples
+   - Runtime configuration
+
+3. PYTORCH_CUDA_ERROR_PATTERNS.json (8.8 KB, 205 lines)
+   - Structured JSON reference
+   - Ranked files with descriptions
+   - Error handling patterns
+   - Research methodology
+
+4. PYTORCH_CUDA_RESEARCH_INDEX.md (15 KB, 512 lines)
+   - Navigation and summary document
+   - Error type matrix
+   - Integration points
+   - File organization guide
+
+5. PYTORCH_CUDA_GITHUB_URLS.txt (This file)
+   - GitHub source links
+   - Macro summary table
+   - Configuration flags
+   - Statistics
+
+================================================================================
+HOW TO USE THESE RESOURCES
+================================================================================
+
+FOR QUICK REFERENCE:
+  1. Start with PYTORCH_CUDA_ERROR_QUICK_REFERENCE.md
+  2. Use PYTORCH_CUDA_GITHUB_URLS.txt for direct links
+
+FOR DETAILED ANALYSIS:
+  1. Read PYTORCH_CUDA_ERROR_HANDLING_RESEARCH.md (sections 1-7)
+  2. Reference specific patterns (sections 11-12)
+
+FOR IMPLEMENTATION:
+  1. Use PYTORCH_CUDA_ERROR_PATTERNS.json for copy-paste code
+  2. Follow patterns from Quick Reference
+  3. Import headers from file paths listed above
+
+FOR DEBUGGING:
+  1. Check Device-Side Assertion section in Research doc
+  2. Enable TORCH_USE_CUDA_DSA for production issues
+  3. Review error context field list above
+
+================================================================================
+VERIFICATION
+================================================================================
+
+Source: github.com/pytorch/pytorch master branch
+Fetch Method: Direct GitHub raw content API
+Verification: Code snippets cross-referenced with multiple source links
+Last Updated: 2026-07-07
+
+All URLs are direct GitHub links to the pytorch/pytorch repository.
+Use .blob/master path for web browsing.
+Use .raw/master path for raw file download.
+
+Replace "blob" with "raw" to get raw content:
+Example: https://raw.githubusercontent.com/pytorch/pytorch/master/c10/cuda/CUDAException.h
+
+================================================================================
+CONTACT & ATTRIBUTION
+================================================================================
+
+Research Compiled: 2026-07-07
+Source Repository: https://github.com/pytorch/pytorch
+PyTorch Documentation: https://pytorch.org/docs
+CUDA Documentation: https://docs.nvidia.com/cuda/
+
+This research document analyzes production-grade CUDA error handling
+code from PyTorch, one of the world's most widely-used deep learning
+frameworks. All information is derived from publicly available source code.
+
+================================================================================

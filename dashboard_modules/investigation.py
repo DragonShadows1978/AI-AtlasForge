@@ -241,6 +241,8 @@ def api_investigation_start():
         "workspace_dir": str(config.workspace_dir),
         "deliverable_format": deliverable_format,
         "max_subagents": max_subagents,
+        "enable_validation": config.enable_validation,
+        "validation_filter_mode": config.validation_filter_mode,
     }
     if resource_suggestion is not None:
         response_data["resource_suggestion"] = resource_suggestion

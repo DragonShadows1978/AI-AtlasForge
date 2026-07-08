@@ -46,6 +46,7 @@ _RING_MAX_SEQ = 2**31 - 1  # upper-bound guard for get_ring_since last_seq
 _VALID_AGENT_STATUSES = frozenset({"running", "complete", "error"})
 _MAX_AGENT_ID_LENGTH = 128
 _MAX_AGENT_ERROR_LENGTH = 4096
+_MAX_STREAM_DISPLAY_TEXT = 4000
 
 logger = logging.getLogger(__name__)
 
@@ -278,7 +279,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
 
     if not isinstance(obj, dict):
         # Valid JSON but not an object (e.g. null, number, array) — treat as raw
-        safe_text = html.escape(''.join(c for c in raw[:400] if c.isprintable() or c in '\t\n'))
+        safe_text = html.escape(_clip_stream_text(raw))
         return {'event_type': 'raw', 'display_text': safe_text, 'raw': raw}
 
     # Codex exec transcript format
@@ -291,11 +292,17 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
             if message:
                 return {
                     'event_type': 'thinking',
-                    'display_text': html.escape(message[:600]),
+                    'display_text': html.escape(_clip_stream_text(message)),
                     'raw': raw,
                 }
             return None
-        if event_type in ('task_started', 'task_complete', 'token_count', 'user_message'):
+        if event_type in ('task_started', 'task_complete', 'task_notification'):
+            return {
+                'event_type': 'raw',
+                'display_text': html.escape(_format_codex_task_event(event_type, payload)),
+                'raw': raw,
+            }
+        if event_type in ('token_count', 'user_message'):
             return None
 
     if record_type == 'response_item' and isinstance(payload, dict):
@@ -310,7 +317,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     args = str(args)
             return {
                 'event_type': 'tool_call',
-                'display_text': f"{name}({html.escape(args[:300])})",
+                'display_text': f"{name}({html.escape(_clip_stream_text(args))})",
                 'raw': raw,
             }
         if item_type == 'function_call_output':
@@ -322,7 +329,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     output = str(output)
             return {
                 'event_type': 'tool_result',
-                'display_text': html.escape(output[:400]),
+                'display_text': html.escape(_clip_stream_text(output)),
                 'raw': raw,
             }
         if item_type in ('message', 'reasoning'):
@@ -344,7 +351,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
             if btype == 'tool_use':
                 name = html.escape(str(block.get('name', '?')))
                 inp = block.get('input', {})
-                inp_str = json.dumps(inp)[:300] if inp is not None else ''
+                inp_str = _clip_stream_text(json.dumps(inp)) if inp is not None else ''
                 return {
                     'event_type': 'tool_call',
                     'display_text': f"{name}({html.escape(inp_str)})",
@@ -359,7 +366,7 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
         if first_text is not None:
             return {
                 'event_type': 'thinking',
-                'display_text': html.escape(first_text[:600]),
+                'display_text': html.escape(_clip_stream_text(first_text)),
                 'raw': raw,
             }
 
@@ -374,11 +381,18 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
                     content = ' '.join(text_parts)
                 return {
                     'event_type': 'tool_result',
-                    'display_text': html.escape(str(content)[:400]),
+                    'display_text': html.escape(_clip_stream_text(str(content))),
                     'raw': raw,
                 }
 
-    elif msg_type in ('system', 'init', 'result'):
+    elif msg_type == 'system':
+        return {
+            'event_type': 'raw',
+            'display_text': html.escape(_format_claude_system_event(obj, raw)),
+            'raw': raw,
+        }
+
+    elif msg_type in ('init', 'result'):
         # 'result' lines are completion metadata from claude CLI (cost, session_id, etc.) — not streamable
         return None
 
@@ -389,6 +403,58 @@ def _parse_jsonl_line(line: str) -> Optional[dict]:
         safe_raw = html.escape(raw[:200])
         return {'event_type': 'raw', 'display_text': f"[{safe_type}] {safe_raw}", 'raw': raw}
     return None
+
+
+def _clip_stream_text(value: str, max_chars: int = _MAX_STREAM_DISPLAY_TEXT) -> str:
+    """Sanitize and cap text for activity-panel display without hiding most output."""
+    if not isinstance(value, str):
+        value = str(value) if value is not None else ''
+    clean = ''.join(c for c in value if c.isprintable() or c in '\t\n')
+    if len(clean) <= max_chars:
+        return clean
+    return clean[:max_chars] + f"\n...[truncated {len(clean) - max_chars} chars]"
+
+
+def _format_codex_task_event(event_type: str, payload: dict) -> str:
+    task_id = payload.get('task_id') or ''
+    description = payload.get('description') or payload.get('summary') or ''
+    status = payload.get('status') or ''
+    parts = [f"[{event_type}]"]
+    if task_id:
+        parts.append(str(task_id))
+    if status:
+        parts.append(str(status))
+    if description:
+        parts.append(str(description))
+    return _clip_stream_text(' '.join(parts))
+
+
+def _format_claude_system_event(obj: dict, raw: str) -> str:
+    subtype = obj.get('subtype') or 'system'
+    if subtype == 'init':
+        cwd = obj.get('cwd') or ''
+        model = obj.get('model') or ''
+        tools = obj.get('tools') if isinstance(obj.get('tools'), list) else []
+        tool_count = len(tools)
+        parts = ["[system:init]"]
+        if model:
+            parts.append(f"model={model}")
+        if cwd:
+            parts.append(f"cwd={cwd}")
+        if tool_count:
+            parts.append(f"tools={tool_count}")
+        return _clip_stream_text(' '.join(parts))
+    if subtype == 'task_started':
+        desc = obj.get('description') or ''
+        task_id = obj.get('task_id') or ''
+        task_type = obj.get('task_type') or ''
+        return _clip_stream_text(f"[system:task_started] {task_id} {task_type} {desc}".strip())
+    if subtype == 'task_notification':
+        task_id = obj.get('task_id') or ''
+        status = obj.get('status') or ''
+        summary = obj.get('summary') or ''
+        return _clip_stream_text(f"[system:task_notification] {task_id} {status} {summary}".strip())
+    return _clip_stream_text(f"[system:{subtype}] {raw}")
 
 
 def _parse_stream_line(line: str) -> Tuple[Optional[int], Optional[dict]]:
@@ -1071,7 +1137,7 @@ class AgentStreamManager:
             if ctx is not None and ctx.status == 'running':
                 if newly_claimed:
                     self._fanout_existing_ring(ctx)
-                if self._start_watcher(ctx, tail_from_end=True, emit_spawn=False):
+                if self._start_watcher(ctx, tail_from_end=True, emit_spawn=newly_claimed):
                     started += 1
         return started
 
@@ -1081,12 +1147,81 @@ class AgentStreamManager:
         if disk_status not in ('complete', 'error'):
             return False
 
+        never_seen = False
         ctx = None
         with self._lock:
             entry = self._agents.get(agent_id)
-            if not isinstance(entry, AgentContext):
+            if entry is _PREWARM_SENTINEL:
                 return False
-            if entry.status != 'running':
+            if isinstance(entry, dict) and entry.get('_tombstone'):
+                return False
+            if not isinstance(entry, AgentContext):
+                never_seen = True
+            elif entry.status != 'running':
+                return False
+
+        if never_seen:
+            agent_context = info.get('context') or 'mission'
+            try:
+                ctx = AgentContext(
+                    agent_id=agent_id,
+                    context=agent_context,
+                    label=info.get('label') or agent_id,
+                    pid=info.get('pid') or None,
+                )
+            except (ValueError, TypeError):
+                return False
+            ctx.spawned_at = info.get('spawned_at', time.time())
+            ctx.started_at = info.get('started_at', ctx.spawned_at)
+            completed_at = info.get('completed_at')
+            ctx.completed_at = completed_at if isinstance(completed_at, (int, float)) else time.time()
+            ctx.status = 'error' if disk_status == 'error' else 'complete'
+            ctx.error = info.get('error') if ctx.status == 'error' else None
+            self._populate_context_from_disk(ctx)
+            with self._lock:
+                self._agents[agent_id] = {
+                    '_tombstone': True,
+                    'agent_id': ctx.agent_id,
+                    'context': ctx.context,
+                    'label': ctx.label,
+                    'stream_file': str(ctx.stream_file),
+                    'snapshot_file': str(ctx.stream_file.with_suffix('.snapshot.json')),
+                    'status': ctx.status,
+                    'started_at': ctx.started_at,
+                    'completed_at': ctx.completed_at,
+                    'error': ctx.error,
+                }
+            self.broadcast_lifecycle(ctx, {
+                'event': 'agent_spawned',
+                'agent_id': ctx.agent_id,
+                'label': ctx.label,
+                'context': ctx.context,
+                'timestamp': datetime.fromtimestamp(ctx.started_at).isoformat() if isinstance(ctx.started_at, (int, float)) else datetime.now().isoformat(),
+            })
+            self._fanout_existing_ring(ctx)
+            self._write_snapshot(ctx)
+            if ctx.error:
+                self._log_agent_error(ctx, ctx.error)
+            duration = _duration_seconds(ctx.completed_at, ctx.started_at)
+            with ctx._lock:
+                line_count = len(ctx._parsed_lines)
+            ctx._completion_broadcasted = True
+            self.broadcast_lifecycle(ctx, {
+                'event': 'agent_error' if ctx.status == 'error' else 'agent_complete',
+                'agent_id': ctx.agent_id,
+                'label': html.escape(str(ctx.label)) if ctx.label else '',
+                'context': ctx.context,
+                'error': html.escape(str(ctx.error)) if ctx.error else None,
+                'duration_seconds': duration,
+                'line_count': line_count,
+                'timestamp': datetime.now().isoformat(),
+            })
+            return True
+
+        entry = None
+        with self._lock:
+            entry = self._agents.get(agent_id)
+            if not isinstance(entry, AgentContext):
                 return False
             entry.status = 'error' if disk_status == 'error' else 'complete'
             entry.error = info.get('error') if entry.status == 'error' else None

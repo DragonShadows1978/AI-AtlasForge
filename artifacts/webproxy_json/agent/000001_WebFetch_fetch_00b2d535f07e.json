@@ -1,0 +1,250 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_0369036d85a2e4d2800fd347281b68728d5d27a988241d022623c1be37b29f51",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_0369036d85a2e4d2800fd347281b68728d5d27a988241d022623c1be37b29f51.json",
+  "_cached_at": 1779413701,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": 1779413701,
+  "headings": [
+    "Safetensors",
+    "Safetensors",
+    "Installation",
+    "Usage",
+    "Load tensors",
+    "Save tensors",
+    "Format",
+    "Featured Projects"
+  ],
+  "links": [
+    {
+      "text": "",
+      "url": "https://github.com/huggingface/safetensors"
+    },
+    {
+      "text": "🤗 Safetensors",
+      "url": "https://huggingface.co/docs/safetensors/index"
+    },
+    {
+      "text": "Speed Comparison",
+      "url": "https://huggingface.co/docs/safetensors/speed"
+    },
+    {
+      "text": "Tensor Sharing in Pytorch",
+      "url": "https://huggingface.co/docs/safetensors/torch_shared_tensors"
+    },
+    {
+      "text": "Metadata Parsing",
+      "url": "https://huggingface.co/docs/safetensors/metadata_parsing"
+    },
+    {
+      "text": "Convert weights to safetensors",
+      "url": "https://huggingface.co/docs/safetensors/convert-weights"
+    },
+    {
+      "text": "Torch API",
+      "url": "https://huggingface.co/docs/safetensors/api/torch"
+    },
+    {
+      "text": "Tensorflow API",
+      "url": "https://huggingface.co/docs/safetensors/api/tensorflow"
+    },
+    {
+      "text": "PaddlePaddle API",
+      "url": "https://huggingface.co/docs/safetensors/api/paddle"
+    },
+    {
+      "text": "Flax API",
+      "url": "https://huggingface.co/docs/safetensors/api/flax"
+    },
+    {
+      "text": "Numpy API",
+      "url": "https://huggingface.co/docs/safetensors/api/numpy"
+    },
+    {
+      "text": "v0.5.0-rc.0",
+      "url": "https://huggingface.co/docs/safetensors/v0.5.0-rc.0/index"
+    },
+    {
+      "text": "Sign Up",
+      "url": "https://huggingface.co/join"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#safetensors"
+    },
+    {
+      "text": "fast 🚀",
+      "url": "https://huggingface.co/docs/safetensors/speed"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#installation"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#usage"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#load-tensors"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#save-tensors"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#format"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index#featured-projects"
+    },
+    {
+      "text": "Hugging Face",
+      "url": "https://huggingface.co/"
+    },
+    {
+      "text": "EleutherAI",
+      "url": "https://www.eleuther.ai/"
+    },
+    {
+      "text": "StabilityAI",
+      "url": "https://stability.ai/"
+    },
+    {
+      "text": "huggingface/transformers",
+      "url": "https://github.com/huggingface/transformers"
+    },
+    {
+      "text": "ml-explore/mlx",
+      "url": "https://github.com/ml-explore/mlx"
+    },
+    {
+      "text": "huggingface/candle",
+      "url": "https://github.com/huggingface/candle"
+    },
+    {
+      "text": "AUTOMATIC1111/stable-diffusion-webui",
+      "url": "https://github.com/AUTOMATIC1111/stable-diffusion-webui"
+    },
+    {
+      "text": "Llama-cpp",
+      "url": "https://github.com/ggerganov/llama.cpp/blob/e6a46b0ed1884c77267dc70693183e3b7164e0e0/convert.py#L537"
+    },
+    {
+      "text": "microsoft/TaskMatrix",
+      "url": "https://github.com/microsoft/TaskMatrix"
+    },
+    {
+      "text": "hpcaitech/ColossalAI",
+      "url": "https://github.com/hpcaitech/ColossalAI"
+    },
+    {
+      "text": "huggingface/pytorch-image-models",
+      "url": "https://github.com/huggingface/pytorch-image-models"
+    },
+    {
+      "text": "CivitAI",
+      "url": "https://civitai.com/"
+    },
+    {
+      "text": "huggingface/diffusers",
+      "url": "https://github.com/huggingface/diffusers"
+    },
+    {
+      "text": "coreylowman/dfdx",
+      "url": "https://github.com/coreylowman/dfdx"
+    },
+    {
+      "text": "invoke-ai/InvokeAI",
+      "url": "https://github.com/invoke-ai/InvokeAI"
+    },
+    {
+      "text": "oobabooga/text-generation-webui",
+      "url": "https://github.com/oobabooga/text-generation-webui"
+    },
+    {
+      "text": "Sanster/lama-cleaner",
+      "url": "https://github.com/Sanster/lama-cleaner"
+    },
+    {
+      "text": "PaddlePaddle/PaddleNLP",
+      "url": "https://github.com/PaddlePaddle/PaddleNLP"
+    },
+    {
+      "text": "AIGC-Audio/AudioGPT",
+      "url": "https://github.com/AIGC-Audio/AudioGPT"
+    },
+    {
+      "text": "brycedrennan/imaginAIry",
+      "url": "https://github.com/brycedrennan/imaginAIry"
+    },
+    {
+      "text": "comfyanonymous/ComfyUI",
+      "url": "https://github.com/comfyanonymous/ComfyUI"
+    },
+    {
+      "text": "LianjiaTech/BELLE",
+      "url": "https://github.com/LianjiaTech/BELLE"
+    },
+    {
+      "text": "alvarobartt/safejax",
+      "url": "https://github.com/alvarobartt/safejax"
+    },
+    {
+      "text": "MaartenGr/BERTopic",
+      "url": "https://github.com/MaartenGr/BERTopic"
+    },
+    {
+      "text": "rachthree/safestructures",
+      "url": "https://github.com/rachthree/safestructures"
+    },
+    {
+      "text": "justinchuby/onnx-safetensors",
+      "url": "https://github.com/justinchuby/onnx-safetensors"
+    },
+    {
+      "text": "Update on GitHub",
+      "url": "https://github.com/huggingface/safetensors/blob/main/docs/source/index.mdx"
+    },
+    {
+      "text": "Speed Comparison →",
+      "url": "https://huggingface.co/docs/safetensors/speed"
+    },
+    {
+      "text": "Safetensors",
+      "url": "https://huggingface.co/docs/safetensors/index#safetensors"
+    },
+    {
+      "text": "Installation",
+      "url": "https://huggingface.co/docs/safetensors/index#installation"
+    },
+    {
+      "text": "Usage",
+      "url": "https://huggingface.co/docs/safetensors/index#usage"
+    },
+    {
+      "text": "Load tensors",
+      "url": "https://huggingface.co/docs/safetensors/index#load-tensors"
+    },
+    {
+      "text": "Save tensors",
+      "url": "https://huggingface.co/docs/safetensors/index#save-tensors"
+    },
+    {
+      "text": "Format",
+      "url": "https://huggingface.co/docs/safetensors/index#format"
+    },
+    {
+      "text": "Featured Projects",
+      "url": "https://huggingface.co/docs/safetensors/index#featured-projects"
+    }
+  ],
+  "meta_description": "We’re on a journey to advance and democratize artificial intelligence through open source and open science.",
+  "status_code": 200,
+  "text": "Safetensors documentation\n\nSafetensors\n\nSafetensors\n\nand get access to the augmented documentation experience\n\nto get started\n\nSafetensors\n\nSafetensors is a new simple format for storing tensors safely (as opposed to pickle) and that is still fast (zero-copy). Safetensors is really fast 🚀 .\n\nInstallation\n\nwith pip:\n\nwith conda:\n\nUsage\n\nLoad tensors\n\nLoading only part of the tensors (interesting when running on multiple GPU)\n\nSave tensors\n\nFormat\n\nLet’s say you have safetensors file named model.safetensors , then model.safetensors will have the following internal format:\n\nFeatured Projects\n\nSafetensors is being used widely at leading AI enterprises, such as Hugging Face , EleutherAI , and StabilityAI . Here is a non-exhaustive list of projects that are using safetensors:\n\nhuggingface/transformers\n\nml-explore/mlx\n\nhuggingface/candle\n\nAUTOMATIC1111/stable-diffusion-webui\n\nLlama-cpp\n\nmicrosoft/TaskMatrix\n\nhpcaitech/ColossalAI\n\nhuggingface/pytorch-image-models\n\nCivitAI\n\nhuggingface/diffusers\n\ncoreylowman/dfdx\n\ninvoke-ai/InvokeAI\n\noobabooga/text-generation-webui\n\nSanster/lama-cleaner\n\nPaddlePaddle/PaddleNLP\n\nAIGC-Audio/AudioGPT\n\nbrycedrennan/imaginAIry\n\ncomfyanonymous/ComfyUI\n\nLianjiaTech/BELLE\n\nalvarobartt/safejax\n\nMaartenGr/BERTopic\n\nrachthree/safestructures\n\njustinchuby/onnx-safetensors",
+  "text_length": 1304,
+  "title": "Safetensors · Hugging Face",
+  "url": "https://huggingface.co/docs/safetensors/index"
+}

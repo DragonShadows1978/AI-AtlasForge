@@ -1,0 +1,190 @@
+{
+  "KV-cache reuse distillation": {
+    "_cache_hit": false,
+    "_cache_key": "search_edc754adadeac1ab15473906ac6f19ec3f6e223bec9da345404189ddbed1d3e0",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_edc754adadeac1ab15473906ac6f19ec3f6e223bec9da345404189ddbed1d3e0.json",
+    "_cached_at": 1783298736,
+    "count": 5,
+    "fetched_at": 1783298736,
+    "provider": "brave",
+    "query": "KV-cache reuse distillation",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "This dynamic distillation ensures that critical and novel information remains accessible while maintaining a constant memory footprint. A lightweight alternative avoids full attention computation altogether. HASHEVICT [20] introduces a pre-attention KV cache eviction strategy that leverages Locality-Sensitive Hashing (LSH) to estimate token similarity before performing full attention computation, thereby reducing both memory and computational overhead.",
+        "source": "brave",
+        "title": "KV Cache Optimization Strategies for Scalable and Efficient LLM Inference",
+        "url": "https://arxiv.org/html/2603.20397v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "In this paper, we propose KV Packet, a recomputation-free cache reuse framework that treats cached documents as immutable \u201cpackets\u201d wrapped in light-weight trainable soft-token adapters, which are trained via <strong>self-supervised distillation to bridge context discontinuities</strong>.",
+        "source": "brave",
+        "title": "KV Packet: Recomputation-Free Context-Independent KV Caching for LLMs",
+        "url": "https://arxiv.org/html/2604.13226v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "Approaches that reduce the per-pair footprint -- quantization and low-rank decomposition -- are orthogonal to those that reduce the sequence length of the cache. Along the sequence-length dimension, existing methods range from pure eviction -- selecting which KV pairs to keep -- to merging, which combines similar pairs into fewer ones. Both remain anchored to the original cache entries.",
+        "source": "brave",
+        "title": "[2603.27819] KVSculpt: KV Cache Compression as Distillation",
+        "url": "https://arxiv.org/abs/2603.27819"
+      },
+      {
+        "display_url": null,
+        "snippet": "The Consumer reconstructs states ... Cache Distillation (SCD), <strong>a bandwidth-efficient state-transfer framework that replaces raw KV transmission with compact semantic codes for shared-architecture, weight-mismatched producer-consumer pairs</strong>....",
+        "source": "brave",
+        "title": "Semantic Cache Distillation: Efficient State Transfer via Reuse and Selective Patching",
+        "url": "https://arxiv.org/html/2606.07684"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>We implement REUSE as a stack of independent linear translators</strong>. For each layer \u2113, we execute full prefill passes on both the source (MA) and target (MB) models over a calibration dataset. We collect the internal representations at layer \u2113that serve as inputs to the KV cache.",
+        "source": "brave",
+        "title": "Semantic Cache Distillation: Efficient State Transfer via Reuse and Selective Patching",
+        "url": "https://arxiv.org/pdf/2606.07684"
+      }
+    ]
+  },
+  "cross-model cache sharing inference": {
+    "_cache_hit": false,
+    "_cache_key": "search_05a9b348e73edbad56ce63f03eea8d34c83750164b2fd4e81722b04e3f441dd8",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_05a9b348e73edbad56ce63f03eea8d34c83750164b2fd4e81722b04e3f441dd8.json",
+    "_cached_at": 1783298737,
+    "count": 5,
+    "fetched_at": 1783298737,
+    "provider": "brave",
+    "query": "cross-model cache sharing inference",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "In this work, we presented ICaRus, a KV cache-sharing architecture for multi model inference. ICaRus addresses the memory inefficiency of conventional system by enabling cross-model KV cache reuse, while maintaining accuracy through fine-tuning.",
+        "source": "brave",
+        "title": "ICaRus: Identical Cache Reuse for Efficient Multi Model Inference",
+        "url": "https://arxiv.org/html/2603.13281v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "After lunch, Session B dives deeper into technical details such as KV cache sharing, disaggregated prefill [3], Mooncake storage backend integration [7], KV cache compression [1, 6], and multi-modality support. The afternoon concludes with sessions on autoscaling, vLLM integration, and an open Q&amp;A and wrap-up. Stateful LLM inference, where prior inputs are reused for future responses, is now ubiquitous in applications like agent workflows, multi-turn chat, and RAG. This creates a distributed, network-intensive workload, as shared context\u2014often encoded in large KV caches (e.g., multi-GBs) \u2014must be transferred across GPU nodes or fetched from remote storage.",
+        "source": "brave",
+        "title": "Networking for Stateful LLM Inference - ACM SIGCOMM 2025",
+        "url": "https://conferences.sigcomm.org/sigcomm/2025/tutorials-hackathons/tutorial-nllm/"
+      },
+      {
+        "display_url": null,
+        "snippet": "Recently, <strong>sharing key-value (KV) cache across layers has been found effective in efficient inference of large language models (LLMs).</strong> To systematically investigate different techniques of cross-layer KV sharing, we propose a unified framework ...",
+        "source": "brave",
+        "title": "A Systematic Study of Cross-Layer KV Sharing for Efficient LLM Inference - ACL Anthology",
+        "url": "https://aclanthology.org/2025.naacl-short.34/"
+      },
+      {
+        "display_url": null,
+        "snippet": "The NVIDIA Grace Blackwell and NVIDIA Grace Hopper architectures use NVLink-C2C, a 900 GB/s memory-coherent interconnect, to create a unified memory address space shared by the CPU and GPU, allowing them to access and operate on the same data without explicit data transfers. Large Language Models (LLMs) like Llama 3 70B require significant memory, and loading them into GPU memory can result in out-of-memory (OOM) errors, but unified memory architecture enables the CPU and GPU to share memory, resolving this issue.",
+        "source": "brave",
+        "title": "Accelerate Large-Scale LLM Inference and KV Cache Offload with CPU-GPU Memory Sharing | NVIDIA Technical Blog",
+        "url": "https://developer.nvidia.com/blog/accelerate-large-scale-llm-inference-and-kv-cache-offload-with-cpu-gpu-memory-sharing/"
+      },
+      {
+        "display_url": null,
+        "snippet": "It concatenates the sharer and receiver caches, fuses them at full width, and outputs receiver-shaped residuals. This makes transfer expensive: each cache type needs its own full-width fuser. LCF instead transfers information through a low-dimensional latent bottleneck. This bottleneck is motivated by two observations: KV states can be compressed within a model (DeepSeek-AI, 2024), and cross-model representations can be approximately linearly aligned (Chen et al., 2025; Dery et al., 2026).",
+        "source": "brave",
+        "title": "Latent Cache Flow: Model-to-Model Communication Without Text",
+        "url": "https://arxiv.org/html/2605.22863v1"
+      }
+    ]
+  },
+  "multi-model inference cache sharing": {
+    "_cache_hit": false,
+    "_cache_key": "search_446947f02a20f9fb56260eafcc72a0ed2bf187d634cb887df7bbd17941d7b865",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_446947f02a20f9fb56260eafcc72a0ed2bf187d634cb887df7bbd17941d7b865.json",
+    "_cached_at": 1783298738,
+    "count": 5,
+    "fetched_at": 1783298738,
+    "provider": "brave",
+    "query": "multi-model inference cache sharing",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "ICaRus fine-tunes only the logical decoder while freezing the logical encoder, enabling multiple models to share an identical KV cache. This eliminates cache memory explosion and unexpected evictions while also allowing cross-model reuse of KV caches for new input tokens, thereby removing redundant recomputation in multi model inference achieving both efficiency and scalability.",
+        "source": "brave",
+        "title": "ICaRus: Identical Cache Reuse for Efficient Multi Model Inference",
+        "url": "https://arxiv.org/html/2603.13281v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "Create an endpoint that can host multiple Amazon SageMaker AI <strong>models</strong> to help reduce cost.",
+        "source": "brave",
+        "title": "Multi-model endpoints - Amazon SageMaker AI",
+        "url": "https://docs.aws.amazon.com/sagemaker/latest/dg/multi-model-endpoints.html"
+      },
+      {
+        "display_url": null,
+        "snippet": "KV caching: Caches the internal attention states \u2014 key-value pairs \u2014 computed during a single inference request, so the model does not recompute them at every decode step. This happens automatically inside the model and is always on. Prefix caching: Extends KV caching across multiple requests. When different requests share the same leading tokens, such as a system prompt, a reference document, or few-shot examples, the KV states for that shared prefix are stored and reused across all of them.",
+        "source": "brave",
+        "title": "The Complete Guide to Inference Caching in LLMs - MachineLearningMastery.com",
+        "url": "https://machinelearningmastery.com/the-complete-guide-to-inference-caching-in-llms/"
+      },
+      {
+        "display_url": null,
+        "snippet": "Link: https://github.com/ovg-p... for production deployments: Multi-LLM Serving: <strong>Multiple different models can concurrently share the same physical GPU memory pool elastically</strong>, replacing rigid memory partitioning and significantly ...",
+        "source": "brave",
+        "title": "A Practical Guide to LLM Inference at Scale - The Neural Maze",
+        "url": "https://theneuralmaze.substack.com/p/a-practical-guide-to-llm-inference"
+      },
+      {
+        "display_url": null,
+        "snippet": "Standard text LLM serving (chatbot, completion): Era 2 (PagedAttention) is your bread and butter. Pick vLLM or SGLang and you are in good shape. Enable prefix caching if you have shared system prompts. Multimodal models (VLMs): You are in Era 3 territory. Pay attention to how your framework handles vision embeddings.",
+        "source": "brave",
+        "title": "KV Cache Explained: The Complete Guide to KV Cache in LLM Inference | Medium",
+        "url": "https://luv-bansal.medium.com/the-evolution-of-kv-cache-from-simple-buffers-to-distributed-memory-systems-df51cb8ce26f"
+      }
+    ]
+  },
+  "KV-cache serialization format": {
+    "_cache_hit": false,
+    "_cache_key": "search_78d6e3dec1800f08fb2645b3a9f9a337bf05ba01cf00f3c146647a55b7c47d05",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_78d6e3dec1800f08fb2645b3a9f9a337bf05ba01cf00f3c146647a55b7c47d05.json",
+    "_cached_at": 1783298739,
+    "count": 5,
+    "fetched_at": 1783298739,
+    "provider": "brave",
+    "query": "KV-cache serialization format",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "A lightweight, Redis-compatible key-value cache server implemented in Go that supports basic Redis commands and the <strong>RESP (Redis Serialization Protocol).</strong> - ratishjain12/kv-cache",
+        "source": "brave",
+        "title": "GitHub - ratishjain12/kv-cache: A lightweight, Redis-compatible key-value cache server implemented in Go that supports basic Redis commands and the RESP (Redis Serialization Protocol). \u00b7 GitHub",
+        "url": "https://github.com/ratishjain12/kv-cache"
+      },
+      {
+        "display_url": null,
+        "snippet": "So I built binary KV cache persistence with instant restore. And yes, I am writing this post and Yes I rewrote it hundreds of times. I had to learn about what all this stuff was and I still have no clue, but I think I built something interesting, so here it goes: ... Uses llama.cpp&#x27;s llama_state_get_data and llama_state_set_data APIs to serialize the entire KV cache to disk.",
+        "source": "brave",
+        "title": "r/LocalLLaMA on Reddit: I built instant persistent memory for local LLMs (binary KV cache save/restore, sub-second restore, 67% VRAM savings)",
+        "url": "https://www.reddit.com/r/LocalLLaMA/comments/1q7bh5h/i_built_instant_persistent_memory_for_local_llms/"
+      },
+      {
+        "display_url": null,
+        "snippet": "kv_cache_dtype=&quot;auto&quot;: Use the model&#x27;s default data type",
+        "source": "brave",
+        "title": "Quantized KV Cache - vLLM",
+        "url": "https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/"
+      },
+      {
+        "display_url": null,
+        "snippet": "PD disaggregation and KV transfer: Support KV cache transfer from prefill workers to decode workers over NVLink, RDMA, or TCP through transport layers such as NIXL. Pluggable KV transformation: A simple interface for researchers to write compression, token dropping, and custom serialization through a flexible SERDE interface.",
+        "source": "brave",
+        "title": "GitHub - LMCache/LMCache: LMCache: Supercharge Your LLM with the Fastest KV Cache Layer \u00b7 GitHub",
+        "url": "https://github.com/LMCache/LMCache"
+      },
+      {
+        "display_url": null,
+        "snippet": "Implement a persistent in-memory key-value store using a fake disk inside the function. The store supports `put`, `get`, `delete`, `serialize(path)`, and `deserialize(path)`. Each key and value is either a Python `bytes` object or a `str`. Your persistence format must be binary-safe: do not rely on delimiters that may appear inside the data.",
+        "source": "brave",
+        "title": "Implement Persistent KV Store Serialization | OpenAI Coding Question",
+        "url": "https://prachub.com/coding-questions/implement-persistent-kv-store-serialization"
+      }
+    ]
+  }
+}

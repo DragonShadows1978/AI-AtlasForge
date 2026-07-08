@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-07-06T13:48:40.395706",
+  "total_papers": 0,
+  "search_queries": [
+    "PACT quantization regularization",
+    "NAS quantization aware training",
+    "AutoML quantization",
+    "learned clipping quantization",
+    "post-training adaptive clipping"
+  ],
+  "papers": []
+}

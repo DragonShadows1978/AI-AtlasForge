@@ -888,7 +888,13 @@ export async function setMission() {
         payload.project_name = projectName;
     }
 
-    const data = await api('/api/mission', 'POST', payload);
+    let data;
+    try {
+        data = await api('/api/mission', 'POST', payload);
+    } catch (err) {
+        showToast(err.message || 'Failed to set mission', 'error');
+        return;
+    }
     showToast(data.message);
     if (missionInput) missionInput.value = '';
     if (projectNameInput) projectNameInput.value = '';
@@ -3282,6 +3288,27 @@ export function handleMissionStatusEvent(data) {
     if (data.project_name !== undefined) {
         const projEl = document.getElementById('stat-project-name');
         if (projEl) projEl.textContent = data.project_name || '-';
+    }
+
+    // Update mission text on cycle transitions
+    const missionText = data.mission_preview || data.mission;
+    if (missionText) {
+        const missionEl = document.getElementById('current-mission');
+        if (missionEl) {
+            missionEl.textContent = '';
+            const span = document.createElement('span');
+            span.onclick = () => window.openMissionModal();
+            span.style.cursor = 'pointer';
+            span.title = 'Click to view full mission';
+            span.textContent = missionText.length > 100 ? missionText.substring(0, 100) + '...' : missionText;
+            if (missionText.length > 100) {
+                const expand = document.createElement('span');
+                expand.style.color = 'var(--accent)';
+                expand.textContent = ' [expand]';
+                span.appendChild(expand);
+            }
+            missionEl.appendChild(span);
+        }
     }
 
     // Toast for stage transitions

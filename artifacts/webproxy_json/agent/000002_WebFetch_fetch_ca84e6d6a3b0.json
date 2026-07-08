@@ -1,0 +1,207 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_8a752c5bd3d15937cafe9392a7bae79184bd03a2e79acbe4dd428b34b6991128",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_8a752c5bd3d15937cafe9392a7bae79184bd03a2e79acbe4dd428b34b6991128.json",
+  "_cached_at": 1779337683,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": 1779337683,
+  "headings": [
+    "QAT APIs",
+    "What is Quantization-Aware Training?",
+    "QAT in PyTorch",
+    "Experimental Results",
+    "Looking Ahead"
+  ],
+  "links": [
+    {
+      "text": "torchao",
+      "url": "https://github.com/pytorch/ao/"
+    },
+    {
+      "text": "torchtune",
+      "url": "https://github.com/pytorch/torchtune/"
+    },
+    {
+      "text": "XNNPACK",
+      "url": "https://github.com/google/XNNPACK"
+    },
+    {
+      "text": "executorch",
+      "url": "https://github.com/pytorch/executorch/tree/main/examples/models/llama2"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#qat-apis"
+    },
+    {
+      "text": "QAT API",
+      "url": "https://github.com/pytorch/ao/blob/v0.3.0/torchao/quantization/prototype/qat.py"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#fine-tuning-with-torchtune"
+    },
+    {
+      "text": "torchtune",
+      "url": "https://github.com/pytorch/torchtune"
+    },
+    {
+      "text": "recipes",
+      "url": "https://github.com/pytorch/torchtune/blob/main/recipes/configs/llama3/8B_qat_full.yaml"
+    },
+    {
+      "text": "this README",
+      "url": "https://github.com/pytorch/torchtune/blob/main/recipes/quantization.md"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#what-is-quantization-aware-training"
+    },
+    {
+      "text": "straight-through estimators (STE)",
+      "url": "https://arxiv.org/pdf/1308.3432"
+    },
+    {
+      "text": "prior efforts",
+      "url": "https://cloud.google.com/blog/products/compute/accurate-quantized-training-aqt-for-tpu-v5e"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#qat-in-pytorch"
+    },
+    {
+      "text": "here",
+      "url": "https://github.com/pytorch/ao/blob/v0.2.0/torchao/quantization/prototype/qat.py"
+    },
+    {
+      "text": "kernel availability on edge backends",
+      "url": "https://github.com/pytorch/executorch/blob/main/examples/models/llama2/README.md#quantization"
+    },
+    {
+      "text": "prior research on LLM quantization",
+      "url": "https://arxiv.org/pdf/2305.17888"
+    },
+    {
+      "text": "Int8DynActInt4WeightQuantizer",
+      "url": "https://github.com/pytorch/ao/blob/v0.3.0/torchao/quantization/GPTQ.py#L941"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#experimental-results"
+    },
+    {
+      "text": "Llama2-7B",
+      "url": "https://huggingface.co/meta-llama/Llama-2-7b"
+    },
+    {
+      "text": "Llama3-8B",
+      "url": "https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct"
+    },
+    {
+      "text": "C4 dataset",
+      "url": "https://huggingface.co/datasets/allenai/c4"
+    },
+    {
+      "text": "Fully Sharded Data Parallel",
+      "url": "https://pytorch.org/docs/stable/fsdp.html"
+    },
+    {
+      "text": "lm-evaluation-harness",
+      "url": "https://github.com/EleutherAI/lm-evaluation-harness"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#int8-dynamic-activations--int4-weight-quantization-8da4w"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#lower-bit-weight-only-quantization"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#qat-overhead"
+    },
+    {
+      "text": "torch.compile",
+      "url": "https://pytorch.org/get-started/pytorch-2.0/"
+    },
+    {
+      "text": "",
+      "url": "https://pytorch.org/blog/quantization-aware-training/#looking-ahead"
+    },
+    {
+      "text": "torchao",
+      "url": "https://github.com/pytorch/ao/"
+    },
+    {
+      "text": "torchtune",
+      "url": "https://github.com/pytorch/torchtune/"
+    },
+    {
+      "text": "learned quantization ranges",
+      "url": "https://arxiv.org/pdf/1902.08153"
+    },
+    {
+      "text": "clipped softmax",
+      "url": "https://arxiv.org/pdf/2306.12929"
+    },
+    {
+      "text": "gated attention",
+      "url": "https://arxiv.org/pdf/2306.12929"
+    },
+    {
+      "text": "SpinQuant",
+      "url": "https://arxiv.org/pdf/2405.16406"
+    },
+    {
+      "text": "SmoothQuant",
+      "url": "https://arxiv.org/pdf/2211.10438"
+    },
+    {
+      "text": "no longer support int4 tensor cores",
+      "url": "https://www.nvidia.com/en-us/data-center/tensor-cores/"
+    },
+    {
+      "text": "torch.compile",
+      "url": "https://pytorch.org/get-started/pytorch-2.0/"
+    },
+    {
+      "text": "LLM-QAT",
+      "url": "https://arxiv.org/pdf/2305.17888"
+    },
+    {
+      "text": "Prior work",
+      "url": "https://arxiv.org/pdf/2109.12948"
+    },
+    {
+      "text": "int4 weight mm kernel with bitpacking",
+      "url": "https://github.com/pytorch/pytorch/blob/v2.3.1/aten/src/ATen/native/cuda/int4mm.cu#L865"
+    },
+    {
+      "text": "https://github.com/pytorch/ao/pull/383",
+      "url": "https://github.com/pytorch/ao/pull/383"
+    },
+    {
+      "text": "mixed 4-bit/8-bit GEMM",
+      "url": "https://github.com/NVIDIA/cutlass/pull/1413"
+    },
+    {
+      "text": "here",
+      "url": "https://github.com/pytorch/ao/blob/v0.3.0/torchao/quantization/prototype/qat.py"
+    },
+    {
+      "text": "this torchtune tutorial",
+      "url": "https://pytorch.org/torchtune/main/tutorials/qat_finetune.html"
+    },
+    {
+      "text": "github",
+      "url": "https://github.com/pytorch/ao/issues"
+    }
+  ],
+  "meta_description": "",
+  "status_code": 200,
+  "text": "In this blog, we present an end-to-end Quantization-Aware Training (QAT) flow for large language models in PyTorch. We demonstrate how QAT in PyTorch can recover up to 96% of the accuracy degradation on hellaswag and 68% of the perplexity degradation on wikitext for Llama3 compared to post-training quantization (PTQ). We present the QAT APIs in torchao and showcase how users can leverage them for fine-tuning in torchtune .\n\nFigure 1: Llama3-8B fine-tuned on the C4 dataset (en subset) with and without QAT using int8 per token dynamic activations + int4 grouped per channel weights, evaluated on hellaswag and wikitext on a A100 GPU. Note the log scale for wikitext (lower is better).\n\nTo demonstrate the effectiveness of QAT in an end-to-end flow, we further lowered the quantized model to XNNPACK , a highly optimized neural network library for backends including iOS and Android, through executorch . After lowering to XNNPACK, the QAT model saw 16.8% lower perplexity than the PTQ model, while maintaining the same model size and on-device inference and generation speeds.\n\nTable 1: QAT achieved 16.8% lower perplexity and unchanged model sizes and on-device inference and generation speeds on the Llama3-8B model lowered to XNNPACK. Linear layers are quantized using int8 per token dynamic activations + int4 grouped per channel weights, and embeddings are additionally quantized to int4 using a group size of 32 (QAT is only applied to linear layers). Wikitext evaluation is performed using 5 samples and a max sequence length of 127 on server CPU, since evaluation is not available on device (lower is better for all wikitext results). On-device inference and generation is benchmarked on the Samsung Galaxy S22 smartphone.\n\nQAT APIs\n\nWe are excited for users to try our QAT API in torchao, which can be leveraged for both training and fine-tuning. This API involves two steps, prepare and convert: prepare applies a transformation on the linear layers in the model to simulate the numerics of quantization during training, and convert actually quantizes these layers into lower bit-widths after training. The converted model can then be used in the exact same way as the PTQ model:\n\nWe also integrated this QAT flow into torchtune and provided recipes to run this in a distributed setting, similar to the existing full fine-tune distributed recipe. Users can additionally apply QAT during LLM fine-tuning by running the following command. See this README for more details.\n\nWhat is Quantization-Aware Training?\n\nQuantization-Aware Training (QAT) is a common quantization technique for mitigating model accuracy/perplexity degradation that arises from quantization. This is achieved by simulating quantization numerics during training while keeping the weights and/or activations in the original data type, typically float, effectively “fake quantizing” the values instead of actually casting them to lower bit-widths:\n\nSince quantization involves non-differentiable operations like rounding, the QAT backward pass typically uses straight-through estimators (STE) , a mechanism to estimate the gradients flowing through non-smooth functions, to ensure the gradients passed to the original weights are still meaningful. In this manner, the gradients are computed with the knowledge that the weights will ultimately be quantized after training, effectively allowing the model to adjust for quantization noise during the training process. Note that an alternative to QAT is quantized training, which actually casts the values to lower bit dtypes during training, but prior efforts have only seen success up to 8-bits, whereas QAT is effective even at lower bit-widths.\n\nQAT in PyTorch\n\nWe added an initial QAT flow in torchao under prototype here . Currently we support int8 dynamic per-token activations + int4 grouped per-channel weights (abbreviated 8da4w) for linear layers. These settings are motivated by a combination of kernel availability on edge backends and prior research on LLM quantization , which found that per-token activation and per-group weight quantization achieves the best model quality for LLMs compared to other quantization schemes.\n\nFigure 2: torchao QAT flow. This flow involves two steps: (1) prepare, which inserts the fake quantization ops into the model’s linear layers, and (2) convert, which converts these fake quantization ops with actual quantize and dequantize ops after training.\n\nThis flow produces the exact same quantized model as the PTQ flow using the same quantization settings (through Int8DynActInt4WeightQuantizer ), but with quantized weights that achieve superior accuracies and perplexities. Thus, we can use the model converted from the QAT flow as a drop-in replacement for the PTQ model and reuse all the backend delegation logic and underlying kernels.\n\nExperimental Results\n\nAll experiments in this blog post are performed using the torchtune QAT integration described above. We use 6-8 A100 GPUs with 80 GBs each to fine-tune Llama2-7B and Llama3-8B on the C4 dataset (en subset) for 5000 steps. For all experiments, we use batch size = 2, learning rate = 2e-5, max sequence length = 4096 for Llama2 and 8192 for Llama3, Fully Sharded Data Parallel (FSDP) as our distribution strategy, and activation checkpointing to reduce memory footprint. For 8da4w experiments, we use a group size of 256 for weights.\n\nSince the pre-training dataset is not easily accessible, we perform QAT during the fine-tuning process. Empirically, we found that disabling fake quantization for the first N steps led to better results, presumably because doing so allows the weights to stabilize before we start introducing quantization noise to the fine-tuning process. We disable fake quantization for the first 1000 steps for all our experiments.\n\nWe evaluate our quantized models using the lm-evaluation-harness integration in torchtune. We report evaluation results from a variety of tasks commonly used to evaluate LLMs, including hellaswag, a commonsense sentence completion task, wikitext, a next token/byte prediction task, and a few question-answering tasks such as arc, openbookqa, and piqa. For wikitext, perplexity refers to the inverse of how well the model can predict the next word or byte (lower is better), and bits_per_byte refers to how many bits are needed to predict the next byte (lower is also better here). For all other tasks, acc_norm refers to the accuracy normalized by the byte-length of the target string.\n\nStarting with Llama2 8da4w quantization, we saw that QAT was able to recover 62% of the normalized accuracy degradation on hellaswag compared to PTQ, and 58% and 57% of the word and byte perplexity degradation (respectively) on wikitext. We see similar improvements for most of the other tasks.\n\nFigure 3a: Llama2-7B 8da4w quantization with and without QAT\n\nFigure 3b: Llama2-7B 8da4w quantization with and without QAT, evaluated on wikitext (lower is better)\n\nLlama3 8da4w quantization saw even more pronounced improvements with QAT. On the hellaswag evaluation task, we were able to recover 96% of the normalized accuracy degradation on hellaswag compared to PTQ, with minimal overall degradation (<1%) compared to the non-quantized accuracy. On the wikitext evaluation task, QAT recovered 68% and 65% of the word and byte perplexity degradation (respectively). Even on arc_challenge, which was difficult for Llama2 QAT, we were able to recover 51% of the normalized accuracy degradation.\n\nFigure 4a: Llama3-8B 8da4w quantization with and without QAT\n\nFigure 4b: Llama3-8B 8da4w quantization with and without QAT, evaluated on wikitext (lower is better)\n\nWe further extended the torchao QAT flow to 2-bit and 3-bit weight only quantization and repeated the same experiments for Llama3-8B. Quantization degradation is more severe at lower bit-widths, so we use a group size of 32 for all experiments for finer-grained quantization.\n\nHowever, this is still not enough for 2-bits PTQ, which saw wikitext perplexity explode. To mitigate this problem, we leverage knowledge from prior sensitivity analysis that the first 3 and last 2 layers of the Llama3 model are the most sensitive, and skip quantizing these layers in exchange for a moderate increase in quantized model size (1.78 GB for 2-bits and 1.65 GB for 3-bits). This brought the wikitext word perplexity down from 603336 to 6766, which is significant but still far from acceptable. To further improve the quantized model, we turn to QAT.\n\nFigure 5a: Llama3-8B 2-bit weight only quantization with and without QAT, evaluated on wikitext (lower is better). Bars with “skip” refer to skipping quantization for the first 3 and last 2 layers of the model, which are more sensitive to quantization. Note the log scale.\n\nWe observe that applying QAT while skipping quantization for the first 3 and last 2 layers further brought the word perplexity down to a much more reasonable value of 30 (from 6766). More generally, QAT was able to recover 53% of the normalized accuracy degradation on hellaswag compared to PTQ, and 99% and 89% of the word and byte perplexity degradation (respectively) on wikitext. Without skipping the sensitive layers, however, QAT was far less effective at mitigating degradation in quantized model quality.\n\nFigure 5b: Llama3-8B 2-bit weight only quantization with and without QAT. Bars with “skip” refer to skipping quantization for the first 3 and last 2 layers of the model, which are more sensitive to quantization.\n\nFor 3-bit weight only quantization, QAT was effective even without skipping the first 3 and last 2 layers, though skipping these layers still led to better results for both PTQ and QAT. In the skip case, QAT was able to recover 63% of the normalized accuracy degradation on hellaswag compared to PTQ, and 72% and 65% of the word and byte perplexity degradation (respectively) on wikitext.\n\nFigure 6a: Llama3-8B 3-bit weight only quantization with and without QAT. Bars with “skip” refer to skipping quantization for the first 3 and last 2 layers of the model, which are more sensitive to quantization.\n\nFigure 6b: Llama3-8B 3-bit weight only quantization with and without QAT, evaluated on wikitext (lower is better). Bars with “skip” refer to skipping quantization for the first 3 and last 2 layers of the model, which are more sensitive to quantization. Note the log scale.\n\nQAT inserts many fake quantize operations throughout the model, adding considerable overhead to both the fine-tuning speed and the memory usage. For a model like Llama3-8B for example, we have (32 * 7) + 1 = 225 linear layers, each of which has at least 1 fake quantize for the weights and potentially 1 fake quantize for the input activations. Memory footprint increase is also significant, since we cannot mutate the weights in-place and so we need to clone them before applying fake quantization, though this overhead can be mostly mitigated by enabling activation checkpointing.\n\nIn our microbenchmarks, we found that 8da4w QAT fine-tuning is ~34% slower than regular full fine-tuning. With activation checkpointing, the memory increase per GPU is around 2.35 GB. Most of these overheads are fundamental to how QAT works, though we may be able to speed up computation with torch.compile in the future.\n\nTable 2: Llama3 QAT fine-tuning overhead for int8 per token dynamic activations + int4 grouped per channel weights on 6 A100 GPUs (each with 80GB memory).\n\nLooking Ahead\n\nIn this blog, we presented a QAT flow for LLMs through torchao , integrated this flow with the fine-tuning APIs in torchtune , and demonstrated its potential to recover most of the quantization degradation compared to PTQ and match non-quantized performance on certain tasks. There are many directions for future explorations:\n\nHyperparameter tuning. It is likely that extensive hyperparameter tuning can further improve the results of finetuning and QAT. In addition to the general hyperparameters like the learning rate, batch size, dataset size, and number of fine-tuning steps, we should also tune QAT-specific ones, such as when to start/stop fake quantization, how many steps to fake quantize, and regularization parameters for fake quantized values.\n\nOutlier reduction techniques. In our experiments, we found that both PTQ and QAT were susceptible to outliers. In addition to simple clamping and regularization during fine-tuning, we can explore techniques that allow the network to learn how to control these outliers (e.g. learned quantization ranges , clipped softmax , and gated attention ), or possibly even borrow outlier suppression techniques from post-training settings (e.g. SpinQuant , SmoothQuant ) and apply them sparingly throughout the fine-tuning process.\n\nMixed-precision and more complex dtypes. Especially in the lower bit regime, we saw that skipping quantization for certain sensitive layers was effective for both PTQ and QAT. Did we need to skip quantizing these layers altogether, or can we still quantize them, just to lower bit-widths? It will be interesting to explore mixed-precision quantization in the context of QAT. Training with newer dtypes such as MX4 is another promising direction, especially given that the upcoming Blackwell GPUs will no longer support int4 tensor cores .\n\nComposability with LoRA and QLoRA. Our QAT integration in torchtune currently only supports the full fine-tuning workflow. However, many users wish to fine-tune their models using low-ranked adaptors to substantially reduce their memory footprint. Composing QAT with techniques like LoRA / QLoRA will enable users to reap the memory and performance benefits of these approaches while producing a model that will ultimately be quantized with minimal model quality degradation.\n\nComposability with torch.compile . This is another potential way to significantly speed up fake quantization computations in QAT while reducing memory footprint. torch.compile is currently not compatible with the distribution strategy used in full distributed fine-tuning recipes in torchtune (with or without QAT), but support will be added in the near future.\n\nQuantizing other layers. In this work, we only explored quantizing the linear layers. However, in the context of long sequence lengths, the KV cache often becomes the throughput bottleneck and can reach tens of GBs, hence LLM-QAT explored quantizing the KV cache alongside activations and weights. Prior work has also had success with quantizing the embedding layer down to 2-bits in other transformer-based models.\n\nEnd-to-end evaluation on performant cuda kernels. A natural extension of this work is to provide an end-to-end QAT flow evaluated on performant cuda kernels, similar to the existing 8da4w QAT flow lowered to XNNPACK kernels through executorch. For int4 weight only quantization, we can leverage the efficient int4 weight mm kernel with bitpacking for quantization, and there is ongoing work to add QAT support for this kernel: https://github.com/pytorch/ao/pull/383 . For 8da4w quantization, mixed 4-bit/8-bit GEMM is also being added in cutlass. This will be needed to build an efficient 8da4w cuda kernel.\n\nThe QAT code can be found here . Please refer to this torchtune tutorial to get started. If you have any further questions, please feel free to open an issue on the torchao github or reach out to andrewor@meta.com . We welcome your feedback and contributions!",
+  "text_length": 15377,
+  "title": "Quantization-Aware Training for Large Language Models with PyTorch – PyTorch",
+  "url": "https://pytorch.org/blog/quantization-aware-training/"
+}

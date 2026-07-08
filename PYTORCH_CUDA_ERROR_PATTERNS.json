@@ -1,0 +1,205 @@
+{
+  "research_title": "PyTorch CUDA Error Handling - Top Code Patterns & Files",
+  "research_date": "2026-07-07",
+  "source_repository": "site:github.com/pytorch/pytorch",
+  "top_5_files": [
+    {
+      "rank": 1,
+      "name": "c10/cuda/CUDAException.h",
+      "github_url": "https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAException.h",
+      "purpose": "Core CUDA error handling macros",
+      "key_macros": [
+        "C10_CUDA_CHECK",
+        "C10_CUDA_CHECK_WARN",
+        "C10_CUDA_KERNEL_LAUNCH_CHECK",
+        "C10_CUDA_ERROR_HANDLED",
+        "C10_CUDA_IGNORE_ERROR",
+        "C10_CUDA_CLEAR_ERROR",
+        "TORCH_DSA_KERNEL_LAUNCH"
+      ],
+      "error_handling_pattern": "Macro-based error checking with diagnostic context (file, function, line)",
+      "code_snippet": {
+        "primary_macro": "C10_CUDA_CHECK(EXPR)",
+        "description": "Executes CUDA API call, captures error code, passes to c10_cuda_check_implementation() with diagnostic context"
+      }
+    },
+    {
+      "rank": 2,
+      "name": "c10/cuda/CUDAException.cpp",
+      "github_url": "https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAException.cpp",
+      "purpose": "Implementation of CUDA error checking and exception generation",
+      "key_function": "c10_cuda_check_implementation()",
+      "error_handling_pattern": "Fast-path check, error state clearing, rich message assembly, exception throw",
+      "error_flow": [
+        "Check if error == cudaSuccess (fast path)",
+        "Clear error state via cudaGetLastError()",
+        "Assemble error message with context",
+        "Include device-side assertions if available",
+        "Throw c10::AcceleratorError exception"
+      ],
+      "resource_cleanup": "cudaGetLastError() prevents error accumulation"
+    },
+    {
+      "rank": 3,
+      "name": "c10/cuda/CUDADeviceAssertionHost.h",
+      "github_url": "https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDADeviceAssertionHost.h",
+      "purpose": "Device-side assertion tracking and kernel launch registry",
+      "key_structures": [
+        "DeviceAssertionData",
+        "DeviceAssertionsData",
+        "CUDAKernelLaunchInfo",
+        "CUDAKernelLaunchRegistry"
+      ],
+      "error_handling_pattern": "Managed memory + circular buffer for post-mortem debugging",
+      "features": {
+        "circular_buffer_size": 1024,
+        "max_assertion_count": 10,
+        "string_limit_bytes": 512,
+        "thread_safety": "mutex-protected read/write",
+        "generation_tracking": "unique ID per kernel launch for cross-reference"
+      },
+      "use_case": "Capture device-side kernel failures with thread/block coordinates"
+    },
+    {
+      "rank": 4,
+      "name": "aten/src/ATen/cuda/Exceptions.h",
+      "github_url": "https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/Exceptions.h",
+      "purpose": "Library-specific CUDA error handlers (cuDNN, cuBLAS, cuSPARSE, cuSOLVER, cuDSS, Driver API)",
+      "error_types": [
+        {
+          "library": "cuDNN",
+          "macro": "AT_CUDNN_CHECK",
+          "special_handling": "Detects non-contiguous tensor errors with helpful message"
+        },
+        {
+          "library": "cuBLAS",
+          "macro": "TORCH_CUDABLAS_CHECK",
+          "special_handling": "Maps cublasStatus_t to readable error string"
+        },
+        {
+          "library": "cuSPARSE",
+          "macro": "TORCH_CUDASPARSE_CHECK",
+          "special_handling": "Generic sparse matrix error handling"
+        },
+        {
+          "library": "cuSOLVER",
+          "macro": "TORCH_CUSOLVER_CHECK",
+          "special_handling": "Distinguishes INVALID_VALUE (NaN matrices) with backend suggestions"
+        },
+        {
+          "library": "cuDSS",
+          "macro": "TORCH_CUDSS_CHECK",
+          "special_handling": "Execution failure detection with NaN guidance"
+        },
+        {
+          "library": "CUDA Driver",
+          "macro": "AT_CUDA_DRIVER_CHECK",
+          "special_handling": "Dynamically loaded error string function via NVRTC"
+        }
+      ],
+      "error_handling_pattern": "Library-specific error enums -> string conversion -> exception throw with context"
+    },
+    {
+      "rank": 5,
+      "name": "c10/cuda/CUDAGuard.h",
+      "github_url": "https://github.com/pytorch/pytorch/blob/master/c10/cuda/CUDAGuard.h",
+      "purpose": "RAII guards for device/stream context management and automatic restoration on error",
+      "guard_types": [
+        {
+          "name": "CUDAGuard",
+          "purpose": "Manages current device, restores on scope exit",
+          "error_recovery": "Destructor always restores original device, even on exception"
+        },
+        {
+          "name": "OptionalCUDAGuard",
+          "purpose": "Optional device switching without allocation guarantees",
+          "error_recovery": "Conditional restoration via reset()"
+        },
+        {
+          "name": "CUDAStreamGuard",
+          "purpose": "Manages current stream and associated device",
+          "error_recovery": "Destructor restores both stream and device"
+        }
+      ],
+      "error_handling_pattern": "RAII (Resource Acquisition Is Initialization) ensures cleanup on exception",
+      "resource_cleanup": "Guarantees device/stream restoration even on error"
+    }
+  ],
+  "error_handling_summary": {
+    "error_detection": "Macro-based checks with immediate context capture",
+    "error_types_supported": [
+      "CUDA runtime errors",
+      "cuDNN errors",
+      "cuBLAS errors",
+      "cuSPARSE errors",
+      "cuSOLVER errors",
+      "cuDSS errors",
+      "CUDA Driver API errors",
+      "Device-side assertion failures"
+    ],
+    "error_propagation_mechanism": "Exception-based (c10::AcceleratorError)",
+    "retry_logic": "None (caller responsibility)",
+    "resource_cleanup": "RAII guards guarantee restoration on exception",
+    "device_side_assertions": "Managed memory + circular buffer with generation tracking",
+    "kernel_launch_validation": "C10_CUDA_KERNEL_LAUNCH_CHECK() immediate post-launch",
+    "warning_mode": "C10_CUDA_CHECK_WARN() for non-critical operations",
+    "error_context_captured": [
+      "Source filename",
+      "Function name",
+      "Line number",
+      "Error code enum",
+      "Device-side assertion details (if DSA enabled)",
+      "CUDA error string",
+      "Context-specific help text"
+    ],
+    "performance_optimization": "Branch prediction hints (C10_UNLIKELY) optimize fast-path (no error case)",
+    "build_time_config": [
+      "STRIP_ERROR_MESSAGES for binary size",
+      "TORCH_USE_CUDA_DSA for device assertions"
+    ],
+    "runtime_config": [
+      "enabled_at_runtime for DSA control",
+      "gather_launch_stacktrace for debugging",
+      "set_sync_debug_mode for synchronization analysis"
+    ]
+  },
+  "top_error_patterns": {
+    "pattern_1_safe_kernel_launch": {
+      "description": "Validates kernel launch immediately after <<<>>> invocation",
+      "code": "kernel<<<blocks, threads, shared_mem, stream>>>(...);\nC10_CUDA_KERNEL_LAUNCH_CHECK();",
+      "error_caught": "Invalid grid/block configuration, shared memory issues, launch failures"
+    },
+    "pattern_2_device_guard": {
+      "description": "Automatic device context restoration on exception",
+      "code": "{\n  c10::cuda::CUDAGuard guard(target_device);\n  // ... operations on target device ...\n}\n// Original device restored automatically",
+      "error_recovery": "Device context is always restored, no resource leaks"
+    },
+    "pattern_3_warning_only": {
+      "description": "Non-fatal error reporting for optional operations",
+      "code": "C10_CUDA_CHECK_WARN(cudaMemcpy(...));\n// Logs warning without throwing exception",
+      "use_case": "Cleanup operations that shouldn't fail the application"
+    },
+    "pattern_4_library_specific": {
+      "description": "Library-specific error checking with meaningful messages",
+      "code": "AT_CUDNN_CHECK(cudnnConvolutionForward(...));\nTORCH_CUDABLAS_CHECK(cublasGemm(...));\nTORCH_CUDASPARSE_CHECK(cusparseSpMV(...));",
+      "benefit": "Specialized error messages including non-contiguous tensor hints, NaN detection"
+    },
+    "pattern_5_device_assertions": {
+      "description": "Kernel launch with device-side assertion tracking",
+      "code": "TORCH_DSA_KERNEL_LAUNCH(kernel, blocks, threads, shared_mem, stream, ...);",
+      "debugging_benefit": "Post-mortem access to kernel failure location, thread/block coordinates, assertion message"
+    }
+  },
+  "research_methodology": {
+    "search_queries": [
+      "site:github.com/pytorch/pytorch CUDA error handling",
+      "site:github.com/pytorch/pytorch cuda_check macros",
+      "site:github.com/pytorch/pytorch C10_CUDA_CHECK",
+      "site:github.com/pytorch/pytorch CUDAException.h",
+      "site:github.com/pytorch/pytorch device assertion"
+    ],
+    "sources_fetched": 5,
+    "github_raw_content_urls_used": true,
+    "verification_method": "Direct code inspection from pytorch master branch"
+  }
+}

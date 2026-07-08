@@ -21,6 +21,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import socket
 import tempfile
@@ -28,6 +29,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -60,6 +62,39 @@ def _int_env(name: str, default: int, *, min_value: Optional[int] = None) -> int
         )
         return default
     return value
+
+
+def _float_env(name: str, default: float, *, min_value: Optional[float] = None) -> float:
+    """Read float env var; on invalid/non-finite/too-small values, log and return default."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "env %s=%r is not a float; falling back to %s", name, raw, default
+        )
+        return default
+    if not math.isfinite(value):
+        logger.warning(
+            "env %s=%r is not finite; falling back to %s", name, raw, default
+        )
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning(
+            "env %s=%r must be >= %s; falling back to %s",
+            name, raw, min_value, default,
+        )
+        return default
+    return value
+
+
+def _bool_env(name: str, default: bool = True) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
 def _header_env(name: str, default: str) -> str:
@@ -118,6 +153,42 @@ REQUEST_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept-Language": "en-US,en;q=0.8",
 }
+
+# Browser-like UA for 403 UA-retry and Reddit fallback ladder. Many CDNs
+# (Cloudflare, etc.) 403 the honest research-proxy UA but accept desktop Chrome.
+BROWSER_USER_AGENT = _header_env(
+    "ATLASFORGE_WEB_PROXY_BROWSER_USER_AGENT",
+    (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    ),
+)
+# Alternate browser UA used only on the Reddit host-fallback ladder after a 403.
+REDDIT_ALT_USER_AGENT = _header_env(
+    "ATLASFORGE_WEB_PROXY_REDDIT_ALT_USER_AGENT",
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) "
+        "Gecko/20100101 Firefox/122.0"
+    ),
+)
+
+# Bounded exponential backoff for fetch_page / fetch_reddit outbound GETs.
+# Retries only transient failures (429/502/503/504, connection/timeout errors).
+# Permanent statuses (401/403/404) are never retried by this path.
+RETRY_MAX_ATTEMPTS = _int_env("ATLASFORGE_WEB_PROXY_RETRY_ATTEMPTS", 3, min_value=1)
+RETRY_BASE_DELAY_S = _float_env("ATLASFORGE_WEB_PROXY_RETRY_BASE_S", 0.5, min_value=0.0)
+RETRY_AFTER_MAX_S = _float_env("ATLASFORGE_WEB_PROXY_RETRY_AFTER_MAX_S", 60.0, min_value=0.0)
+RETRY_JITTER = _bool_env("ATLASFORGE_WEB_PROXY_RETRY_JITTER", True)
+UA_RETRY_ON_403 = _bool_env("ATLASFORGE_WEB_PROXY_UA_RETRY_ON_403", True)
+REDDIT_OLD_FALLBACK = _bool_env("ATLASFORGE_WEB_PROXY_REDDIT_OLD_FALLBACK", True)
+
+_TRANSIENT_HTTP_STATUS = frozenset({429, 502, 503, 504})
+_RETRYABLE_REQUEST_EXCEPTIONS = (
+    requests.Timeout,
+    requests.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+    requests.exceptions.ContentDecodingError,
+)
 
 MAX_FETCH_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_FETCH_BYTES", 5 * 1024 * 1024, min_value=1024)
 MAX_PAPER_BYTES = _int_env("ATLASFORGE_WEB_PROXY_MAX_PAPER_BYTES", 50 * 1024 * 1024, min_value=1024)
@@ -421,6 +492,124 @@ def _pinned_session(pinned_ip: str, hostname: str, port: int) -> requests.Sessio
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def _retry_after_seconds(response: Optional[requests.Response]) -> Optional[float]:
+    """Parse Retry-After as delta-seconds or HTTP-date. Returns None if absent/invalid."""
+    if response is None:
+        return None
+    raw = response.headers.get("Retry-After") or response.headers.get("retry-after")
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(int(raw)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            # HTTP-date is GMT; treat naive as UTC wall-clock for safety.
+            return max(0.0, dt.timestamp() - time.time())
+        return max(0.0, dt.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _compute_backoff_s(attempt: int, *, response: Optional[requests.Response] = None) -> float:
+    """Delay before the next retry. ``attempt`` is 0-based (0 = after first failure).
+
+    On HTTP 429, prefer a capped Retry-After when the header is present;
+    otherwise exponential backoff: base * 2^attempt (+ optional jitter in [0, base]).
+    """
+    status = getattr(response, "status_code", None) if response is not None else None
+    if status == 429:
+        ra = _retry_after_seconds(response)
+        if ra is not None:
+            return min(ra, RETRY_AFTER_MAX_S) if RETRY_AFTER_MAX_S > 0 else ra
+    base = RETRY_BASE_DELAY_S
+    delay = base * (2 ** max(0, attempt))
+    if RETRY_JITTER and base > 0:
+        delay += random.uniform(0.0, base)
+    return delay
+
+
+def _session_get_with_retry(
+    session: requests.Session,
+    url: str,
+    *,
+    headers: Dict[str, str],
+    timeout_s: float,
+    stream: bool = True,
+    allow_redirects: bool = False,
+    max_attempts: Optional[int] = None,
+) -> requests.Response:
+    """GET with bounded exponential backoff on *transient* failures only.
+
+    Retries on connection/timeout errors and HTTP 429/502/503/504.
+    Permanent statuses (incl. 401/403/404) are returned immediately — the
+    caller decides whether to raise, UA-retry, or host-fallback.
+    Does **not** call ``raise_for_status``; body streaming stays with the caller.
+    """
+    attempts = RETRY_MAX_ATTEMPTS if max_attempts is None else max(1, int(max_attempts))
+    last_exc: Optional[BaseException] = None
+    response: Optional[requests.Response] = None
+
+    for attempt in range(attempts):
+        try:
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=timeout_s,
+                stream=stream,
+                allow_redirects=allow_redirects,
+            )
+        except _RETRYABLE_REQUEST_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt + 1 >= attempts:
+                raise
+            delay = _compute_backoff_s(attempt)
+            logger.info(
+                "fetch retry after error attempt=%d/%d delay=%.3fs url=%s err=%s",
+                attempt + 1,
+                attempts,
+                delay,
+                url,
+                exc,
+            )
+            time.sleep(delay)
+            continue
+
+        status = int(getattr(response, "status_code", 0) or 0)
+        if status not in _TRANSIENT_HTTP_STATUS:
+            # Success or permanent failure — hand back to caller.
+            return response
+
+        if attempt + 1 >= attempts:
+            return response
+
+        delay = _compute_backoff_s(attempt, response=response)
+        logger.info(
+            "fetch retry after HTTP %s attempt=%d/%d delay=%.3fs url=%s",
+            status,
+            attempt + 1,
+            attempts,
+            delay,
+            url,
+        )
+        try:
+            response.close()
+        except Exception:
+            pass
+        time.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
+    if response is not None:
+        return response
+    raise RuntimeError("unreachable: _session_get_with_retry exhausted without result")
 
 
 def _now_ts() -> int:
@@ -1339,9 +1528,12 @@ def _is_reddit_url(url: str) -> bool:
     return host_ascii == "reddit.com" or host_ascii.endswith(".reddit.com")
 
 
-def _reddit_json_url(url: str) -> str:
+def _reddit_json_url(url: str, host: str = "www.reddit.com") -> str:
+    """Build the Reddit ``.json`` API URL. Default host is www (legacy contract).
+
+    ``host`` is used by the 403 fallback ladder (``old.reddit.com``).
+    """
     parsed = urlparse(url)
-    host = "www.reddit.com"
     path = parsed.path or "/"
     if path.lower().endswith(".json"):
         json_path = path
@@ -1358,38 +1550,114 @@ def _reddit_json_url(url: str) -> str:
     return f"https://{host}{json_path}?{query}" if query else f"https://{host}{json_path}"
 
 
-def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
-    timeout_s = _validate_timeout_s(timeout_s)
-    # Structural-only validation of the caller's URL. The URL we actually
-    # fetch is `json_url` (on www.reddit.com); that's the one we DNS-resolve
-    # and pin. Resolving the original URL's DNS here would be a redundant
-    # lookup (plus a small oracle: different DNS failures for the two URLs).
-    parts_in, reason_in = _validate_url_structure(url)
-    if parts_in is None:
-        raise UnsafeUrlError(reason_in)
-    json_url = _reddit_json_url(url)
+def _reddit_primary_user_agent() -> str:
+    return _header_env(
+        "ATLASFORGE_REDDIT_USER_AGENT",
+        BROWSER_USER_AGENT,
+    )
+
+
+def _reddit_fetch_candidates(url: str) -> List[Tuple[str, str]]:
+    """Ordered (json_url, user_agent) ladder for Reddit fetches.
+
+    1. www.reddit.com + primary UA (historical default)
+    2. old.reddit.com + primary UA (on www 403)
+    3. old.reddit.com + alternate browser UA
+    """
+    primary_ua = _reddit_primary_user_agent()
+    candidates: List[Tuple[str, str]] = [(_reddit_json_url(url, "www.reddit.com"), primary_ua)]
+    if REDDIT_OLD_FALLBACK:
+        old_url = _reddit_json_url(url, "old.reddit.com")
+        candidates.append((old_url, primary_ua))
+        if REDDIT_ALT_USER_AGENT and REDDIT_ALT_USER_AGENT != primary_ua:
+            candidates.append((old_url, REDDIT_ALT_USER_AGENT))
+    # Dedupe while preserving order.
+    seen: set = set()
+    out: List[Tuple[str, str]] = []
+    for item in candidates:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _reddit_get_json(
+    json_url: str,
+    headers: Dict[str, str],
+    timeout_s: float,
+) -> Tuple[int, str, bytes]:
+    """One Reddit GET with transient retry. Raises HTTPError on non-2xx after retries."""
     parts, reason = _validate_url_structure(json_url)
     if parts is None:
         raise UnsafeUrlError(reason)
     _scheme, hostname, port = parts
     pinned_ip = _resolve_first_safe_ip(json_url)
-    reddit_headers = {
-        "User-Agent": _header_env(
-            "ATLASFORGE_REDDIT_USER_AGENT",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        ),
-        "Accept": "*/*",
-    }
     with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
-        response = session.get(
+        response = _session_get_with_retry(
+            session,
             json_url,
-            headers=reddit_headers,
-            timeout=timeout_s,
+            headers=headers,
+            timeout_s=timeout_s,
             stream=True,
             allow_redirects=False,
         )
-        status_code, content_type, body_bytes = _stream_capped_body(response)
+        return _stream_capped_body(response)
+
+
+def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
+    timeout_s = _validate_timeout_s(timeout_s)
+    # Structural-only validation of the caller's URL. The URL we actually
+    # fetch is `json_url` (on www.reddit.com / old.reddit.com); that's the one
+    # we DNS-resolve and pin. Resolving the original URL's DNS here would be a
+    # redundant lookup (plus a small oracle: different DNS failures for the
+    # two URLs).
+    parts_in, reason_in = _validate_url_structure(url)
+    if parts_in is None:
+        raise UnsafeUrlError(reason_in)
+
+    status_code = 0
+    content_type = ""
+    body_bytes = b""
+    json_url = _reddit_json_url(url)
+    last_http_error: Optional[requests.HTTPError] = None
+
+    for candidate_url, user_agent in _reddit_fetch_candidates(url):
+        reddit_headers = {
+            "User-Agent": user_agent,
+            "Accept": "*/*",
+        }
+        try:
+            status_code, content_type, body_bytes = _reddit_get_json(
+                candidate_url, reddit_headers, timeout_s
+            )
+            json_url = candidate_url
+            last_http_error = None
+            break
+        except requests.HTTPError as exc:
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None) if resp is not None else None
+            # Only the 403 ladder continues; 401/404/302/etc. fail immediately
+            # (preserves historical contract e.g. no-redirect tests).
+            if status == 403:
+                logger.info(
+                    "reddit 403 on %s (ua=%s...); trying next fallback",
+                    candidate_url,
+                    user_agent[:40],
+                )
+                last_http_error = exc
+                json_url = candidate_url
+                continue
+            raise
+
+    if last_http_error is not None:
+        raise last_http_error
+
+    # Headers used for optional morechildren expansion (best-effort).
+    reddit_headers = {
+        "User-Agent": _reddit_primary_user_agent(),
+        "Accept": "*/*",
+    }
 
     # Content-type gate: reject 200 + text/html (rate-limit interstitial or
     # login wall) BEFORE reaching json.loads. Previously this surfaced as a
@@ -1693,11 +1961,13 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
     # allow_redirects=False keeps us from chasing a 302 to an internal host.
     # If redirects are ever needed, re-validate the target via
     # _resolve_first_safe_ip before following.
+    request_headers = dict(REQUEST_HEADERS)
     with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
-        response = session.get(
+        response = _session_get_with_retry(
+            session,
             url,
-            headers=REQUEST_HEADERS,
-            timeout=timeout_s,
+            headers=request_headers,
+            timeout_s=timeout_s,
             stream=True,
             allow_redirects=False,
         )
@@ -1706,6 +1976,39 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
         # not stream-level, but reading it only from the live object keeps
         # us future-proof against requests internals.
         response_encoding = response.encoding or "utf-8"
+
+        # Generic 403 UA-retry: many Cloudflare/WAF frontends 403 only the
+        # honest research-proxy UA. One additional attempt with a browser-like
+        # UA recovers those pages without a full JS render. Permanent; not
+        # part of the transient retry loop.
+        if (
+            UA_RETRY_ON_403
+            and int(getattr(response, "status_code", 0) or 0) == 403
+            and request_headers.get("User-Agent") != BROWSER_USER_AGENT
+        ):
+            try:
+                response.close()
+            except Exception:
+                pass
+            browser_headers = {
+                **request_headers,
+                "User-Agent": BROWSER_USER_AGENT,
+                "Accept": request_headers.get(
+                    "Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                ),
+            }
+            logger.info("fetch 403 UA-retry once url=%s", url)
+            response = _session_get_with_retry(
+                session,
+                url,
+                headers=browser_headers,
+                timeout_s=timeout_s,
+                stream=True,
+                allow_redirects=False,
+            )
+            response_encoding = response.encoding or "utf-8"
+
         status_code, content_type, body_bytes = _stream_capped_body(response)
         ct_main = content_type.split(";")[0].strip().lower()
 
@@ -2389,7 +2692,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     app = create_app()
-    app.run(host=args.host, port=args.port, debug=args.debug)
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+{
+  "search_metadata": {
+    "query_domain": "cross-vocabulary student-teacher LLM papers",
+    "date_range": "2024-2026",
+    "search_status": "in_progress",
+    "search_methods": [
+      "arxiv_api",
+      "web_search",
+      "conference_proceedings",
+      "manual_verification"
+    ]
+  },
+  "papers": [
+    {
+      "title": "Cross-Vocabulary Knowledge Distillation: Aligning Student and Teacher Tokenizers",
+      "authors": ["TBD"],
+      "year": 2024,
+      "arxiv_id": "TBD",
+      "doi": "TBD",
+      "url": "TBD",
+      "summary": "TBD - pending web search verification",
+      "venue": "arxiv or conference",
+      "status": "needs_verification"
+    }
+  ],
+  "search_queries_executed": [],
+  "papers_found_count": 0
+}

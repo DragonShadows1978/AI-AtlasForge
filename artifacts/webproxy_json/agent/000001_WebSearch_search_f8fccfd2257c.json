@@ -1,0 +1,74 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "search_1c5ef4c7e981936f9cb2741cc366d37432a18de952a1546852567013e6d3327b",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_1c5ef4c7e981936f9cb2741cc366d37432a18de952a1546852567013e6d3327b.json",
+  "_cached_at": 1779337577,
+  "count": 10,
+  "fallback_from": "brave",
+  "fallback_reason": "brave_quota_or_rate_limit",
+  "fetched_at": 1779337577,
+  "provider": "duckduckgo",
+  "query": "ghost attention phantom attention near-zero weights transformers",
+  "results": [
+    {
+      "snippet": "Final Step: Attention weights × Value vectors = Context vector Each token gets enriched representation Contains information from all relevant tokens Foundation for all transformer models",
+      "source": "duckduckgo",
+      "title": "PDF Attention Mechanisms: Understanding Self-Attention and Transformer Basics",
+      "url": "https://rongyulin3.com/qu_genai/slides/lecture4_slides.pdf"
+    },
+    {
+      "snippet": "The weights are normalized to sum to one via softmax, ∑l l = 1 Akin to the intuitive idea of \"limited attention \" In practice, I conjecture this normalization is critical for its training stability. The output of attention is a weighted sum of the inputs based on the computed attention weights out = ∑l lhl2",
+      "source": "duckduckgo",
+      "title": "PDF Attention and Transformer Architectures - David I. Inouye",
+      "url": "https://www.davidinouye.com/course/ece47300-spring-2024/lectures/attention-and-transformers.pdf"
+    },
+    {
+      "snippet": "We formally introduce the layer weight matrices (LWM) that constitute the two types of Transformer sublayers, multi-head self- attention and position-wise fully connected feed-forward network.",
+      "source": "duckduckgo",
+      "title": "Weight, Is Attention All We Need? Matrices in Transformer Improves ...",
+      "url": "https://arxiv.org/pdf/2302.02123v1"
+    },
+    {
+      "snippet": "The self- attention block accepts a set of inputs, from 1, , t 1,⋯,t, and outputs 1, , t 1,⋯,t attention weighted values which are fed through the rest of the encoder.",
+      "source": "duckduckgo",
+      "title": "Attention and the Transformer · Deep Learning",
+      "url": "https://atcold.github.io/NYU-DLSP20/en/week12/12-3/"
+    },
+    {
+      "snippet": "Weights : We'll define simple weight matrices for Q, K, and V transformations. Before we get into the step by step walkthrough of how attention is derived, a visual way to think of it is imagining the embeddings as vectors in a high-dimensional space.",
+      "source": "duckduckgo",
+      "title": "Transformer Attention: A Guide to the Q, K, and V Matrices",
+      "url": "https://www.billparker.ai/2024/10/transformer-attention-simple-guide-to-q.html"
+    },
+    {
+      "snippet": "11. Attention Mechanisms and Transformers The earliest years of the deep learning boom were driven primarily by results produced using the multilayer perceptron, convolutional network, and recurrent network architectures. Remarkably, the model architectures that underpinned many of deep learning's breakthroughs in the 2010s had changed remarkably little relative to their antecedents despite ...",
+      "source": "duckduckgo",
+      "title": "11. Attention Mechanisms and Transformers — Dive into Deep ... - D2L",
+      "url": "https://d2l.ai/chapter_attention-mechanisms-and-transformers/index.html"
+    },
+    {
+      "snippet": "Understanding Attention in Transformers : A Visual Guide Image source: Transformer architecture highlighting attention mechanisms Introduction Attention mechanisms are the cornerstone of ...",
+      "source": "duckduckgo",
+      "title": "Understanding Attention in Transformers: A Visual Guide",
+      "url": "https://medium.com/@nitinmittapally/understanding-attention-in-transformers-a-visual-guide-df416bfe495a"
+    },
+    {
+      "snippet": "Visualize attention weights at,i Diagonal attention means words correspond in order",
+      "source": "duckduckgo",
+      "title": "PDF Lecture 8: Attention and Transformers - Stanford University",
+      "url": "https://cs231n.stanford.edu/slides/2024/lecture_8.pdf"
+    },
+    {
+      "snippet": "By visualizing attention weights , researchers and practitioners can gain insights into the model's decision-making process, identifying the input elements that contribute most to the output.",
+      "source": "duckduckgo",
+      "title": "Understanding Attention Mechanisms: The Key to Transformer ... - LinkedIn",
+      "url": "https://www.linkedin.com/pulse/understanding-attention-mechanisms-key-transformer-model-sachin-psp2c"
+    },
+    {
+      "snippet": "Attention Zero To One : The Transformer Blueprint Transformer Implementation from Scratch A complete PyTorch implementation of the Transformer architecture from the groundbreaking paper \" Attention Is All You Need\" by Vaswani et al. (2017).",
+      "source": "duckduckgo",
+      "title": "Attention Zero To One : The Transformer Blueprint - GitHub",
+      "url": "https://github.com/NathanCordeiro/Attention-Zero-To-One"
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "title": "CUDA Pinned Memory & Stream Patterns - Quick Reference",
+  "date": "2026-07-07",
+  "sections": {
+    "pinned_memory_allocation": {
+      "description": "Host memory allocation APIs for GPU-accelerated transfers",
+      "api_functions": {
+        "cudaHostAlloc": {
+          "signature": "cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)",
+          "parameters": {
+            "pHost": "Output pointer to allocated pinned memory",
+            "size": "Bytes to allocate (256B-1GB typical)",
+            "flags": ["cudaHostAllocDefault", "cudaHostAllocWriteCombined", "cudaHostAllocMapped", "cudaHostAllocPortable"]
+          },
+          "return_codes": ["cudaSuccess", "cudaErrorMemoryAllocation", "cudaErrorInvalidValue"],
+          "use_cases": ["Fast H2D transfers", "GPU-efficient data staging"],
+          "performance": "3-10× faster than pageable malloc for transfers"
+        },
+        "cudaFreeHost": {
+          "signature": "cudaError_t cudaFreeHost(void *p)",
+          "parameters": {"p": "Pointer returned by cudaHostAlloc"},
+          "use_cases": ["Cleanup at app shutdown"]
+        },
+        "cudaHostRegister": {
+          "signature": "cudaError_t cudaHostRegister(void *p, size_t size, unsigned int flags)",
+          "parameters": {
+            "p": "Pointer to existing malloc'd memory",
+            "size": "Size in bytes",
+            "flags": ["cudaHostRegisterDefault", "cudaHostRegisterMapped", "cudaHostRegisterPortable"]
+          },
+          "use_cases": ["Register pre-allocated memory without cudaHostAlloc"]
+        },
+        "cudaHostUnregister": {
+          "signature": "cudaError_t cudaHostUnregister(void *p)",
+          "parameters": {"p": "Pointer returned by cudaHostRegister"}
+        }
+      },
+      "allocation_flags_guide": {
+        "cudaHostAllocDefault": {
+          "behavior": "Write-combined, page-locked",
+          "best_for": "Most common use case: GPU reads host data",
+          "bandwidth_h2d": "22-24 GB/s (A100 PCIe Gen 4)"
+        },
+        "cudaHostAllocWriteCombined": {
+          "behavior": "Optimized for host sequential writes",
+          "best_for": "Host generates data for GPU",
+          "notes": "CPU reads from this memory are slow; use for output buffers"
+        },
+        "cudaHostAllocMapped": {
+          "behavior": "Visible in GPU address space (zero-copy)",
+          "best_for": "Fine-grained GPU access without explicit copy",
+          "warnings": "Higher register pressure in kernels, PCIe reads slower than writes"
+        },
+        "cudaHostAllocPortable": {
+          "behavior": "Accessible from all GPU devices",
+          "best_for": "Multi-GPU systems",
+          "overhead": "+10-20% registration time"
+        }
+      },
+      "performance_comparison": {
+        "pageable_h2d": {"bandwidth_gb_s": "8-12", "latency_us": "500-800", "use_case": "Baseline malloc" },
+        "pinned_h2d": {"bandwidth_gb_s": "22-24", "latency_us": "100-200", "use_case": "Direct DMA" },
+        "pinned_mapped": {"bandwidth_gb_s": "0.5-2", "latency_us": "5-50", "use_case": "Zero-copy, slow" },
+        "speedup_pinned_vs_pageable": "3-10×"
+      },
+      "allocation_pattern": {
+        "startup": "Allocate once at app init, large buffers (256MB-1GB)",
+        "runtime": "Reuse buffers across iterations",
+        "shutdown": "Deallocate via cudaFreeHost()",
+        "constraints": "Max pinned ~10-20% system RAM; limited by OS"
+      }
+    },
+    "async_transfers": {
+      "description": "Non-blocking GPU-host memory operations",
+      "api_functions": {
+        "cudaMemcpyAsync": {
+          "signature": "cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count, cudaMemcpyKind kind, cudaStream_t stream)",
+          "parameters": {
+            "dst": "Destination pointer (device or host)",
+            "src": "Source pointer (device or host)",
+            "count": "Bytes to copy",
+            "kind": ["cudaMemcpyHostToDevice", "cudaMemcpyDeviceToHost", "cudaMemcpyDeviceToDevice"],
+            "stream": "Stream to queue operation"
+          },
+          "host_behavior": "Returns immediately (non-blocking)",
+          "gpu_behavior": "Copy queued and executed on GPU when stream reaches this operation",
+          "ordering": "All prior kernels in stream complete before copy; all subsequent kernels wait for copy"
+        },
+        "cudaMemcpy2DAsync": {
+          "signature": "cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, cudaMemcpyKind kind, cudaStream_t stream)",
+          "use_case": "2D matrix copies with stride"
+        },
+        "cudaMemcpyPeerAsync": {
+          "signature": "cudaError_t cudaMemcpyPeerAsync(void *dst, int dstDev, const void *src, int srcDev, size_t count, cudaStream_t stream)",
+          "use_case": "GPU-to-GPU P2P transfers"
+        }
+      },
+      "execution_models": {
+        "naive_synchronous": {
+          "code": "cudaMemcpy(host, device, size, cudaMemcpyDeviceToHost); kernel(); cudaMemcpy(device, host, size, cudaMemcpyHostToDevice);",
+          "timeline": "Copy → Kernel → Copy (fully serialized)",
+          "total_time": "(transfer + compute) × num_batches"
+        },
+        "pipelined_async": {
+          "code": "cudaMemcpyAsync(batch_n); kernel(batch_n-1); cudaMemcpyAsync(batch_n-2);",
+          "timeline": "Transfer₁ ∥ Compute₁ ∥ Transfer₂ ∥ Compute₂ (overlapped)",
+          "total_time": "≈ max(transfer, compute) × num_batches + 2 × max(transfer, compute)"
+        }
+      },
+      "bandwidth_optimization": {
+        "use_pinned_memory": "Mandatory for >10 GB/s transfer rates",
+        "batch_transfers": "Queue multiple copies to hide latency",
+        "multiple_streams": "Use separate H→D and D→H streams to avoid blocking",
+        "dma_engine_saturation": "A100 has 1 copy engine; H100 has 2 (bidirectional)"
+      }
+    },
+    "stream_callbacks": {
+      "description": "Event-driven host work dispatch without polling",
+      "api": {
+        "cudaLaunchHostFunc": {
+          "signature": "cudaError_t cudaLaunchHostFunc(cudaStream_t stream, cudaHostFn_t function, void *userData)",
+          "callback_signature": "void (*cudaHostFn_t)(void *userData)",
+          "parameters": {
+            "stream": "Stream on which callback executes",
+            "function": "Host function to call",
+            "userData": "Arbitrary context pointer"
+          },
+          "execution_timing": {
+            "relative_to_stream": "After all prior work in stream completes; before subsequent work",
+            "host_thread": "Synchronous to stream's host thread (blocks thread during callback)",
+            "gpu_thread": "GPU doesn't stall; continues other streams"
+          },
+          "host_overhead": "100-500 ns (CPU clock dependent)",
+          "return_codes": ["cudaSuccess", "cudaErrorInvalidResourceHandle"]
+        }
+      },
+      "use_cases": {
+        "work_stealing": {
+          "description": "Dynamic dispatch of GPU kernels based on completion",
+          "pattern": "kernel() → callback_dispatch_next_job() → kernel() → ...",
+          "benefit": "Load balancing, no CPU busy-wait"
+        },
+        "cpu_gpu_sync": {
+          "description": "Signal CPU when GPU work completes",
+          "pattern": "kernel() → callback_set_flag() → CPU proceeds",
+          "benefit": "Non-blocking sync, low energy (no polling)"
+        },
+        "conditional_launch": {
+          "description": "Launch next GPU kernel based on previous kernel's results",
+          "pattern": "kernel_phase1() → callback(memcpy_result_and_decide) → kernel_phase2()",
+          "benefit": "Avoid CPU round-trip, keep data on GPU"
+        },
+        "callback_chains": {
+          "description": "Chain multiple callbacks for multi-stage pipelines",
+          "pattern": "kernel_stage1() → callback1(launch_stage2) → kernel_stage2() → callback2(launch_stage3) → ...",
+          "benefit": "Fully asynchronous pipeline without explicit host sync"
+        }
+      },
+      "energy_comparison": {
+        "polling_approach": "CPU busy-wait in tight loop; high power ~10-100W spinning",
+        "callback_approach": "CPU parked in scheduler; low power ~2-5W idle",
+        "energy_savings": "50-90% reduction vs polling"
+      }
+    },
+    "stream_dependencies": {
+      "description": "Ordering and priority control for multi-stream execution",
+      "api": {
+        "cudaStreamWaitEvent": {
+          "signature": "cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)",
+          "parameters": {
+            "stream": "Stream that will wait",
+            "event": "Event from potentially different stream",
+            "flags": ["cudaEventWaitDefault", "cudaEventWaitExternal"]
+          },
+          "host_behavior": "Non-blocking; returns immediately",
+          "gpu_behavior": "GPU scheduler checks event at work launch boundary; if not complete, kernel queues (no busy-wait)",
+          "latency": "~100-200 ns GPU scheduler latency to resume after event complete",
+          "use_cases": ["Producer-consumer sync", "DAG execution", "Pipeline stage ordering"]
+        },
+        "cudaStreamCreateWithPriority": {
+          "signature": "cudaError_t cudaStreamCreateWithPriority(cudaStream_t *pStream, unsigned int flags, int priority)",
+          "parameters": {
+            "pStream": "Output stream handle",
+            "flags": ["cudaStreamDefault", "cudaStreamNonBlocking"],
+            "priority": "Range from cudaStreamLeastPriority to cudaStreamGreatestPriority"
+          },
+          "priority_levels": "Typically 3 levels (least, default, greatest)",
+          "preemption": "High-priority kernels may preempt low-priority kernels on same SM (context-dependent)"
+        },
+        "cudaDeviceGetStreamPriorityRange": {
+          "signature": "cudaError_t cudaDeviceGetStreamPriorityRange(int *leastPriority, int *greatestPriority)",
+          "use_case": "Query available priority levels per GPU"
+        }
+      },
+      "dependency_patterns": {
+        "linear_chain": {
+          "description": "A → B → C → D (fully sequential)",
+          "pattern": "kernel_a(); event_a=record(); wait_event(event_a); kernel_b(); ...",
+          "parallelism": "None; critical path is sum of all kernel times"
+        },
+        "diamond": {
+          "description": "A → (B, C) → D (parallel middle, converging at end)",
+          "pattern": "A(); wait_A in B and C; B(), C() in parallel; wait_B and wait_C in D",
+          "parallelism": "B and C overlap; D waits for both"
+        },
+        "fan_out": {
+          "description": "A → (B, C, D, E, F) (one-to-many)",
+          "pattern": "A(); all consumers wait_A in parallel",
+          "parallelism": "All consumers execute in parallel after A completes"
+        },
+        "complex_dag": {
+          "description": "Arbitrary directed acyclic graph of dependencies",
+          "pattern": "Multiple wait_events per stream, arbitrary topology",
+          "constraints": "Must be acyclic to avoid deadlock"
+        }
+      }
+    },
+    "performance_baselines": {
+      "platform": "NVIDIA A100, PCIe Gen 4, CUDA 12.x",
+      "bandwidth": {
+        "h2d_pageable": {"gb_s": 8, "notes": "Via I/O MMU" },
+        "h2d_pinned": {"gb_s": 24, "notes": "Direct DMA, 3× faster" },
+        "d2h_pageable": {"gb_s": 7, "notes": "Via I/O MMU" },
+        "d2h_pinned": {"gb_s": 23, "notes": "Direct DMA, 3× faster" },
+        "d2d_on_device": {"gb_s": 1930, "notes": "On-chip bandwidth" }
+      },
+      "latency": {
+        "cudaHostAlloc": {"us": 2, "notes": "One-time overhead" },
+        "cudaEventRecord": {"us": 0.0003, "notes": "100-300 ns" },
+        "cudaStreamWaitEvent_host": {"us": 0, "notes": "Non-blocking" },
+        "cudaStreamWaitEvent_gpu": {"ns": 100, "notes": "GPU scheduler check" },
+        "cudaLaunchHostFunc": {"ns": 500, "notes": "CPU callback latency" },
+        "cudaEventSynchronize_host": {"us": 0.05, "notes": "10-100 µs with blocking flag" }
+      },
+      "overhead_reduction": {
+        "async_vs_sync_h2d": "1.5-2× speedup for pipelined transfers",
+        "pinned_vs_pageable": "3-10× bandwidth improvement",
+        "callback_vs_polling": "50-90% energy reduction, same latency"
+      }
+    },
+    "pitfalls_and_solutions": {
+      "pitfall_circular_dependencies": {
+        "problem": "Stream A waits for event from B; B waits for event from A → deadlock",
+        "detection": "Nsight profiler shows idle streams; CUDA_LAUNCH_BLOCKING=1 exposes",
+        "prevention": "Maintain acyclic topological ordering of stream dependencies"
+      },
+      "pitfall_lost_events": {
+        "problem": "Stream waits for event that was never recorded",
+        "detection": "cudaStreamWaitEvent on unrecorded event; use validation layers",
+        "prevention": "Wrapper function enforcing cudaEventRecord before cudaStreamWaitEvent"
+      },
+      "pitfall_event_reuse": {
+        "problem": "Event reused in new dependency before old dependency completes",
+        "detection": "Thread sanitizer with CUDA tracing",
+        "prevention": "Allocate unique event per dependency; use event pool with lifecycle management"
+      },
+      "pitfall_default_stream": {
+        "problem": "Implicit sync with default stream blocks all operations",
+        "detection": "Profiler shows unexpected global stalls",
+        "prevention": "Use CUDA_API_PER_THREAD_DEFAULT_STREAM=1; create explicit streams"
+      },
+      "pitfall_early_destroy": {
+        "problem": "Destroy event while dependent streams still waiting",
+        "detection": "Undefined behavior; crashes or hangs",
+        "prevention": "Synchronize all dependent streams before cudaEventDestroy()"
+      }
+    },
+    "code_patterns": {
+      "basic_pinned_allocation": {
+        "code": "float *h_data; cudaHostAlloc((void**)&h_data, nbytes, cudaHostAllocDefault);",
+        "advantage": "3× faster transfers vs malloc"
+      },
+      "pipelined_transfers": {
+        "code": "for batch: { cudaMemcpyAsync(batch_n); kernel(batch_n-1); cudaMemcpyAsync(batch_n-2); }",
+        "advantage": "Hides transfer latency; 2-3× throughput"
+      },
+      "event_callback_dispatch": {
+        "code": "kernel(); cudaLaunchHostFunc(stream, work_dispatch_callback, queue);",
+        "advantage": "No polling; CPU parks until GPU work done"
+      },
+      "producer_consumer_sync": {
+        "code": "kernel_prod(); cudaEventRecord(evt); cudaStreamWaitEvent(consumer_stream, evt); kernel_cons();",
+        "advantage": "GPU-efficient sync; 100-200 ns latency"
+      },
+      "multi_stage_pipeline": {
+        "code": "kernel_load(); cudaEventRecord(evt_loaded); cudaStreamWaitEvent(compute_stream, evt_loaded); kernel_compute(); cudaEventRecord(evt_computed); cudaStreamWaitEvent(store_stream, evt_computed); kernel_store();",
+        "advantage": "3-stage load-compute-store overlap"
+      }
+    },
+    "recommended_practices": {
+      "memory": [
+        "Pre-allocate pinned buffers at startup (avoid fragmentation)",
+        "Reuse buffers across iterations",
+        "Limit pinned allocation to <20% system RAM",
+        "Use cudaHostAllocPortable for multi-GPU"
+      ],
+      "transfers": [
+        "Always use cudaMemcpyAsync with explicit streams",
+        "Queue multiple copies to hide latency",
+        "Use separate streams for H→D and D→H to avoid blocking",
+        "Measure actual bandwidth with timer events"
+      ],
+      "streams_and_events": [
+        "Create streams at app startup; destroy at shutdown",
+        "Use cudaEventDisableTiming for dependency events (cheaper)",
+        "Prefer cudaStreamWaitEvent over polling (lower CPU power)",
+        "Validate no circular event dependencies"
+      ],
+      "callbacks": [
+        "Keep callbacks short (< 1 µs ideal)",
+        "Use callbacks for event dispatch, not heavy computation",
+        "Consider atomics for thread-safe work queue access",
+        "Monitor callback overhead with profiler"
+      ]
+    }
+  }
+}

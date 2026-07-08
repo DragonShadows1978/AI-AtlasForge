@@ -237,6 +237,74 @@ def test_parse_jsonl_line_codex_function_events():
     assert "atlasforge_conductor.py" in output_event["display_text"]
 
 
+def test_parse_jsonl_line_keeps_claude_system_lifecycle_events():
+    init_event = asm._parse_jsonl_line(
+        json.dumps(
+            {
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/mnt/ForgeRealm/AI-AtlasForge/workspace/mission",
+                "model": "claude-opus-4-8",
+                "tools": ["Read", "Bash"],
+            }
+        )
+    )
+    started_event = asm._parse_jsonl_line(
+        json.dumps(
+            {
+                "type": "system",
+                "subtype": "task_started",
+                "task_id": "task_1",
+                "task_type": "local_bash",
+                "description": "Probe game engines",
+            }
+        )
+    )
+    notification_event = asm._parse_jsonl_line(
+        json.dumps(
+            {
+                "type": "system",
+                "subtype": "task_notification",
+                "task_id": "task_1",
+                "status": "completed",
+                "summary": "Probe game engines",
+            }
+        )
+    )
+
+    assert init_event["event_type"] == "raw"
+    assert "system:init" in init_event["display_text"]
+    assert "claude-opus-4-8" in init_event["display_text"]
+    assert started_event["event_type"] == "raw"
+    assert "task_started" in started_event["display_text"]
+    assert "Probe game engines" in started_event["display_text"]
+    assert notification_event["event_type"] == "raw"
+    assert "task_notification" in notification_event["display_text"]
+    assert "completed" in notification_event["display_text"]
+
+
+def test_parse_jsonl_line_preserves_long_planning_tool_result_preview():
+    content = "x" * 1200
+    event = asm._parse_jsonl_line(
+        json.dumps(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "content": content,
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    assert event["event_type"] == "tool_result"
+    assert len(event["display_text"]) == len(content)
+
+
 def test_stream_stdout_pins_webproxy_cache_json_from_tool_result(monkeypatch, tmp_path):
     monkeypatch.setattr(asm, "REPO_ROOT", tmp_path)
 

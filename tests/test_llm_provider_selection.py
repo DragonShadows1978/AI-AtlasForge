@@ -27,6 +27,49 @@ def test_conductor_prefers_in_memory_mission_provider(monkeypatch, tmp_path):
     assert conductor.resolve_llm_provider({"llm_provider": "codex"}) == "codex"
 
 
+def test_provider_api_updates_active_mission_provider(monkeypatch, tmp_path):
+    from flask import Flask
+    import io_utils
+    from dashboard_modules import core as core_mod
+
+    mission_path = tmp_path / "mission.json"
+    mission_path.write_text(json.dumps({
+        "mission_id": "mission_provider_switch",
+        "llm_provider": "claude",
+    }))
+
+    def fake_set_provider(provider, **_kwargs):
+        return str(provider).strip().lower()
+
+    monkeypatch.setattr(core_mod, "MISSION_PATH", mission_path)
+    monkeypatch.setattr(core_mod, "io_utils", io_utils)
+    monkeypatch.setattr(core_mod, "set_llm_provider", fake_set_provider)
+    monkeypatch.setattr(
+        core_mod,
+        "get_llm_config",
+        lambda: {"provider": "codex", "selected": {}, "options": {}},
+    )
+
+    app = Flask(__name__)
+    app.register_blueprint(core_mod.core_bp)
+    response = app.test_client().post(
+        "/api/llm-provider",
+        json={
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "thinking": "high",
+            "fast": True,
+        },
+    )
+
+    assert response.status_code == 200
+    mission = json.loads(mission_path.read_text())
+    assert mission["llm_provider"] == "codex"
+    assert mission["llm_model"] == "gpt-5.5"
+    assert mission["llm_thinking"] == "high"
+    assert mission["llm_fast"] is True
+
+
 def test_conductor_falls_back_to_persisted_provider(monkeypatch, tmp_path):
     import atlasforge_conductor as conductor
 

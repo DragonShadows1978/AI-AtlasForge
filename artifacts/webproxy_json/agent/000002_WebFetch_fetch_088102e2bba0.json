@@ -1,0 +1,51 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_cc9dec11edd0af5297b81ee220b416007106dc315462755047669437b035095b",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_cc9dec11edd0af5297b81ee220b416007106dc315462755047669437b035095b.json",
+  "_cached_at": 1779412708,
+  "content_type": "text/html",
+  "fetched_at": 1779412708,
+  "headings": [
+    "Rotary Positional Embeddings (RoPE)",
+    "Why It Exists",
+    "What Changes In Attention",
+    "Why It Became Standard",
+    "How To Read It In The Gallery"
+  ],
+  "links": [
+    {
+      "text": "Architecture gallery",
+      "url": "https://sebastianraschka.com/llm-architecture-gallery/"
+    },
+    {
+      "text": "From GPT-2 to gpt-oss",
+      "url": "https://magazine.sebastianraschka.com/p/from-gpt-2-to-gpt-oss-analyzing-the"
+    },
+    {
+      "text": "From-scratch RoPE implementation",
+      "url": "https://github.com/rasbt/LLMs-from-scratch/blob/main/ch05/07_gpt_to_llama/converting-gpt-to-llama2.ipynb"
+    },
+    {
+      "text": "Llama 3 RoPE scaling notebook",
+      "url": "https://github.com/rasbt/LLMs-from-scratch/blob/main/ch05/07_gpt_to_llama/converting-llama2-to-llama3.ipynb"
+    },
+    {
+      "text": "NoPE",
+      "url": "https://sebastianraschka.com/llms-from-scratch/ch04/13_nope/"
+    },
+    {
+      "text": "QK-Norm",
+      "url": "https://sebastianraschka.com/llms-from-scratch/ch04/12_qk_norm/"
+    },
+    {
+      "text": "GQA",
+      "url": "https://sebastianraschka.com/llms-from-scratch/ch04/04_gqa/"
+    }
+  ],
+  "meta_description": "A concept guide to Rotary Positional Embeddings based on recent LLM architecture articles and the local LLMs-from-scratch materials.",
+  "status_code": 200,
+  "text": "Rotary Positional Embeddings (RoPE)\n\nRoPE became the default positional recipe in modern LLMs because it fits naturally into attention and scales\n better than the older learned absolute-position setup.\n\nInstead of adding a separate position embedding vector to the token representation, RoPE rotates the query and\n key vectors in a position-dependent way. That keeps positional information tied directly to the attention\n mechanism, which is why RoPE took over once Llama-style architectures became mainstream.\n\nEfficiency target\n\nPositional encoding that integrates cleanly with attention and context scaling tricks\n\nMain tradeoff\n\nCleaner extrapolation than absolute embeddings, but still one more operation inside attention\n\nTypical models\n\nLlama, Qwen, GPT-OSS, DeepSeek, GLM-4.5, Sarvam 30B\n\nWhy It Exists\n\nAttention by itself has no notion of order. Early GPT architectures solved that with learned absolute positional\n embeddings added to the token vectors. RoPE changes the place where position enters the computation: not at the\n token embedding input, but inside the attention mechanism itself.\n\nThat shift turned out to be important because it gave labs a positional scheme that played better with longer\n contexts and later context-extension tricks like interpolation or YaRN-style scaling.\n\nWhat Changes In Attention\n\nRoPE rotates the query and key vectors using position-dependent sine and cosine terms. The practical effect is\n that relative position gets encoded directly into the dot product used by attention. So instead of adding a\n separate learned vector for âposition 512,â the attention computation itself becomes position-aware.\n\nThis is also why RoPE is usually discussed together with q and k rather than with the embedding layer. It lives\n in the attention path, not the token-embedding path.\n\nWhy It Became Standard\n\nRoPE sits in a good middle ground. It is not as bare as NoPE, which removes explicit position information\n entirely, but it is more flexible than learned absolute embeddings. That is why most mainstream dense and sparse\n decoders still say RoPE in the architecture figure unless they are doing something more unusual.\n\nRecent models then stack extra variations on top. Some use partial RoPE on only a subset of dimensions, while\n others mix RoPE and NoPE across different layer types.\n\nHow To Read It In The Gallery\n\nOn the gallery page, RoPE is the quiet default. You will mostly notice it when a card says something more\n specific like partial RoPE , NoPE + RoPE , or RoPE only on sliding-window layers . Those are\n the cases where a model is no longer following the plain mainstream recipe.\n\nSources\n\nRelated concepts",
+  "text_length": 2669,
+  "title": "Rotary Positional Embeddings (RoPE) | Sebastian Raschka, PhD",
+  "url": "https://sebastianraschka.com/llms-from-scratch/ch04/10_rope/"
+}

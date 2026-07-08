@@ -3065,6 +3065,7 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                 if _watcher_policy != "token_first"
                 else False   # token_first: suppress time monitor, use budget instead
             )
+            _active_llm_provider = resolve_llm_provider(controller.mission)
             if HAS_CONTEXT_WATCHER:
                 try:
                     watcher = get_context_watcher()
@@ -3072,12 +3073,13 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
                         str(workspace),
                         on_context_handoff,
                         enable_time_handoff=_enable_time_handoff,
-                        stage=current_stage
+                        stage=current_stage,
+                        provider=_active_llm_provider,
                     )
                     if context_session_id:
                         logger.info(
                             f"ContextWatcher started for session {context_session_id} "
-                            f"(stage={current_stage}, policy={_watcher_policy}, "
+                            f"(provider={_active_llm_provider}, stage={current_stage}, policy={_watcher_policy}, "
                             f"time_handoff={_enable_time_handoff})"
                         )
                 except Exception as e:
@@ -3087,12 +3089,11 @@ def run_rd_mode(takeover: bool = False, force: bool = False):
             _work_budget_mgr: Optional["WorkBudgetManager"] = None
             if HAS_WORK_BUDGET_MANAGER and _watcher_policy == "token_first":
                 try:
-                    _detected_provider = resolve_llm_provider(controller.mission)
-                    _detected_model = get_llm_model(_detected_provider, mission=controller.mission) or ""
+                    _detected_model = get_llm_model(_active_llm_provider, mission=controller.mission) or ""
                     _work_budget_mgr = WorkBudgetManager(model=_detected_model)
                     logger.info(
                         "WorkBudgetManager active: provider=%s model=%s budget=%d tokens",
-                        _detected_provider,
+                        _active_llm_provider,
                         _detected_model or "(unset)", _work_budget_mgr.budget_tokens,
                     )
                 except Exception as _wbm_err:

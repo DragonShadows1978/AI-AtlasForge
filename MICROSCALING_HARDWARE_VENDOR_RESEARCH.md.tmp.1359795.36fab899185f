@@ -1,0 +1,47 @@
+# Hardware Vendor Support for Microscaling Quantization Formats
+
+## Research Scope
+
+This document captures comprehensive research on hardware vendor support for microscaling quantization formats across GPU, accelerator, and mobile platforms.
+
+### Research Angles
+1. **NVIDIA**: CUDA kernels, TensorRT, MXFP4/MXINT8 inference
+2. **Intel**: oneAPI, Arc GPU, Data Center GPU
+3. **AMD**: rocBLAS, HIP, RDNA, MI300
+4. **Qualcomm**: Snapdragon mobile SoC
+5. **FPGA/Custom Silicon**: Accelerators
+
+### Research Dimensions (Per Vendor)
+- Kernel availability (CUDA/HIP/OpenCL/custom)
+- SDK/framework versions
+- Performance benchmarks (TFLOPS, latency, bandwidth)
+- Hardware compatibility matrix
+- Support timeline (available/roadmap/research)
+- Documentation links
+
+---
+
+## Vendor Support Matrix (To Be Populated)
+
+| Vendor | GPU Family | Kernel Type | MXFP4 | MXINT8 | SDK Version | Performance | Availability | Notes |
+|--------|-----------|-------------|-------|--------|-------------|-------------|--------------|-------|
+| NVIDIA | H100/H200 | CUDA | ? | ? | ? | ? | ? | ? |
+| Intel | Arc | custom | ? | ? | ? | ? | ? | ? |
+| AMD | MI300 | HIP | ? | ? | ? | ? | ? | ? |
+| Qualcomm | Snapdragon | custom | ? | ? | ? | ? | ? | ? |
+| FPGA | Various | custom | ? | ? | ? | ? | ? | ? |
+
+---
+
+## Research Findings
+
+### Phase 1: Search & Fetch
+Status: Pending
+
+### Phase 2: Verification & Synthesis
+Status: Pending
+
+---
+
+## References
+(To be populated during research phase)

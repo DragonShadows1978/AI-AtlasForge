@@ -1,0 +1,468 @@
+{
+  "metadata": {
+    "search_date": "2026-07-06",
+    "search_queries": [
+      "symmetric asymmetric quantization",
+      "quantization methods comparison equations",
+      "quantization scale factor clipping range",
+      "quantization scheme comparison",
+      "post-training quantization PTQ weights activations",
+      "affine quantization zero-point parameter",
+      "quantization-aware training QAT gradient",
+      "GPTQ QuaRot SmoothQuant quantization methods comparison",
+      "quantization formula x_q = round((x - min) / scale) + zero_point",
+      "loss function squared error quantization MSE Hessian"
+    ],
+    "total_papers": 10,
+    "focus_areas": [
+      "Symmetric vs Asymmetric Quantization",
+      "Mathematical Formulations and Equations",
+      "Scale Factor Computation",
+      "Clipping Range Determination",
+      "Granularity (Per-tensor, Per-channel, Per-group)",
+      "Error Mitigation Techniques",
+      "Quantization-Aware Training (QAT) vs Post-Training Quantization (PTQ)",
+      "LLM-Specific Methods"
+    ]
+  },
+  "papers": [
+    {
+      "id": 1,
+      "title": "A Comprehensive Evaluation on Quantization Techniques for Large Language Models",
+      "authors": "Anonymous (2025)",
+      "year": 2025,
+      "venue": "arXiv: 2507.17417v2",
+      "url": "https://arxiv.org/html/2507.17417v2",
+      "type": "Conference-quality empirical evaluation",
+      "key_equations": [
+        {
+          "name": "Symmetric Quantization",
+          "formula": "x_q = clip(round(x / s), Q_min, Q_max)",
+          "description": "Zero-point fixed at z=0, symmetric range"
+        },
+        {
+          "name": "Asymmetric Quantization",
+          "formula": "x_q = clip(round((x - z_fp) / s + z_int), Q_min, Q_max)",
+          "description": "Allows dynamic zero-point per data distribution"
+        },
+        {
+          "name": "Channel-wise Shifting",
+          "formula": "X̂ = X - T; B̂ = B + T·W",
+          "description": "Eliminates cross-channel asymmetry"
+        },
+        {
+          "name": "Scaling (SmoothQuant)",
+          "formula": "Y = (X·S)·(S^(-1)·W) = X·W",
+          "description": "Smooth outliers from activations to weights"
+        },
+        {
+          "name": "Rotation",
+          "formula": "X̂ = X·O; Ŵ = O^T·W",
+          "description": "Orthogonal transformation, reduces incoherence"
+        },
+        {
+          "name": "Self-Compensation Loss",
+          "formula": "L(W) ≈ L(W_q) + ∇L^T·dq + (1/2)·dq^T·H·dq",
+          "description": "Hessian-based quadratic approximation for GPTQ"
+        },
+        {
+          "name": "Low-Rank Error Compensation",
+          "formula": "Y = (X·W_q) + A·B",
+          "description": "Additional low-rank matrices for error correction"
+        },
+        {
+          "name": "FP4 (E2M1) Value",
+          "formula": "Value = (-1)^S × 2^E × (1 + M)",
+          "description": "4-bit floating-point: 1 sign, 2 exp, 1 mantissa"
+        }
+      ],
+      "methods_compared": [
+        "Symmetric quantization",
+        "Asymmetric quantization",
+        "Shifting (Outlier Suppression+)",
+        "Scaling (SmoothQuant, AWQ, Outlier Suppression+, OmniQuant, FlatQuant, OSTQuant)",
+        "Rotation (QuIP, QuIP#, QuaRot, SpinQuant)",
+        "GPTQ (Hessian-based)",
+        "Low-rank decomposition (ZeroQuant-v2, CALDERA, LQER, QERA, QwT)",
+        "FP4 variants (MXFP4, NVFP4)"
+      ],
+      "key_findings": [
+        "Asymmetric quantization for activations yields significant benefits; minor for weights",
+        "Optimal: symmetric weights + asymmetric activations",
+        "Finer granularity improves accuracy but increases storage overhead",
+        "Rotation effective for INT4/MXFP4; less for NVFP4",
+        "Best performance: optimized rotation + scaling + GPTQ + low-rank compensation",
+        "NVFP4 outperforms MXFP4 due to finer group size (16 vs 32) and better scaling format (E4M3 vs E8M0)"
+      ],
+      "granularities": [
+        "Per-tensor",
+        "Per-channel",
+        "Per-token",
+        "Per-group"
+      ],
+      "precision_levels": [
+        "FP4 (MXFP4, NVFP4)",
+        "INT4",
+        "INT8"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "A White Paper on Neural Network Quantization",
+      "authors": "Markus Nagel et al.",
+      "year": 2021,
+      "venue": "arXiv: 2106.08295",
+      "url": "https://arxiv.org/pdf/2106.08295",
+      "type": "Comprehensive review",
+      "key_equations": [
+        {
+          "name": "General Affine Quantization",
+          "formula": "x_q = Δ × clip(round((x - β)/Δ + Z), 0, 2^b - 1)",
+          "description": "Core affine quantization with scale and zero-point"
+        },
+        {
+          "name": "Scale Factor (MinMax)",
+          "formula": "Δ = (β_max - β_min) / (2^b - 1)",
+          "description": "Range-based scale computation"
+        },
+        {
+          "name": "Zero-Point (Asymmetric)",
+          "formula": "Z = round(-β_min / Δ)",
+          "description": "Maps floating-point 0 to integer domain"
+        },
+        {
+          "name": "Power-of-Two Scale",
+          "formula": "Δ = 2^(-k)",
+          "description": "Restricted scale for hardware efficiency (bit-shifting)"
+        }
+      ],
+      "methods_compared": [
+        "Affine (asymmetric) quantization",
+        "Symmetric quantization (special case with Z=0)"
+      ],
+      "key_insights": [
+        "Symmetric quantization = simplified asymmetric with Z=0",
+        "Power-of-two restrictions enable hardware efficiency but reduce expressiveness",
+        "Trade-off between rounding and clipping error"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Model Quantization: Concepts, Methods, and Why It Matters",
+      "authors": "NVIDIA Technical Blog",
+      "year": 2024,
+      "venue": "NVIDIA Developer Blog",
+      "url": "https://developer.nvidia.com/blog/model-quantization-concepts-methods-and-why-it-matters/",
+      "type": "Industry best practices",
+      "key_equations": [
+        {
+          "name": "Quantization Range Mapping",
+          "formula": "x_q = clip(round((x - α) × s + z), α_q, β_q)",
+          "description": "Maps [α, β] to [α_q, β_q] with scale s and zero-point z"
+        },
+        {
+          "name": "Asymmetric Scale",
+          "formula": "s = (β - α) / (β_q - α_q)",
+          "description": "Scale computation for asymmetric case"
+        },
+        {
+          "name": "Asymmetric Zero-Point",
+          "formula": "z = α_q - (α × s)",
+          "description": "Zero-point for asymmetric quantization"
+        },
+        {
+          "name": "Symmetric Scale",
+          "formula": "s = max(|α|, |β|) / max(|α_q|, |β_q|)",
+          "description": "Symmetric scale around zero"
+        },
+        {
+          "name": "AbsMax Method",
+          "formula": "s = max(|x|) / max(|x_q|)",
+          "description": "Simple symmetric scaling"
+        }
+      ],
+      "granularities": [
+        "Per-tensor: single s, z for entire tensor",
+        "Per-channel: individual s, z per input channel",
+        "Per-block: sub-channel grouping"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Which Quantization Should I Use? A Unified Evaluation of llama.cpp Quantization on Llama-3.1-8B-Instruct",
+      "authors": "Anonymous",
+      "year": 2026,
+      "venue": "arXiv: 2601.14277",
+      "url": "https://arxiv.org/html/2601.14277",
+      "type": "Empirical evaluation",
+      "key_equations": [],
+      "methods_compared": [
+        "Q2_K, Q3_K, Q4_K, Q5_K, Q6_K (K-quant)",
+        "Q4_0, Q5_0, Q6_0 (basic quantization)",
+        "I-quant variants (importance-weighted)"
+      ],
+      "evaluation_dimensions": [
+        "Accuracy-compression tradeoff",
+        "Task sensitivity",
+        "Throughput analysis"
+      ],
+      "metrics": [
+        "Perplexity (WikiText-2)",
+        "Zero-shot benchmarks (GSM8K, HellaSwag, IFEval, MMLU, TruthfulQA)"
+      ],
+      "key_findings": [
+        "K-quant methods outperform basic quantization",
+        "Per-group quantization optimal accuracy/size tradeoff",
+        "Task-specific sensitivity varies significantly"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "AffineQuant: Affine Transformation Quantization for Large Language Models",
+      "authors": "Anonymous",
+      "year": 2024,
+      "venue": "arXiv: 2403.12544v1",
+      "url": "https://arxiv.org/html/2403.12544v1",
+      "type": "Proposed method",
+      "key_equations": [
+        {
+          "name": "Standard PTQ Scaling",
+          "formula": "X̂ = X·S^(-1); Ŵ = S·W",
+          "description": "Traditional diagonal scaling only"
+        },
+        {
+          "name": "AffineQuant Full Transformation",
+          "formula": "X̂ = X·M^(-1); Ŵ = M·W",
+          "description": "General affine matrix (not just diagonal)"
+        },
+        {
+          "name": "Reversibility Guarantee",
+          "formula": "Y = (X·M^(-1))·(M·W) = X·W",
+          "description": "Output mathematically identical"
+        }
+      ],
+      "innovation": "Optimizes full affine matrices instead of just diagonal scaling, enabling merging with LayerNorm without inference overhead"
+    },
+    {
+      "id": 6,
+      "title": "A Comprehensive Evaluation of Quantization Strategies for Large Language Models",
+      "authors": "Anonymous",
+      "year": 2024,
+      "venue": "arXiv: 2402.16775v1",
+      "url": "https://arxiv.org/html/2402.16775v1",
+      "type": "Empirical evaluation",
+      "key_equations": [
+        {
+          "name": "MinMax Calibration",
+          "formula": "range = [min(x), max(x)]",
+          "description": "Simple range-based calibration"
+        },
+        {
+          "name": "Percentile Calibration",
+          "formula": "range = [percentile(x, α), percentile(x, 100-α)]",
+          "description": "Robust to outliers"
+        },
+        {
+          "name": "Entropy Calibration",
+          "formula": "range = argmin KL(P_original || P_quantized)",
+          "description": "Information-theoretic calibration"
+        }
+      ],
+      "methods_compared": [
+        "Round-to-Nearest (RTN)",
+        "MinMax",
+        "Percentile",
+        "Entropy",
+        "SmoothQuant",
+        "GPTQ",
+        "AWQ",
+        "OmniQuant",
+        "Mixed-precision"
+      ],
+      "evaluation_framework": [
+        "Knowledge & Capacity",
+        "Alignment",
+        "Efficiency"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Quantization Methods Compared: Speed vs. Accuracy in Model Deployment",
+      "authors": "RunPod Blog",
+      "year": 2024,
+      "venue": "RunPod Blog",
+      "url": "https://www.runpod.io/blog/quantization-methods-speed-vs-accuracy/",
+      "type": "Industry guide",
+      "key_equations": [
+        {
+          "name": "Post-Training Quantization",
+          "formula": "x_q = clip(round((x - β)/Δ), 0, 2^b - 1); x̂ = (x_q × Δ) + β",
+          "description": "PTQ quantization and dequantization"
+        },
+        {
+          "name": "Quantization-Aware Training Forward",
+          "formula": "x̂_q = quantize(x) [fake quantization]",
+          "description": "QAT forward pass with simulated quantization"
+        },
+        {
+          "name": "Straight-Through Estimator",
+          "formula": "∇x = STE(∇x̂_q); x ← x - η × ∇x",
+          "description": "QAT backward pass with STE"
+        }
+      ],
+      "methods_taxonomy": [
+        "Post-Training Quantization (PTQ)",
+        "Quantization-Aware Training (QAT)",
+        "Mixed-Precision Quantization",
+        "Dynamic Quantization"
+      ]
+    },
+    {
+      "id": 8,
+      "title": "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers",
+      "authors": "Elias Frantar, Saleh Ashkboos, Torsten Hoefler, Dan Alistarh",
+      "year": 2022,
+      "venue": "NeurIPS 2022 / arXiv: 2210.17323",
+      "url": "https://arxiv.org/pdf/2210.17323",
+      "type": "Foundational method",
+      "key_equations": [
+        {
+          "name": "Loss Approximation (Quadratic Proxy)",
+          "formula": "ΔL ≈ ||W_q - W||_H^2 = Σ_i (w_{q,i} - w_i) × H_{ii} × (w_{q,i} - w_i)",
+          "description": "Hessian-based second-order loss approximation"
+        },
+        {
+          "name": "Hessian Computation",
+          "formula": "H = (2/|D|) × Σ_{batch ∈ D} X^T × X",
+          "description": "Hessian matrix from input activations"
+        },
+        {
+          "name": "Layer-wise MSE Minimization",
+          "formula": "Minimize: ||X·W_q - X·W||_2^2",
+          "description": "Per-layer quantization objective"
+        },
+        {
+          "name": "Greedy Weight Quantization",
+          "formula": "w_{q,i} = clip(w_i - H_{ii}^(-1) × H_{i,¬i} × (W_{q,¬i} - W_{¬i}), Q_min, Q_max)",
+          "description": "Optimal per-weight quantization accounting for dependencies"
+        }
+      ],
+      "innovation": "Second-order Hessian-based approach; per-channel/per-group precision; highly accurate low-bit quantization",
+      "capabilities": [
+        "2, 3, 4-bit weight quantization",
+        "Per-channel and per-group precision",
+        "175B parameter models in ~4 GPU hours"
+      ]
+    },
+    {
+      "id": 9,
+      "title": "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+      "authors": "Jiangfeng Lin, Junyang Tang et al.",
+      "year": 2023,
+      "venue": "MLSys 2024 (Best Paper) / arXiv: 2306.00978",
+      "url": "https://arxiv.org/pdf/2306.00978",
+      "type": "State-of-the-art method",
+      "key_equations": [
+        {
+          "name": "Quantization Error Decomposition",
+          "formula": "Error = Σ_c ||X_c ⊙ (w_{q,c} - w_c)||_2^2",
+          "description": "Per-channel error analysis"
+        },
+        {
+          "name": "Activation-Awareness Insight",
+          "formula": "Error_c ∝ ||X_c||_2^2 × ||w_{q,c} - w_c||_2^2",
+          "description": "Error proportional to activation magnitude"
+        },
+        {
+          "name": "AWQ Per-Channel Scaling",
+          "formula": "s_c = (max(|X_c|) / q_mean(w_c))^α",
+          "description": "Activation-aware scaling factor with exponent α"
+        },
+        {
+          "name": "Scaled Weight and Activation",
+          "formula": "W' = S^(-1) × W; X' = X × S; Y = X' × W' = X × W",
+          "description": "Mathematically equivalent transformation"
+        }
+      ],
+      "innovation": "Identifies and protects salient weights using activation statistics; no backpropagation; hardware-efficient",
+      "advantages": [
+        "No calibration/reconstruction needed",
+        "Preserves generalization across domains/modalities",
+        "Activation-aware channel protection",
+        "Scaling fused into GEMM (zero overhead)"
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Understanding Quantization-Aware Training: Gradients at Quantized Weights Bias to the Low-Loss Basin",
+      "authors": "Hanyang Li et al.",
+      "year": 2024,
+      "venue": "arXiv: 2606.09012",
+      "url": "https://arxiv.org/html/2606.09012",
+      "type": "Theoretical analysis",
+      "key_equations": [
+        {
+          "name": "Fake Quantization",
+          "formula": "x̂ = clip(round(x / s + z), Q_min, Q_max); x_dq = (x̂ - z) × s",
+          "description": "Simulated quantization during QAT"
+        },
+        {
+          "name": "Straight-Through Estimator",
+          "formula": "∂x̂/∂x|STE = 1 [identity, not actual quantization gradient]",
+          "description": "Bypass non-differentiable quantization operation"
+        },
+        {
+          "name": "QAT Learning Insight",
+          "formula": "Gradient ∇L computed at quantized weight state; model learns flat loss w.r.t. quantization",
+          "description": "Convergence to low-loss basin for quantized values"
+        }
+      ],
+      "insight": "QAT adjusts weights to settle in flat loss regions relative to quantization perturbations, enabling better low-bit accuracy"
+    }
+  ],
+  "key_formulas": {
+    "quantization": {
+      "affine_asymmetric": "x_q = clip(round((x - β)/Δ + Z), 0, 2^b - 1)",
+      "affine_symmetric": "x_q = clip(round(x / s), -2^(b-1), 2^(b-1) - 1)",
+      "scale_computation": "Δ = (β_max - β_min) / (2^b - 1)",
+      "zero_point_computation": "Z = round(-β_min / Δ)"
+    },
+    "granularity": {
+      "per_tensor": "Single s, z for entire tensor",
+      "per_channel": "Individual s_c, z_c per channel c",
+      "per_group": "Individual s_{c,g}, z_{c,g} per group g in channel c",
+      "per_token": "Individual s_t, z_t per token t (for activations)"
+    },
+    "error_mitigation": {
+      "hessian_based": "ΔL ≈ ||W_q - W||_H^2 = Σ_i (w_{q,i} - w_i) × H_{ii} × (w_{q,i} - w_i)",
+      "activation_aware": "s_c = (max(|X_c|) / q_mean(w_c))^α",
+      "low_rank_compensation": "Y = X·W_q + A·B"
+    },
+    "training": {
+      "qat_forward": "x̂_q = quantize(x) [fake quantization]",
+      "qat_backward": "∇x = STE(∇x̂_q)"
+    }
+  },
+  "method_comparison": {
+    "symmetric_advantages": [
+      "Simpler hardware (no zero-point operations)",
+      "Lower dequantization cost",
+      "Efficient for balanced distributions"
+    ],
+    "symmetric_disadvantages": [
+      "Suboptimal for asymmetric data",
+      "Wastes quantization range",
+      "Higher clipping error for skewed distributions"
+    ],
+    "asymmetric_advantages": [
+      "Optimal range utilization",
+      "Better for asymmetric distributions",
+      "Reduced clipping loss"
+    ],
+    "asymmetric_disadvantages": [
+      "Extra zero-point parameter",
+      "More complex hardware",
+      "Additional dequantization operation"
+    ]
+  }
+}

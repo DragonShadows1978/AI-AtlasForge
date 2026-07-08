@@ -1692,17 +1692,14 @@ class SessionMonitor:
                 total_usage = {}
 
             usage = {
-                # Codex emits both incremental and cumulative token counts.
-                # Use cumulative totals here so threshold checks track true
-                # session growth against the model context window.
-                "input_tokens": total_usage.get("input_tokens", last_usage.get("input_tokens", 0)),
-                "output_tokens": total_usage.get("output_tokens", last_usage.get("output_tokens", 0)),
-                "cache_read_input_tokens": total_usage.get(
-                    "cached_input_tokens",
-                    last_usage.get("cached_input_tokens", 0),
-                ),
+                # Codex `total_token_usage` is cumulative for the whole rollout,
+                # not the active context window. Context pressure must use the
+                # current request/window usage from `last_token_usage`.
+                "input_tokens": last_usage.get("input_tokens", 0),
+                "output_tokens": last_usage.get("output_tokens", 0),
+                "cache_read_input_tokens": last_usage.get("cached_input_tokens", 0),
                 "cache_creation_input_tokens": 0,
-                "total_tokens": total_usage.get("total_tokens", 0),
+                "total_tokens": last_usage.get("total_tokens", 0),
                 "model_context_window": _codex_context_window_for_model(
                     self._detected_model,
                     _safe_nonnegative_int(info.get("model_context_window", 0)),
@@ -2170,7 +2167,8 @@ class ContextWatcher:
         workspace_path: str,
         callback: Callable[[HandoffSignal], None],
         enable_time_handoff: bool = True,
-        stage: Optional[str] = None
+        stage: Optional[str] = None,
+        provider: Optional[str] = None,
     ) -> Optional[str]:
         """
         Start monitoring a workspace for context exhaustion.
@@ -2181,6 +2179,8 @@ class ContextWatcher:
             enable_time_handoff: Whether to enable time-based handoff (default True)
             stage: Current R&D stage (e.g. "TESTING"). When provided, uses
                    activity-aware adaptive timeout instead of fixed 55-min timer.
+            provider: Provider used by the active LLM subprocess. When omitted,
+                      falls back to env/state/default provider resolution.
 
         Returns:
             Session ID if started successfully, None on failure
@@ -2192,7 +2192,7 @@ class ContextWatcher:
         with self._lock:
             # Generate session ID
             session_id = str(uuid.uuid4())[:8]
-            active_provider = get_active_provider()
+            active_provider = get_active_provider(provider)
 
             # Create session monitor with time-based handoff option
             monitor = SessionMonitor(
@@ -2595,7 +2595,8 @@ def get_context_watcher() -> ContextWatcher:
 def start_context_watching(
     workspace_path: str,
     callback: Callable[[HandoffSignal], None],
-    stage: Optional[str] = None
+    stage: Optional[str] = None,
+    provider: Optional[str] = None,
 ) -> Optional[str]:
     """
     Convenience function to start watching a workspace.
@@ -2604,11 +2605,17 @@ def start_context_watching(
         workspace_path: Path to workspace
         callback: Handoff callback function
         stage: Current R&D stage for adaptive timeout (optional)
+        provider: Provider used by the active LLM subprocess (optional)
 
     Returns:
         Session ID or None
     """
-    return get_context_watcher().start_watching(workspace_path, callback, stage=stage)
+    return get_context_watcher().start_watching(
+        workspace_path,
+        callback,
+        stage=stage,
+        provider=provider,
+    )
 
 
 def stop_context_watching(session_id: str):

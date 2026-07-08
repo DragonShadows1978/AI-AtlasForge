@@ -1,0 +1,74 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "search_0355d3762dd1fd51d7b40151ba98763116291508d65eab8b95af68dc0df5db38",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_0355d3762dd1fd51d7b40151ba98763116291508d65eab8b95af68dc0df5db38.json",
+  "_cached_at": 1779337579,
+  "count": 10,
+  "fallback_from": "brave",
+  "fallback_reason": "brave_quota_or_rate_limit",
+  "fetched_at": 1779337579,
+  "provider": "duckduckgo",
+  "query": "pruning attention heads negligible weights neural networks",
+  "results": [
+    {
+      "snippet": "In particular, we prune attention heads from Multi- Head Attention (MHA) and neurons from Multilayer Perceptron (MLP) within each layer of the model. This approach provides a more faithful representation of how the network internally processes information than simple weight -only or activation-only heuristics.",
+      "source": "duckduckgo",
+      "title": "Efficient LLMs with AMP: Attention Heads and MLP Pruning",
+      "url": "https://arxiv.org/html/2504.21174v1"
+    },
+    {
+      "snippet": "What is Neural Network Pruning ? Neural network pruning is a process of removing redundant or less important neurons or connections ( weights ) from a neural network without significantly impacting its performance. By eliminating these unnecessary components, the model's size and complexity can be reduced, leading to faster inference times and lower memory usage. Pruning is particularly useful ...",
+      "source": "duckduckgo",
+      "title": "Neural Network Pruning in Deep Learning - GeeksforGeeks",
+      "url": "https://www.geeksforgeeks.org/deep-learning/neural-network-pruning-in-deep-learning/"
+    },
+    {
+      "snippet": "To measure the informativeness of attention heads , we train our Single-Shot Meta-Pruner (SMP) with a meta-learning paradigm aiming to maintain the distribution of text representations after pruning . Compared with existing compression methods for pre-trained models, our method can reduce the overhead of both fine-tuning and inference.",
+      "source": "duckduckgo",
+      "title": "Know what you don't need: Single-Shot Meta-Pruning for attention heads ...",
+      "url": "https://www.sciencedirect.com/science/article/pii/S2666651021000140"
+    },
+    {
+      "snippet": "Attention head pruning , or simply 'head pruning' , is the removal of under-used or redundant attention head components in AI Transformer models. This efficiency method is a type of width pruning , that simplifies the neural networks , and has been shown to be effective in numerous research papers.",
+      "source": "duckduckgo",
+      "title": "Attention Head Pruning Research - Aussie AI",
+      "url": "https://www.aussieai.com/research/head-pruning"
+    },
+    {
+      "snippet": "This layered functional organization mirrors theories of hierarchical representation in neural networks . See multi- head - attention for the parameter structure that enables this specialization, and self- attention -mechanism for the core computation each head performs.",
+      "source": "duckduckgo",
+      "title": "Attention Heads: Specialization, Pruning, and What Different Heads ...",
+      "url": "https://ai.towerofrecords.com/ai/attention-heads"
+    },
+    {
+      "snippet": "Pruning techniques trim down neural networks by selectively removing less important weights , neurons, or layers, significantly reducing model size and computational load. Whether it's unstructured pruning targeting individual weights or structured pruning removing entire filters, these methods make models leaner and faster without compromising performance.",
+      "source": "duckduckgo",
+      "title": "Pruning Techniques for Optimizing Neural Networks",
+      "url": "https://lechnowak.com/posts/neural-network-pruning-techniques/"
+    },
+    {
+      "snippet": "On the other hand, unstructured pruning operates at the level of individual weights in a neural network , meaning it can remove any specific weight , regardless of its position 27.",
+      "source": "duckduckgo",
+      "title": "Efficient self-attention with smart pruning for sustainable large ...",
+      "url": "https://www.nature.com/articles/s41598-025-92586-5"
+    },
+    {
+      "snippet": "Neural network pruning is essential for deploying large models efficiently because it reduces the model size by removing unnecessary weights . Prior research pursued two largely separate paths: differentiable pruning , which uses trainable parameters as proxies for importance, and combinatorial optimization, which uses algorithms to search for ...",
+      "source": "duckduckgo",
+      "title": "Sequential Attention: Making AI models leaner and faster without ...",
+      "url": "https://research.google/blog/sequential-attention-making-ai-models-leaner-and-faster-without-sacrificing-accuracy/"
+    },
+    {
+      "snippet": "However, by carefully considering these factors, it is possible to prune BERT without significantly degrading its pre-trained loss. In this paper, we propose a Meta-learning-based pruning approach that can adaptively identify and eliminate insignificant attention weights .",
+      "source": "duckduckgo",
+      "title": "PDF Explainable attention pruning: a meta-learning-based approach",
+      "url": "https://hal.science/hal-04447491/file/2023_IEEE_TAI___BERT_Pruning__V5___Accepted_.pdf"
+    },
+    {
+      "snippet": "Additionally, we design multiple collaborative views to display the entire pruning process, guiding users to carry out pruning . Our system supports exploring the role of self- attention heads in the model inference process using text dependency relations and attention weight distribution.",
+      "source": "duckduckgo",
+      "title": "BHPVAS: visual analysis system for pruning attention heads ... - Springer",
+      "url": "https://link.springer.com/article/10.1007/s12650-024-00985-z"
+    }
+  ]
+}

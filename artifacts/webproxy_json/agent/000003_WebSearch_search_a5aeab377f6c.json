@@ -1,0 +1,74 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "search_406bc6cd585316d98fec4edabda4057aee1135bf4dd730ecc4b3e2613fb95379",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_406bc6cd585316d98fec4edabda4057aee1135bf4dd730ecc4b3e2613fb95379.json",
+  "_cached_at": 1779337578,
+  "count": 10,
+  "fallback_from": "brave",
+  "fallback_reason": "brave_quota_or_rate_limit",
+  "fetched_at": 1779337578,
+  "provider": "duckduckgo",
+  "query": "transformer attention patterns 2024 2025 2026 analysis",
+  "results": [
+    {
+      "snippet": "This produces source-side feature activations. An attention operation. For each feature we have a vector specifying a linear combination of attention patterns from heads in the base layer, padded with an identity pattern to imitate the residual connection and facilitate modeling of MLP computation, if desired.",
+      "source": "duckduckgo",
+      "title": "Progress on Attention - transformer-circuits.pub",
+      "url": "https://transformer-circuits.pub/2025/attention-update/index.html"
+    },
+    {
+      "snippet": "One of the reasons for the success of transformer architectures is that their attention mechanism resolves these problems better than previous schemes, based upon (for example) recurrent neural networks and gating mechanisms (Buckley & Singh, 2024 ; Cho, 2014; Hochreiter & Schmidhuber, 1997; Su et al., 2023).",
+      "source": "duckduckgo",
+      "title": "Beyond Markov: Transformers, memory, and attention",
+      "url": "https://www.tandfonline.com/doi/full/10.1080/17588928.2025.2484485"
+    },
+    {
+      "snippet": "\" Attention Is All You Need \" [1] is a 2017 research paper in machine learning authored by eight scientists and engineers working at Google. The paper introduced a new deep learning architecture known as the transformer , based on the attention mechanism proposed in 2014 by Bahdanau et al.[2] The transformer approach it describes has become the main architecture of a wide variety of artificial ...",
+      "source": "duckduckgo",
+      "title": "Attention Is All You Need - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Attention_Is_All_You_Need"
+    },
+    {
+      "snippet": "A core intuition about transformers is that attention patterns can tell us a lot about what's going on inside - if we see attention from position i to position j, that could mean the model is using information at j to compute something at i! We can look at these for the regression model and see what patterns emerge.",
+      "source": "duckduckgo",
+      "title": "Transformer Circuits and Attention Patterns",
+      "url": "https://g-structure.github.io/optim-hunt/"
+    },
+    {
+      "snippet": "The quadratic computational complexity of the self- attention mechanism in Transformer models severely constrains their applicability to long sequence inputs. We propose Contextual Priority ...",
+      "source": "duckduckgo",
+      "title": "Contextual priority attention enables linear time sequence ... - Nature",
+      "url": "https://www.nature.com/articles/s41598-025-32639-x"
+    },
+    {
+      "snippet": "Our experimental analysis demonstrates that the vanilla transformer architecture magnified with LAM surpasses state-of-the-art models, including the vanilla attention mechanism. These results confirm the effectiveness of our approach and highlight a range of future challenges in long-sequence time series forecasting.",
+      "source": "duckduckgo",
+      "title": "[2410.03805] Local Attention Mechanism: Boosting the Transformer ...",
+      "url": "https://arxiv.org/abs/2410.03805"
+    },
+    {
+      "snippet": "Examining the latest advances in transformer attention mechanisms and their impact on model efficiency, performance, and scalability in modern AI systems.",
+      "source": "duckduckgo",
+      "title": "Transformer Attention Mechanisms: The 2025 Evolution",
+      "url": "https://neuraldom.com/posts/transformer-attention-mechanism-evolution-2025/"
+    },
+    {
+      "snippet": "Unlike recurrent neural networks (RNNs) that process words sequentially, the Transformer's self- attention enables parallel processing, significantly accelerating training and inference. This parallelization, coupled with the ability to capture long-range dependencies more effectively than previous deep learning models, has made the Transformer architecture a cornerstone of modern NLP ...",
+      "source": "duckduckgo",
+      "title": "Decoding Transformer Architecture: A Deep Dive into Attention ...",
+      "url": "https://taylor-amarel.com/2025/03/decoding-transformer-architecture-a-deep-dive-into-attention-mechanisms-layers-and-optimization-techniques/"
+    },
+    {
+      "snippet": "Interactive transformer attention visualizer. Type a sentence, see tokenization, Q/K/V matrices, and attention heatmaps. Explore single-head vs multi-head attention with step-by-step scaled dot-product attention computation. Understand how GPT, BERT, and modern LLMs process language. Try it free!",
+      "source": "duckduckgo",
+      "title": "Free Transformer Attention Mechanism Visualizer - Simulations4All",
+      "url": "https://simulations4all.com/simulations/transformer-attention-visualizer"
+    },
+    {
+      "snippet": "Exploring the inner workings of Transformers Patterns and Messages: A New Framing of Transformer Attention 18 Feb 2025 I recently had a series of \"aha!\" moments around the Attention equations that's lead to some exciting weeks of research and insight. The core revelation is that the way we've been taught to think about Transformers reflects an emphasis on computational efficiency and ...",
+      "source": "duckduckgo",
+      "title": "Patterns and Messages: A New Framing of Transformer Attention",
+      "url": "https://mccormickml.com/2025/02/18/patterns-and-messages-intro/"
+    }
+  ]
+}

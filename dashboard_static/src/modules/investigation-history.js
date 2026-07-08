@@ -1298,15 +1298,15 @@ window.exportCurrentInvestigation = async function(format) {
 /**
  * Re-run current investigation
  */
-window.rerunCurrentInvestigation = function() {
+function rerunCurrentInvestigation() {
     if (!currentInvestigationId) return;
     rerunInvestigation(currentInvestigationId);
-};
+}
 
 /**
  * Re-run a specific investigation
  */
-window.rerunInvestigation = async function(investigationId) {
+async function rerunInvestigation(investigationId) {
     try {
         // Get the investigation details first
         const status = await api(`/api/investigation/status/${encodeURIComponent(investigationId)}`);
@@ -1368,7 +1368,10 @@ window.rerunInvestigation = async function(investigationId) {
     } catch (e) {
         showToast('Error starting re-run: ' + e.message, 'error');
     }
-};
+}
+
+window.rerunCurrentInvestigation = rerunCurrentInvestigation;
+window.rerunInvestigation = rerunInvestigation;
 
 // ============================================================================
 // Utility Functions

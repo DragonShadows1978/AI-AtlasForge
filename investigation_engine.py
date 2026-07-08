@@ -741,6 +741,12 @@ def invoke_claude(
     provider = _get_active_llm_provider()
     env = os.environ.copy()
     env = _apply_agent_process_guard_env(env)
+    env["ATLASFORGE_INVESTIGATION_WORKSPACE"] = str(cwd)
+    if artifact_label:
+        env["ATLASFORGE_ARTIFACT_LABEL"] = artifact_label
+        env["ATLASFORGE_SUBAGENT_ID"] = artifact_label
+    if artifact_sources_file:
+        env["ATLASFORGE_SUBAGENT_ARTIFACT_DIR"] = str(artifact_sources_file.parent)
     # Prevent "Claude Code cannot be launched inside another Claude Code session" error
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
@@ -2121,6 +2127,7 @@ class InvestigationRunner:
         # Runner-owned WebProxy evidence loaded from subagent source_payloads.
         self.pinned_evidence_sources: Dict[str, Any] = {}
         self.pinned_evidence_records: List[Dict[str, Any]] = []
+        self.webproxy_json_records: List[Dict[str, Any]] = []
         # Check validator availability at startup (non-fatal warning if missing)
         self._validator_available = self._check_validator_health()
 
@@ -2217,9 +2224,14 @@ class InvestigationRunner:
                 update_investigation_status(self.config.investigation_id, InvestigationStatus.EXPLORING)
             self.subagent_results = self._run_subagents(research_directions)
             self.pinned_evidence_sources, self.pinned_evidence_records = self._load_pinned_webproxy_evidence()
+            self.webproxy_json_records = self._load_webproxy_json_artifact_records()
             if self.pinned_evidence_records:
                 self._log(
                     f"Loaded {len(self.pinned_evidence_records)} runner-pinned WebProxy source payloads"
+                )
+            if self.webproxy_json_records:
+                self._log(
+                    f"Captured {len(self.webproxy_json_records)} literal WebProxy JSON outputs"
                 )
 
             # Step 3.5: Adversarial validation (fact-check citations before synthesis)
@@ -2273,6 +2285,7 @@ class InvestigationRunner:
                     "filter_mode": self.config.validation_filter_mode,
                 },
                 "pinned_source_evidence": self.pinned_evidence_records,
+                "webproxy_json_artifacts": self.webproxy_json_records,
                 # Include URL handler metadata for rich reports
                 "url_metadata": self.url_metadata if self.url_metadata else [],
             }
@@ -2683,6 +2696,42 @@ class InvestigationRunner:
         _atomic_write_json(result_path, result.to_dict())
         return result
 
+    def _load_webproxy_json_artifact_records(self) -> List[Dict[str, Any]]:
+        """Load the manifest of literal WebProxy JSON outputs for this investigation."""
+        webproxy_json_dir = self.config.workspace_dir / "artifacts" / "webproxy_json"
+        if not webproxy_json_dir.exists():
+            return []
+
+        records: List[Dict[str, Any]] = []
+        seen_paths: set[str] = set()
+        for manifest_path in sorted(webproxy_json_dir.glob("**/manifest.jsonl")):
+            try:
+                lines = manifest_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("artifact_type") != "web_proxy_json_output":
+                    continue
+                artifact_path = record.get("artifact_json_path")
+                if not isinstance(artifact_path, str) or not artifact_path:
+                    continue
+                resolved = Path(artifact_path).resolve()
+                if str(resolved) in seen_paths:
+                    continue
+                if not _is_relative_to(resolved, self.config.workspace_dir.resolve()):
+                    continue
+                seen_paths.add(str(resolved))
+                clean = dict(record)
+                clean["artifact_json_path"] = str(resolved)
+                records.append(clean)
+        return records
+
     def _load_pinned_webproxy_evidence(self) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
         Load investigation-owned WebProxy JSON payloads captured from subagent
@@ -2700,12 +2749,86 @@ class InvestigationRunner:
             return {}, []
 
         artifacts_dir = self.config.workspace_dir / "artifacts" / "subagents"
-        if not artifacts_dir.exists():
+        webproxy_json_dir = self.config.workspace_dir / "artifacts" / "webproxy_json"
+        if not artifacts_dir.exists() and not webproxy_json_dir.exists():
             return {}, []
 
         sources_by_url: Dict[str, Any] = {}
         records: List[Dict[str, Any]] = []
         seen_evidence_paths: set[str] = set()
+
+        def _ingest_payload_record(record: Dict[str, Any], subagent_id: str) -> None:
+            evidence_json_path = (
+                record.get("evidence_json_path")
+                or record.get("artifact_json_path")
+            )
+            if not isinstance(evidence_json_path, str) or not evidence_json_path:
+                return
+            evidence_path = Path(evidence_json_path).resolve()
+            if str(evidence_path) in seen_evidence_paths:
+                return
+            if not _is_relative_to(evidence_path, self.config.workspace_dir.resolve()):
+                logger.warning("Ignoring pinned evidence outside investigation workspace: %s", evidence_path)
+                return
+            payload = _safe_read_json(evidence_path)
+            if not isinstance(payload, dict):
+                return
+
+            seen_evidence_paths.add(str(evidence_path))
+            url = str(payload.get("url") or payload.get("pdf_url") or record.get("source_url") or record.get("url") or "").strip()
+            if not url:
+                return
+            text = _text_from_webproxy_payload(payload)
+            original_length = int(
+                payload.get("original_text_length")
+                or payload.get("text_length")
+                or payload.get("original_length")
+                or len(text)
+            )
+            content_type = str(
+                payload.get("content_type")
+                or ("application/pdf" if payload.get("type") == "paper" else "text/html")
+            )
+            fetched = FetchedSource(
+                url=url,
+                content=text,
+                accessible=bool(text),
+                error=None if text else "Pinned WebProxy JSON did not contain extracted text",
+                content_type=content_type,
+                truncated=bool(payload.get("truncated", False)),
+                original_length=original_length,
+            )
+            sources_by_url[url] = fetched
+            normalized = _normalize_source_url(url)
+            if normalized and normalized not in sources_by_url:
+                sources_by_url[normalized] = fetched
+
+            pdf_url = payload.get("pdf_url")
+            if isinstance(pdf_url, str) and pdf_url and pdf_url != url:
+                sources_by_url[pdf_url] = fetched
+                normalized_pdf = _normalize_source_url(pdf_url)
+                if normalized_pdf and normalized_pdf not in sources_by_url:
+                    sources_by_url[normalized_pdf] = fetched
+
+            title = payload.get("title") or payload.get("paper_title") or ""
+            records.append({
+                "subagent_id": record.get("subagent_id") or subagent_id,
+                "url": url,
+                "pdf_url": pdf_url if isinstance(pdf_url, str) else None,
+                "title": str(title)[:200] if title else "",
+                "type": payload.get("type") or record.get("type") or "fetch",
+                "content_type": content_type,
+                "text_length": len(text),
+                "original_text_length": original_length,
+                "truncated": bool(payload.get("truncated", False)),
+                "sha256": record.get("sha256") or payload.get("sha256"),
+                "byte_length": record.get("byte_length"),
+                "cache_json_path": record.get("cache_json_path"),
+                "evidence_json_path": str(evidence_path),
+                "artifact_json_path": record.get("artifact_json_path"),
+                "local_pdf_path": payload.get("local_pdf_path"),
+                "local_text_path": payload.get("local_text_path"),
+            })
 
         for sources_path in sorted(artifacts_dir.glob("*/sources.jsonl")):
             subagent_id = sources_path.parent.name
@@ -2724,73 +2847,24 @@ class InvestigationRunner:
                 if record.get("artifact_type") != "web_proxy_cache_json":
                     continue
 
-                evidence_json_path = record.get("evidence_json_path")
-                if not isinstance(evidence_json_path, str) or not evidence_json_path:
-                    continue
-                evidence_path = Path(evidence_json_path).resolve()
-                if str(evidence_path) in seen_evidence_paths:
-                    continue
-                if not _is_relative_to(evidence_path, self.config.workspace_dir.resolve()):
-                    logger.warning("Ignoring pinned evidence outside investigation workspace: %s", evidence_path)
-                    continue
-                payload = _safe_read_json(evidence_path)
-                if not isinstance(payload, dict):
-                    continue
+                _ingest_payload_record(record, subagent_id)
 
-                seen_evidence_paths.add(str(evidence_path))
-                url = str(payload.get("url") or payload.get("pdf_url") or record.get("source_url") or "").strip()
-                if not url:
+        for manifest_path in sorted(webproxy_json_dir.glob("**/manifest.jsonl")):
+            try:
+                lines = manifest_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            manifest_subagent_id = manifest_path.parent.name
+            for line in lines:
+                if not line.strip():
                     continue
-                text = _text_from_webproxy_payload(payload)
-                original_length = int(
-                    payload.get("original_text_length")
-                    or payload.get("text_length")
-                    or payload.get("original_length")
-                    or len(text)
-                )
-                content_type = str(
-                    payload.get("content_type")
-                    or ("application/pdf" if payload.get("type") == "paper" else "text/html")
-                )
-                fetched = FetchedSource(
-                    url=url,
-                    content=text,
-                    accessible=bool(text),
-                    error=None if text else "Pinned WebProxy JSON did not contain extracted text",
-                    content_type=content_type,
-                    truncated=bool(payload.get("truncated", False)),
-                    original_length=original_length,
-                )
-                sources_by_url[url] = fetched
-                normalized = _normalize_source_url(url)
-                if normalized and normalized not in sources_by_url:
-                    sources_by_url[normalized] = fetched
-
-                pdf_url = payload.get("pdf_url")
-                if isinstance(pdf_url, str) and pdf_url and pdf_url != url:
-                    sources_by_url[pdf_url] = fetched
-                    normalized_pdf = _normalize_source_url(pdf_url)
-                    if normalized_pdf and normalized_pdf not in sources_by_url:
-                        sources_by_url[normalized_pdf] = fetched
-
-                title = payload.get("title") or payload.get("paper_title") or ""
-                records.append({
-                    "subagent_id": subagent_id,
-                    "url": url,
-                    "pdf_url": pdf_url if isinstance(pdf_url, str) else None,
-                    "title": str(title)[:200] if title else "",
-                    "type": payload.get("type") or "fetch",
-                    "content_type": content_type,
-                    "text_length": len(text),
-                    "original_text_length": original_length,
-                    "truncated": bool(payload.get("truncated", False)),
-                    "sha256": record.get("sha256") or payload.get("sha256"),
-                    "byte_length": record.get("byte_length"),
-                    "cache_json_path": record.get("cache_json_path"),
-                    "evidence_json_path": str(evidence_path),
-                    "local_pdf_path": payload.get("local_pdf_path"),
-                    "local_text_path": payload.get("local_text_path"),
-                })
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("artifact_type") != "web_proxy_json_output":
+                    continue
+                _ingest_payload_record(record, str(record.get("subagent_id") or manifest_subagent_id))
 
         return sources_by_url, records
 

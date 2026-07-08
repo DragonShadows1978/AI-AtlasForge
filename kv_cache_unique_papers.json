@@ -1,0 +1,666 @@
+{
+  "https://arxiv.org/html/2603.20397v1": {
+    "title": "KV Cache Optimization Strategies for Scalable and Efficient LLM Inference",
+    "snippet": "This dynamic distillation ensures that critical and novel information remains accessible while maintaining a constant memory footprint. A lightweight alternative avoids full attention computation altogether. HASHEVICT [20] introduces a pre-attention KV cache eviction strategy that leverages Locality-Sensitive Hashing (LSH) to estimate token similarity before performing full attention computation, thereby reducing both memory and computational overhead.",
+    "found_in_queries": [
+      "KV-cache reuse distillation",
+      "LLM serving cache management"
+    ]
+  },
+  "https://arxiv.org/html/2604.13226v1": {
+    "title": "KV Packet: Recomputation-Free Context-Independent KV Caching for LLMs",
+    "snippet": "In this paper, we propose KV Packet, a recomputation-free cache reuse framework that treats cached documents as immutable \u201cpackets\u201d wrapped in light-weight trainable soft-token adapters, which are trained via <strong>self-supervised distillation to bridge context discontinuities</strong>.",
+    "found_in_queries": [
+      "KV-cache reuse distillation"
+    ]
+  },
+  "https://arxiv.org/abs/2603.27819": {
+    "title": "[2603.27819] KVSculpt: KV Cache Compression as Distillation",
+    "snippet": "Approaches that reduce the per-pair footprint -- quantization and low-rank decomposition -- are orthogonal to those that reduce the sequence length of the cache. Along the sequence-length dimension, existing methods range from pure eviction -- selecting which KV pairs to keep -- to merging, which combines similar pairs into fewer ones. Both remain anchored to the original cache entries.",
+    "found_in_queries": [
+      "KV-cache reuse distillation"
+    ]
+  },
+  "https://arxiv.org/html/2606.07684": {
+    "title": "Semantic Cache Distillation: Efficient State Transfer via Reuse and Selective Patching",
+    "snippet": "The Consumer reconstructs states ... Cache Distillation (SCD), <strong>a bandwidth-efficient state-transfer framework that replaces raw KV transmission with compact semantic codes for shared-architecture, weight-mismatched producer-consumer pairs</strong>....",
+    "found_in_queries": [
+      "KV-cache reuse distillation"
+    ]
+  },
+  "https://arxiv.org/pdf/2606.07684": {
+    "title": "Semantic Cache Distillation: Efficient State Transfer via Reuse and Selective Patching",
+    "snippet": "<strong>We implement REUSE as a stack of independent linear translators</strong>. For each layer \u2113, we execute full prefill passes on both the source (MA) and target (MB) models over a calibration dataset. We collect the internal representations at layer \u2113that serve as inputs to the KV cache.",
+    "found_in_queries": [
+      "KV-cache reuse distillation"
+    ]
+  },
+  "https://arxiv.org/html/2603.13281v1": {
+    "title": "ICaRus: Identical Cache Reuse for Efficient Multi Model Inference",
+    "snippet": "In this work, we presented ICaRus, a KV cache-sharing architecture for multi model inference. ICaRus addresses the memory inefficiency of conventional system by enabling cross-model KV cache reuse, while maintaining accuracy through fine-tuning.",
+    "found_in_queries": [
+      "cross-model cache sharing inference",
+      "multi-model inference cache sharing"
+    ]
+  },
+  "https://conferences.sigcomm.org/sigcomm/2025/tutorials-hackathons/tutorial-nllm/": {
+    "title": "Networking for Stateful LLM Inference - ACM SIGCOMM 2025",
+    "snippet": "After lunch, Session B dives deeper into technical details such as KV cache sharing, disaggregated prefill [3], Mooncake storage backend integration [7], KV cache compression [1, 6], and multi-modality support. The afternoon concludes with sessions on autoscaling, vLLM integration, and an open Q&amp;A and wrap-up. Stateful LLM inference, where prior inputs are reused for future responses, is now ubiquitous in applications like agent workflows, multi-turn chat, and RAG. This creates a distributed, network-intensive workload, as shared context\u2014often encoded in large KV caches (e.g., multi-GBs) \u2014must be transferred across GPU nodes or fetched from remote storage.",
+    "found_in_queries": [
+      "cross-model cache sharing inference"
+    ]
+  },
+  "https://aclanthology.org/2025.naacl-short.34/": {
+    "title": "A Systematic Study of Cross-Layer KV Sharing for Efficient LLM Inference - ACL Anthology",
+    "snippet": "Recently, <strong>sharing key-value (KV) cache across layers has been found effective in efficient inference of large language models (LLMs).</strong> To systematically investigate different techniques of cross-layer KV sharing, we propose a unified framework ...",
+    "found_in_queries": [
+      "cross-model cache sharing inference"
+    ]
+  },
+  "https://developer.nvidia.com/blog/accelerate-large-scale-llm-inference-and-kv-cache-offload-with-cpu-gpu-memory-sharing/": {
+    "title": "Accelerate Large-Scale LLM Inference and KV Cache Offload with CPU-GPU Memory Sharing | NVIDIA Technical Blog",
+    "snippet": "The NVIDIA Grace Blackwell and NVIDIA Grace Hopper architectures use NVLink-C2C, a 900 GB/s memory-coherent interconnect, to create a unified memory address space shared by the CPU and GPU, allowing them to access and operate on the same data without explicit data transfers. Large Language Models (LLMs) like Llama 3 70B require significant memory, and loading them into GPU memory can result in out-of-memory (OOM) errors, but unified memory architecture enables the CPU and GPU to share memory, resolving this issue.",
+    "found_in_queries": [
+      "cross-model cache sharing inference"
+    ]
+  },
+  "https://arxiv.org/html/2605.22863v1": {
+    "title": "Latent Cache Flow: Model-to-Model Communication Without Text",
+    "snippet": "It concatenates the sharer and receiver caches, fuses them at full width, and outputs receiver-shaped residuals. This makes transfer expensive: each cache type needs its own full-width fuser. LCF instead transfers information through a low-dimensional latent bottleneck. This bottleneck is motivated by two observations: KV states can be compressed within a model (DeepSeek-AI, 2024), and cross-model representations can be approximately linearly aligned (Chen et al., 2025; Dery et al., 2026).",
+    "found_in_queries": [
+      "cross-model cache sharing inference"
+    ]
+  },
+  "https://docs.aws.amazon.com/sagemaker/latest/dg/multi-model-endpoints.html": {
+    "title": "Multi-model endpoints - Amazon SageMaker AI",
+    "snippet": "Create an endpoint that can host multiple Amazon SageMaker AI <strong>models</strong> to help reduce cost.",
+    "found_in_queries": [
+      "multi-model inference cache sharing"
+    ]
+  },
+  "https://machinelearningmastery.com/the-complete-guide-to-inference-caching-in-llms/": {
+    "title": "The Complete Guide to Inference Caching in LLMs - MachineLearningMastery.com",
+    "snippet": "KV caching: Caches the internal attention states \u2014 key-value pairs \u2014 computed during a single inference request, so the model does not recompute them at every decode step. This happens automatically inside the model and is always on. Prefix caching: Extends KV caching across multiple requests. When different requests share the same leading tokens, such as a system prompt, a reference document, or few-shot examples, the KV states for that shared prefix are stored and reused across all of them.",
+    "found_in_queries": [
+      "multi-model inference cache sharing"
+    ]
+  },
+  "https://theneuralmaze.substack.com/p/a-practical-guide-to-llm-inference": {
+    "title": "A Practical Guide to LLM Inference at Scale - The Neural Maze",
+    "snippet": "Link: https://github.com/ovg-p... for production deployments: Multi-LLM Serving: <strong>Multiple different models can concurrently share the same physical GPU memory pool elastically</strong>, replacing rigid memory partitioning and significantly ...",
+    "found_in_queries": [
+      "multi-model inference cache sharing"
+    ]
+  },
+  "https://luv-bansal.medium.com/the-evolution-of-kv-cache-from-simple-buffers-to-distributed-memory-systems-df51cb8ce26f": {
+    "title": "KV Cache Explained: The Complete Guide to KV Cache in LLM Inference | Medium",
+    "snippet": "Standard text LLM serving (chatbot, completion): Era 2 (PagedAttention) is your bread and butter. Pick vLLM or SGLang and you are in good shape. Enable prefix caching if you have shared system prompts. Multimodal models (VLMs): You are in Era 3 territory. Pay attention to how your framework handles vision embeddings.",
+    "found_in_queries": [
+      "multi-model inference cache sharing"
+    ]
+  },
+  "https://github.com/ratishjain12/kv-cache": {
+    "title": "GitHub - ratishjain12/kv-cache: A lightweight, Redis-compatible key-value cache server implemented in Go that supports basic Redis commands and the RESP (Redis Serialization Protocol). \u00b7 GitHub",
+    "snippet": "A lightweight, Redis-compatible key-value cache server implemented in Go that supports basic Redis commands and the <strong>RESP (Redis Serialization Protocol).</strong> - ratishjain12/kv-cache",
+    "found_in_queries": [
+      "KV-cache serialization format"
+    ]
+  },
+  "https://www.reddit.com/r/LocalLLaMA/comments/1q7bh5h/i_built_instant_persistent_memory_for_local_llms/": {
+    "title": "r/LocalLLaMA on Reddit: I built instant persistent memory for local LLMs (binary KV cache save/restore, sub-second restore, 67% VRAM savings)",
+    "snippet": "So I built binary KV cache persistence with instant restore. And yes, I am writing this post and Yes I rewrote it hundreds of times. I had to learn about what all this stuff was and I still have no clue, but I think I built something interesting, so here it goes: ... Uses llama.cpp&#x27;s llama_state_get_data and llama_state_set_data APIs to serialize the entire KV cache to disk.",
+    "found_in_queries": [
+      "KV-cache serialization format"
+    ]
+  },
+  "https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/": {
+    "title": "Quantized KV Cache - vLLM",
+    "snippet": "kv_cache_dtype=&quot;auto&quot;: Use the model&#x27;s default data type",
+    "found_in_queries": [
+      "KV-cache serialization format",
+      "KV cache quantization"
+    ]
+  },
+  "https://github.com/LMCache/LMCache": {
+    "title": "GitHub - LMCache/LMCache: LMCache: Supercharge Your LLM with the Fastest KV Cache Layer \u00b7 GitHub",
+    "snippet": "PD disaggregation and KV transfer: Support KV cache transfer from prefill workers to decode workers over NVLink, RDMA, or TCP through transport layers such as NIXL. Pluggable KV transformation: A simple interface for researchers to write compression, token dropping, and custom serialization through a flexible SERDE interface.",
+    "found_in_queries": [
+      "KV-cache serialization format"
+    ]
+  },
+  "https://prachub.com/coding-questions/implement-persistent-kv-store-serialization": {
+    "title": "Implement Persistent KV Store Serialization | OpenAI Coding Question",
+    "snippet": "Implement a persistent in-memory key-value store using a fake disk inside the function. The store supports `put`, `get`, `delete`, `serialize(path)`, and `deserialize(path)`. Each key and value is either a Python `bytes` object or a `str`. Your persistence format must be binary-safe: do not rely on delimiters that may appear inside the data.",
+    "found_in_queries": [
+      "KV-cache serialization format"
+    ]
+  },
+  "https://arxiv.org/html/2604.15039v1": {
+    "title": "Prefill-as-a-Service: KVCache of Next-Generation Models Could Go Cross-Datacenter",
+    "snippet": "We present Prefill-as-a-Service (PrfaaS), a cross-datacenter serving architecture that selectively offloads long-context prefill to standalone, compute-dense prefill clusters and transfers the resulting KVCache over commodity Ethernet to local PD clusters for decode. Rather than treating reduced KVCache as sufficient, PrfaaS combines model-side KV efficiency with system-side selective offloading, bandwidth-aware scheduling, and cache-aware request placement. This design removes the requirement that heterogeneous accelerators share the same low-latency RDMA fabric, enabling independent scaling of prefill and decode capacity across loosely coupled clusters.",
+    "found_in_queries": [
+      "KV cache prefill decode sharing"
+    ]
+  },
+  "https://arxiv.org/abs/2602.12029v1": {
+    "title": "[2602.12029v1] PrefillShare: A Shared Prefill Module for KV Reuse in Multi-LLM Disaggregated Serving",
+    "snippet": "<strong>PrefillShare factorizes the model into prefill and decode modules, freezes the prefill module, and fine-tunes only the decode module</strong>. This design allows multiple task-specific models to share a prefill module and the KV cache generated for the ...",
+    "found_in_queries": [
+      "KV cache prefill decode sharing"
+    ]
+  },
+  "https://www.reddit.com/r/LocalLLaMA/comments/1sp216x/prefillasaservice_kvcache_of_nextgeneration/": {
+    "title": "r/LocalLLaMA on Reddit: Prefill-as-a-Service: KVCache of Next-Generation Models Could Go Cross-Datacenter",
+    "snippet": "This is what they mean by &quot;prefill-decode (PD) disaggregation&quot; (although it&#x27;s not necessarily different GPU models, just <strong>separate pools, which is relevant when serving multiple users and therefore running both prefill and decode simultaneously</strong>).",
+    "found_in_queries": [
+      "KV cache prefill decode sharing"
+    ]
+  },
+  "https://arxiv.org/abs/2602.12029": {
+    "title": "[2602.12029] PrefillShare: A Shared Prefill Module for KV Reuse in Multi-LLM Disaggregated Serving",
+    "snippet": "<strong>PrefillShare factorizes the model into prefill and decode modules, freezes the prefill module, and fine-tunes only the decode module</strong>. This design allows multiple task-specific models to share a prefill module and the KV cache generated for the ...",
+    "found_in_queries": [
+      "KV cache prefill decode sharing"
+    ]
+  },
+  "https://arxiv.org/html/2602.12029v1": {
+    "title": "PrefillShare: A Shared Prefill Module for KV Reuse in Multi-LLM Disaggregated Serving",
+    "snippet": "To address this issue, we propose PrefillShare, a novel algorithm that enables sharing the prefill stage across multiple models in a disaggregated setting. <strong>PrefillShare factorizes the model into prefill and decode modules, freezes the prefill module, and fine-tunes only the decode module</strong>. This ...",
+    "found_in_queries": [
+      "KV cache prefill decode sharing"
+    ]
+  },
+  "https://docs.vllm.ai/en/stable/design/prefix_caching/": {
+    "title": "Automatic Prefix Caching - vLLM",
+    "snippet": "Prefix caching kv-cache blocks is <strong>a popular optimization in LLM inference to avoid redundant prompt computations</strong>. The core idea is simple \u2013 we cache the kv-cache blocks of processed requests, and reuse these blocks when a new request comes in with the same prefix as previous requests.",
+    "found_in_queries": [
+      "prefix caching LLM"
+    ]
+  },
+  "https://bentoml.com/llm/inference-optimization/prefix-caching": {
+    "title": "Prefix caching | LLM Inference Handbook",
+    "snippet": "Prefix caching (also known as prompt caching or context caching) is <strong>one of the most effective techniques to reduce latency and cost in LLM inference</strong>.",
+    "found_in_queries": [
+      "prefix caching LLM"
+    ]
+  },
+  "https://sankalp.bearblog.dev/how-prompt-caching-works/": {
+    "title": "How prompt caching works - Paged Attention and Automatic Prefix Caching plus practical tips \u2013 sankalp's blog",
+    "snippet": "<strong>By default, cached prefixes stay in GPU VRAM for 5-10 minutes of inactivity</strong>. The extended 24hr retention offloads KV tensors to GPU-local storage (SSDs attached to GPU nodes) when idle, loading them back into VRAM on cache hit.",
+    "found_in_queries": [
+      "prefix caching LLM",
+      "attention cache reuse"
+    ]
+  },
+  "https://openreview.net/pdf?id=Vj48eXaQDM": {
+    "title": "Learned Pre\ufb01x Caching for Ef\ufb01cient LLM Inference Dongsheng Yang Austin Li",
+    "snippet": "This paper presents the \ufb01rst learned pre\ufb01x cache LPC to improve LLM inference ef\ufb01ciency.",
+    "found_in_queries": [
+      "prefix caching LLM"
+    ]
+  },
+  "https://llm-d.ai/blog/kvcache-wins-you-can-see": {
+    "title": "KV-Cache Wins You Can See: From Prefix Caching in vLLM to Distributed Scheduling with llm-d | llm-d",
+    "snippet": "The power of vLLM&#x27;s caching isn&#x27;t theoretical; it directly maps to the structure of the most common and valuable LLM workloads. By understanding this pattern, we can see exactly what&#x27;s at stake when serving in production. In any multi-turn dialogue, from a customer service bot to a long-form assistant, the entire chat history and system prompt form a massive prefix.",
+    "found_in_queries": [
+      "prefix caching LLM"
+    ]
+  },
+  "https://github.com/NVIDIA/kvpress": {
+    "title": "GitHub - NVIDIA/kvpress: LLM KV cache compression made easy \u00b7 GitHub",
+    "snippet": "KVComposePress performs an extra pass over the full context, temporarily creating a KV cache of ~2x the context length and creating memory overhead during prefill. Finally we provide wrapper presses that can be combined with other presses: AdaKVPress (source, paper): prune bottom scores of any ScorerPress but across all heads, achieving head-wise compressions \u00b7 PerLayerCompressionPress (source): compress each layer with a different compression ratio (experimental)",
+    "found_in_queries": [
+      "KV cache compression layers"
+    ]
+  },
+  "https://research.nvidia.com/labs/eai/blogs/kv-cache-compression-and-its-infra-problems/": {
+    "title": "KV Cache Compression and Its Infra Problems",
+    "snippet": "The KV cache is what makes this affordable: each token&#x27;s K and V are computed once and saved, and every later step reuses them instead of recomputing \u2014 O(n) work per step instead of O(n\u00b2). But nothing ever shrinks it: <strong>every generated token appends new K and V rows across all layers and heads</strong>.",
+    "found_in_queries": [
+      "KV cache compression layers"
+    ]
+  },
+  "https://cs.stanford.edu/~keithw/sigcomm2024/sigcomm24-final1571-acmpaginated.pdf": {
+    "title": "CacheGen: KV Cache Compression and Streaming for Fast Large",
+    "snippet": "figurations without affecting compression efficiency? To encode the \u00b7 chunks offline, CacheGen first computes the KV cache of the en- tire context (i.e., prefill) and splits the K and V tensors of the KV \u00b7 cache along the token dimension into sub-tensors, each of which \u00b7 contains the layers and ...",
+    "found_in_queries": [
+      "KV cache compression layers"
+    ]
+  },
+  "https://martinalderson.com/posts/a-brief-history-of-kv-cache-compression-developments/": {
+    "title": "A brief history of KV cache compression developments - Martin Alderson",
+    "snippet": "Instead of sharing KV heads between query heads, MLA compresses the keys and values down into a much smaller latent vector, and folds the decompression step into the surrounding projection matrices so the full keys and values never have to be materialised at all. DeepSeek claimed a 93% reduction in KV cache size in their V2 paper - while improving on quality benchmarks, not just holding steady.",
+    "found_in_queries": [
+      "KV cache compression layers"
+    ]
+  },
+  "https://discuss.huggingface.co/t/kv-cache-compression/173295": {
+    "title": "KV Cache Compression - Research - Hugging Face Forums",
+    "snippet": "The core idea is <strong>converting attention layers to use Multi-Head Latent Attention (MLA),</strong> instead of caching full-dimensional keys and values, the model caches smaller latent representations and reconstructs K/V on the fly.",
+    "found_in_queries": [
+      "KV cache compression layers"
+    ]
+  },
+  "https://huggingface.co/papers/2311.04934": {
+    "title": "Paper page - Prompt Cache: Modular Attention Reuse for Low-Latency Inference",
+    "snippet": "Prompt Cache improves inference speed for large language models by <strong>reusing precomputed attention states of common text segments in user prompts</strong>.",
+    "found_in_queries": [
+      "attention cache reuse"
+    ]
+  },
+  "https://arxiv.org/abs/2311.04934": {
+    "title": "[2311.04934] Prompt Cache: Modular Attention Reuse for Low-Latency Inference",
+    "snippet": "Our key insight is that by precomputing and storing the attention states of these frequently occurring text segments on the inference server, we can efficiently reuse them when these segments appear in user prompts. Prompt Cache employs a schema to explicitly define such reusable text segments, called prompt modules.",
+    "found_in_queries": [
+      "attention cache reuse"
+    ]
+  },
+  "https://research.google/pubs/prompt-cache-modular-attention-reuse-for-low-latency-inference/": {
+    "title": "Prompt Cache: Modular Attention Reuse for Low Latency Inference",
+    "snippet": "Our key insight is that by precomputing and storing the attention states of these frequently occurring text segments on the inference server, we can efficiently reuse them when these segments appear in user prompts. Prompt Cache employs a schema to explicitly define such reusable text segments, called prompt modules.",
+    "found_in_queries": [
+      "attention cache reuse"
+    ]
+  },
+  "https://arxiv.org/pdf/2311.04934": {
+    "title": "PROMPT CACHE: MODULAR ATTENTION REUSE FOR LOW-LATENCY INFERENCE",
+    "snippet": "We present Prompt Cache, an approach for accelerating inference for large language models (LLM) by reusing \u00b7 attention states across different LLM prompts.",
+    "found_in_queries": [
+      "attention cache reuse"
+    ]
+  },
+  "https://medium.com/@plienhar/llm-inference-series-4-kv-caching-a-deeper-look-4ba9a77746c8": {
+    "title": "LLM Inference Series: 4. KV caching, a deeper look | by Pierre Lienhart | Medium",
+    "snippet": "LLM Inference Series: 4. KV caching, a deeper look In the previous post, we introduced KV caching, a common optimization of the inference process of LLMs that make compute requirements of the \u2026",
+    "found_in_queries": [
+      "model ensemble KV cache",
+      "multi-GPU KV cache distribution"
+    ]
+  },
+  "https://huggingface.co/blog/not-lain/kv-caching": {
+    "title": "KV Caching Explained: Optimizing Transformer Inference Efficiency",
+    "snippet": "KV caching <strong>solves compute overlap by remembering these calculations from previous steps</strong>, this can be achieved by storing the intermediate states of attention layers during inference.",
+    "found_in_queries": [
+      "model ensemble KV cache"
+    ]
+  },
+  "https://magazine.sebastianraschka.com/p/coding-the-kv-cache-in-llms": {
+    "title": "Understanding and Coding the KV Cache in LLMs from Scratch",
+    "snippet": "In short, a KV cache <strong>stores intermediate key (K) and value (V) computations for reuse during inference (after training),</strong> which results in a substantial speed-up when generating text.",
+    "found_in_queries": [
+      "model ensemble KV cache"
+    ]
+  },
+  "https://medium.com/@joaolages/kv-caching-explained-276520203249": {
+    "title": "Transformers KV Caching Explained | by Jo\u00e3o Lages | Medium",
+    "snippet": "KV caching <strong>occurs during multiple token generation steps and only happens in the decoder</strong> (i.e., in decoder-only models like GPT, or in the decoder part of encoder-decoder models like T5).",
+    "found_in_queries": [
+      "model ensemble KV cache"
+    ]
+  },
+  "https://developer.nvidia.com/blog/optimizing-inference-for-long-context-and-large-batch-sizes-with-nvfp4-kv-cache/": {
+    "title": "Optimizing Inference for Long Context and Large Batch Sizes with NVFP4 KV Cache | NVIDIA Technical Blog",
+    "snippet": "NVFP4 KV cache quantization reduces KV cache memory footprint by 50% compared to FP8, enables doubling of context length and batch size, and achieves &lt;1% accuracy loss on benchmarks such as LiveCodeBench, MMLU-PRO, MBPP, and Ruler 64K for code-generation and long-context tasks on NVIDIA Blackwell GPUs. The optimization leverages post-training quantization and quantization aware training with NVIDIA TensorRT Model Optimizer, allowing 4-bit storage of KV tensors (dequantized to FP8 before attention) and realizing significant HBM, memory bandwidth, and throughput gains, particularly in multi-agent and MoE deployments.",
+    "found_in_queries": [
+      "model ensemble KV cache",
+      "KV cache quantization"
+    ]
+  },
+  "https://boringbot.substack.com/p/kv-caching-and-speculative-decoding": {
+    "title": "KV Caching and Speculative Decoding - The Production Gap",
+    "snippet": "Two techniques are changing this. KV Cache stores previous computations in memory so the model doesn\u2019t repeat the same work. Speculative Decoding <strong>uses a small, fast model to generate multiple tokens at once, then verifies them with the full model</strong>.",
+    "found_in_queries": [
+      "speculative decoding KV cache"
+    ]
+  },
+  "https://kumarshivam-66534.medium.com/real-time-ai-inference-systems-speculative-decoding-kv-cache-streaming-architecture-f8812f7e25dd": {
+    "title": "Real-Time AI Inference Systems: Speculative Decoding, KV Cache & Streaming Architecture | by Kumar Shivam | May, 2026 | Medium",
+    "snippet": "Incoming Request: 131,072-token prompt (128K) \u2502 \u25bc Scheduler splits into 32 chunks \u00d7 4096 tokens \u2502 \u251c\u2500\u2500 Chunk 1 (tokens 0\u20134095) \u2190 compute attention, cache KV \u2502 \u2514\u2500\u2500 yield \u2192 run N decode steps \u251c\u2500\u2500 Chunk 2 (tokens 4096\u20138191) \u2190 attend to chunk 1 + 2 KV \u2502 \u2514\u2500\u2500 yield \u2192 run N decode steps \u251c\u2500\u2500 ... \u2514\u2500\u2500 Chunk 32 (tokens 126976\u2013131071) \u2190 full context now cached \u2514\u2500\u2500 yield \u2192 begin decode phase for this request \u00b7 Chunked prefill and speculative decoding interact non-trivially.",
+    "found_in_queries": [
+      "speculative decoding KV cache"
+    ]
+  },
+  "https://openreview.net/forum?id=7SHbJENgHX": {
+    "title": "QuantSpec: Self-Speculative Decoding with Hierarchical Quantized KV Cache | OpenReview",
+    "snippet": "To address these challenges, we propose a novel self-speculative decoding framework, QuantSpec, where the draft model shares the architecture of the target model but employs a <strong>hierarchical 4-bit quantized KV cache</strong> and 4-bit quantized weights for acceleration.",
+    "found_in_queries": [
+      "speculative decoding KV cache"
+    ]
+  },
+  "https://fergusfinn.com/blog/kv-entropy-coder/": {
+    "title": "Speculative KV coding: losslessly compressing KV cache by up to ~4\u00d7 using a predictor model",
+    "snippet": "In this post we introduce Speculative KV coding, <strong>a method for losslessly compressing the KV cache of a large target model by up to ~ ... 8\\times8\u00d7. using a cheaper predictor model \u2014 a faster model whose forward pass on the same prompt predicts what the target\u2019s cache will be. By analogy with speculative decoding (Leviathan et al., 2022), the predictor runs in parallel on both encode and decode sides; an arithmetic coder then encodes the true cache at a bitrate set by how well the predictor fits the target</strong>...",
+    "found_in_queries": [
+      "speculative decoding KV cache"
+    ]
+  },
+  "https://arxiv.org/pdf/2503.16163": {
+    "title": "SpeCache: Speculative Key-Value Caching for Efficient Generation of LLMs",
+    "snippet": "<strong>SPECACHE stores the full KV cache in CPU memory</strong>. Be- fore each attention computation begins, SPECACHE strives \u00b7 to ensure that the top-k most relevant KV pairs has been \u00b7 already prefetched into VRAM. To achieve this, at each \u00b7 step, SPECACHE decodes two tokens simultaneously \u2014 \u00b7 an \u201coutput ...",
+    "found_in_queries": [
+      "speculative decoding KV cache"
+    ]
+  },
+  "https://www.reddit.com/r/LocalLLaMA/comments/1mhlj69/whats_the_verdict_on_using_quantized_kv_cache/": {
+    "title": "r/LocalLLaMA on Reddit: What's the verdict on using quantized KV cache?",
+    "snippet": "On one hand, the original PR mentions that perplexity is more sensitive to model weight quants than to KV cache. Or in other words, quantizing kv cache is worth it if it frees memory for a slightly less quantized model (eg q4kL vs q4kM).",
+    "found_in_queries": [
+      "KV cache quantization"
+    ]
+  },
+  "https://arxiv.org/abs/2401.18079": {
+    "title": "[2401.18079] KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization",
+    "snippet": "Our work, KVQuant, facilitates low precision <strong>KV cache quantization</strong> by incorporating several novel methods: (i) Per-Channel Key Quantization, where we adjust the dimension along which we quantize the Key activations to better match the distribution; (ii) Pre-RoPE Key Quantization, where we quantize Key activations before the rotary positional embedding to mitigate its impact on quantization; (iii) Non-Uniform KV Cache Quantization, where we derive per-layer sensitivity-weighted non-uniform datatypes that better represent the distributions; and (iv) Per-Vector Dense-and-Sparse Quantization, where we isolate outliers separately for each vector to minimize skews in quantization ranges.",
+    "found_in_queries": [
+      "KV cache quantization"
+    ]
+  },
+  "https://sgl-project.github.io/advanced_features/quantized_kv_cache.html": {
+    "title": "Quantized KV Cache",
+    "snippet": "This page has moved to https://docs.sglang.io/advanced_features/quantized_kv_cache.html.",
+    "found_in_queries": [
+      "KV cache quantization"
+    ]
+  },
+  "https://pyimagesearch.com/2025/10/13/kv-cache-optimization-via-multi-head-latent-attention/": {
+    "title": "KV Cache Optimization via Multi-Head Latent Attention - PyImageSearch",
+    "snippet": "Rather than storing full-resolution K/V vectors for each head and each token, <strong>MLA compresses them into a shared latent space</strong>, leveraging the underlying linear redundancy of natural language and the overparameterization of transformer blocks ...",
+    "found_in_queries": [
+      "vision language model cache sharing"
+    ]
+  },
+  "https://developer.nvidia.com/blog/structuring-applications-to-secure-the-kv-cache/": {
+    "title": "Structuring Applications to Secure the KV Cache | NVIDIA Technical Blog",
+    "snippet": "Under the hood, this is implemented using key-value (KV) caching. As the model processes input tokens, it generates intermediate tensors\u2014keys and values\u2014that represent the model\u2019s state. When a new prompt shares a prefix with a previous one, the system can reuse those cached KV instead of recalculating them.",
+    "found_in_queries": [
+      "vision language model cache sharing"
+    ]
+  },
+  "https://openreview.net/pdf/ab187b19e4f174f9a6c3f7d82d52c8f6f1abfafb.pdf": {
+    "title": "VLA-Cache: Efficient Vision-Language-Action Manipulation ...",
+    "snippet": "While KV caching is effective for language decoding within a single query in vision-language models, this technique does not address redundancy in the visual stream, especially in Vision-Language-Action \u00b7 (VLA) models. In robotic manipulation, consecutive visual inputs often share large overlapping",
+    "found_in_queries": [
+      "vision language model cache sharing"
+    ]
+  },
+  "https://arxiv.org/html/2512.12977v1": {
+    "title": "VLCache: Computing 2% Vision Tokens and Reusing 98% for Vision\u2013Language Inference",
+    "snippet": "With a Vision Transformer (ViT) [dosovitskiy2020vit, Vaswani2017Attention] as the visual embedding backbone, and a Large Language Model (LLM) [qwen, qwen2, qwen3] as the main reasoning module, the VLM shows remarkable performance in complex tasks, such as visual reasoning, referring expression comprehension, and multimodal dialogue. To speed up the inference of language models, engineers leverage the Key-Value (KV) cache computed for a previous request in future requests to skip time-consuming computation.",
+    "found_in_queries": [
+      "vision language model cache sharing"
+    ]
+  },
+  "https://arxiv.org/abs/2410.23317": {
+    "title": "[2410.23317] VL-Cache: Sparsity and Modality-Aware KV Cache Compression for Vision-Language Model Inference Acceleration",
+    "snippet": "Vision-Language Models (VLMs) have demonstrated impressive performance across a versatile set of tasks. A key challenge in accelerating VLMs is storing and accessing the large Key-Value (KV) cache that encodes long visual contexts, such as images or videos. While existing KV cache compression methods are effective for Large Language Models (LLMs), directly migrating them to VLMs yields suboptimal accuracy and speedup.",
+    "found_in_queries": [
+      "vision language model cache sharing"
+    ]
+  },
+  "https://github.com/lmcache/lmcache": {
+    "title": "GitHub - LMCache/LMCache: LMCache: Supercharge Your LLM with the Fastest KV Cache Layer \u00b7 GitHub",
+    "snippet": "<strong>LMCache is a KV cache management layer for LLM inference</strong>. It turns KV cache from a temporary state into reusable AI-native knowledge that can be stored persistently, reused across multiple serving engines, monitored with an observability stack, ...",
+    "found_in_queries": [
+      "LLM serving cache management"
+    ]
+  },
+  "https://aws.amazon.com/blogs/database/optimize-llm-response-costs-and-latency-with-effective-caching/": {
+    "title": "Optimize LLM response costs and latency with effective caching | Amazon Web Services",
+    "snippet": "Large language model (<strong>LLM</strong>) inference can quickly become expensive and slow, especially when <strong>serving</strong> the same or similar requests repeatedly. As more applications incorporate Artificial Intelligence (AI), organizations often face mounting costs from redundant computations and frustrated users waiting for responses. Smart <strong>caching</strong> ...",
+    "found_in_queries": [
+      "LLM serving cache management"
+    ]
+  },
+  "https://github.com/llm-d/llm-d-kv-cache": {
+    "title": "GitHub - llm-d/llm-d-kv-cache: Distributed KV cache scheduling & offloading libraries \u00b7 GitHub",
+    "snippet": "As a distributed LLM inference platform, llm-d provides a comprehensive suite of KV-Cache management capabilities to achieve these goals. This repository contains the llm-d-kv-cache, a pluggable service designed to enable KV-Cache Aware Routing and lay the foundation for advanced, cross-node cache coordination in vLLM-based serving platforms.",
+    "found_in_queries": [
+      "LLM serving cache management"
+    ]
+  },
+  "https://latitude.so/blog/ultimate-guide-to-llm-caching-for-low-latency-ai": {
+    "title": "Ultimate Guide to LLM Caching for Low-Latency AI | Latitude",
+    "snippet": "<strong>Set appropriate cache expiration times</strong> : Define expiration policies to prevent stale data from slowing down your system while keeping the cache size manageable. Monitor and scale dynamically : Implement monitoring tools to track cache hit rates ...",
+    "found_in_queries": [
+      "LLM serving cache management"
+    ]
+  },
+  "https://developers.redhat.com/articles/2025/07/24/how-pagedattention-resolves-memory-waste-llm-systems": {
+    "title": "How PagedAttention resolves memory waste of LLM systems | Red Hat Developer",
+    "snippet": "PagedAttention in vLLM mainly solves external fragmentation Here <strong>the large kv cache is divided into block of pages(kv blocks)</strong> and here we avoid preallocation the contiguous memory as a result the chance of memory wastage becomes less.",
+    "found_in_queries": [
+      "PagedAttention KV cache"
+    ]
+  },
+  "https://medium.com/my-musings-with-llms/understanding-kv-cache-and-paged-attention-in-llms-a-deep-dive-into-efficient-inference-62fa372432ce": {
+    "title": "Understanding KV Cache and Paged Attention in LLMs: A Deep Dive into Efficient Inference | by Dewang Sultania | My musings with LLMs | Medium",
+    "snippet": "As Large Language Models (LLMs) continue to grow in size and complexity, efficient inference becomes increasingly crucial. Two key techniques that have emerged to optimize LLM inference are KV (Key-Value) caching and paged attention.",
+    "found_in_queries": [
+      "PagedAttention KV cache"
+    ]
+  },
+  "https://docs.vllm.ai/en/latest/design/paged_attention/": {
+    "title": "Paged Attention - vLLM",
+    "snippet": "Currently, vLLM utilizes its own implementation of a multi-head query attention kernel (csrc/attention/attention_kernels.cu). This kernel is designed to be compatible with vLLM&#x27;s paged KV caches, where the key and value cache are stored in separate blocks (note that this block concept differs from the GPU thread block.",
+    "found_in_queries": [
+      "PagedAttention KV cache"
+    ]
+  },
+  "https://huggingface.co/docs/text-generation-inference/conceptual/paged_attention": {
+    "title": "PagedAttention \u00b7 Hugging Face",
+    "snippet": "In the decoding part of generation, <strong>all the attention keys and values generated for previous tokens are stored in GPU memory for reuse</strong>. This is called KV cache, and it may take up a large amount of memory for large models and long sequences.",
+    "found_in_queries": [
+      "PagedAttention KV cache"
+    ]
+  },
+  "https://arxiv.org/abs/2309.06180": {
+    "title": "[2309.06180] Efficient Memory Management for Large Language Model Serving with PagedAttention",
+    "snippet": "To address this problem, we propose PagedAttention, an attention algorithm inspired by the classical virtual memory and paging techniques in operating systems. On top of it, we build vLLM, an LLM serving system that achieves (1) near-zero waste in KV cache memory and (2) flexible sharing of KV cache within and across requests to further reduce memory usage.",
+    "found_in_queries": [
+      "PagedAttention KV cache"
+    ]
+  },
+  "https://docs.vllm.ai/projects/production-stack/en/latest/use_cases/sharing-kv-cache.html": {
+    "title": "Sharing KV Cache Across Instances \u2014 production-stack - vLLM",
+    "snippet": "This tutorial demonstrates how to enable remote KV cache storage using LMCache in a vLLM deployment. Remote KV cache sharing <strong>moves large KV caches from GPU memory to a remote shared storage</strong>, enabling more KV cache hits and potentially making the deployment more fault tolerant.",
+    "found_in_queries": [
+      "vLLM cache sharing"
+    ]
+  },
+  "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/": {
+    "title": "Automatic Prefix Caching - vLLM",
+    "snippet": "Automatic Prefix Caching (APC in short) caches the KV cache of existing queries, so that a new query can directly reuse the KV cache if it shares the same prefix with one of the existing queries, allowing the new query to skip the computation of the shared part. ... Technical details on how vLLM implements APC can be found here.",
+    "found_in_queries": [
+      "vLLM cache sharing"
+    ]
+  },
+  "https://www.spheron.network/blog/deploy-lmcache-vllm-kv-cache-sharing-gpu-cloud/": {
+    "title": "Deploy LMCache on GPU Cloud: Share KV Cache Across vLLM Nodes for 15x Higher Throughput (2026 Guide) | Spheron Blog",
+    "snippet": "Cold cache, 100-500 microsecond access, 2-4 TB capacity. At 6-12 GB/s sequential throughput on fast NVMe, this tier can feed a 70B model&#x27;s prefill miss rate at reasonable concurrency. Tier 3: Remote shared store (Redis or Infinispan). Shared across all nodes. On 25 GbE, you get roughly 3 GB/s effective bandwidth. On RDMA/RoCEv2, up to 20 GB/s. For RDMA networking options, see the GPU Networking: InfiniBand, RoCE, and Spectrum-X guide. vLLM Worker A vLLM Worker B [GPU HBM] [GPU HBM] | | [CPU DRAM] [CPU DRAM] | | [Local NVMe] [Local NVMe] | | +------- Redis --------+ (shared tier)",
+    "found_in_queries": [
+      "vLLM cache sharing"
+    ]
+  },
+  "https://docs.vllm.ai/en/v0.10.1.1/examples/others/lmcache.html": {
+    "title": "LMCache - vLLM",
+    "snippet": "We will launch 2 vllm instances (GPU 0 for prefill and GPU 1 for decode), and launch an additional LMCache server. KV cache is transferred in the following manner: <strong>vLLM prefill node -&gt; LMCache server -&gt; vLLM decode node</strong>. Note that `pip install lmcache` is needed to run this example.",
+    "found_in_queries": [
+      "vLLM cache sharing"
+    ]
+  },
+  "https://docs.vllm.ai/en/latest/examples/disaggregated/lmcache/": {
+    "title": "LMCache Examples - vLLM",
+    "snippet": "<strong>One or more vLLM instances connect to it via # the `LMCacheMPConnector`</strong>. This is the recommended way to run LMCache for # distributed KV storage and for sharing KV cache across vLLM instances.",
+    "found_in_queries": [
+      "vLLM cache sharing"
+    ]
+  },
+  "https://deepseek.ai/blog/deepseek-v4-compressed-attention": {
+    "title": "DeepSeek V4 Compressed Attention: KV-Cache 2% Explained",
+    "snippet": "DeepSeek V4 cuts KV-cache memory to <strong>~2%</strong>. A deep dive into CSA, HCA, low-rank queries and the hybrid layer stack powering 1M-token context.",
+    "found_in_queries": [
+      "DeepSeek KV cache reduction"
+    ]
+  },
+  "https://knightli.com/en/2026/05/18/deepseek-v4-kv-cache-compressed-attention/": {
+    "title": "DeepSeek-V4 KV Cache Explained: Why 1M Context Uses Less VRAM",
+    "snippet": "A comparison of DeepSeek-V4&#x27;s CSA/HCA hybrid compressed attention with traditional MHA, GQA, and MLA, explaining why <strong>DeepSeek-V4 can greatly reduce KV Cache memory for 1M-token context</strong>.",
+    "found_in_queries": [
+      "DeepSeek KV cache reduction"
+    ]
+  },
+  "https://blog.lmcache.ai/en/2026/05/04/deepseek-v4-explained-and-why-it-matters-to-your-wallet/": {
+    "title": "Deepseek V4 explained, and why it matters to your wallet | LMCache Blog",
+    "snippet": "To summarize \u2014 the key of reducing token pricing, is to just make KV cache smaller. To reduce token pricing, DeepSeek <strong>use two set of special attention modules to reduce KV cache</strong>.",
+    "found_in_queries": [
+      "DeepSeek KV cache reduction"
+    ]
+  },
+  "https://www.mindstudio.ai/blog/deepseek-v4-vision-model-kv-cache-efficiency-maze-navigation-benchmark": {
+    "title": "DeepSeek V4 Vision Model: 10x KV-Cache Efficiency and 67% Maze Navigation vs GPT-5.4's 50% | MindStudio",
+    "snippet": "DeepSeek&#x27;s vision variant uses <strong>~90 KV-cache entries per image</strong> vs Claude Sonnet 4.6&#x27;s ~870 \u2014 and beats GPT-5.4 on maze navigation 67% to 50%.",
+    "found_in_queries": [
+      "DeepSeek KV cache reduction"
+    ]
+  },
+  "https://api-docs.deepseek.com/guides/kv_cache": {
+    "title": "Context Caching | DeepSeek API Docs",
+    "snippet": "<strong>Persistence at fixed token intervals</strong>: For long inputs or long outputs, the system will carve out cache prefix units at fixed token intervals, to avoid long prefixes from being completely uncacheable due to never reaching an end position.",
+    "found_in_queries": [
+      "DeepSeek KV cache reduction"
+    ]
+  },
+  "https://bhargavaparv.medium.com/cache-augmented-generation-for-chatbots-step-by-step-guide-db737a925817": {
+    "title": "Cache Augmented Generation for Chatbots: Step-by-Step Guide | by Parv Bhargava | Medium",
+    "snippet": "<strong>By storing results of previous queries, a chatbot can reuse them for identical or similar prompts</strong>, reducing the need for repetitive API calls. This guide will walk you through implementing CAG for a chatbot that uses OpenAI\u2019s API.",
+    "found_in_queries": [
+      "ChatGPT cache reuse"
+    ]
+  },
+  "https://openai.com/index/api-prompt-caching/": {
+    "title": "Prompt Caching in the API | OpenAI",
+    "snippet": "The API caches the longest prefix ... increments. <strong>If you reuse prompts with common prefixes, we will automatically apply the Prompt Caching discount without requiring you to make any changes to your API integration</strong>....",
+    "found_in_queries": [
+      "ChatGPT cache reuse"
+    ]
+  },
+  "https://gptcache.readthedocs.io/en/latest/bootcamp/openai/chat.html": {
+    "title": "Chat - GPTCache - Read the Docs",
+    "snippet": "Initalize the cache to run GPTCache and import openai form gptcache.adapter, which will automatically set the map data manager to match the exact cahe, more details refer to build your cache. And if you ask ChatGPT the exact same two questions, the answer to the second question will be obtained from the cache without requesting ChatGPT again.",
+    "found_in_queries": [
+      "ChatGPT cache reuse"
+    ]
+  },
+  "https://www.reddit.com/r/ChatGPT/comments/1j33gps/cachecraft_chunklevel_kv_cache_reuse_for_faster/": {
+    "title": "r/ChatGPT on Reddit: Cache-Craft: Chunk-Level KV Cache Reuse for Faster and Efficient Retrieval-Augmented Generation (SIGMOD 2025)",
+    "snippet": "\ud83d\udd39 Key Contributions: \u2705 <strong>Chunked KV Reuse \u2013 Efficient caching and reuse of KV states at a RAG chunk level, surpassing traditional full-prefix caching methods</strong>. \u2705 Selective Recompute Planning \u2013 Dynamic determination of KV states to reuse ...",
+    "found_in_queries": [
+      "ChatGPT cache reuse"
+    ]
+  },
+  "https://blog.apexapplab.dev/better-chatgpt-use-with-a-local-database-cache": {
+    "title": "Better ChatGPT use with a local database cache",
+    "snippet": "This procedure makes the REST API call to ChatGPT using apex_web_service.make_rest_request procedure and is used in my example below. To accomplish the local database caching and prompts reuse, I have set up the following database objects on top of a ChatGPT REST API packaged procedure - chatgpt_util.ask_chatgpt.",
+    "found_in_queries": [
+      "ChatGPT cache reuse"
+    ]
+  },
+  "https://github.com/ggml-org/llama.cpp/discussions/20574": {
+    "title": "[Tutorial] Mastering Host-Memory Prompt Caching in llama-server \u00b7 ggml-org/llama.cpp \u00b7 Discussion #20574",
+    "snippet": "<strong>Host-memory prompt caching is a performance optimization feature in llama-server that stores pre-computed prompt representations in system RAM (host memory) instead of GPU VRAM</strong>.",
+    "found_in_queries": [
+      "LLama cache optimization"
+    ]
+  },
+  "https://medium.com/rigel-computer-com/optimize-your-gpu-kv-cache-for-llama-cpp-opencode-co-13b6bc74f5ec": {
+    "title": "Optimize Your GPU KV-Cache for Llama.cpp, OpenCode & Co.",
+    "snippet": "On a model like Qwen3\u201314B with a 128K context window, the KV cache can consume several gigabytes of VRAM at full utilization, cutting deeply into available headroom. By default, llama.cpp stores the KV cache in float16 (FP16) or bfloat16 (BF16) \u2014 full 16-bit precision for every stored vector.",
+    "found_in_queries": [
+      "LLama cache optimization"
+    ]
+  },
+  "https://knightli.com/en/2026/04/23/llama-cpp-8g-vram-32k-64k-kv-cache-tuning/": {
+    "title": "How to Tune llama.cpp on 8GB VRAM: Why 32K Is Safer and 64K Needs KV Cache Quantization",
+    "snippet": "Without changing the model itself, <strong>quantizing only the cache can directly reduce cache memory usage under long context</strong>. That means some of the data that previously spilled out of VRAM can move back into VRAM. As a result, 64K is still heavier than 32K, but it is less likely to fall into the ...",
+    "found_in_queries": [
+      "LLama cache optimization"
+    ]
+  },
+  "https://carteakey.dev/blog/local-inference/local-llm-optimization/": {
+    "title": "Local LLM Inference Optimization: The Complete Guide",
+    "snippet": "<strong>Auto-probes free VRAM at startup, computes optimal -ngl + -ot placement automatically</strong>. Zero manual tuning. llama-server \\ -m model.gguf \\ --fit on \\ --fit-ctx 65536 \\ # minimum context to guarantee fits; KV cache for this ctx is accounted for ...",
+    "found_in_queries": [
+      "LLama cache optimization"
+    ]
+  },
+  "https://explore.n1n.ai/blog/gemma-4-local-inference-llama-cpp-kv-cache-fix-npu-benchmarks-2026-04-05": {
+    "title": "Optimizing Gemma 4 Local Inference: llama.cpp KV Cache Fix and NPU Performance Benchmarks | Enterprise Unified LLM API Gateway (One Key for All Models) | n1n.ai",
+    "snippet": "By aligning the memory layout of the KV cache with Gemma&#x27;s specific architecture, the overhead was minimized. Developers can now utilize the --flash-attn flag in llama.cpp to further enhance performance, ensuring that Latency &lt; 50ms for initial token generation in most optimized environments.",
+    "found_in_queries": [
+      "LLama cache optimization"
+    ]
+  },
+  "https://www.spheron.network/blog/kv-cache-optimization-guide/": {
+    "title": "KV Cache Optimization: Serve 10x More Users on the Same GPU (2026) | Spheron Blog",
+    "snippet": "Actual results depend on model, hardware, batch composition, and request length distribution. Run your own benchmarks on your target hardware before making infrastructure decisions. Enable PagedAttention (default in vLLM, on by default) Set --gpu-memory-utilization 0.90 (raise to 0.92-0.95 if model fits tightly) Use FP8 KV cache on H100/A100: --kv-cache-dtype fp8",
+    "found_in_queries": [
+      "multi-GPU KV cache distribution"
+    ]
+  },
+  "https://arxiv.org/html/2501.06709v1": {
+    "title": "Mell: Memory-Efficient Large Language Model Serving via Multi-GPU KV Cache Management",
+    "snippet": "... We design an adaptive request ... for the dynamic environment. ... <strong>We develop an online KV cache scheduling algorithm in a multi-request multi-GPU environment to minimize the number of GPUs needed and limit the number of migrations</strong>....",
+    "found_in_queries": [
+      "multi-GPU KV cache distribution"
+    ]
+  },
+  "https://www.gmicloud.ai/en/blog/kv-cache-management-pagedattention": {
+    "title": "KV-Cache Management: Cutting Memory Waste",
+    "snippet": "NVIDIA&#x27;s TensorRT-LLM includes KV-cache optimizations: - Optimized attention kernels that reduce intermediate memory usage - Integration with NVIDIA&#x27;s memory pooling libraries - Support for multi-GPU KV-cache distribution",
+    "found_in_queries": [
+      "multi-GPU KV cache distribution"
+    ]
+  },
+  "https://www.ai21.com/glossary/foundational-llm/what-is-a-kv-cache/": {
+    "title": "What is a KV Cache? | AI21",
+    "snippet": "In multi-GPU deployments using tensor parallelism, the KV cache is distributed <strong>across GPUs</strong>, which is one reason pooling more GPUs per instance can unlock significantly more concurrent request capacity.",
+    "found_in_queries": [
+      "multi-GPU KV cache distribution"
+    ]
+  },
+  "https://bentoml.com/llm/inference-optimization/kv-cache-offloading": {
+    "title": "KV cache offloading | LLM Inference Handbook",
+    "snippet": "To solve these problems, KV cache offloading <strong>moves inactive or less frequently accessed cache data from GPU memory to lower-cost, higher-capacity storage such as CPU RAM, local SSDs, or remote object storage</strong>.",
+    "found_in_queries": [
+      "KV cache offloading CPU GPU"
+    ]
+  },
+  "https://docs.lmcache.ai/getting_started/quickstart/offload_kv_cache.html": {
+    "title": "Example: Offload KV cache to CPU | LMCache",
+    "snippet": "This section demonstrates the performance benefits of using CPU offloading with LMCache. We\u2019ll use a script that generates multiple prompts and compare the performance with and without LMCache. A CUDA GPU. The example picks a model that fits the GPU automatically: Qwen/Qwen3-8B (bf16) when the GPU has ~36 GiB or more (e.g. A100-80G, H100). Qwen/Qwen3-8B-FP8 with kv_cache_dtype=&quot;fp8&quot; when the GPU has ~24 GiB and supports native FP8 (Ada Lovelace / Hopper, sm_89+; e.g.",
+    "found_in_queries": [
+      "KV cache offloading CPU GPU"
+    ]
+  },
+  "https://docs.vllm.ai/projects/production-stack/en/vllm-stack-0.1.2/tutorials/kv_cache.html": {
+    "title": "KV Cache Offloading \u2014 production-stack - vLLM Documentation",
+    "snippet": "This tutorial demonstrates how to enable KV cache offloading using LMCache in a vLLM deployment. KV cache offloading <strong>moves large KV caches from GPU memory to CPU or disk</strong>, enabling more potential KV cache hits.",
+    "found_in_queries": [
+      "KV cache offloading CPU GPU"
+    ]
+  },
+  "https://community.netapp.com/t5/Tech-ONTAP-Blogs/KV-Cache-Offloading-When-is-it-Beneficial/ba-p/462900": {
+    "title": "KV Cache Offloading - When is it Beneficial? - NetApp Community",
+    "snippet": "In this scenario, enabling KV cache offloading will not be beneficial. Virtually all inference server deployments have enough space in GPU memory to hold the KV cache entries for at least one full generation sequence, so the entries will remain in GPU memory during processing of a single prompt.",
+    "found_in_queries": [
+      "KV cache offloading CPU GPU"
+    ]
+  },
+  "https://developer.nvidia.com/blog/how-to-reduce-kv-cache-bottlenecks-with-nvidia-dynamo/": {
+    "title": "How to Reduce KV Cache Bottlenecks with NVIDIA Dynamo | NVIDIA Technical Blog",
+    "snippet": "NVIDIA Dynamo enables KV Cache offloading to scalable storage options like CPU RAM, SSDs, and networked storage, <strong>reducing GPU memory usage and improving concurrency</strong>.",
+    "found_in_queries": [
+      "KV cache offloading CPU GPU"
+    ]
+  }
+}

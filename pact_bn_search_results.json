@@ -1,0 +1,412 @@
+{
+  "PACT quantization batch normalization folding ArXiv ICML": {
+    "_cache_hit": false,
+    "_cache_key": "search_584c08f28b78c815a3e62c824c2e8efe2ba468c75dc3f137f8f8725a938c140c",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_584c08f28b78c815a3e62c824c2e8efe2ba468c75dc3f137f8f8725a938c140c.json",
+    "_cached_at": 1783360086,
+    "count": 10,
+    "fetched_at": 1783360086,
+    "provider": "brave",
+    "query": "PACT quantization batch normalization folding ArXiv ICML",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "Recently, this challenge has been partially addressed by applying a half-wave Gaussian quantization \u00b7 scheme to activations (Cai et al. (2017)). Based on the observation that activation after BatchNorm \u00b7 normalization is close to a Gaussian distribution with zero mean and unit variance, they used Lloyd\u2019s",
+        "source": "brave",
+        "title": "PACT: PARAMETERIZED CLIPPING ACTIVATION FOR QUANTIZED NEURAL NETWORKS",
+        "url": "https://arxiv.org/pdf/1805.06085"
+      },
+      {
+        "display_url": null,
+        "snippet": "modern networks require training to maintain accuracy when quantized for int8. Jacob et al. [20] described models \u00b7 optimized for inference where all inference operations were performed with integer data types. Here batch normalization \u00b7 layers were folded into the preceding convolution layer ...",
+        "source": "brave",
+        "title": "INTEGER QUANTIZATION FOR DEEP LEARNING INFERENCE:",
+        "url": "https://arxiv.org/pdf/2004.09602"
+      },
+      {
+        "display_url": null,
+        "snippet": "Batch-Normalization is often very important for quantization strategy, it normalizes \u00b7 activations, constraining \u201csoftly\u201d in an interval that maps well to the clipping (\u03b2) that is imposed \u00b7 through quantization. In general, three different strategies can be applied: i) fold the network BN",
+        "source": "brave",
+        "title": "arXiv:2004.05930v1 [cs.LG] 13 Apr 2020 TECHNICAL REPORT:",
+        "url": "https://arxiv.org/pdf/2004.05930"
+      },
+      {
+        "display_url": null,
+        "snippet": "arXiv is a free distribution service and an open-access archive for nearly 2.4 million scholarly articles in the fields of physics, mathematics, computer science, quantitative biology, quantitative finance, statistics, electrical engineering and systems science, and economics.",
+        "source": "brave",
+        "title": "Arxiv",
+        "url": "https://arxiv.org/pdf/1806.08342"
+      },
+      {
+        "display_url": null,
+        "snippet": "Quantised neural networks (QNNs) shrink models and reduce inference energy through low-bit arithmetic, yet most still depend on a running statistics batch normalisation (BN) layer, preventing true integer-only deployment. Prior attempts remove BN by parameter folding or tailored initialisation; while helpful, they rarely recover BN\u2019s stability and accuracy and often impose bespoke constraints.",
+        "source": "brave",
+        "title": "Batch Normalization\u2013Free Fully Integer Quantized Neural Networks via Progressive Tandem Learning",
+        "url": "https://arxiv.org/html/2512.16476"
+      },
+      {
+        "display_url": null,
+        "snippet": "Fighting quantization bias with bias. ECV ... Jonathan Frankle and Michael Carbin. The lottery ticket hypothesis: Finding sparse, trainable neural ... Kaiming He, Xiangyu Zhang, et al. Deep residual learning for image recognition. In CVPR, 2016. Kaiming He, Georgia Gkioxari, et al. Mask r-cnn. In ICCV, 2017. Sergey Ioffe and Christian Szegedy. Batch normalization: Accelerating deep network training by",
+        "source": "brave",
+        "title": "a Necessary and Sufficient Condition on Batch- ...",
+        "url": "https://arxiv.org/pdf/2203.14646"
+      },
+      {
+        "display_url": null,
+        "snippet": "&quot;PACT: Parameterized Clipping Activation for Quantized Neural Networks&quot;, arXiv, 2018.",
+        "source": "brave",
+        "title": "GitHub - Zhen-Dong/Awesome-Quantization-Papers: List of papers related to neural network quantization in recent AI conferences and journals. \u00b7 GitHub",
+        "url": "https://github.com/Zhen-Dong/Awesome-Quantization-Papers"
+      },
+      {
+        "display_url": null,
+        "snippet": "DNN [Renda et al., 2020]. Quantization consists in mapping \u00b7 the weight values from continuous values to evenly-spread \u00b7 integer values using lower bit-wise representations (e.g. int8 \u00b7 or int4) [Krishnamoorthi, 2018]. Both approaches are often \u00b7 combined or even intrinsically leverage BN folding. Batch-normalization ...",
+        "source": "brave",
+        "title": "a Necessary and Sufficient Condition on Batch- ...",
+        "url": "https://www.ijcai.org/proceedings/2022/0223.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "Unlike AWQ (Lin et al., 2023), which protects salient channels by scaling activations down and weights up, or SmoothQuant (Xiao et al., 2023), which applies symmetric smoothing to both activations and weights, Scale Folding performs asymmetric migration of outliers into weights with explicit inverse compensation of preceding normalization layers. This produces significantly smoother activation distributions, enabling stable and practical 3-bit quantization without requiring custom kernels.",
+        "source": "brave",
+        "title": "1 Introduction",
+        "url": "https://arxiv.org/html/2603.17891"
+      },
+      {
+        "display_url": null,
+        "snippet": "much closer performance to full precision networks. Whereas, after the previous ef\ufb01cient quantized \u00b7 Preprint. Under review. ... neural network (QNN) training, there still has \ufb02oating point operators in model inference particularly \u00b7 due to the \ufb02oat-type numbers in Batch Normalization (BN).",
+        "source": "brave",
+        "title": "Optimal Quantization for Batch Normalization in Neural ...",
+        "url": "https://arxiv.org/pdf/2008.13128"
+      }
+    ]
+  },
+  "learned clipping activation quantization batch norm": {
+    "_cache_hit": false,
+    "_cache_key": "search_f55ee2cd15cf838e5b2422f5b78a815a5a33dc0ae0407f5fbcb59ef630832807",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_f55ee2cd15cf838e5b2422f5b78a815a5a33dc0ae0407f5fbcb59ef630832807.json",
+    "_cached_at": 1783360086,
+    "count": 10,
+    "fetched_at": 1783360086,
+    "provider": "brave",
+    "query": "learned clipping activation quantization batch norm",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "Norm) layer is replaced with BatchNorm layer. We used ADAM with epsilon 10\u22125 and learning \u00b7 rate starting from 10\u22124 and scaled by 0.2 at epoch 56 and 64. L2-regularizer with decay factor of \u00b7 5 \u00d7 10\u22126 is applied to weight. The mini-batch size of 128 is used, and the maximum number of ... and a \ufb01nal FC layer. &quot;full pre-activation&quot; ResNet structure (He et al.",
+        "source": "brave",
+        "title": "PACT: PARAMETERIZED CLIPPING ACTIVATION FOR QUANTIZED NEURAL NETWORKS",
+        "url": "https://arxiv.org/pdf/1805.06085"
+      },
+      {
+        "display_url": null,
+        "snippet": "Thirdly, we propose to clamp both the activations \u00b7 and the weights in order to reduce the quantization bin size (and, thus, the quantization error) at the expense \u00b7 of some sacri\ufb01ce of the dynamic range. The clamping values are initialized using the statistics of each layer. In order to truly optimize the tradeoff between the reduction of the quantization error vs that of the dynamic \u00b7 range, we learn optimal clamping values by de\ufb01ning a loss on the quantization error.",
+        "source": "brave",
+        "title": "Under review as a conference paper at ICLR 2019",
+        "url": "https://arxiv.org/pdf/1810.00162"
+      },
+      {
+        "display_url": null,
+        "snippet": "Obviously, no one wants batch-normalization layers in it\u2019s quantized model. We answer this problem with our internal tool named DeepNetQAT. This tool allowed us to fused batch normalization parameters within the scaling, clipping and biases parameters of our quantized models under the SAT method.",
+        "source": "brave",
+        "title": "Quantization-Aware Training \u2014 N2D2 documentation",
+        "url": "https://cea-list.github.io/N2D2-docs/quant/qat.html"
+      },
+      {
+        "display_url": null,
+        "snippet": "We speculate that this is due to the activation \u00b7 tensors being much larger so that much of the execution time \u00b7 goes into data movement from memory, which amortizes ... Comparing static quantization using OCTAV vs. ... MSE sweep. As both methods are supposed to return similar \u00b7 solutions, we investigated the reason of this discrepancy. In Figure 5(a) we plot the calibrated clipping scalar for acti-",
+        "source": "brave",
+        "title": "Optimal Clipping and Magnitude-aware Differentiation for ...",
+        "url": "https://arxiv.org/pdf/2206.06501"
+      },
+      {
+        "display_url": null,
+        "snippet": "it is suf\ufb01cient to store the optimal clipping values for N(0, 1) and Laplace(0, 1) and scale these \u00b7 values by \u03c3 and b, which are estimated from the tensor values. We ran experiments to see how many activation layers can be quantized from 8 to 4 bits of precision \u00b7 without a signi\ufb01cant accuracy drop. These experiments have been made with ResNet-18, ResNet-50, ResNet-101, VGG-16, VGG-16 with batch normalization and Inception-v3 on the ImageNet dataset.",
+        "source": "brave",
+        "title": "ACIQ: ANALYTICAL CLIPPING FOR INTEGER QUAN- TIZATION OF NEURAL NETWORKS",
+        "url": "https://openreview.net/pdf?id=B1x33sC9KQ"
+      },
+      {
+        "display_url": null,
+        "snippet": "We speculate that this is due to the activation \u00b7 tensors being much larger so that much of the execution time \u00b7 goes into data movement from memory, which amortizes ... Comparing static quantization using OCTAV vs. ... MSE sweep. As both methods are supposed to return similar \u00b7 solutions, we investigated the reason of this discrepancy. In Figure 5(a) we plot the calibrated clipping scalar for acti-",
+        "source": "brave",
+        "title": "Optimal Clipping and Magnitude-aware Differentiation for ...",
+        "url": "https://proceedings.mlr.press/v162/sakr22a/sakr22a.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>Accurate activation clipping (AAC) improves the model accuracy by exploiting accurate activation information from the full-precision model</strong>. Adaptive batch normalization firstly proposes to address the quantization error from distribution changes ...",
+        "source": "brave",
+        "title": "[2204.04215] Data-Free Quantization with Accurate Activation Clipping and Adaptive Batch Normalization",
+        "url": "https://arxiv.org/abs/2204.04215"
+      },
+      {
+        "display_url": null,
+        "snippet": "Its purpose is to accumulate the small changes from the gradients without loss of precision (Note that the quantization of the weights is an integral part of the training graph, meaning that we back-propagate through it as well). Once the model is trained, only the quantized weights are used for inference. In the diagram we show &quot;layer N&quot; as the conv + batch-norm + activation combination, but the same applies to fully-connected layers, element-wise operations, etc.",
+        "source": "brave",
+        "title": "Quantization - Neural Network Distiller",
+        "url": "https://intellabs.github.io/distiller/quantization.html"
+      },
+      {
+        "display_url": null,
+        "snippet": "The proposed data-free quantization method <strong>uses accurate activation clipping and adaptive batch normalization to achieve high performance with low-bit-width models without requiring original training data</strong>.",
+        "source": "brave",
+        "title": "Paper page - Data-Free Quantization with Accurate Activation Clipping and Adaptive Batch Normalization",
+        "url": "https://huggingface.co/papers/2204.04215"
+      },
+      {
+        "display_url": null,
+        "snippet": "clipping due to its use of moments to smooth the gradients. To use Adam safely, we derive rough bounds on the learning \u00b7 rate and momentum parameters to ensure the oscillations \u00b7 seen in Figure 8 for log gradient with Adam do not exceed \u00b7 a single integer bin. This is important because if they move \u00b7 across bins often, the network may have more trouble adapt- ing to the changing distributions from a given quantized",
+        "source": "brave",
+        "title": "Trained Quantization Thresholds for Accurate and Efficient ...",
+        "url": "https://proceedings.mlsys.org/paper_files/paper/2020/file/1eb34d662b67a14e3511d0dfd78669be-Paper.pdf"
+      }
+    ]
+  },
+  "quantization BN folding post-training": {
+    "_cache_hit": false,
+    "_cache_key": "search_0520e018a94421f9619c4528f251c629b9b5ad2394612510a237111c0a5d574b",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_0520e018a94421f9619c4528f251c629b9b5ad2394612510a237111c0a5d574b.json",
+    "_cached_at": 1783360087,
+    "count": 10,
+    "fetched_at": 1783360087,
+    "provider": "brave",
+    "query": "quantization BN folding post-training",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "proach demonstrates the most promising results among the three methods, where BN \u00b7 parameters are frozen and folded after sufficient training. Keywords 5G, neural network, quantization-aware training, channel estimation,",
+        "source": "brave",
+        "title": "Effect of Batch Normalization on Quantization-Aware ...",
+        "url": "https://aaltodoc.aalto.fi/bitstreams/83f3cd73-0fa8-4933-9e11-493f557c2940/download"
+      },
+      {
+        "display_url": null,
+        "snippet": "We are planning to add BN-fold function to quantization-aware training quantizers, especially for QAT_Quantizer and LsqQuantizer. <strong>The core idea of bn-fold function is to simulate this folding process in the training graph</strong>.",
+        "source": "brave",
+        "title": "Add bn fold to quantization-aware training quantizers \u00b7 microsoft/nni \u00b7 Discussion #3890",
+        "url": "https://github.com/microsoft/nni/discussions/3890"
+      },
+      {
+        "display_url": null,
+        "snippet": "based quantize technique by reducing parameter dependency \u00b7 [48]. Since the parameters of the BN operation are not modi\ufb01ed \u00b7 in the inference phase, they may be combined with the trained \u00b7 weights and biases. This is called BN folding or BN merging. Equation 3 show an example of BN folding.",
+        "source": "brave",
+        "title": "Pruning and Quantization for Deep Neural Network Acceleration: A Survey",
+        "url": "https://arxiv.org/pdf/2101.09671"
+      },
+      {
+        "display_url": null,
+        "snippet": "Previously comparedarticleAs a ... of BN, <strong>the post-training quantization is more pronounced</strong>, and the quantitative perceived training can still bring a large accuracy. But in the case of low bit, the optimization of the network will become very difficult due to the serious information loss.",
+        "source": "brave",
+        "title": "Neural network quantization entry - FOLDING BN RELU code implementation - Programmer All",
+        "url": "https://programmerall.com/article/11002209192/"
+      },
+      {
+        "display_url": null,
+        "snippet": "also leverage BN folding such as [Srinivas and Babu, 2015; Liu and others, 2017; Ye and others, 2018]. [Nagel et al., 2019] aim at balancing the weights, for quantization, across \u00b7 the entire network post BN folding and before performing",
+        "source": "brave",
+        "title": "To Fold or Not to Fold: a Necessary and Suf\ufb01cient Condition on",
+        "url": "https://www.ijcai.org/proceedings/2022/0223.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "overheads. While per-tensor quantization results in substantial accuracy losses for some networks, accuracy loss is \u00b7 more pronounced and even catastrophic for Ef\ufb01cientNet once batch-normalization (BN) parameters are folded into",
+        "source": "brave",
+        "title": "INTEGER QUANTIZATION FOR DEEP LEARNING INFERENCE:",
+        "url": "https://arxiv.org/pdf/2004.09602"
+      },
+      {
+        "display_url": null,
+        "snippet": "arXiv is a free distribution service and an open-access archive for nearly 2.4 million scholarly articles in the fields of physics, mathematics, computer science, quantitative biology, quantitative finance, statistics, electrical engineering and systems science, and economics.",
+        "source": "brave",
+        "title": "Quantizing deep convolutional networks for efficient ...",
+        "url": "https://arxiv.org/pdf/1806.08342"
+      },
+      {
+        "display_url": null,
+        "snippet": "while quantization consists in reducing the temporal cost of scalar operations by using lower bit-wise \u00b7 representations. However most of these methods leverage the dependencies across consecutive \u00b7 convolutional and fully-connected layers. Those dependencies are affected by BN layers. This is the \u00b7 \ufb01rst motivation for BN folding.",
+        "source": "brave",
+        "title": "To Fold or Not to Fold: a Necessary and Suf\ufb01cient",
+        "url": "https://arxiv.org/pdf/2203.14646"
+      },
+      {
+        "display_url": null,
+        "snippet": "QAT&#x27;s primary advantage is its potential for higher accuracy compared to PTQ, especially when pushing below 8-bit precision. <strong>By integrating quantization noise into the training loop, the model adapts, often recovering most, if not all, of the accuracy lost in a PTQ approach</strong>.",
+        "source": "brave",
+        "title": "Quantization-Aware Training (QAT)",
+        "url": "https://apxml.com/courses/llm-compression-acceleration/chapter-2-advanced-quantization-techniques/quantization-aware-training-qat"
+      },
+      {
+        "display_url": null,
+        "snippet": "If you still want to quantize for the layer, change the return of the get_weights_and_quantizers to return [(layer.weights[i], LastValueQuantizer(num_bits=8, symmetric=True, narrow_range=False, per_axis=False)) for i in range(2)]. Then set back the quantizers to gamma,beta,... according to the indices of the return list above at set_quantize_weights. However, I am not encouraging this way as it surely harm the accuracy as BN should act as an activation quantization",
+        "source": "brave",
+        "title": "python - Quantization aware training in TensorFlow version 2 and BatchNorm folding - Stack Overflow",
+        "url": "https://stackoverflow.com/questions/60883928/quantization-aware-training-in-tensorflow-version-2-and-batchnorm-folding"
+      }
+    ]
+  },
+  "activation function clipping quantized networks": {
+    "_cache_hit": false,
+    "_cache_key": "search_37877b9f62b6bb8345641d4927eb05159399369aaed8bcfa36c8002285145a6d",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_37877b9f62b6bb8345641d4927eb05159399369aaed8bcfa36c8002285145a6d.json",
+    "_cached_at": 1783360087,
+    "count": 10,
+    "fetched_at": 1783360087,
+    "provider": "brave",
+    "query": "activation function clipping quantized networks",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation. This technique, PArameterized Clipping acTivation (PACT), uses an activation clipping parameter $\\alpha$ that is optimized during training to find the right quantization scale.",
+        "source": "brave",
+        "title": "[1805.06085] PACT: Parameterized Clipping Activation for Quantized Neural Networks",
+        "url": "https://arxiv.org/abs/1805.06085"
+      },
+      {
+        "display_url": null,
+        "snippet": "In this paper, we propose a novel activation quantization technique, PArameterized Clipping acTi- vation function (PACT), that <strong>automatically optimizes the quantization scales during model training</strong>.",
+        "source": "brave",
+        "title": "PACT: PARAMETERIZED CLIPPING ACTIVATION FOR QUANTIZED NEURAL NETWORKS",
+        "url": "https://arxiv.org/pdf/1805.06085"
+      },
+      {
+        "display_url": null,
+        "snippet": "From the question mentioned earlier, the authors propose PACT, a new activation quantization scheme with a parameterized clipping level, \u03b1. It can be learned during training. Then, the conventional ReLU activation function in CNN can be replaced by PACT with the formula:",
+        "source": "brave",
+        "title": "Paper Review: \u201cPACT: Parameterized clipping activation for quantized neural networks\u201d | by Anh Tuan | Medium",
+        "url": "https://medium.com/@anhtuan_40207/paper-review-pact-parameterized-clipping-activation-for-quantized-neural-networks-2dfce4e2e876"
+      },
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation. This technique, PArameterized Clipping acTi-vation (PACT), uses an activation clipping parameter \u03b1 that is optimized duringtraining to find the right quantization scale.",
+        "source": "brave",
+        "title": "PACT: Parameterized Clipping Activation for Quantized Neural Networks | OpenReview",
+        "url": "https://openreview.net/forum?id=By5ugjyCb"
+      },
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that <strong>enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation</strong>.",
+        "source": "brave",
+        "title": "(PDF) PACT: Parameterized Clipping Activation for Quantized Neural Networks",
+        "url": "https://www.researchgate.net/publication/325191618_PACT_Parameterized_Clipping_Activation_for_Quantized_Neural_Networks"
+      },
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation. This technique, PArameterized Clipping acTivation (PACT), uses an activation clipping parameter $\\alpha$ that is optimized during training to find the right quantization scale.",
+        "source": "brave",
+        "title": "[1805.06085v2] PACT: Parameterized Clipping Activation for Quantized Neural Networks",
+        "url": "https://arxiv.org/abs/1805.06085v2"
+      },
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation. This technique, PArameterized Clipping acTivation (PACT), uses an activation clipping parameter $\\alpha$ that is optimized during training to find the right quantization scale.",
+        "source": "brave",
+        "title": "[1805.06085] PACT: Parameterized Clipping Activation for Quantized Neural Networks",
+        "url": "http://export.arxiv.org/abs/1805.06085"
+      },
+      {
+        "display_url": null,
+        "snippet": "The proposed scheme replaces ReLU with an activation function with \u00b7 a clipping parameter, \u03b1, that is optimized via gradient descent based training. We provide analysis \u00b7 on why PACT outperforms ReLU when quantization is applied during training. Extensive empirical \u00b7 evaluation using several popular convolutional neural networks, such as CIFAR10, SVHN, AlexNet,",
+        "source": "brave",
+        "title": "PACT: Parameterized Clipping Activation for Quantized ...",
+        "url": "https://scispace.com/pdf/pact-parameterized-clipping-activation-for-quantized-neural-544x8orkhr.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "This paper proposes a novel quantization scheme for activations during training - that enables neural networks to work well with ultra low precision weights and activations without any significant accuracy degradation. This technique, PArameterized Clipping acTivation (PACT), uses an activation clipping parameter $\\alpha$ that is optimized during training to find the right quantization scale.",
+        "source": "brave",
+        "title": "PACT: Parameterized Clipping Activation for Quantized Neural Networks - ADS",
+        "url": "https://ui.adsabs.harvard.edu/abs/2018arXiv180506085C/abstract"
+      },
+      {
+        "display_url": null,
+        "snippet": "We theoretically demonstrate that BCPReLU has approximately the same expressive power as the corresponding unbounded version and establish its convergence in low-bit quantization networks. Extensive experiments on a variety of datasets and network architectures demonstrate the effectiveness of our trainable clipping activation function.",
+        "source": "brave",
+        "title": "Learning Bilateral Clipping Parametric Activation for Low-Bit Neural Networks",
+        "url": "https://www.mdpi.com/2227-7390/11/9/2001"
+      }
+    ]
+  },
+  "batch norm folding quantized weights interaction": {
+    "_cache_hit": false,
+    "_cache_key": "search_17a8b6ea7a045eeb29ce3f92038adff52348623819764202d98c8b7d2aa61e56",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_17a8b6ea7a045eeb29ce3f92038adff52348623819764202d98c8b7d2aa61e56.json",
+    "_cached_at": 1783360088,
+    "count": 10,
+    "fetched_at": 1783360088,
+    "provider": "brave",
+    "query": "batch norm folding quantized weights interaction",
+    "results": [
+      {
+        "display_url": null,
+        "snippet": "When I quantize the weights per-channel, I can see (using Netron) that the BatchNorm was folded into Conv2D (as I expect it to be). When I changed Default8BitConvWeightsQuantizer to use per-tensor quantization (flipping per-axis flag and removing shape arguments in build), I saw that the BatchNorm was not folded.",
+        "source": "brave",
+        "title": "folding batchnorm into conv in per-tensor weights quantization \u00b7 Issue #43882 \u00b7 tensorflow/tensorflow",
+        "url": "https://github.com/tensorflow/tensorflow/issues/43882"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>The weights and biases are modified to account for batch normalization instead</strong>: For quantized inference, we first consider folding batch norms and training them as shown in figure 8. We note that batch normalization uses batch statistics during ...",
+        "source": "brave",
+        "title": "Baseline approach for folding batch norms for quantized inference | Download Scientific Diagram",
+        "url": "https://www.researchgate.net/figure/Baseline-approach-for-folding-batch-norms-for-quantized-inference_fig4_325922339"
+      },
+      {
+        "display_url": null,
+        "snippet": "Tensorflow 2 has a tutorial on how to use quantization in their recently adopted tf.keras API, but they don&#x27;t mention anything about batch normalization. I tried the following simple example with a BatchNorm layer: import tensorflow_model_optimization as tfmo model = tf.keras.Sequential([ l.Conv2D(32, 5, padding=&#x27;same&#x27;, activation=&#x27;relu&#x27;, input_shape=input_shape), l.MaxPooling2D((2, 2), (2, 2), padding=&#x27;same&#x27;), l.Conv2D(64, 5, padding=&#x27;same&#x27;, activation=&#x27;relu&#x27;), l.BatchNormalization(), # BN!",
+        "source": "brave",
+        "title": "python - Quantization aware training in TensorFlow version 2 and BatchNorm folding - Stack Overflow",
+        "url": "https://stackoverflow.com/questions/60883928/quantization-aware-training-in-tensorflow-version-2-and-batchnorm-folding"
+      },
+      {
+        "display_url": null,
+        "snippet": "the inference graph has batch normalization parameters \u00b7 \u201cfolded\u201d into the convolutional or fully connected layer\u2019s \u00b7 weights and biases, for ef\ufb01ciency. To accurately simulate \u00b7 quantization effects, we need to simulate this folding, and \u00b7 quantize weights after they have been scaled by the batch \u00b7",
+        "source": "brave",
+        "title": "Quantization and Training of Neural Networks for Efficient ...",
+        "url": "https://openaccess.thecvf.com/content_cvpr_2018/papers/Jacob_Quantization_and_Training_CVPR_2018_paper.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "DNN [Renda et al., 2020]. Quantization consists in mapping \u00b7 the weight values from continuous values to evenly-spread \u00b7 integer values using lower bit-wise representations (e.g. int8 \u00b7 or int4) [Krishnamoorthi, 2018]. Both approaches are often \u00b7 combined or even intrinsically leverage BN folding. Batch-normalization Folding.",
+        "source": "brave",
+        "title": "a Necessary and Sufficient Condition on Batch- ...",
+        "url": "https://www.ijcai.org/proceedings/2022/0223.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "arXiv is a free distribution service and an open-access archive for nearly 2.4 million scholarly articles in the fields of physics, mathematics, computer science, quantitative biology, quantitative finance, statistics, electrical engineering and systems science, and economics.",
+        "source": "brave",
+        "title": "Quantizing deep convolutional networks for efficient ...",
+        "url": "https://arxiv.org/pdf/1806.08342"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>batch norms were folded into the preceding convolution before quantization</strong> ... We \ufb01rst evaluate weight quantization in isolation, since their values do not depend on network inputs, and demonstrate",
+        "source": "brave",
+        "title": "INTEGER QUANTIZATION FOR DEEP LEARNING INFERENCE:",
+        "url": "https://arxiv.org/pdf/2004.09602"
+      },
+      {
+        "display_url": null,
+        "snippet": "[2020]. Quantization consists in mapping the weight values from continuous values to evenly-spread \u00b7 integer values using lower bit-wise representations (e.g. int8 or int4) Krishnamoorthi [2018]. Both \u00b7 approaches are often combined or even intrinsically leverage BN folding.",
+        "source": "brave",
+        "title": "a Necessary and Sufficient Condition on Batch- ...",
+        "url": "https://arxiv.org/pdf/2203.14646"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>During inference the statistics of batch norm (mean, variance, beta, gamma) are folded into the weights and biases if the conv layer before</strong>.",
+        "source": "brave",
+        "title": "Hello ! Yes it is totally possible using something called batch norm folding. | by Karanbir Chahal | Medium",
+        "url": "https://karanbirchahal.medium.com/hello-yes-it-is-totally-possible-using-something-called-batch-norm-folding-b45f7a343a96"
+      },
+      {
+        "display_url": null,
+        "snippet": "breviate this (standard) implementation of batch normalization as \u00b7 BN-pop. Throughout the experiments, BN-pop will refer to neural ... There are more speci\ufb01c hyperparameter details in Appendix A. We \u00b7 compared BN-\ufb01nal and BN-pop over \ufb02oating point precision and \u00b7 quantized models for 3 classi\ufb01cation datasets (CIFAR-10, CIFAR-",
+        "source": "brave",
+        "title": "Final Sample Batch Normalization For Quantized Neural Networks Joel Nicholls",
+        "url": "https://confit.atlas.jp/guide/event-img/jsai2019/2A4-E-2-05/public/pdf?type=in"
+      }
+    ]
+  }
+}

@@ -1,0 +1,328 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_a3849ddf910f0fea6ba2ee7bc5ec0bae61fe8519af16c9581e0cedc1eb53349b",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_a3849ddf910f0fea6ba2ee7bc5ec0bae61fe8519af16c9581e0cedc1eb53349b.json",
+  "_cached_at": 1779556611,
+  "content_type": "text/html",
+  "fetched_at": 1779556611,
+  "headings": [
+    "4.3. Stream-Ordered Memory Allocator #",
+    "4.3.1. Introduction #",
+    "4.3.2. Memory Management #",
+    "4.3.2.1. Allocating Memory #",
+    "4.3.2.2. Freeing Memory #",
+    "4.3.3. Memory Pools #",
+    "4.3.3.1. Default/Implicit Pools #",
+    "4.3.3.2. Explicit Pools #",
+    "4.3.3.3. Device Accessibility for Multi-GPU Support #",
+    "4.3.3.4. Enabling Memory Pools for IPC #",
+    "4.3.4. Best Practices and Tuning #",
+    "4.3.4.1. Query for Support #",
+    "4.3.4.2. Physical Page Caching Behavior #",
+    "4.3.4.3. Resource Usage Statistics #",
+    "4.3.4.4. Memory Reuse Policies #",
+    "4.3.4.5. Synchronization API Actions #",
+    "4.3.5. Addendums #",
+    "4.3.5.1. cudaMemcpyAsync Current Context/Device Sensitivity #",
+    "4.3.5.2. cudaPointerGetAttributes Query #",
+    "4.3.5.3. cudaGraphAddMemsetNode #",
+    "4.3.5.4. Pointer Attributes #",
+    "4.3.5.5. CPU Virtual Memory #"
+  ],
+  "links": [
+    {
+      "text": "",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/contents.html"
+    },
+    {
+      "text": "CUDA Programming Guide",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/index.html"
+    },
+    {
+      "text": "4. CUDA Features",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/part4.html"
+    },
+    {
+      "text": "Is this page helpful?",
+      "url": "https://surveys.hotjar.com/4904bf71-6484-47a7-83ff-4715cceabdb5"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-memory-allocator"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#introduction"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-management"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#allocating-memory"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#freeing-memory"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-pools"
+    },
+    {
+      "text": "c++ overloads of\ncudaMallocAsync",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__HIGHLEVEL.html#group__CUDART__HIGHLEVEL_1ga31efcffc48981621feddd98d71a0feb"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#default-implicit-pools"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#explicit-pools"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#device-accessibility-for-multi-gpu-support"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#enabling-memory-pools-for-ipc"
+    },
+    {
+      "text": "virtual memory management APIs",
+      "url": "https://docs.nvidia.com/cuda/cuda-c-programming-guide/#virtual-memory-management"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#creating-and-sharing-ipc-memory-pools"
+    },
+    {
+      "text": "samples",
+      "url": "https://github.com/NVIDIA/cuda-samples/tree/master/Samples/2_Concepts_and_Techniques/streamOrderedAllocationIPC"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#set-access-in-the-importing-process"
+    },
+    {
+      "text": "Device Accessibility for Multi-GPU Support",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-deviceaccessibility"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#creating-and-sharing-allocations-from-an-exported-pool"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#ipc-export-pool-limitations"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#ipc-import-pool-limitations"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#best-practices-and-tuning"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#query-for-support"
+    },
+    {
+      "text": "developer blog",
+      "url": "https://developer.nvidia.com/blog/cuda-pro-tip-the-fast-way-to-query-device-properties/"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#physical-page-caching-behavior"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#resource-usage-statistics"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-reuse-policies"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreusefolloweventdependencies"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreuseallowopportunistic"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreuseallowinternaldependencies"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#disabling-reuse-policies"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#synchronization-api-actions"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#addendums"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamemcpyasync-current-context-device-sensitivity"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudapointergetattributes-query"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudagraphaddmemsetnode"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#pointer-attributes"
+    },
+    {
+      "text": "#",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cpu-virtual-memory"
+    },
+    {
+      "text": "previous 4.2. CUDA Graphs",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html"
+    },
+    {
+      "text": "next 4.4. Cooperative Groups",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cooperative-groups.html"
+    },
+    {
+      "text": "4.3.1. Introduction",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#introduction"
+    },
+    {
+      "text": "4.3.2. Memory Management",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-management"
+    },
+    {
+      "text": "4.3.2.1. Allocating Memory",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#allocating-memory"
+    },
+    {
+      "text": "4.3.2.2. Freeing Memory",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#freeing-memory"
+    },
+    {
+      "text": "4.3.3. Memory Pools",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-pools"
+    },
+    {
+      "text": "4.3.3.1. Default/Implicit Pools",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#default-implicit-pools"
+    },
+    {
+      "text": "4.3.3.2. Explicit Pools",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#explicit-pools"
+    },
+    {
+      "text": "4.3.3.3. Device Accessibility for Multi-GPU Support",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#device-accessibility-for-multi-gpu-support"
+    },
+    {
+      "text": "4.3.3.4. Enabling Memory Pools for IPC",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#enabling-memory-pools-for-ipc"
+    },
+    {
+      "text": "4.3.3.4.1. Creating and Sharing IPC Memory Pools",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#creating-and-sharing-ipc-memory-pools"
+    },
+    {
+      "text": "4.3.3.4.2. Set Access in the Importing Process",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#set-access-in-the-importing-process"
+    },
+    {
+      "text": "4.3.3.4.3. Creating and Sharing Allocations from an Exported Pool",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#creating-and-sharing-allocations-from-an-exported-pool"
+    },
+    {
+      "text": "4.3.3.4.4. IPC Export Pool Limitations",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#ipc-export-pool-limitations"
+    },
+    {
+      "text": "4.3.3.4.5. IPC Import Pool Limitations",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#ipc-import-pool-limitations"
+    },
+    {
+      "text": "4.3.4. Best Practices and Tuning",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#best-practices-and-tuning"
+    },
+    {
+      "text": "4.3.4.1. Query for Support",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#query-for-support"
+    },
+    {
+      "text": "4.3.4.2. Physical Page Caching Behavior",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#physical-page-caching-behavior"
+    },
+    {
+      "text": "4.3.4.3. Resource Usage Statistics",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#resource-usage-statistics"
+    },
+    {
+      "text": "4.3.4.4. Memory Reuse Policies",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#memory-reuse-policies"
+    },
+    {
+      "text": "4.3.4.4.1. cudaMemPoolReuseFollowEventDependencies",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreusefolloweventdependencies"
+    },
+    {
+      "text": "4.3.4.4.2. cudaMemPoolReuseAllowOpportunistic",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreuseallowopportunistic"
+    },
+    {
+      "text": "4.3.4.4.3. cudaMemPoolReuseAllowInternalDependencies",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamempoolreuseallowinternaldependencies"
+    },
+    {
+      "text": "4.3.4.4.4. Disabling Reuse Policies",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#disabling-reuse-policies"
+    },
+    {
+      "text": "4.3.4.5. Synchronization API Actions",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#synchronization-api-actions"
+    },
+    {
+      "text": "4.3.5. Addendums",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#addendums"
+    },
+    {
+      "text": "4.3.5.1. cudaMemcpyAsync Current Context/Device Sensitivity",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudamemcpyasync-current-context-device-sensitivity"
+    },
+    {
+      "text": "4.3.5.2. cudaPointerGetAttributes Query",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudapointergetattributes-query"
+    },
+    {
+      "text": "4.3.5.3. cudaGraphAddMemsetNode",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cudagraphaddmemsetnode"
+    },
+    {
+      "text": "4.3.5.4. Pointer Attributes",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#pointer-attributes"
+    },
+    {
+      "text": "4.3.5.5. CPU Virtual Memory",
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#cpu-virtual-memory"
+    }
+  ],
+  "meta_description": "",
+  "status_code": 200,
+  "text": "CUDA Programming Guide\n\n4. CUDA Features\n\n4.3. Stream-Ordered Memory Allocator\n\n4.3. Stream-Ordered Memory Allocator #\n\n4.3.1. Introduction #\n\nManaging memory allocations using cudaMalloc and cudaFree causes the GPU\nto synchronize across all executing CUDA streams. The stream-ordered memory\nallocator enables applications to order memory allocation and deallocation\nwith other work launched into a CUDA stream such as kernel launches and\nasynchronous copies. This improves application memory use by taking advantage\nof stream-ordering semantics to reuse memory allocations. The allocator also\nallows applications to control the allocatorâs memory caching behavior. When\nset up with an appropriate release threshold, the caching behavior allows the\nallocator to avoid expensive calls into the OS when the application indicates\nit is willing to accept a bigger memory footprint. The allocator also supports\neasy and secure allocation sharing between processes.\n\nStream-Ordered Memory Allocator:\n\nReduces the need for custom memory management abstractions, and makes it\neasier to create high-performance custom memory management for\napplications that need it. Enables multiple libraries to share a common memory pool managed by the\ndriver. This can reduce excess memory consumption. Allows, the driver to perform optimizations based on its awareness of the\nallocator and other stream management APIs.\n\nReduces the need for custom memory management abstractions, and makes it\neasier to create high-performance custom memory management for\napplications that need it.\n\nReduces the need for custom memory management abstractions, and makes it\neasier to create high-performance custom memory management for\napplications that need it.\n\nEnables multiple libraries to share a common memory pool managed by the\ndriver. This can reduce excess memory consumption.\n\nEnables multiple libraries to share a common memory pool managed by the\ndriver. This can reduce excess memory consumption.\n\nAllows, the driver to perform optimizations based on its awareness of the\nallocator and other stream management APIs.\n\nAllows, the driver to perform optimizations based on its awareness of the\nallocator and other stream management APIs.\n\nNote\n\nNsight Compute and the Next-Gen CUDA debugger is aware of the allocator\nsince CUDA 11.3.\n\n4.3.2. Memory Management #\n\ncudaMallocAsync and cudaFreeAsync are the APIs which enable stream-ordered memory management. cudaMallocAsync returns an allocation and cudaFreeAsync frees an\nallocation. Both APIs accept stream arguments to define when the allocation\nwill become and stop being available for use.\nThese functions allow memory operations to be tied to specific CUDA streams,\nenabling them to occur without blocking the host or other\nstreams. Application performance can be improved by avoiding potentially\ncostly synchronization of cudaMalloc and cudaFree .\n\nThese APIs can be used for further performance optimization through\nmemory pools, which manage and reuse large blocks of memory for more efficient\nallocation and deallocation. Memory pools help reduce overhead and prevent\nfragmentation, improving performance in scenarios with frequent memory\nallocation operations.\n\n4.3.2.1. Allocating Memory #\n\nThe cudaMallocAsync function triggers asynchronous memory allocation on the\nGPU, linked to a specific CUDA stream. cudaMallocAsync allows memory\nallocation to occur without hindering the host or other\nstreams, eliminating the need for expensive synchronization.\n\nNote\n\ncudaMallocAsync ignores the current device/context when determining where\nthe allocation will reside. Instead, cudaMallocAsync determines the\nappropriate device based on the specified memory pool or the supplied stream.\n\nThe listing below illustrates a fundamental use pattern: the memory is\nallocated, used, and then freed back into the same stream.\n\nNote\n\nWhen accessing allocation from a stream other than the stream that made the allocation, the\nuser must guarantee that the access occurs after the allocation\noperation, otherwise the behavior is undefined.\n\n4.3.2.2. Freeing Memory #\n\ncudaFreeAsync() asynchronously frees device memory in a stream-ordered\nfashion, meaning the memory deallocation is assigned to a specific CUDA stream\nand does not block the host or other streams.\n\nThe user must guarantee that the free operation happens after the allocation\noperation and any uses of the allocation. Any use of the allocation\nafter the free operation starts results in undefined behavior.\n\nEvents and/or stream synchronizing operations should be used to guarantee any\naccess to the allocation from other streams is complete before the free operation\nbegins, as illustrated in the following example.\n\nMemory allocated with cudaMalloc() can be freed with with cudaFreeAsync() . As above, all accesses to the memory must be\ncomplete before the free operation begins.\n\nLikewise, memory allocated with cudaMallocAsync can be freed with cudaFree() . When freeing such allocations through the cudaFree() API,\nthe driver assumes that all accesses to the allocation are complete and\nperforms no further synchronization. The user can use cudaStreamQuery / cudaStreamSynchronize / cudaEventQuery / cudaEventSynchronize / cudaDeviceSynchronize to guarantee that the appropriate asynchronous work\nis complete and that the GPU will not try to access the allocation.\n\n4.3.3. Memory Pools #\n\nMemory pools encapsulate virtual address and physical memory resources that\nare allocated and managed according to the pools attributes and properties.\nThe primary aspect of a memory pool is the kind and location of memory it\nmanages.\n\nAll calls to cudaMallocAsync use resources from memory pool. If\na memory pool is not specified, cudaMallocAsync uses the current\nmemory pool of the supplied streamâs device. The current memory pool for a\ndevice may be set with cudaDeviceSetMempool and queried with cudaDeviceGetMempool . Each device has a default memory pool, which is\nactive if cudaDeviceSetMempool has not been called.\n\nThe API cudaMallocFromPoolAsync and c++ overloads of\ncudaMallocAsync allow a user to specify the pool to be used for an allocation without setting\nit as the current pool. The APIs cudaDeviceGetDefaultMempool and cudaMemPoolCreate return handles to memory pools. cudaMemPoolSetAttribute and cudaMemPoolGetAttribute control the attributes of memory pools.\n\nNote\n\nThe mempool current to a device will be local to that device. So allocating\nwithout specifying a memory pool will always yield an allocation local to\nthe streamâs device.\n\n4.3.3.1. Default/Implicit Pools #\n\nThe default memory pool of a device can be retrieved by calling cudaDeviceGetDefaultMempool . Allocations from the default memory pool\nof a device are non-migratable device allocation located on that device. These\nallocations will always be accessible from that device. The accessibility of\nthe default memory pool can be modified with cudaMemPoolSetAccess and\nqueried with cudaMemPoolGetAccess . Since the default pools do not need to be\nexplicitly created, they are sometimes referred to as implicit pools. The\ndefault memory pool of a device does not support IPC.\n\n4.3.3.2. Explicit Pools #\n\ncudaMemPoolCreate creates an explicit pool. This allows\napplications to request properties for their allocation beyond what is\nprovided by the default/implicit pools. These include properties such as IPC\ncapability, maximum pool size, allocations resident on a specific CPU NUMA\nnode on supported platforms etc.\n\nThe following code snippet illustrates an example of creating an IPC capable\nmemory pool on a valid CPU NUMA node.\n\n4.3.3.3. Device Accessibility for Multi-GPU Support #\n\nLike allocation accessibility controlled through the virtual memory\nmanagement APIs, memory pool allocation accessibility does not follow cudaDeviceEnablePeerAccess or cuCtxEnablePeerAccess . For memory pools, the API cudaMemPoolSetAccess modifies what devices can access allocations from a\npool. By default, allocations are accessible only from the device where the\nallocations are located. This access cannot be revoked. To enable access from\nother devices, the accessing device must be peer capable with the memory\npoolâs device. This can be verified with cudaDeviceCanAccessPeer . If the peer capability\nis not checked, the set access may fail with cudaErrorInvalidDevice . However, if no\nallocations had been made from the pool, the cudaMemPoolSetAccess call may\nsucceed even when the devices are not peer capable. In this case, the next\nallocation from the pool will fail.\n\nIt is worth noting that cudaMemPoolSetAccess affects all allocations from\nthe memory pool, not just future ones. Likewise, the accessibility reported by cudaMemPoolGetAccess applies to all allocations from the pool, not just\nfuture ones. Changing the accessibility settings of a pool for a\ngiven GPU frequently is not recommended. That is, once a pool is made accessible from a\ngiven GPU, it should remain accessible from that GPU for the lifetime of the\npool.\n\n4.3.3.4. Enabling Memory Pools for IPC #\n\nMemory pools can be enabled for interprocess communication (IPC) to\nallow easy, efficient and secure sharing of GPU\nmemory between processes. CUDAâs IPC memory pools provide the same security\nbenefits as CUDAâs virtual memory management APIs .\n\nThere are two steps to sharing memory between processes with memory pools:\nthe processes first needs to share access to the pool, then share specific\nallocations from that pool. The first step establishes and enforces security.\nThe second step coordinates what virtual addresses are used in each process\nand when mappings need to be valid in the importing process.\n\nSharing access to a pool involves retrieving an OS-native handle to the pool\nwith cudaMemPoolExportToShareableHandle() , transferring the\nhandle to the importing process using OS-native IPC mechanisms, and then\ncreating an imported memory pool with the cudaMemPoolImportFromShareableHandle() API. For cudaMemPoolExportToShareableHandle to succeed, the memory pool must have been\ncreated with the requested handle type specified in the pool properties\nstructure.\n\nPlease reference samples for the appropriate IPC mechanisms to\ntransfer the OS-native handle between processes. The rest of the procedure can\nbe found in the following code snippets.\n\nImported memory pools are initially only accessible from their resident\ndevice. The imported memory pool does not inherit any accessibility set by the\nexporting process. The importing process needs to enable access with cudaMemPoolSetAccess from any GPU it plans to access the memory from.\n\nIf the imported memory pool belongs to a device that is not visible to importing\nprocess, the user must use the cudaMemPoolSetAccess API to enable access\nfrom the GPUs the allocations will be used on.\n(See Device Accessibility for Multi-GPU Support )\n\nOnce the pool has been shared, allocations made with cudaMallocAsync() from the pool in the exporting process can be shared with processes that\nhave imported the pool. Since the poolâs security policy is established and\nverified at the pool level, the OS does not need extra bookkeeping to provide\nsecurity for specific pool allocations. In other words, the opaque cudaMemPoolPtrExportData required to import a pool allocation may be sent\nto the importing process using any mechanism.\n\nWhile allocations may be exported and imported without synchronizing with\nthe allocating stream in any way, the importing process must follow the same\nrules as the exporting process when accessing the allocation. Specifically, access\nto the allocation must happen after the allocation\noperation in the allocating stream executes. The two following code snippets show cudaMemPoolExportPointer() and cudaMemPoolImportPointer() sharing the\nallocation with an IPC event used to guarantee that the allocation isnât\naccessed in the importing process before the allocation is ready.\n\nWhen freeing the allocation, the allocation must be freed in the importing\nprocess before it is freed in the exporting process. The following code\nsnippet demonstrates the use of CUDA IPC events to provide the required\nsynchronization between the cudaFreeAsync operations in both processes.\nAccess to the allocation from the importing process is obviously restricted by\nthe free operation in the importing process side. It is worth noting that cudaFree can be used to free the allocation in both processes and that\nother stream synchronization APIs may be used instead of CUDA IPC events.\n\nIPC pools currently do not support releasing physical blocks back to the OS.\nAs a result the cudaMemPoolTrimTo API has no effect and the cudaMemPoolAttrReleaseThreshold is effectively ignored. This behavior is\ncontrolled by the driver, not the runtime and may change in a future driver\nupdate.\n\nAllocating from an import pool is not allowed; specifically, import pools\ncannot be set current and cannot be used in the cudaMallocFromPoolAsync API. As such, the allocation reuse policy attributes do not have meaning for these\npools.\n\nIPC Import pools, like IPC export pools, currently do not support releasing physical blocks back to the OS.\n\nThe resource usage stat attribute queries only reflect the allocations\nimported into the process and the associated physical memory.\n\n4.3.4. Best Practices and Tuning #\n\n4.3.4.1. Query for Support #\n\nAn application can determine whether or not a device supports the stream-ordered\nmemory allocator by calling cudaDeviceGetAttribute() (see developer blog )\nwith the device attribute cudaDevAttrMemoryPoolsSupported .\n\nIPC memory pool support can be queried with the cudaDevAttrMemoryPoolSupportedHandleTypes device attribute. This attribute was added\nin CUDA 11.3, and older drivers will return cudaErrorInvalidValue when this attribute\nis queried.\n\nPerforming the driver version check before the query avoids hitting a cudaErrorInvalidValue error on drivers where the attribute was not yet\ndefined. One can use cudaGetLastError to clear the error instead of\navoiding it.\n\n4.3.4.2. Physical Page Caching Behavior #\n\nBy default, the allocator tries to minimize the physical memory owned by a\npool. To minimize the OS calls to allocate and free physical memory,\napplications must configure a memory footprint for each pool. Applications can\ndo this with the release threshold attribute\n( cudaMemPoolAttrReleaseThreshold ).\n\nThe release threshold is the amount of memory in bytes a pool should hold onto\nbefore trying to release memory back to the OS. When more than the release\nthreshold bytes of memory are held by the memory pool, the allocator will try\nto release memory back to the OS on the next call to stream, event or device\nsynchronize. Setting the release threshold to UINT64_MAX will prevent the\ndriver from attempting to shrink the pool after every synchronization.\n\nApplications that set cudaMemPoolAttrReleaseThreshold high enough to\neffectively disable memory pool shrinking may wish to explicitly shrink a\nmemory poolâs memory footprint. cudaMemPoolTrimTo allows applications\nto do so. When trimming a memory poolâs footprint, the minBytesToKeep parameter allows an application to hold onto a specified amount of memory,\nfor example the amount it expects to need in a subsequent phase of execution.\n\n4.3.4.3. Resource Usage Statistics #\n\nQuerying the cudaMemPoolAttrReservedMemCurrent attribute of a pool reports\nthe current total physical GPU memory consumed by the pool. Querying the cudaMemPoolAttrUsedMemCurrent of a pool returns the total size of all of\nthe memory allocated from the pool and not available for reuse.\n\nThe cudaMemPoolAttr*MemHigh attributes are watermarks recording the max\nvalue achieved by the respective cudaMemPoolAttr*MemCurrent attribute\nsince last reset. They can be reset to the current value by using the cudaMemPoolSetAttribute API.\n\n4.3.4.4. Memory Reuse Policies #\n\nIn order to service an allocation request, the driver attempts to reuse memory\nthat was previously freed via cudaFreeAsync() before attempting to\nallocate more memory from the OS. For example, memory freed in a stream can\nbe reused immediately in a subsequent allocation request on the same stream.\nWhen a stream is synchronized with the CPU, the memory that was\npreviously freed in that stream becomes available for reuse for an allocation\nin any stream.\nReuse policies can be applied to both default and explicit memory pools.\n\nThe stream-ordered allocator has a few controllable allocation policies. The\npool attributes cudaMemPoolReuseFollowEventDependencies , cudaMemPoolReuseAllowOpportunistic , and cudaMemPoolReuseAllowInternalDependencies control these policies and are detailed below.\nThese policies can be enabled or disabled through a call to cudaMemPoolSetAttribute .\nUpgrading to a newer CUDA driver may change, enhance, augment and/or reorder\nthe enumeration of the reuse policies.\n\nBefore allocating more physical GPU memory, the allocator examines dependency\ninformation established by CUDA events and tries to allocate from memory freed\nin another stream.\n\nWhen the cudaMemPoolReuseAllowOpportunistic policy is enabled, the allocator\nexamines freed allocations to see if the free operations stream order semantic has been\nmet, for example the stream has passed the point of execution indicated by the\nfree operation. When this policy is disabled, the allocator will still reuse memory made\navailable when a stream is synchronized with the CPU. Disabling this policy\ndoes not stop the cudaMemPoolReuseFollowEventDependencies from applying.\n\nFailing to allocate and map more physical memory from the OS, the driver will\nlook for memory whose availability depends on another streamâs pending\nprogress. If such memory is found, the driver will insert the required\ndependency into the allocating stream and reuse the memory.\n\nWhile the controllable reuse policies improve memory reuse, users may want to\ndisable them. Allowing opportunistic reuse (such as cudaMemPoolReuseAllowOpportunistic ) introduces run to run variance in\nallocation patterns based on the interleaving of CPU and GPU execution.\nInternal dependency insertion (such as cudaMemPoolReuseAllowInternalDependencies ) can serialize work in\nunexpected and potentially non-deterministic ways when the user would rather\nexplicitly synchronize an event or stream on allocation failure.\n\n4.3.4.5. Synchronization API Actions #\n\nOne of the optimizations that comes with the allocator being part of the CUDA\ndriver is integration with the synchronize APIs. When the user requests that\nthe CUDA driver synchronize, the driver waits for asynchronous work to\ncomplete. Before returning, the driver will determine what frees the\nsynchronization guaranteed to be completed. These allocations are made\navailable for allocation regardless of specified stream or disabled allocation\npolicies. The driver also checks cudaMemPoolAttrReleaseThreshold here and\nreleases any excess physical memory that it can.\n\n4.3.5. Addendums #\n\n4.3.5.1. cudaMemcpyAsync Current Context/Device Sensitivity #\n\nIn the current CUDA driver, any async memcpy involving memory from cudaMallocAsync should be done using the specified streamâs context as the\ncalling threadâs current context. This is not necessary for cudaMemcpyPeerAsync , as the device primary contexts specified in the API\nare referenced instead of the current context.\n\n4.3.5.2. cudaPointerGetAttributes Query #\n\nInvoking cudaPointerGetAttributes on an allocation after invoking cudaFreeAsync on it results in undefined behavior. Specifically, it does\nnot matter if an allocation is still accessible from a given stream: the\nbehavior is still undefined.\n\n4.3.5.3. cudaGraphAddMemsetNode #\n\ncudaGraphAddMemsetNode does not work with memory allocated via the stream\nordered allocator. However, memsets of the allocations can be stream captured.\n\n4.3.5.4. Pointer Attributes #\n\nThe cudaPointerGetAttributes query works on stream-ordered allocations.\nSince stream-ordered allocations are not context associated, querying CU_POINTER_ATTRIBUTE_CONTEXT will succeed but return NULL in *data .\nThe attribute CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL can be used to determine\nthe location of the allocation: this can be useful when selecting a context\nfor making p2h2p copies using cudaMemcpyPeerAsync . The attribute CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE was added in CUDA 11.3 and can be\nuseful for debugging and for confirming which pool an allocation comes from\nbefore doing IPC.\n\n4.3.5.5. CPU Virtual Memory #\n\nWhen using CUDA stream-ordered memory allocator APIs, avoid setting VRAM limitations with âulimit -vâ as this is not supported.\n\nprevious\n\n4.2. CUDA Graphs\n\nnext\n\n4.4. Cooperative Groups\n\n4.3.1. Introduction\n\n4.3.2. Memory Management 4.3.2.1. Allocating Memory 4.3.2.2. Freeing Memory\n\n4.3.2.1. Allocating Memory\n\n4.3.2.2. Freeing Memory\n\n4.3.3. Memory Pools 4.3.3.1. Default/Implicit Pools 4.3.3.2. Explicit Pools 4.3.3.3. Device Accessibility for Multi-GPU Support 4.3.3.4. Enabling Memory Pools for IPC 4.3.3.4.1. Creating and Sharing IPC Memory Pools 4.3.3.4.2. Set Access in the Importing Process 4.3.3.4.3. Creating and Sharing Allocations from an Exported Pool 4.3.3.4.4. IPC Export Pool Limitations 4.3.3.4.5. IPC Import Pool Limitations\n\n4.3.3.1. Default/Implicit Pools\n\n4.3.3.2. Explicit Pools\n\n4.3.3.3. Device Accessibility for Multi-GPU Support\n\n4.3.3.4. Enabling Memory Pools for IPC 4.3.3.4.1. Creating and Sharing IPC Memory Pools 4.3.3.4.2. Set Access in the Importing Process 4.3.3.4.3. Creating and Sharing Allocations from an Exported Pool 4.3.3.4.4. IPC Export Pool Limitations 4.3.3.4.5. IPC Import Pool Limitations\n\n4.3.3.4.1. Creating and Sharing IPC Memory Pools\n\n4.3.3.4.2. Set Access in the Importing Process\n\n4.3.3.4.3. Creating and Sharing Allocations from an Exported Pool\n\n4.3.3.4.4. IPC Export Pool Limitations\n\n4.3.3.4.5. IPC Import Pool Limitations\n\n4.3.4. Best Practices and Tuning 4.3.4.1. Query for Support 4.3.4.2. Physical Page Caching Behavior 4.3.4.3. Resource Usage Statistics 4.3.4.4. Memory Reuse Policies 4.3.4.4.1. cudaMemPoolReuseFollowEventDependencies 4.3.4.4.2. cudaMemPoolReuseAllowOpportunistic 4.3.4.4.3. cudaMemPoolReuseAllowInternalDependencies 4.3.4.4.4. Disabling Reuse Policies 4.3.4.5. Synchronization API Actions\n\n4.3.4.1. Query for Support\n\n4.3.4.2. Physical Page Caching Behavior\n\n4.3.4.3. Resource Usage Statistics\n\n4.3.4.4. Memory Reuse Policies 4.3.4.4.1. cudaMemPoolReuseFollowEventDependencies 4.3.4.4.2. cudaMemPoolReuseAllowOpportunistic 4.3.4.4.3. cudaMemPoolReuseAllowInternalDependencies 4.3.4.4.4. Disabling Reuse Policies\n\n4.3.4.4.1. cudaMemPoolReuseFollowEventDependencies\n\n4.3.4.4.2. cudaMemPoolReuseAllowOpportunistic\n\n4.3.4.4.3. cudaMemPoolReuseAllowInternalDependencies\n\n4.3.4.4.4. Disabling Reuse Policies\n\n4.3.4.5. Synchronization API Actions\n\n4.3.5. Addendums 4.3.5.1. cudaMemcpyAsync Current Context/Device Sensitivity 4.3.5.2. cudaPointerGetAttributes Query 4.3.5.3. cudaGraphAddMemsetNode 4.3.5.4. Pointer Attributes 4.3.5.5. CPU Virtual Memory\n\n4.3.5.1. cudaMemcpyAsync Current Context/Device Sensitivity\n\n4.3.5.2. cudaPointerGetAttributes Query\n\n4.3.5.3. cudaGraphAddMemsetNode\n\n4.3.5.4. Pointer Attributes\n\n4.3.5.5. CPU Virtual Memory",
+  "text_length": 23198,
+  "title": "4.3. Stream-Ordered Memory Allocator — CUDA Programming Guide",
+  "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html"
+}

@@ -1,0 +1,389 @@
+{
+  "timestamp": "2026-07-06T13:48:42.802158",
+  "proxy_url": "http://localhost:8765",
+  "total_categories": 10,
+  "results": {
+    "binarized neural networks": [
+      {
+        "display_url": null,
+        "snippet": "Another problem is related to the use of deterministic functions (2) or stochastic functions (Hubara et al. 2016) for binarization, which \u201cflattens the gradient\u201d during backpropagation. A common solution to these problems is to use the Saturated STE (Straight Through Estimator) (Bengio, ...",
+        "source": "brave",
+        "title": "Taming Binarized Neural Networks and Mixed-Integer Programs",
+        "url": "https://arxiv.org/html/2310.04469v3"
+      },
+      {
+        "display_url": null,
+        "snippet": "Hubara, I., Courbariaux, M., Soudry, D., El-Yaniv, R., and Bengio, Y. Quantized neural networks: Training \u00b7 neural networks with low precision weights and activations. arXiv preprint arXiv:1609.07061, 2016.",
+        "source": "brave",
+        "title": "Binarized Neural Networks Itay Hubara1* itayh@technion.ac.il",
+        "url": "http://papers.neurips.cc/paper/6573-binarized-neural-networks.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "2016). Due to the non-differentiable nature of the sign function, conventional backpropagation is hindered in updating gradients for BNNs. BinaryConnect (Courbariaux, Bengio, and David 2015) addresses this challenge by introducing the Straight-Through Estimator (STE), <strong>a technique used to</strong> ...",
+        "source": "brave",
+        "title": "Fast and Slow Gradient Approximation for Binary Neural Network Optimization",
+        "url": "https://arxiv.org/html/2412.11777"
+      },
+      {
+        "display_url": null,
+        "snippet": "training or using the \u201cstraight-through estimator (STE)&quot; [Bengio et al., 2013], these works avoided the \u00b7 issues of non-differentiable optimization. While some of these methods have produced good results \u00b7 on datasets such as CIFAR-10 and SVHN, none has produced low precision networks competitive \u00b7 with full-precision models on large-scale classi\ufb01cation tasks, such as ImageNet. In fact, [Zhou et al., 2016] and [Hubara et al., 2016] experiment with different combinations of bitwidth for weights and",
+        "source": "brave",
+        "title": "Towards Accurate Binary Convolutional Neural Network Xiaofan Lin Cong Zhao",
+        "url": "https://arxiv.org/pdf/1711.11294"
+      },
+      {
+        "display_url": null,
+        "snippet": "Chassang, Antoine, Gatta, Carlo, and Bengio, Yoshua. ... Ramabhadran, Bhuvana. Deep convolutional neural networks ... Simonyan, Karen and Zisserman, Andrew. Very deep convolu- tional networks for large-scale image recognition. In ICLR, ... Soudry, Daniel, Hubara, Itay, and Meir, Ron. Expectation back- propagation: Parameter-free training of multilayer neural net- ... Binarized Neural Networks: Training Neural Networks with Weights and Activations Constrained to +1 or \u22121",
+        "source": "brave",
+        "title": "Binarized Neural Networks: Training Neural Networks with Weights and",
+        "url": "https://arxiv.org/pdf/1602.02830"
+      }
+    ],
+    "quantization aware training": [
+      {
+        "display_url": null,
+        "snippet": "We empirically demonstrate that <strong>quantized models show a better generalization gap on distorted data</strong>. Since the advent of BinaryConnect Courbariaux et al. (2015) and Binarized Neural Networks Hubara et al.",
+        "source": "brave",
+        "title": "QGen: On the Ability to Generalize in Quantization Aware Training",
+        "url": "https://arxiv.org/html/2404.11769v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "Quantization for deep neural networks has a history spanning nearly ten years, with <strong>researchers initially compressing networks to reduce memory usage and computational load while maintaining accuracy</strong> (Rastegari et al., 2016; Hubara et al., 2018). Recent quantization methods for LLMs can be ...",
+        "source": "brave",
+        "title": "Direct Quantized Training of Language Models with Stochastic Rounding",
+        "url": "https://arxiv.org/html/2412.04787v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "View a PDF of the paper titled Quantized Neural Networks: Training Neural Networks with Low Precision Weights and Activations, by Itay Hubara and 3 other authors View PDF",
+        "source": "brave",
+        "title": "[1609.07061] Quantized Neural Networks: Training Neural Networks with Low Precision Weights and Activations",
+        "url": "https://arxiv.org/abs/1609.07061"
+      },
+      {
+        "display_url": null,
+        "snippet": "Hubara, I., Nahshan, Y., Hanani, Y., Banner, R., Soudry, D.: Accurate post train- ing quantization with small calibration sets. In: Proceedings of the International \u00b7 Conference on Machine Learning (ICML). pp. 4466\u20134475. PMLR (2021) 13. Jacob, B., Kligys, S., Chen, B., Zhu, M., Tang, M., Howard, A., Adam, H., Kalenichenko, D.: Quantization and training of neural ...",
+        "source": "brave",
+        "title": "Sensitivity-Aware Post-Training Quantization for Deep Neural Networks",
+        "url": "https://www.arxiv.org/pdf/2509.05576"
+      },
+      {
+        "display_url": null,
+        "snippet": "By transforming pre-trained weights ... 2016). Quantization-aware training (QAT) <strong>simulates quantization during training, allowing the model to adapt to quantization effects and achieve better performace than post-training quantzation</strong> (Hubara et al., 2021; Nagel et al., ...",
+        "source": "brave",
+        "title": "Quantization Meets OOD: Generalizable Quantization-aware Training from a Flatness Perspective",
+        "url": "https://arxiv.org/html/2509.00859v1"
+      }
+    ],
+    "post-training quantization": [
+      {
+        "display_url": null,
+        "snippet": "[Submitted on 26 Jan 2022 (v1), last revised 15 Jan 2023 (this version, v3)] Authors:Jinjie Zhang, Yixuan Zhou, Rayan Saab \u00b7 View a PDF of the paper titled Post-training Quantization for Neural Networks with Provable Guarantees, by Jinjie Zhang and 2 other authors View PDF \u00b7",
+        "source": "brave",
+        "title": "[2201.11113] Post-training Quantization for Neural Networks with Provable Guarantees",
+        "url": "https://arxiv.org/abs/2201.11113"
+      },
+      {
+        "display_url": null,
+        "snippet": "Efficient Post-training Quantization with FP8 Formats ... Baevski, A., Zhou, Y., Mohamed, A., and Auli, M. wav2vec \u00b7 2.0: A framework for self-supervised learning of speech \u00b7 representations. Advances in neural information process-",
+        "source": "brave",
+        "title": "EFFICIENT POST-TRAINING QUANTIZATION WITH FP8 FORMATS",
+        "url": "https://proceedings.mlsys.org/paper_files/paper/2024/file/dea9b4b6f55ae611c54065d6fc750755-Paper-Conference.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "<strong>This formalism underpins state-of-the-art quantization routines, such as selective per-row or per-column updates and cross-row compensation</strong>. Task-specific requirements and the nonuniformity of real-world deployment scenarios have motivated PTQ ...",
+        "source": "brave",
+        "title": "Post-Training Quantization (PTQ)",
+        "url": "https://www.emergentmind.com/topics/post-training-quantization-ptq-1bf0dd2f-5d00-4942-b4b1-e894a2c9397b"
+      },
+      {
+        "display_url": null,
+        "snippet": "S. Zhou, Y. Wu, Z. Ni, X. Zhou, H. Wen, and Y. Zou. Dorefa-net: Training low bitwidth convolutional neural networks with low bitwidth gradients. arXiv preprint arXiv:1606.06160, 2016. C. Zhu, S. Han, H. Mao, and W. J. Dally. Trained ternary quantization. arXiv preprint arXiv:1612.01064, 2016. Dwith Chenna, Evolution of Convolutional Neural Network(CNN): Compute vs Memory bandwidth for Edge AI, IEEE FeedForward Magazine 2(3), 2023, pp.",
+        "source": "brave",
+        "title": "Quantization of Convolutional Neural Networks: Model Quantization - Edge AI and Vision Alliance",
+        "url": "https://www.edge-ai-vision.com/2024/02/quantization-of-convolutional-neural-networks-model-quantization/"
+      },
+      {
+        "display_url": null,
+        "snippet": "layering of quantized neural networks for heterogeneous \u00b7 inference. IEEE Transactions on Pattern Analysis and \u00b7 Machine Intelligence, 45, 2023. Xiao, G., Lin, J., Seznec, M., Wu, H., Demouth, J., and Han, S. Smoothquant: Accurate and efficient post-training \u00b7 quantization for large language models. In ICML, 2023. Xu, Y., Zhou, H., and Deng, Y.",
+        "source": "brave",
+        "title": "Deep Unfolding with Kernel-based Quantization in MIMO ...",
+        "url": "https://arxiv.org/pdf/2505.12736"
+      }
+    ],
+    "straight-through estimator": [
+      {
+        "display_url": null,
+        "snippet": "If the gradient is zero or undefined, the updates cannot flow back through the quantization operation to the preceding layers and weights. This effectively stalls the learning process for parameters situated before the quantization node. How can the model learn to adapt to quantization if the gradients are blocked? This is where the Straight-Through Estimator ...",
+        "source": "brave",
+        "title": "Straight-Through Estimator (STE) Explained",
+        "url": "https://apxml.com/courses/practical-llm-quantization/chapter-4-quantization-aware-training-qat/straight-through-estimator-ste"
+      },
+      {
+        "display_url": null,
+        "snippet": "Speci\ufb01cally, one can replace the a.e. zero derivative of quantized \u00b7 activation function composited in the chain rule with a related surrogate. This proxy derivative used \u00b7 in the backward pass only is referred as the straight-through estimator (STE) (Bengio et al., 2013).",
+        "source": "brave",
+        "title": "Published as a conference paper at ICLR 2019",
+        "url": "https://openreview.net/pdf?id=Skh4jRcKQ"
+      },
+      {
+        "display_url": null,
+        "snippet": "A key development in the methodology of training quantized DL models is the Quantization Aware Training (QAT) algorithm which first used by Courbariaux and Bengio (2016) to retrain their quantized networks. This method utilizes the straight-through estimator, discussed by Hinton, Srivastava, and Swersky (2012) and Bengio, L\u00e9onard, and Courville (2013) to propagate gradients across the discontinuous quantization operation.",
+        "source": "brave",
+        "title": "Training generalizable quantized deep neural nets - ScienceDirect",
+        "url": "https://www.sciencedirect.com/science/article/abs/pii/S0957417422017547"
+      },
+      {
+        "display_url": null,
+        "snippet": "In this regime, straight-through-estimator-based QAT has a useful bias: <strong>it evaluates gradients at the deployed quantized weights while updating latent full-precision weights</strong>, causing the gradient to sense the valley wall and acquire an inward component that steers subsequent quantized iterates ...",
+        "source": "brave",
+        "title": "Understanding Quantization-Aware Training: Gradients at Quantized Weights Bias to the Low-Loss Basin",
+        "url": "https://arxiv.org/html/2606.09012"
+      },
+      {
+        "display_url": null,
+        "snippet": "Quantization-aware training comes ... proposed to address this issue. In this paper, we prove that <strong>a large class of weight gradient estimators is approximately equivalent with the straight through estimator (STE).</strong>...",
+        "source": "brave",
+        "title": "Custom Gradient Estimators are Straight-Through Estimators in Disguise",
+        "url": "https://arxiv.org/html/2405.05171v3"
+      }
+    ],
+    "gumbel softmax quantization": [
+      {
+        "display_url": null,
+        "snippet": "We have a way to separate the stochastic from the deterministic in the sampling process, and we have provided a means for sampling from a categorical distribution, as opposed to a continuous distribution. However, <strong>the argmax function in the Gumbel-Max Trick is not differentiable</strong> [1-4, 6]. So ...",
+        "source": "brave",
+        "title": "The Gumbel-Softmax Distribution",
+        "url": "https://sassafras13.github.io/GumbelSoftmax/"
+      },
+      {
+        "display_url": null,
+        "snippet": "The resulting reconstruction loss is <strong>fully differentiable in both the per-group scales and the discrete assignments</strong>, and can be optimized jointly via gradient-based methods. As the temperature is annealed, the soft assignments collapse onto hard grid points, yielding a fully discrete quantized ...",
+        "source": "brave",
+        "title": "GSQ: Highly-Accurate Low-Precision Scalar Quantization for LLMs via Gumbel-Softmax Sampling",
+        "url": "https://arxiv.org/html/2604.18556v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "Code: https://github.com/priyammaz/PyTorch-Adventures/blob/main/PyTorch for Generation/AutoEncoders/Intro to AutoEncoders/gumbel_softmax_quantizer.ip...",
+        "source": "brave",
+        "title": "Gumbel Softmax Quantization: Differentiable Discrete Sampling - YouTube",
+        "url": "https://www.youtube.com/watch?v=c65nlNgfFrE"
+      },
+      {
+        "display_url": null,
+        "snippet": "After writing this answer, I found ... problem, and vice versa. Because both of them are soft and not exact, and <strong>both of them are differentiable</strong>....",
+        "source": "brave",
+        "title": "neural network - Gumbel-Softmax trick vs Softmax with temperature - Data Science Stack Exchange",
+        "url": "https://datascience.stackexchange.com/questions/58376/gumbel-softmax-trick-vs-softmax-with-temperature"
+      },
+      {
+        "display_url": null,
+        "snippet": "In [BA20], researchers proposed ... training on the encoder and decoder. The Gumbel-Softmax method was introduced as <strong>a differentiable approximation for sampling from categorical distributions</strong>....",
+        "source": "brave",
+        "title": "Gumbel-Softmax Discretization Constraint, Differentiable IDS Channel, and an IDS-Correcting Code for DNA Storage",
+        "url": "https://arxiv.org/html/2407.18929v2"
+      }
+    ],
+    "learned quantization parameters": [
+      {
+        "display_url": null,
+        "snippet": "There are two forms of quantization of the activations: ... This distribution of activations is then used to calculate the zeropoint (z) and scale factor (s) values needed to quantize the output:",
+        "source": "brave",
+        "title": "A Visual Guide to Quantization - by Maarten Grootendorst",
+        "url": "https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-quantization"
+      },
+      {
+        "display_url": null,
+        "snippet": "In AbsMax-quantization, the maximum absolute activation value \\(y_{max}\\) is calculated as \\(y_{max} = \\mathbf{max}(|y_0|, \\ldots, |y_N|)\\), where \\(y_i\\) is the activation output for data sample \\(d_i\\). This value \\(y_{max}\\) is then used to derive the scaling factor. There are two main approaches to PTQ: weight-only quantization and quantization of weights and activations. In weight-only quantization, we have access to the trained model\u2019s weights, and we simply quantize these weights. Since the weights are known and fixed, no additional data is needed. The process involves mapping the weights to lower-precision values using a calculated scale with/without zero-point parameters.",
+        "source": "brave",
+        "title": "Model Quantization: Concepts, Methods, and Why It Matters | NVIDIA Technical Blog",
+        "url": "https://developer.nvidia.com/blog/model-quantization-concepts-methods-and-why-it-matters/"
+      },
+      {
+        "display_url": null,
+        "snippet": "Later, researchers proposed various methods using backpropagation with stochastic gradient descent to learn quantizer parameters that minimize task loss [5, 6, 16]. These methods make the optimization of quantizer parameters more direct. Notably, the learned step size quantization (LSQ) method [6] introduced a new gradient estimate to learn the scaling factors (also known as step size) for non-negative activations during QAT.",
+        "source": "brave",
+        "title": "Precision Neural Network Quantization via Learnable Adaptive Modules",
+        "url": "https://arxiv.org/html/2504.17263v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "AbsMax. The AbsMax quantizer computes the scaling factor using the absolute maximum value, given by ... LWC and LAC. The LWC [36] and LAC [5] quantizers extend AbsMax by introducing learnable clipping factors",
+        "source": "brave",
+        "title": "Scaling Law for Quantization-Aware Training",
+        "url": "https://arxiv.org/pdf/2505.14302"
+      },
+      {
+        "display_url": null,
+        "snippet": "Uniform af\ufb01ne quantization, also known as asymmetric quantization, is de\ufb01ned by three quantization \u00b7 parameters: <strong>the scale factor s, the zero-point z and the bit-width b</strong>.",
+        "source": "brave",
+        "title": "A White Paper on Neural Network Quantization Markus Nagel\u2217",
+        "url": "https://arxiv.org/pdf/2106.08295"
+      }
+    ],
+    "binarized weights networks": [
+      {
+        "display_url": null,
+        "snippet": "Our technique jointly maximizes the accuracy of the network while minimizing its memory impact by deciding whether each weight should be binarized or kept in full precision. We show how to efficiently perform a forward pass through layers compressed using APB by decomposing it into a binary ...",
+        "source": "brave",
+        "title": "Neural network compression using binarization and few full-precision weights - ScienceDirect",
+        "url": "https://www.sciencedirect.com/science/article/pii/S0020025525003834"
+      },
+      {
+        "display_url": null,
+        "snippet": "APB enhances the representational capability of binary networks using a few full-precision weights. Our technique jointly maximizes the accuracy of the network while minimizing its memory impact by deciding whether each weight should be binarized or kept in full precision.",
+        "source": "brave",
+        "title": "[2306.08960] Neural Network Compression using Binarization and Few Full-Precision Weights",
+        "url": "https://arxiv.org/abs/2306.08960"
+      },
+      {
+        "display_url": null,
+        "snippet": "Table 1 (rows 13 to 16) reports a selection of results from this search. Using 1.4 bits to binarize inputs \u00b7 and weights (mn = 1.4 \u00d7 1.4 = 1.96) gives a very high accuracy <strong>(53.2% top-1)</strong> while having the \u00b7 same number of total operations mn as a network, such as the one from row 10, binarized ...",
+        "source": "brave",
+        "title": "Heterogeneous Bitwidth Binarization in Convolutional Neural Networks Josh Fromm",
+        "url": "https://ubicomplab.cs.washington.edu/pdfs/hbnns.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "By doing so, APB produces two different overlapping networks, i.e., a binary network and an extremely sparse full-precision network. Their combined expressiveness allows for improving the performance of binary networks without the need to double the bits required to represent the weights, as done in",
+        "source": "brave",
+        "title": "[2306.08960] Neural Network Compression using Binarization and Few Full-Precision Weights",
+        "url": "https://ar5iv.labs.arxiv.org/html/2306.08960"
+      },
+      {
+        "display_url": null,
+        "snippet": "The authors of Reference [9] proposed Binarized neural networks (BNNs) that constrain not only the weights, but also the activation values to $-$1 and +1. Rastegari et al. [36] proposed BinaryWeightNetwork (BWN) and XNOR-Net that, similarly to BC and BNNs, respectively, constrain the weights to 1 bit, but by introducing scale factors that are learned during training, achieve higher accuracy on large datasets such as ImageNet. All of these works have shown that binary precision neural networks can achieve comparable accuracy to full-precision neural networks for datasets such as MNIST, CIFAR-10, and ImageNet.",
+        "source": "brave",
+        "title": "Binary Precision Neural Network Manycore Accelerator",
+        "url": "https://dl.acm.org/doi/fullHtml/10.1145/3423136"
+      }
+    ],
+    "quantization gradient estimation": [
+      {
+        "display_url": null,
+        "snippet": "While effective, STE overlooks discretization errors between continuous and quantized values, which can lead to accuracy degradation \u2014 especially at extremely low bit-widths. In this paper, we propose Progressive Element-wise Gradient Estimation (PEGE), a simple yet effective alternative to STE, which can be seamlessly integrated with any forward propagation methods and improves the quantized model accuracy.",
+        "source": "brave",
+        "title": "Progressive Element-wise Gradient Estimation for Neural Network Quantization",
+        "url": "https://arxiv.org/html/2509.00097v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "A coarse gradient is generated by replacing the a.e. zero derivative of quantized (i.e., staircase) ReLU activation composited in the chain rule with some heuristic proxy derivative called straight-through estimator (STE). Although having been widely used in training quantized networks empirically, fundamental questions like when and why the ad hoc STE trick works, still lack theoretical understanding.",
+        "source": "brave",
+        "title": "Learning quantized neural nets by coarse gradient method for nonlinear classification | Research in the Mathematical Sciences | Springer Nature Link",
+        "url": "https://link.springer.com/article/10.1007/s40687-021-00281-4"
+      },
+      {
+        "display_url": null,
+        "snippet": "In this paper, we propose two adaptive methods for quantizing the gradients in data-parallel SGD. We study methods that are de\ufb01ned by a norm and a set of quantization levels. In Adaptive Level \u00b7 Quantization (ALQ), we minimize the excess variance of quantization given an estimate of the",
+        "source": "brave",
+        "title": "Adaptive Gradient Quantization for Data-Parallel SGD Fartash Faghri1,2\u21e4",
+        "url": "https://papers.nips.cc/paper/2020/file/20b5e1cf8694af7a3c1ba4a87f073021-Paper.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "We proposed a framework called Deep Projection (DP) to train quantized weights with adaptive gradients. Gradients and weights are projected to high dimensional training space through projection layers, resulting in more complicated update paths and randomness, which benefit the generalization of models. Renewal of weights in the network is conducted by values composited by self-updating high dimensional tensors, which means that the resulting gradients are softer and more adaptive to network training.",
+        "source": "brave",
+        "title": "Adaptive gradients and weight projection based on quantized neural networks for efficient image classification - ScienceDirect",
+        "url": "https://www.sciencedirect.com/science/article/abs/pii/S1077314222001059"
+      },
+      {
+        "display_url": null,
+        "snippet": "Since then, STE has been widely adopted in QAT. In the training of a quantized network, <strong>STE is used for estimating the gradient of a non-differentiable quantized function in the backward pass</strong>.",
+        "source": "brave",
+        "title": "A Comprehensive Survey on Model Quantization for Deep Neural Networks in Image Classification | ACM Transactions on Intelligent Systems and Technology",
+        "url": "https://dl.acm.org/doi/10.1145/3623402"
+      }
+    ],
+    "QAT convergence methods": [
+      {
+        "display_url": null,
+        "snippet": "View a PDF of the paper titled ... model complexity. Quantization-aware training (QAT) is <strong>a promising method to lower the implementation cost and energy consumption</strong>....",
+        "source": "brave",
+        "title": "[2302.11812] Teacher Intervention: Improving Convergence of Quantization Aware Training for Ultra-Low Precision Transformers",
+        "url": "https://arxiv.org/abs/2302.11812"
+      },
+      {
+        "display_url": null,
+        "snippet": "address this by re-training the NN model with quantized \u00b7 parameters so that the model can converge to a point with \u00b7 better loss. One popular approach is to use Quantization- Aware Training (QAT), in which the usual forward \u00b7 and backward pass are performed on the quantized \u00b7",
+        "source": "brave",
+        "title": "A Survey of Quantization Methods for Ef\ufb01cient Neural Network Inference",
+        "url": "https://arxiv.org/pdf/2103.13630"
+      },
+      {
+        "display_url": null,
+        "snippet": "Consistent with other regularization methods, our empirical studies further support the claim that each model requires precise tuning of its quantization level, as models achieve optimal generalization at varying quantization levels. On the generalization side, in Section 4, we show that quantization could help the optimization process convergence to minima with lower sharpness when the scale of quantization noise is bounded.",
+        "source": "brave",
+        "title": "QGen: On the Ability to Generalize in Quantization Aware Training",
+        "url": "https://arxiv.org/html/2404.11769v1"
+      },
+      {
+        "display_url": null,
+        "snippet": "In this paper, we primarily focus on Quantization-Aware Training (QAT) and related methods to perform Fault-Aware and Variability-Aware training on top of low-bit quantized models, in order to mitigate characterized hardware non-idealities. As we have shown, this enables the development of low-bit quantized models that are robust to high levels of stuck-at faults and LRS variability. However, as a QAT-based approach, our method requires extensive training to converge on the optimal configuration of model weights and quantization parameters for low-bit quantization (specifically 3-bit and 4-bit, as explored in this work).",
+        "source": "brave",
+        "title": "Regularization-based Framework for Quantization-, Fault- and Variability-Aware Training",
+        "url": "https://arxiv.org/html/arXiv:2503.01297"
+      },
+      {
+        "display_url": null,
+        "snippet": "Specifically, weight quantization error increases more rapidly with more training tokens. Further analysis shows that the activation quantization error in the FC2 layer, caused by outliers, is the primary bottleneck of W4A4 QAT quantization error. By applying mixed-precision quantization to address this bottleneck, we demonstrate that weight and activation quantization errors can converge to similar levels.",
+        "source": "brave",
+        "title": "Scaling Law for Quantization-Aware Training",
+        "url": "https://arxiv.org/html/2505.14302v1"
+      }
+    ],
+    "PTQ calibration techniques": [
+      {
+        "display_url": null,
+        "snippet": "It supports a broad range of formats, including NVFP4, optimized for NVIDIA Blackwell GPUs, and integrates calibration techniques like <strong>SmoothQuant, activation-aware weight quantization (AWQ), and AutoQuantize</strong> for improved quantization results.",
+        "source": "brave",
+        "title": "Optimizing LLMs for Performance and Accuracy with Post-Training Quantization | NVIDIA Technical Blog",
+        "url": "https://developer.nvidia.com/blog/optimizing-llms-for-performance-and-accuracy-with-post-training-quantization/"
+      },
+      {
+        "display_url": null,
+        "snippet": "8, we can refine the scaling factor for calibrating the activation of the k-th layer. ... Mutual Information and Contrastive Learning. For two \u00b7 discrete variables X and Y, their mutual information (MI) ... F,j) into positive or negative. ... F,j). Hence, the above equation can be sim- ... By applying the logarithm to Eq. 12 and rearranging the ... F,j) \u2212log(M). ... Table 1. Comparison of CL-Calib with various post-training quantization algorithms on ImageNet.",
+        "source": "brave",
+        "title": "Enhancing Post-training Quantization Calibration through Contrastive Learning",
+        "url": "https://openaccess.thecvf.com/content/CVPR2024/papers/Shang_Enhancing_Post-training_Quantization_Calibration_through_Contrastive_Learning_CVPR_2024_paper.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "In all our experiments we apply per-channel quantization of the weights. con\ufb01guration. This is the case for all global optimization \u00b7 methods including bias-tuning. Notably, PN requires only \u00b7 a few (at most 10) forward passes over the calibration set \u00b7 and yield signi\ufb01cant gains (\ufb01g. 4). In this study, we applied \u00b7 PN on models trained ...",
+        "source": "brave",
+        "title": "Accurate Post Training Quantization With Small Calibration Sets",
+        "url": "http://proceedings.mlr.press/v139/hubara21a/hubara21a.pdf"
+      },
+      {
+        "display_url": null,
+        "snippet": "Post Training Quantization (PTQ) is a technique to reduce the required computational resources for inference while still preserving the accuracy of your model by <strong>mapping the traditional FP32 activation space to a reduced INT8 space</strong>. TensorRT uses a calibration step which executes your model ...",
+        "source": "brave",
+        "title": "Post Training Quantization (PTQ) \u2014 Torch-TensorRT",
+        "url": "https://docs.pytorch.org/TensorRT/ts/ptq.html"
+      },
+      {
+        "display_url": null,
+        "snippet": "Lately, post-training quantization methods have gained considerable attention, as they are simple to use, and require only a small unlabeled calibration set. This small dataset cannot be used to fine-tune the model without significant over-fitting. Instead, these methods only use the calibration set to set the activations&#x27; dynamic ranges.",
+        "source": "brave",
+        "title": "ICML Poster Accurate Post Training Quantization With Small Calibration Sets",
+        "url": "https://icml.cc/virtual/2021/poster/10173"
+      }
+    ]
+  },
+  "summary": {
+    "binarized neural networks": 5,
+    "quantization aware training": 5,
+    "post-training quantization": 5,
+    "straight-through estimator": 5,
+    "gumbel softmax quantization": 5,
+    "learned quantization parameters": 5,
+    "binarized weights networks": 5,
+    "quantization gradient estimation": 5,
+    "QAT convergence methods": 5,
+    "PTQ calibration techniques": 5
+  }
+}

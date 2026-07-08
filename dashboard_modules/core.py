@@ -638,6 +638,12 @@ def api_llm_provider():
         options=data.get("options"),
         fast=data.get("fast"),
     )
+    _update_active_mission_provider(
+        normalized,
+        model=data.get("model"),
+        thinking=data.get("thinking"),
+        fast=data.get("fast"),
+    )
     config = get_llm_config() if get_llm_config else {"provider": normalized}
     return jsonify({
         "success": True,
@@ -2280,7 +2286,9 @@ def get_file_content(filepath):
             return jsonify({"error": "Empty file path"}), 400
         from .workspace_resolver import resolve_mission_workspace
         missions_dir = BASE_DIR / "missions"
-        mission_workspace = resolve_mission_workspace(mission_id, missions_dir, WORKSPACE_DIR, io_utils)
+        active_mission = io_utils.atomic_read_json(MISSION_PATH, {})
+        mission_data = active_mission if active_mission.get("mission_id") == mission_id else None
+        mission_workspace = resolve_mission_workspace(mission_id, missions_dir, WORKSPACE_DIR, io_utils, mission_data=mission_data)
         full_path = (mission_workspace / relative_path).resolve()
         allowed_base = mission_workspace.resolve()
     else:

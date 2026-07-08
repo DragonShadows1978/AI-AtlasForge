@@ -1,0 +1,521 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_3bbe71ae7442d455a5afe3e4b2d5a9f65f0c3903d3b4dac3e8a33994bd642083",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_3bbe71ae7442d455a5afe3e4b2d5a9f65f0c3903d3b4dac3e8a33994bd642083.json",
+  "_cached_at": 1779413704,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": 1779413704,
+  "headings": [
+    "safetensors/safetensors",
+    "Folders and files",
+    "Latest commit",
+    "History",
+    "Repository files navigation",
+    "safetensors",
+    "Safetensors",
+    "Installation",
+    "Getting started",
+    "Format",
+    "Yet another format ?",
+    "Main oppositions",
+    "Notes",
+    "Benefits",
+    "About",
+    "Resources",
+    "License",
+    "Code of conduct",
+    "Contributing",
+    "Security policy",
+    "Uh oh!",
+    "Stars",
+    "Watchers",
+    "Forks",
+    "Releases 46",
+    "Packages 0",
+    "Uh oh!",
+    "Uh oh!",
+    "Contributors",
+    "Uh oh!",
+    "Languages"
+  ],
+  "links": [
+    {
+      "text": "safetensors",
+      "url": "https://github.com/safetensors"
+    },
+    {
+      "text": "safetensors",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Notifications",
+      "url": "https://github.com/login?return_to=%2Fsafetensors%2Fsafetensors"
+    },
+    {
+      "text": "Fork 321",
+      "url": "https://github.com/login?return_to=%2Fsafetensors%2Fsafetensors"
+    },
+    {
+      "text": "Star 3.8k",
+      "url": "https://github.com/login?return_to=%2Fsafetensors%2Fsafetensors"
+    },
+    {
+      "text": "Code",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Issues 34",
+      "url": "https://github.com/safetensors/safetensors/issues"
+    },
+    {
+      "text": "Pull requests 10",
+      "url": "https://github.com/safetensors/safetensors/pulls"
+    },
+    {
+      "text": "Discussions",
+      "url": "https://github.com/safetensors/safetensors/discussions"
+    },
+    {
+      "text": "Actions",
+      "url": "https://github.com/safetensors/safetensors/actions"
+    },
+    {
+      "text": "Projects",
+      "url": "https://github.com/safetensors/safetensors/projects"
+    },
+    {
+      "text": "Security and quality 0",
+      "url": "https://github.com/safetensors/safetensors/security"
+    },
+    {
+      "text": "Insights",
+      "url": "https://github.com/safetensors/safetensors/pulse"
+    },
+    {
+      "text": "Code",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Issues",
+      "url": "https://github.com/safetensors/safetensors/issues"
+    },
+    {
+      "text": "Pull requests",
+      "url": "https://github.com/safetensors/safetensors/pulls"
+    },
+    {
+      "text": "Discussions",
+      "url": "https://github.com/safetensors/safetensors/discussions"
+    },
+    {
+      "text": "Actions",
+      "url": "https://github.com/safetensors/safetensors/actions"
+    },
+    {
+      "text": "Projects",
+      "url": "https://github.com/safetensors/safetensors/projects"
+    },
+    {
+      "text": "Security and quality",
+      "url": "https://github.com/safetensors/safetensors/security"
+    },
+    {
+      "text": "Insights",
+      "url": "https://github.com/safetensors/safetensors/pulse"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Branches",
+      "url": "https://github.com/safetensors/safetensors/branches"
+    },
+    {
+      "text": "Tags",
+      "url": "https://github.com/safetensors/safetensors/tags"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors/branches"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors/tags"
+    },
+    {
+      "text": "414 Commits",
+      "url": "https://github.com/safetensors/safetensors/commits/main/"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors/commits/main/"
+    },
+    {
+      "text": ".github",
+      "url": "https://github.com/safetensors/safetensors/tree/main/.github"
+    },
+    {
+      "text": ".github",
+      "url": "https://github.com/safetensors/safetensors/tree/main/.github"
+    },
+    {
+      "text": "attacks",
+      "url": "https://github.com/safetensors/safetensors/tree/main/attacks"
+    },
+    {
+      "text": "attacks",
+      "url": "https://github.com/safetensors/safetensors/tree/main/attacks"
+    },
+    {
+      "text": "bindings/ python",
+      "url": "https://github.com/safetensors/safetensors/tree/main/bindings/python"
+    },
+    {
+      "text": "bindings/ python",
+      "url": "https://github.com/safetensors/safetensors/tree/main/bindings/python"
+    },
+    {
+      "text": "docs",
+      "url": "https://github.com/safetensors/safetensors/tree/main/docs"
+    },
+    {
+      "text": "docs",
+      "url": "https://github.com/safetensors/safetensors/tree/main/docs"
+    },
+    {
+      "text": "safetensors",
+      "url": "https://github.com/safetensors/safetensors/tree/main/safetensors"
+    },
+    {
+      "text": "safetensors",
+      "url": "https://github.com/safetensors/safetensors/tree/main/safetensors"
+    },
+    {
+      "text": ".dockerignore",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.dockerignore"
+    },
+    {
+      "text": ".dockerignore",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.dockerignore"
+    },
+    {
+      "text": ".gitignore",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.gitignore"
+    },
+    {
+      "text": ".gitignore",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.gitignore"
+    },
+    {
+      "text": ".pre-commit-config.yaml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.pre-commit-config.yaml"
+    },
+    {
+      "text": ".pre-commit-config.yaml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/.pre-commit-config.yaml"
+    },
+    {
+      "text": "CODE_OF_CONDUCT.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/CODE_OF_CONDUCT.md"
+    },
+    {
+      "text": "CODE_OF_CONDUCT.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/CODE_OF_CONDUCT.md"
+    },
+    {
+      "text": "CONTRIBUTING.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/CONTRIBUTING.md"
+    },
+    {
+      "text": "CONTRIBUTING.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/CONTRIBUTING.md"
+    },
+    {
+      "text": "Dockerfile.s390x.test",
+      "url": "https://github.com/safetensors/safetensors/blob/main/Dockerfile.s390x.test"
+    },
+    {
+      "text": "Dockerfile.s390x.test",
+      "url": "https://github.com/safetensors/safetensors/blob/main/Dockerfile.s390x.test"
+    },
+    {
+      "text": "GOVERNANCE.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/GOVERNANCE.md"
+    },
+    {
+      "text": "GOVERNANCE.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/GOVERNANCE.md"
+    },
+    {
+      "text": "LICENSE",
+      "url": "https://github.com/safetensors/safetensors/blob/main/LICENSE"
+    },
+    {
+      "text": "LICENSE",
+      "url": "https://github.com/safetensors/safetensors/blob/main/LICENSE"
+    },
+    {
+      "text": "MAINTAINERS.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/MAINTAINERS.md"
+    },
+    {
+      "text": "MAINTAINERS.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/MAINTAINERS.md"
+    },
+    {
+      "text": "Makefile",
+      "url": "https://github.com/safetensors/safetensors/blob/main/Makefile"
+    },
+    {
+      "text": "Makefile",
+      "url": "https://github.com/safetensors/safetensors/blob/main/Makefile"
+    },
+    {
+      "text": "README.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/README.md"
+    },
+    {
+      "text": "README.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/README.md"
+    },
+    {
+      "text": "RELEASE.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/RELEASE.md"
+    },
+    {
+      "text": "RELEASE.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/RELEASE.md"
+    },
+    {
+      "text": "SECURITY.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/SECURITY.md"
+    },
+    {
+      "text": "SECURITY.md",
+      "url": "https://github.com/safetensors/safetensors/blob/main/SECURITY.md"
+    },
+    {
+      "text": "codecov.yaml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/codecov.yaml"
+    },
+    {
+      "text": "codecov.yaml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/codecov.yaml"
+    },
+    {
+      "text": "codecov.yml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/codecov.yml"
+    },
+    {
+      "text": "codecov.yml",
+      "url": "https://github.com/safetensors/safetensors/blob/main/codecov.yml"
+    },
+    {
+      "text": "flake.lock",
+      "url": "https://github.com/safetensors/safetensors/blob/main/flake.lock"
+    },
+    {
+      "text": "flake.lock",
+      "url": "https://github.com/safetensors/safetensors/blob/main/flake.lock"
+    },
+    {
+      "text": "flake.nix",
+      "url": "https://github.com/safetensors/safetensors/blob/main/flake.nix"
+    },
+    {
+      "text": "flake.nix",
+      "url": "https://github.com/safetensors/safetensors/blob/main/flake.nix"
+    },
+    {
+      "text": "README",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Code of conduct",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Contributing",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Apache-2.0 license",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "Security",
+      "url": "https://github.com/safetensors/safetensors"
+    },
+    {
+      "text": "",
+      "url": "https://pypi.org/pypi/safetensors/"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/docs/safetensors/index"
+    },
+    {
+      "text": "",
+      "url": "https://pepy.tech/project/safetensors"
+    },
+    {
+      "text": "",
+      "url": "https://crates.io/crates/safetensors"
+    },
+    {
+      "text": "",
+      "url": "https://docs.rs/safetensors/"
+    },
+    {
+      "text": "",
+      "url": "https://deps.rs/repo/github/huggingface/safetensors?path=safetensors"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#safetensors"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#safetensors-1"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#installation"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#pip"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#from-source"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#getting-started"
+    },
+    {
+      "text": "Python documentation",
+      "url": "https://huggingface.co/docs/safetensors/index"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#format"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#yet-another-format-"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#main-oppositions"
+    },
+    {
+      "text": "https://www.cvedetails.com/vulnerability-list/vendor_id-15991/product_id-35054/Hdfgroup-Hdf5.html",
+      "url": "https://www.cvedetails.com/vulnerability-list/vendor_id-15991/product_id-35054/Hdfgroup-Hdf5.html"
+    },
+    {
+      "text": "link",
+      "url": "https://capnproto.org/language.html#built-in-types"
+    },
+    {
+      "text": "link",
+      "url": "https://stackoverflow.com/questions/48458839/capnproto-maximum-filesize"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#notes"
+    },
+    {
+      "text": "",
+      "url": "https://github.com/safetensors/safetensors#benefits"
+    },
+    {
+      "text": "BLOOM",
+      "url": "https://huggingface.co/bigscience/bloom"
+    },
+    {
+      "text": "huggingface.co/docs/safetensors",
+      "url": "https://huggingface.co/docs/safetensors"
+    },
+    {
+      "text": "Readme",
+      "url": "https://github.com/safetensors/safetensors#readme-ov-file"
+    },
+    {
+      "text": "Apache-2.0 license",
+      "url": "https://github.com/safetensors/safetensors#Apache-2.0-1-ov-file"
+    },
+    {
+      "text": "Code of conduct",
+      "url": "https://github.com/safetensors/safetensors#coc-ov-file"
+    },
+    {
+      "text": "Contributing",
+      "url": "https://github.com/safetensors/safetensors#contributing-ov-file"
+    },
+    {
+      "text": "Security policy",
+      "url": "https://github.com/safetensors/safetensors#security-ov-file"
+    },
+    {
+      "text": "Activity",
+      "url": "https://github.com/safetensors/safetensors/activity"
+    },
+    {
+      "text": "Custom properties",
+      "url": "https://github.com/safetensors/safetensors/custom-properties"
+    },
+    {
+      "text": "3.8k stars",
+      "url": "https://github.com/safetensors/safetensors/stargazers"
+    },
+    {
+      "text": "43 watching",
+      "url": "https://github.com/safetensors/safetensors/watchers"
+    },
+    {
+      "text": "321 forks",
+      "url": "https://github.com/safetensors/safetensors/forks"
+    },
+    {
+      "text": "Report repository",
+      "url": "https://github.com/contact/report-content?content_url=https%3A%2F%2Fgithub.com%2Fsafetensors%2Fsafetensors&report=safetensors+%28user%29"
+    },
+    {
+      "text": "Releases 46",
+      "url": "https://github.com/safetensors/safetensors/releases"
+    },
+    {
+      "text": "v0.7.0 Latest Nov 19, 2025",
+      "url": "https://github.com/safetensors/safetensors/releases/tag/v0.7.0"
+    },
+    {
+      "text": "+ 45 releases",
+      "url": "https://github.com/safetensors/safetensors/releases"
+    },
+    {
+      "text": "Packages 0",
+      "url": "https://github.com/orgs/safetensors/packages?repo_name=safetensors"
+    },
+    {
+      "text": "Contributors",
+      "url": "https://github.com/safetensors/safetensors/graphs/contributors"
+    },
+    {
+      "text": "Python 51.0%",
+      "url": "https://github.com/safetensors/safetensors/search?l=python"
+    },
+    {
+      "text": "Rust 48.3%",
+      "url": "https://github.com/safetensors/safetensors/search?l=rust"
+    }
+  ],
+  "meta_description": "Simple, safe way to store and distribute tensors. Contribute to safetensors/safetensors development by creating an account on GitHub.",
+  "status_code": 200,
+  "text": "Notifications You must be signed in to change notification settings\n\nFork 321\n\nStar 3.8k\n\nCode\n\nIssues 34\n\nPull requests 10\n\nDiscussions\n\nActions\n\nProjects\n\nSecurity and quality 0\n\nInsights\n\nCode\n\nIssues\n\nPull requests\n\nDiscussions\n\nActions\n\nProjects\n\nSecurity and quality\n\nInsights\n\nsafetensors/safetensors\n\nFolders and files\n\nLatest commit\n\nHistory\n\nRepository files navigation\n\nREADME\n\nCode of conduct\n\nContributing\n\nApache-2.0 license\n\nSecurity\n\nPython\n\nRust\n\nsafetensors\n\nSafetensors\n\nThis repository implements a new simple format for storing tensors\nsafely (as opposed to pickle) and that is still fast (zero-copy).\n\nInstallation\n\nYou can install safetensors via the pip manager:\n\nFor the sources, you need Rust\n\nGetting started\n\nPython documentation\n\nFormat\n\n8 bytes: N , an unsigned little-endian 64-bit integer, containing the size of the header\n\nN bytes: a JSON UTF-8 string representing the header. The header data MUST begin with a { character (0x7B). The header data MAY be trailing padded with whitespace (0x20). The header is a dict like {\"TENSOR_NAME\": {\"dtype\": \"F16\", \"shape\": [1, 16, 256], \"data_offsets\": [BEGIN, END]}, \"NEXT_TENSOR_NAME\": {...}, ...} , data_offsets point to the tensor data relative to the beginning of the byte buffer (i.e. not an absolute position in the file),\nwith BEGIN as the starting offset and END as the one-past offset (so total tensor byte size = END - BEGIN ). A special key __metadata__ is allowed to contain free form string-to-string map. Arbitrary JSON is not allowed, all values must be strings.\n\nThe header data MUST begin with a { character (0x7B).\n\nThe header data MAY be trailing padded with whitespace (0x20).\n\nThe header is a dict like {\"TENSOR_NAME\": {\"dtype\": \"F16\", \"shape\": [1, 16, 256], \"data_offsets\": [BEGIN, END]}, \"NEXT_TENSOR_NAME\": {...}, ...} , data_offsets point to the tensor data relative to the beginning of the byte buffer (i.e. not an absolute position in the file),\nwith BEGIN as the starting offset and END as the one-past offset (so total tensor byte size = END - BEGIN ).\n\ndata_offsets point to the tensor data relative to the beginning of the byte buffer (i.e. not an absolute position in the file),\nwith BEGIN as the starting offset and END as the one-past offset (so total tensor byte size = END - BEGIN ).\n\nA special key __metadata__ is allowed to contain free form string-to-string map. Arbitrary JSON is not allowed, all values must be strings.\n\nRest of the file: byte-buffer.\n\nNotes:\n\nDuplicate keys are disallowed. Not all parsers may respect this.\n\nIn general the subset of JSON is implicitly decided by serde_json for\nthis library. Anything obscure might be modified at a later time, that odd ways\nto represent integer, newlines and escapes in utf-8 strings. This would only\nbe done for safety concerns\n\nTensor values are not checked against, in particular NaN and +/-Inf could\nbe in the file\n\nEmpty tensors (tensors with 1 dimension being 0) are allowed.\nThey are not storing any data in the databuffer, yet retaining size in the header.\nThey don't really bring a lot of values but are accepted since they are valid tensors\nfrom traditional tensor libraries perspective (torch, tensorflow, numpy, ..).\n\n0-rank Tensors (tensors with shape [] ) are allowed, they are merely a scalar.\n\nThe byte buffer needs to be entirely indexed, and cannot contain holes. This prevents\nthe creation of polyglot files.\n\nEndianness: Little-endian.\nmoment.\n\nOrder: 'C' or row-major.\n\nNotes: Some smaller than 1 byte dtypes appeared, which make alignment tricky. Non traditional APIs might be required for those.\n\nYet another format ?\n\nThe main rationale for this crate is to remove the need to use pickle on PyTorch which is used by default.\nThere are other formats out there used by machine learning and more general\nformats.\n\nLet's take a look at alternatives and why this format is deemed interesting.\nThis is my very personal and probably biased view:\n\nSafe: Can I use a file randomly downloaded and expect not to run arbitrary code ?\n\nZero-copy: Does reading the file require more memory than the original file ?\n\nLazy loading: Can I inspect the file without loading everything ? And loading only\nsome tensors in it without scanning the whole file (distributed setting) ?\n\nLayout control: Lazy loading, is not necessarily enough since if the information about tensors is spread out in your file, then even if the information is lazily accessible you might have to access most of your file to read the available tensors (incurring many DISK -> RAM copies). Controlling the layout to keep fast access to single tensors is important.\n\nNo file size limit: Is there a limit to the file size ?\n\nFlexibility: Can I save custom code in the format and be able to use it later with zero extra code ? (~ means we can store more than pure tensors, but no custom code)\n\nBfloat16/Fp8: Does the format support native bfloat16/fp8 (meaning no weird workarounds are\nnecessary)? This is becoming increasingly important in the ML world.\n\nMain oppositions\n\nPickle: Unsafe, runs arbitrary code\n\nH5: Apparently now discouraged for TF/Keras. Seems like a great fit otherwise actually. Some classic use after free issues: https://www.cvedetails.com/vulnerability-list/vendor_id-15991/product_id-35054/Hdfgroup-Hdf5.html . On a very different level than pickle security-wise. Also 210k lines of code vs ~400 lines for this lib currently.\n\nSavedModel: Tensorflow specific (it contains TF graph information).\n\nMsgPack: No layout control to enable lazy loading (important for loading specific parts in distributed setting)\n\nProtobuf: Hard 2Go max file size limit\n\nCap'n'proto: Float16 support is not present link so using a manual wrapper over a byte-buffer would be necessary. Layout control seems possible but not trivial as buffers have limitations link .\n\nNumpy (npz): No bfloat16 support. Vulnerable to zip bombs (DOS). Not zero-copy.\n\nArrow: No bfloat16 support.\n\nNotes\n\nZero-copy: No format is really zero-copy in ML, it needs to go from disk to RAM/GPU RAM (that takes time). On CPU, if the file is already in cache, then it can\ntruly be zero-copy, whereas on GPU there is not such disk cache, so a copy is always required\nbut you can bypass allocating all the tensors on CPU at any given point.\nSafeTensors is not zero-copy for the header. The choice of JSON is pretty arbitrary, but since deserialization is <<< of the time required to load the actual tensor data and is readable I went that way, (also space is <<< to the tensor data).\n\nZero-copy: No format is really zero-copy in ML, it needs to go from disk to RAM/GPU RAM (that takes time). On CPU, if the file is already in cache, then it can\ntruly be zero-copy, whereas on GPU there is not such disk cache, so a copy is always required\nbut you can bypass allocating all the tensors on CPU at any given point.\nSafeTensors is not zero-copy for the header. The choice of JSON is pretty arbitrary, but since deserialization is <<< of the time required to load the actual tensor data and is readable I went that way, (also space is <<< to the tensor data).\n\nEndianness: Little-endian. This can be modified later, but it feels really unnecessary at the\nmoment.\n\nEndianness: Little-endian. This can be modified later, but it feels really unnecessary at the\nmoment.\n\nOrder: 'C' or row-major. This seems to have won. We can add that information later if needed.\n\nOrder: 'C' or row-major. This seems to have won. We can add that information later if needed.\n\nStride: No striding, all tensors need to be packed before being serialized. I have yet to see a case where it seems useful to have a strided tensor stored in serialized format.\n\nStride: No striding, all tensors need to be packed before being serialized. I have yet to see a case where it seems useful to have a strided tensor stored in serialized format.\n\nSub 1 bytes dtypes: Dtypes can now have lower than 1 byte size, this makes alignment&adressing tricky. For now, the library will simply error out whenever an operation triggers an non aligned read. Trickier API may be created later for those non standard ops.\n\nSub 1 bytes dtypes: Dtypes can now have lower than 1 byte size, this makes alignment&adressing tricky. For now, the library will simply error out whenever an operation triggers an non aligned read. Trickier API may be created later for those non standard ops.\n\nBenefits\n\nSince we can invent a new format we can propose additional benefits:\n\nPrevent DOS attacks: We can craft the format in such a way that it's almost\nimpossible to use malicious files to DOS attack a user. Currently, there's a limit\non the size of the header of 100MB to prevent parsing extremely large JSON.\nAlso when reading the file, there's a guarantee that addresses in the file\ndo not overlap in any way, meaning when you're loading a file you should never\nexceed the size of the file in memory\n\nPrevent DOS attacks: We can craft the format in such a way that it's almost\nimpossible to use malicious files to DOS attack a user. Currently, there's a limit\non the size of the header of 100MB to prevent parsing extremely large JSON.\nAlso when reading the file, there's a guarantee that addresses in the file\ndo not overlap in any way, meaning when you're loading a file you should never\nexceed the size of the file in memory\n\nFaster load: PyTorch seems to be the fastest file to load out in the major\nML formats. However, it does seem to have an extra copy on CPU, which we\ncan bypass in this lib by using torch.UntypedStorage.from_file .\nCurrently, CPU loading times are extremely fast with this lib compared to pickle.\nGPU loading times are as fast or faster than PyTorch equivalent.\nLoading first on CPU with memmapping with torch, and then moving all tensors to GPU seems\nto be faster too somehow (similar behavior in torch pickle)\n\nFaster load: PyTorch seems to be the fastest file to load out in the major\nML formats. However, it does seem to have an extra copy on CPU, which we\ncan bypass in this lib by using torch.UntypedStorage.from_file .\nCurrently, CPU loading times are extremely fast with this lib compared to pickle.\nGPU loading times are as fast or faster than PyTorch equivalent.\nLoading first on CPU with memmapping with torch, and then moving all tensors to GPU seems\nto be faster too somehow (similar behavior in torch pickle)\n\nLazy loading: in distributed (multi-node or multi-gpu) settings, it's nice to be able to\nload only part of the tensors on the various models. For BLOOM using this format enabled\nto load the model on 8 GPUs from 10mn with regular PyTorch weights down to 45s.\nThis really speeds up feedbacks loops when developing on the model. For instance\nyou don't have to have separate copies of the weights when changing the distribution\nstrategy (for instance Pipeline Parallelism vs Tensor Parallelism).\n\nLazy loading: in distributed (multi-node or multi-gpu) settings, it's nice to be able to\nload only part of the tensors on the various models. For BLOOM using this format enabled\nto load the model on 8 GPUs from 10mn with regular PyTorch weights down to 45s.\nThis really speeds up feedbacks loops when developing on the model. For instance\nyou don't have to have separate copies of the weights when changing the distribution\nstrategy (for instance Pipeline Parallelism vs Tensor Parallelism).\n\nLicense: Apache-2.0\n\nAbout\n\nSimple, safe way to store and distribute tensors\n\nResources\n\nLicense\n\nCode of conduct\n\nContributing\n\nSecurity policy\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nStars\n\nWatchers\n\nForks\n\nReleases 46\n\nPackages 0\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nContributors\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nLanguages\n\nPython 51.0%\n\nRust 48.3%\n\nOther 0.7%",
+  "text_length": 11821,
+  "title": "GitHub - safetensors/safetensors: Simple, safe way to store and distribute tensors · GitHub",
+  "url": "https://github.com/safetensors/safetensors"
+}

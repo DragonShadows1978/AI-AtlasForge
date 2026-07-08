@@ -267,6 +267,52 @@ def test_runner_loads_pinned_webproxy_evidence_for_validation(tmp_path):
     assert "Example Paper" in runner._build_pinned_evidence_index()
 
 
+def test_runner_loads_literal_webproxy_json_manifest_for_validation(tmp_path):
+    import investigation_engine
+
+    config = investigation_engine.InvestigationConfig(
+        query="evidence test",
+        investigation_id="inv_webproxy_json_test",
+        timeout_minutes=10,
+        workspace_dir=tmp_path,
+    )
+    runner = investigation_engine.InvestigationRunner.__new__(investigation_engine.InvestigationRunner)
+    runner.config = config
+
+    capture_dir = tmp_path / "artifacts" / "webproxy_json" / "inv_webproxy_json_test_sub_0"
+    capture_dir.mkdir(parents=True)
+    payload_path = capture_dir / "000001_WebFetch_fetch_abcdef.json"
+    payload = {
+        "type": "fetch",
+        "url": "https://example.com/source",
+        "title": "Literal Capture",
+        "text": "Captured directly by the WebProxy MCP layer.",
+        "text_length": 44,
+    }
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    record = {
+        "artifact_type": "web_proxy_json_output",
+        "subagent_id": "inv_webproxy_json_test_sub_0",
+        "tool_name": "WebFetch",
+        "endpoint": "/fetch",
+        "url": "https://example.com/source",
+        "artifact_json_path": str(payload_path),
+        "sha256": "abc",
+        "byte_length": payload_path.stat().st_size,
+    }
+    (capture_dir / "manifest.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    sources, records = runner._load_pinned_webproxy_evidence()
+    json_records = runner._load_webproxy_json_artifact_records()
+
+    assert "https://example.com/source" in sources
+    assert sources["https://example.com/source"].content == "Captured directly by the WebProxy MCP layer."
+    assert len(records) == 1
+    assert records[0]["artifact_json_path"] == str(payload_path)
+    assert len(json_records) == 1
+    assert json_records[0]["artifact_json_path"] == str(payload_path.resolve())
+
+
 def test_validation_orchestrator_prefers_pinned_evidence(monkeypatch):
     from investigation_validator.models import Claim, FetchedSource, ValidationConfig
     from investigation_validator.orchestrator import ValidationOrchestrator

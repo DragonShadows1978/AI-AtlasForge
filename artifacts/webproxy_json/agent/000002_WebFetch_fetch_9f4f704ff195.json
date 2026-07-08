@@ -1,0 +1,198 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_8b2399c3f0ac7dedf6d7e21e6201f60cf12fb17a5372d4c8dfea179f0264e76a",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_8b2399c3f0ac7dedf6d7e21e6201f60cf12fb17a5372d4c8dfea179f0264e76a.json",
+  "_cached_at": 1779556614,
+  "content_type": "text/html; charset=UTF-8",
+  "fetched_at": 1779556614,
+  "headings": [
+    "Enhancing Memory Allocation with New NVIDIA CUDA 11.2 Features",
+    "CUDA programming model enhancements",
+    "Stream-ordered memory allocator",
+    "Cooperative groups",
+    "CUDA graphs",
+    "CUDA compiler",
+    "Nsight Developer Tools",
+    "CUDA enhanced compatibility",
+    "Summary",
+    "Tags",
+    "About the Authors",
+    "Comments"
+  ],
+  "links": [
+    {
+      "text": "Simulation / Modeling / Design",
+      "url": "https://developer.nvidia.com/blog/category/simulation-modeling-design/"
+    },
+    {
+      "text": "Ram Cherukuri",
+      "url": "https://developer.nvidia.com/blog/author/ramc/"
+    },
+    {
+      "text": "Discuss (0)",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#entry-content-comments"
+    },
+    {
+      "text": "L",
+      "url": "https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fdeveloper.nvidia.com%2Fblog%2Fenhancing-memory-allocation-with-new-cuda-11-2-features%2F"
+    },
+    {
+      "text": "T",
+      "url": "https://twitter.com/intent/tweet?text=Enhancing+Memory+Allocation+with+New+NVIDIA+CUDA+11.2+Features+%7C+NVIDIA+Technical+Blog+https%3A%2F%2Fdeveloper.nvidia.com%2Fblog%2Fenhancing-memory-allocation-with-new-cuda-11-2-features%2F"
+    },
+    {
+      "text": "F",
+      "url": "https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fdeveloper.nvidia.com%2Fblog%2Fenhancing-memory-allocation-with-new-cuda-11-2-features%2F"
+    },
+    {
+      "text": "R",
+      "url": "https://www.reddit.com/submit?url=https%3A%2F%2Fdeveloper.nvidia.com%2Fblog%2Fenhancing-memory-allocation-with-new-cuda-11-2-features%2F&title=Enhancing+Memory+Allocation+with+New+NVIDIA+CUDA+11.2+Features+%7C+NVIDIA+Technical+Blog"
+    },
+    {
+      "text": "Learn more",
+      "url": "https://www.nvidia.com/en-us/agreements/trustworthy-ai/terms/"
+    },
+    {
+      "text": "CUDA 11.2",
+      "url": "https://developer.nvidia.com/cuda-downloads"
+    },
+    {
+      "text": "CUDA 11.2 is available to download now.",
+      "url": "https://developer.nvidia.com/cuda-downloads"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#cuda_programming_model_enhancements"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#stream-ordered_memory_allocator"
+    },
+    {
+      "text": "cudaMallocAsync",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__HIGHLEVEL.html#group__CUDART__HIGHLEVEL_1ga31efcffc48981621feddd98d71a0feb"
+    },
+    {
+      "text": "Using the NVIDIA CUDA Stream-Ordered Memory Allocator",
+      "url": "https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#cooperative_groups"
+    },
+    {
+      "text": "Cooperative Groups: Flexible CUDA Thread Programming",
+      "url": "https://developer.nvidia.com/blog/cooperative-groups/"
+    },
+    {
+      "text": "cuLaunchCooperativeKernel",
+      "url": "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EXECUTION.html#group__CUDART__EXECUTION_1g504b94170f83285c71031be6d5d15f73"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#cuda_graphs"
+    },
+    {
+      "text": "Getting Started with CUDA Graphs",
+      "url": "https://developer.nvidia.com/blog/cuda-graphs/"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#cuda_compiler"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#nsight_developer_tools"
+    },
+    {
+      "text": "NVIDIA Nsight tools",
+      "url": "https://developer.nvidia.com/tools-overview"
+    },
+    {
+      "text": "Nsight Systems",
+      "url": "https://developer.nvidia.com/nsight-systems"
+    },
+    {
+      "text": "NVIDIA Nsight Systems 2020.5",
+      "url": "https://developer.nvidia.com/gameworksdownload#?tx=$gameworks,developer_tools"
+    },
+    {
+      "text": "Nsight Compute",
+      "url": "https://developer.nvidia.com/nsight-compute"
+    },
+    {
+      "text": "NVIDIA Nsight Compute 2020.3",
+      "url": "https://developer.nvidia.com/gameworksdownload#?tx=$gameworks,developer_tools"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#cuda_enhanced_compatibility"
+    },
+    {
+      "text": "CUDA Compatibility guide",
+      "url": "https://docs.nvidia.com/deploy/cuda-compatibility/index.html"
+    },
+    {
+      "text": "",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#summary"
+    },
+    {
+      "text": "CUDA 11 Features Revealed",
+      "url": "https://developer.nvidia.com/blog/cuda-11-features-revealed/"
+    },
+    {
+      "text": "future CUDA posts",
+      "url": "https://developer.nvidia.com/blog/tag/cuda/"
+    },
+    {
+      "text": "Discuss (0)",
+      "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/#entry-content-comments"
+    },
+    {
+      "text": "Simulation / Modeling / Design",
+      "url": "https://developer.nvidia.com/blog/category/simulation-modeling-design/"
+    },
+    {
+      "text": "A100",
+      "url": "https://developer.nvidia.com/blog/recent-posts/?products=A100"
+    },
+    {
+      "text": "Ampere",
+      "url": "https://developer.nvidia.com/blog/recent-posts/?products=Ampere"
+    },
+    {
+      "text": "CUDA",
+      "url": "https://developer.nvidia.com/blog/recent-posts/?products=CUDA"
+    },
+    {
+      "text": "Nsight Tools - Compute",
+      "url": "https://developer.nvidia.com/blog/recent-posts/?products=Nsight+Tools+-+Compute"
+    },
+    {
+      "text": "Accelerated Computing Libraries",
+      "url": "https://developer.nvidia.com/blog/tag/development-tools-and-libraries/"
+    },
+    {
+      "text": "Compilation",
+      "url": "https://developer.nvidia.com/blog/tag/compilation/"
+    },
+    {
+      "text": "parallel programming",
+      "url": "https://developer.nvidia.com/blog/tag/parallel-programming/"
+    },
+    {
+      "text": "Runtime Compilation",
+      "url": "https://developer.nvidia.com/blog/tag/runtime-compilation/"
+    },
+    {
+      "text": "View all posts by Ram Cherukuri",
+      "url": "https://developer.nvidia.com/blog/author/ramc/"
+    }
+  ],
+  "meta_description": "CUDA is the software development platform for building GPU-accelerated applications, providing all the components needed to develop applications targeting every…",
+  "status_code": 200,
+  "text": "Enhancing Memory Allocation with New NVIDIA CUDA 11.2 Features\n\nL\n\nT\n\nF\n\nR\n\nE\n\nAI-Generated Summary\n\nCUDA 11.2 introduces a stream-ordered CUDA memory allocator, enabling applications to order memory allocation and deallocation with other work launched into a CUDA stream, improving application performance by reusing memory allocations.\n\nThe CUDA 11.2 release allows cooperative kernels launched into separate streams to execute concurrently on a GPU if they fit within the GPU resources, enhancing the functionality of cooperative groups.\n\nCUDA 11.2 includes various compiler upgrades, including an LLVM upgrade to 7.0 and link-time optimization for device kernel code, which can improve compiler code generation for NVIDIA GPUs and application performance.\n\nAI-generated content may summarize information incompletely. Verify important information. Learn more\n\nCUDA is the software development platform for building GPU-accelerated applications, providing all the components needed to develop applications targeting every NVIDIA GPU platform for general purpose compute acceleration. The latest CUDA release, CUDA 11.2 , is focused on improving the user experience and application performance for CUDA developers.\n\nCUDA 11.2 has several important features including programming model updates, new compiler features, and enhanced compatibility across CUDA releases. This post offers an overview of the key CUDA 11.2 software features and highlights:\n\nStream-ordered CUDA memory suballocator: cudaMallocAsync and cudaFreeAsync\n\nUpdates to CUDA graphs and cooperative groups\n\nCompiler upgrade to LLVM 7 and CUDA kernel link-time optimization\n\nEnhanced CUDA compatibility support\n\nCUDA 11.2 is available to download now.\n\nCUDA programming model enhancements\n\nWith every CUDA release, we continue to enhance the CUDA programming model to enable you to get the most out of NVIDIA GPUs, while maintaining the programming flexibility of the higher-level APIs. In this release, we added an exciting new feature for stream-ordered memory allocation and extended some of the APIs for improving the functionality of cooperative groups and CUDA graphs.\n\nStream-ordered memory allocator\n\nOne of the highlights of CUDA 11.2 is the new stream-ordered CUDA memory allocator. This feature enables applications to order memory allocation and deallocation with other work launched into a CUDA stream such as kernel launches and asynchronous copies. This improves application performance by taking advantage of stream-ordering semantics to reuse memory allocations, using and managing memory pools to avoid expensive calls into the OS. The new asynchronous memory allocation and free API actions allow you to manage memory use as part of your application’s CUDA workflow. For many applications, this reduces the need for custom memory management abstractions, and makes it easier to create high-performance custom memory management for applications that need it. Moreover, this feature makes it easier to share memory pools across entities within an application.\n\nAs shown in this example, CUDA 11.2 introduces new stream-ordered versions of cudaMalloc and cudaFree —called cudaMallocAsync and cudaFreeAsync —which take a stream as an additional argument. The first call to cudaMallocAsync in the example allocates memory from the OS, but the subsequent call to cudaFreeAsync does not free it back to the OS. Instead, the memory is stored in a pool maintained by the CUDA driver, which allows the second call to cudaMallocAsync to reuse the memory previously freed, if it is of sufficient size.\n\nFor more information, see cudaMallocAsync in the C++ API Routines topic in the CUDA Toolkit documentation. For more information about how stream-ordered allocation works, the performance benefits, and how to port your application to use the new APIs, see Using the NVIDIA CUDA Stream-Ordered Memory Allocator posts.\n\nCooperative groups\n\nCooperative groups, introduced in CUDA 9, provides device code API actions to define groups of communicating threads and to express the granularity at which threads synchronize for more efficient parallel decompositions. For more information, see Cooperative Groups: Flexible CUDA Thread Programming .\n\nWhen you are using cooperative groups to launch kernels into separate streams with cuLaunchCooperativeKernel , these kernels can now execute concurrently on a GPU. Prior to CUDA 11.2, cooperative kernels were always serialized as if launched into the same stream. Kernels A and B launched into separate streams would execute sequentially on the GPU, with B waiting for A to finish before it could start. With CUDA 11.2, cooperative kernels now run concurrently if they can fit together within the GPU resources.\n\nYou can take advantage of this functionality with the existing cuLaunchCooperativeKernel API action. If you were already using multiple streams in your application, you may not even need to modify your application code to benefit from this feature.\n\nCUDA graphs\n\nCUDA graphs were introduced in CUDA 10.0 and have seen a steady progression of new features with every CUDA release. For more information about the performance enhancement, see Getting Started with CUDA Graphs .\n\nCUDA 11.2 introduces a new mechanism for synchronization between graph workloads and non-graph workloads. CUDA graphs now support two pairs of graph node types for external synchronization: signal and wait for CUDA events (available since CUDA 11.1), and external semaphore signal and wait (new in CUDA 11.2). These enhance existing graph functionality allowing internal graph operations to depend upon external work. Allowing graphs to inter-operate with the existing external semaphore infrastructure in CUDA enables new types of synchronization between graph workloads and non-CUDA workloads.\n\nCUDA 11.2 now also allows graph update to change the kernel function launched by a kernel node, using either explicit node update with cudaGraphExecKernelNodeSetParams or whole graph update with cudaGraphExecUpdate. This is an enhancement when compared to prior releases, where the kernel function could not be modified and had to match the original value.\n\nCUDA compiler\n\nIn CUDA 11.2, the compiler tool chain gets multiple feature and performance upgrades that are aimed at accelerating the GPU performance of applications and enhancing your overall productivity.\n\nThe compiler toolchain has an LLVM upgrade to 7.0, which enables new features and can help improve compiler code generation for NVIDIA GPUs. The CUDA C++ compiler, libNVVM, and NVRTC shared library have all been upgraded to the LLVM 7.0 code base. The libNVVM library provides GPU extensions to LLVM in support of the wider community of developers of compilers, DSL translators, and parallel applications targeting computational workloads on NVIDIA GPUs. The NVRTC shared library helps compile dynamically generated CUDA source code at runtime.\n\nLink-time optimization for device kernel code (Device LTO), introduced as a preview feature in the CUDA 11.0 toolkit release, is now available as a full-featured optimization capability in CUDA 11.2. Device LTO enables you to enjoy the productivity benefits of separate compilation of device code without incurring an undue runtime performance overhead relative to whole-program device compilation.\n\nThe 11.2 CUDA C++ compiler can optionally generate a diagnostic report on inline functions which can provide insights into the compiler’s function inlining decisions. These diagnostic reports can aid in advanced application performance analysis and tuning efforts.\n\nThe CUDA C++ compiler aggressively inlines device functions into call sites by default. This can make assembly-level debugging of optimized device code a difficult task. For source code compiled using the 11.2 CUDA C++ compiler toolchain, the cuda-gdb and NVIDIA Nsight Compute debugger can display names of inlined device functions in call-stack backtraces, thereby improving the debugging experience. You can single step through inline functions just like any other device function.\n\nNsight Developer Tools\n\nNVIDIA Developer Tools are a collection of applications, spanning desktop and mobile targets, which enable you to build, debug, profile, and develop CUDA applications that use the latest visual computing hardware. The NVIDIA Nsight tools have introduced some new functionality as well in CUDA 11.2.\n\nNsight Systems is a system-wide performance analysis tool, designed to help developers tune and scale software across CPUs and GPUs. The new 2020.5 update enhances Vulkan ray tracing, and profile tracing for NVIDIA Collectives Communication Library (NCCL) and CUDA memory allocation. It also delivers performance and UX improvements.\n\nNVIDIA Nsight Systems 2020.5 is now available for download.\n\nThe 2020.3 release of NVIDIA Nsight Compute included in the 11.2 CUDA Toolkit introduces several new features that simplify the process of CUDA kernel profiling and optimization. The update for Nsight Compute introduces a new Profile Series feature enabling you to configure ranges for multiple kernel parameters, and a source file import functionality.\n\nNVIDIA Nsight Compute 2020.3 is now available for download.\n\nCUDA enhanced compatibility\n\nHere’s a review of the enhanced CUDA compatibility support that was enabled in CUDA 11.1 and what it means for CUDA developers. By leveraging semantic versioning across components in the CUDA Toolkit, these components remain binary-compatible across all minor versions of a toolkit release. This means that CUDA has relaxed the minimum driver version check for the CUDA Toolkit and no longer requires a driver upgrade with minor releases. This is especially important for users who don’t have root privileges on their system.\n\nFor enterprise users, upgrading to the newer version of the CUDA driver was particularly cumbersome as it required quite a bit of planning and execution to ensure that all components in the production stack dependent on the driver were accounted for and validated. With enhanced compatibility, you can upgrade to a newer version of the CUDA Toolkit while still using an older version of the CUDA driver.\n\nEnhanced CUDA compatibility also gives you the general flexibility to move to newer toolkits and features, only excepting the ones that have new APIs or which depend on the kernel mode driver. You get the compatibility of the CUDA Toolkit with the CUDA driver across all minor versions. An application can be built for one CUDA minor release (for example, 11.1) and work across all future minor releases within the major family (for example, 11.x), as shown in Figure 2.\n\nFor more information about the enhanced compatibility feature and the overall CUDA compatibility model in the toolkit documentation, see the CUDA Compatibility guide .\n\nSummary\n\nTo learn more about the CUDA 11 generation toolkit capabilities and introductions, see CUDA 11 Features Revealed and follow future CUDA posts . For more\n\nTags\n\nAbout the Authors\n\nComments",
+  "text_length": 11003,
+  "title": "Enhancing Memory Allocation with New NVIDIA CUDA 11.2 Features | NVIDIA Technical Blog",
+  "url": "https://developer.nvidia.com/blog/enhancing-memory-allocation-with-new-cuda-11-2-features/"
+}

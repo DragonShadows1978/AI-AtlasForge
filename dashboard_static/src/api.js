@@ -33,7 +33,12 @@ export async function api(endpoint, methodOrOptions = 'GET', body = null) {
 
     const resp = await fetch(endpoint, opts);
     if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        let serverMsg = '';
+        try {
+            const errBody = await resp.json();
+            serverMsg = errBody.message || errBody.error || '';
+        } catch (_) { /* not JSON */ }
+        throw new Error(serverMsg || `HTTP ${resp.status}: ${resp.statusText}`);
     }
     return resp.json();
 }

@@ -6,6 +6,7 @@ This stage evaluates test results and decides next steps.
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
@@ -88,6 +89,36 @@ If ANY in-scope CRITICAL/HIGH/MODERATE/LIGHT bugs remain unfixed → reject to B
 Only proceed to Step C if all in-scope bugs are fixed or marked NONBLOCKING.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP B2 — SPEC AUTHORITY / FALSE-PREMISE GATE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The mission statement and implementation_plan.md are authoritative.
+Industry standard, conventional practice, performance convenience, or "good enough"
+are NOT valid reasons to override explicit mission requirements.
+
+Required:
+  - Extract every hard requirement from the mission and plan, especially MUST,
+    ONLY, NEVER, DO NOT, no/without, exact numbers, protected files, and named
+    algorithms.
+  - Treat implementation_plan.md as the executable contract for what BUILDING
+    was supposed to implement. Plan steps and success criteria are not advisory.
+  - For each hard requirement, provide concrete evidence from code, tests, or
+    artifacts. Do not trust a reported metric if the implementation could have
+    computed it from a proxy or counter.
+  - If a requirement is only approximately satisfied, mark it unmet unless the
+    mission explicitly permits approximation.
+  - If implementation uses an alternative because it is an industry standard,
+    classify that as a spec deviation. Return needs_revision unless the original
+    mission explicitly authorized that alternative.
+  - Look for false-premise success: counters, summaries, or tests that measure
+    the intended behavior while code still performs forbidden work.
+
+If any hard requirement is unmet or unverifiable:
+  - status="needs_revision"
+  - recommendation="BUILDING"
+  - issues_found must name the violated requirement and the evidence gap.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP C — SUGGESTION DECISION GATE (only when gate passes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -153,6 +184,23 @@ Respond with JSON:
     "recommendation": "COMPLETE" | "BUILDING" | "PLANNING",
     "red_team_findings_count": 0,
     "red_team_blocking_bugs": [],
+    "spec_compliance": {{
+        "hard_requirements": [
+            {{
+                "source": "mission|implementation_plan|test_results|artifact",
+                "source_excerpt": "Exact mission/plan text being evaluated",
+                "requirement": "Hard requirement in your own words",
+                "status": "met|unmet|unverifiable",
+                "evidence": ["file.py:123 proves X", "artifact.json field Y proves Z"],
+                "deviation": null,
+                "mission_authorized_deviation": false
+            }}
+        ],
+        "all_hard_requirements_met": true,
+        "unmet_requirements": [],
+        "unverifiable_requirements": [],
+        "unauthorized_deviations": []
+    }},
     "suggestion_decision": {{
         "generate_ideas": false,
         "generate_bugfixes": false,
@@ -214,6 +262,29 @@ If recommending COMPLETE, also include:
         valid_statuses = ["success", "needs_revision", "needs_replanning", "complete", "mission_complete", "done", "finished"]
         if status and status not in valid_statuses:
             logger.warning(f"ANALYZING: Unrecognized status '{raw_status}' (normalized: '{status}')")
+
+        integrity_blockers = self._spec_integrity_blockers(response, context)
+        if integrity_blockers and (status in {"success", "complete", "mission_complete", "done", "finished"} or recommendation == "COMPLETE"):
+            issues = list(response.get("issues_found", []) or [])
+            fixes = list(response.get("proposed_fixes", []) or [])
+            for blocker in integrity_blockers:
+                if blocker not in issues:
+                    issues.append(blocker)
+            if "Align implementation with explicit mission requirements; do not justify deviations as industry standard." not in fixes:
+                fixes.append("Align implementation with explicit mission requirements; do not justify deviations as industry standard.")
+            response = {
+                **response,
+                "status": "needs_revision",
+                "recommendation": "BUILDING",
+                "issues_found": issues,
+                "proposed_fixes": fixes,
+                "message_to_human": (
+                    "Spec integrity gate rejected completion: "
+                    + "; ".join(integrity_blockers[:2])
+                ),
+            }
+            status = "needs_revision"
+            recommendation = "BUILDING"
 
         events = [
             Event(
@@ -377,6 +448,269 @@ If recommending COMPLETE, also include:
             logger.info("ANALYZING: suppressed %s continuation mission(s) for profile=%s", suppressed, profile)
         response["continuation_missions"] = filtered
         return filtered
+
+    def _spec_integrity_blockers(
+        self,
+        response: Dict[str, Any],
+        context: StageContext,
+    ) -> List[str]:
+        """
+        Deterministic backstop for false-premise success in ANALYZING.
+
+        The LLM still performs the broad review, but a few high-risk spec
+        contracts are cheap enough to enforce here. This specifically catches
+        "selective-only" missions whose code reports a selective counter while
+        still computing dense full-precision scores and masking afterward.
+        """
+        blockers: List[str] = []
+        response_text = self._stringify_response(response).lower()
+        if (
+            "industry standard" in response_text
+            and ("spec" in response_text or "requirement" in response_text or "deviation" in response_text)
+        ):
+            blockers.append(
+                "Spec deviation justified by industry standard; explicit mission requirements remain authoritative."
+            )
+
+        hard_requirements = self._extract_hard_requirements(context)
+        if hard_requirements:
+            blockers.extend(self._spec_ledger_blockers(response, hard_requirements))
+
+        mission_text = "\n".join([
+            str(context.problem_statement or ""),
+            str(context.original_mission or ""),
+            str(context.mission.get("problem_statement") or ""),
+            self._read_text(Path(context.artifacts_dir) / "implementation_plan.md", max_chars=20000),
+        ]).lower()
+
+        selective_contract = (
+            "full precision only" in mission_text
+            or "full-precision dots only" in mission_text
+            or "compute full-precision dots only" in mission_text
+            or "no redundant computation" in mission_text
+            or "no computing full precision and throwing it away" in mission_text
+            or "only for the tail" in mission_text
+            or "only for the top-k" in mission_text
+        )
+        if selective_contract:
+            dense_hits = self._dense_full_precision_mask_hits(context)
+            if dense_hits:
+                sample = "; ".join(dense_hits[:3])
+                blockers.append(
+                    "Selective/full-precision-only requirement is not proven: code appears to compute dense "
+                    f"full-precision score matrices before masking ({sample})."
+                )
+
+        return blockers
+
+    def _spec_ledger_blockers(
+        self,
+        response: Dict[str, Any],
+        hard_requirements: List[Dict[str, str]],
+    ) -> List[str]:
+        spec = response.get("spec_compliance")
+        if not isinstance(spec, dict):
+            return [
+                "Missing spec_compliance hard-requirement ledger for mission/implementation plan requirements."
+            ]
+
+        ledger = spec.get("hard_requirements")
+        if not isinstance(ledger, list) or not ledger:
+            return [
+                "Empty spec_compliance.hard_requirements ledger; completion requires evidence for every hard requirement."
+            ]
+
+        blockers: List[str] = []
+        bad_statuses = []
+        unauthorized = []
+        covered = set()
+        for index, item in enumerate(ledger):
+            if not isinstance(item, dict):
+                bad_statuses.append(f"ledger[{index}] is not an object")
+                continue
+            status = str(item.get("status") or "").lower().strip()
+            if status not in {"met", "pass", "passed", "satisfied"}:
+                bad_statuses.append(
+                    f"{item.get('source_excerpt') or item.get('requirement') or f'ledger[{index}]'} => {status or 'missing status'}"
+                )
+            deviation = item.get("deviation")
+            if deviation and not item.get("mission_authorized_deviation"):
+                unauthorized.append(str(item.get("source_excerpt") or item.get("requirement") or deviation))
+            evidence = item.get("evidence")
+            if not evidence:
+                bad_statuses.append(
+                    f"{item.get('source_excerpt') or item.get('requirement') or f'ledger[{index}]'} => missing evidence"
+                )
+
+            ledger_text = " ".join([
+                str(item.get("source_excerpt") or ""),
+                str(item.get("requirement") or ""),
+            ])
+            for req_index, req in enumerate(hard_requirements):
+                if req_index not in covered and self._requirement_matches(req["text"], ledger_text):
+                    covered.add(req_index)
+
+        if spec.get("all_hard_requirements_met") is not True:
+            blockers.append("spec_compliance.all_hard_requirements_met is not true.")
+        for field in ("unmet_requirements", "unverifiable_requirements", "unauthorized_deviations"):
+            values = spec.get(field)
+            if isinstance(values, list) and values:
+                blockers.append(f"spec_compliance.{field} is non-empty: {values[:3]}")
+
+        if bad_statuses:
+            blockers.append(f"Hard requirement ledger has unmet/unverifiable/unevidenced entries: {bad_statuses[:5]}")
+        if unauthorized:
+            blockers.append(f"Unauthorized spec deviations present: {unauthorized[:5]}")
+
+        missing = [
+            req for index, req in enumerate(hard_requirements)
+            if index not in covered
+        ]
+        if missing:
+            samples = [f"{req['source']}: {req['text']}" for req in missing[:5]]
+            blockers.append(f"Spec ledger does not cover extracted hard requirements: {samples}")
+
+        return blockers
+
+    def _extract_hard_requirements(self, context: StageContext) -> List[Dict[str, str]]:
+        sources = [
+            ("mission", str(context.problem_statement or "")),
+            ("original_mission", str(context.original_mission or "")),
+            ("implementation_plan", self._read_text(Path(context.artifacts_dir) / "implementation_plan.md", max_chars=50000)),
+        ]
+        requirements: List[Dict[str, str]] = []
+        seen = set()
+        for source, text in sources:
+            section = ""
+            for raw_line in text.splitlines():
+                line = self._clean_requirement_line(raw_line)
+                if not line:
+                    continue
+                lower = line.lower()
+                if lower.startswith("#"):
+                    section = lower.strip("# ").strip()
+                    continue
+                if self._is_hard_requirement_line(line, section):
+                    key = self._normalize_requirement(line)
+                    if key and key not in seen:
+                        requirements.append({"source": source, "text": line})
+                        seen.add(key)
+        return requirements[:60]
+
+    @staticmethod
+    def _clean_requirement_line(line: str) -> str:
+        cleaned = line.strip()
+        cleaned = re.sub(r"^[-*]\s+", "", cleaned)
+        cleaned = re.sub(r"^\d+[.)]\s+", "", cleaned)
+        cleaned = cleaned.strip()
+        if len(cleaned) < 8:
+            return ""
+        if cleaned in {"---", "```", "```json"}:
+            return ""
+        return cleaned
+
+    @classmethod
+    def _is_hard_requirement_line(cls, line: str, section: str) -> bool:
+        lower = line.lower()
+        hard_markers = (
+            "must", "only", "never", "do not", "don't", "without",
+            "no ", "exact", "all ", "every ", "required", "success criteria",
+            "output:", "produce", "write ", "create ", "build ", "implement ",
+            "protected", "forbidden", "in-scope", "out-of-scope",
+        )
+        hard_sections = (
+            "success criteria", "requirements", "what to build", "steps",
+            "deliverables", "scope", "implementation requirements",
+        )
+        return any(marker in lower for marker in hard_markers) or any(name in section for name in hard_sections)
+
+    @staticmethod
+    def _normalize_requirement(text: str) -> str:
+        return " ".join(re.findall(r"[a-z0-9_]+", text.lower()))
+
+    @classmethod
+    def _requirement_matches(cls, requirement: str, ledger_text: str) -> bool:
+        req_norm = cls._normalize_requirement(requirement)
+        led_norm = cls._normalize_requirement(ledger_text)
+        if not req_norm or not led_norm:
+            return False
+        if req_norm in led_norm or led_norm in req_norm:
+            return True
+        req_tokens = {t for t in req_norm.split() if len(t) > 2}
+        led_tokens = {t for t in led_norm.split() if len(t) > 2}
+        if not req_tokens or not led_tokens:
+            return False
+        overlap = len(req_tokens & led_tokens)
+        return overlap / max(len(req_tokens), 1) >= 0.55
+
+    def _dense_full_precision_mask_hits(self, context: StageContext) -> List[str]:
+        workspace = Path(context.workspace_dir).resolve()
+        if not workspace.exists():
+            return []
+
+        hits: List[str] = []
+        dense_score_re = re.compile(
+            r"\b(full_scores|full_sc|ranking_scores|scores_full)\s*="
+            r".*(einsum|matmul|@).*(key_data|key\b|K\b)",
+            re.IGNORECASE,
+        )
+        mask_blend_re = re.compile(
+            r"where\s*\(\s*(refine_mask|tail_mask|r_mask)\s*,\s*"
+            r"(full_scores|full_sc|ranking_scores|scores_full)",
+            re.IGNORECASE,
+        )
+
+        for path in self._candidate_code_files(context):
+            try:
+                text = path.read_text(errors="ignore")
+            except OSError:
+                continue
+            if not mask_blend_re.search(text):
+                continue
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if dense_score_re.search(line):
+                    hits.append(f"{path.relative_to(workspace)}:{lineno}")
+                    break
+
+        return hits
+
+    def _candidate_code_files(self, context: StageContext) -> List[Path]:
+        workspace = Path(context.workspace_dir).resolve()
+        plan_text = self._read_text(Path(context.artifacts_dir) / "implementation_plan.md", max_chars=50000)
+        candidates: List[Path] = []
+        seen = set()
+        for match in re.finditer(r"[\w./-]+\.py\b", plan_text):
+            raw = match.group(0).strip("./")
+            path = (workspace / raw).resolve()
+            try:
+                path.relative_to(workspace)
+            except ValueError:
+                continue
+            if path.exists() and path.is_file() and path not in seen:
+                candidates.append(path)
+                seen.add(path)
+
+        if candidates:
+            return candidates
+
+        return [
+            path for path in workspace.rglob("*.py")
+            if "__pycache__" not in path.parts and path.is_file()
+        ]
+
+    @staticmethod
+    def _read_text(path: Path, max_chars: int = 10000) -> str:
+        try:
+            return path.read_text(errors="ignore")[:max_chars]
+        except OSError:
+            return ""
+
+    @staticmethod
+    def _stringify_response(response: Dict[str, Any]) -> str:
+        try:
+            return json.dumps(response, default=str)
+        except (TypeError, ValueError):
+            return str(response)
 
     def get_restrictions(self) -> StageRestrictions:
         """

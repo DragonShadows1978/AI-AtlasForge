@@ -1,0 +1,115 @@
+[
+  {
+    "url": "https://en.wikipedia.org/wiki/Vector_quantization",
+    "title": "Vector quantization",
+    "authors": "Wikipedia contributors, developed by Robert M. Gray (1980s)",
+    "year": "2024",
+    "distortion_equations": [
+      "D = Expected squared quantization error (sum of squared differences between input vectors and centroids)",
+      "Voronoi partition: each vector assigned to nearest centroid by Euclidean distance",
+      "Minimize expected squared quantization error"
+    ],
+    "clustering_algorithms": [
+      "K-means clustering",
+      "LBG (Linde-Buzo-Gray) algorithm",
+      "Lloyd algorithm",
+      "Competitive learning paradigm"
+    ],
+    "theoretical_insights": "VQ partitions input data space into Voronoi regions where each region is determined by closeness to representation vectors. Uses prototype-based clustering where centroids function as density points. Density matching property ensures compressed data has errors inversely proportional to local density."
+  },
+  {
+    "url": "https://docs.scipy.org/doc/scipy/reference/cluster.vq.html",
+    "title": "K-means clustering and vector quantization (scipy.cluster.vq) — SciPy v1.18.0 Manual",
+    "authors": "SciPy developers",
+    "year": "2024",
+    "distortion_equations": [
+      "Distortion D = sum of squared distances between observation vectors and dominating centroids",
+      "For vector v belonging to cluster i: minimize ∑||x_i - μ_i||²",
+      "Codebook: k by N array where row i is centroid of codeword i",
+      "Mean squared error (MSE) as distortion measure"
+    ],
+    "clustering_algorithms": [
+      "K-means algorithm",
+      "Iterative centroid reclassification",
+      "Convergence criterion: change in distortion < threshold"
+    ],
+    "theoretical_insights": "K-means algorithm minimizes distortion by iteratively reclassifying observations into clusters and recalculating centroids until convergence. The codebook generated can be used to quantize vectors by finding nearest centroid. Information theory terminology: centroid index = 'code', centroid table = 'code book'."
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.19874",
+    "title": "TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate",
+    "authors": "Amir Zandieh, Majid Daliri, Majid Hadian, Vahab Mirrokni",
+    "year": "2025",
+    "distortion_equations": [
+      "MSE Distortion: D_mse(Q_mse) = E[||x - Q_mse^(-1)(Q_mse(x))||_2^2] ≤ (√3·π/2)·(1/4^b)",
+      "Inner Product Distortion: D_prod(Q_prod) = E[|⟨y,x⟩ - ⟨y,Q_prod^(-1)(Q_prod(x))⟩|²] ≤ (√3·π²·||y||_2²/d)·(1/4^b)",
+      "Shannon's source coding distortion-rate function",
+      "Lloyd-Max quantizer for scalar quantization optimization",
+      "Lower bounds: D_mse(Q) ≥ 1/4^b, D_prod(Q) ≥ ||y||_2²/d·(1/4^b)"
+    ],
+    "clustering_algorithms": [
+      "Lloyd-Max algorithm for optimal scalar quantizers",
+      "Continuous k-means problem solving",
+      "Random rotation + Beta distribution-based quantization",
+      "1-bit Quantized Johnson-Lindenstrauss (QJL) transform"
+    ],
+    "theoretical_insights": "Vector quantization rooted in Shannon's source coding theory. Random rotation induces Beta distribution on coordinates. Near-independence of coordinates in high dimensions enables per-coordinate scalar quantization while achieving near-optimal distortion. Two-stage approach: MSE-optimal followed by QJL for unbiased inner product estimation. Information-theoretic lower bounds proven; TurboQuant achieves within 2.7x factor of optimality."
+  },
+  {
+    "url": "https://arxiv.org/abs/2604.10546",
+    "title": "Differentiable Vector Quantization for Rate-Distortion Optimization of Generative Image Compression",
+    "authors": "Shiyin Jiang, Wei Long, Minghao Han, Zhenghao Chen, Ce Zhu, Shuhang Gu",
+    "year": "2026",
+    "distortion_equations": [
+      "Rate-distortion (RD) optimization framework: minimize D subject to R ≤ R_target",
+      "Joint RD optimization for VQ-based compression",
+      "Entropy-constrained VQ formulation",
+      "Squared error distortion measure D = E[||x - x_hat||²]"
+    ],
+    "clustering_algorithms": [
+      "VQ codebook learning via entropy modeling",
+      "Differentiable soft relaxation of codebook distribution",
+      "Autoregressive entropy prediction",
+      "Lloyd-based codebook optimization"
+    ],
+    "theoretical_insights": "Entropy-constrained vector quantization enables end-to-end rate-distortion optimization. Disconnect between representation learning and entropy modeling solved via differentiable relaxation allowing entropy loss to shape latent prior. VQ achieves strong structural fidelity while maintaining theoretical rate-distortion guarantees."
+  },
+  {
+    "url": "https://www.math.ucdavis.edu/~saito/data/quantization/44it06-gray.pdf",
+    "title": "IEEE Transactions on Information Theory: Quantization and Vector Quantization Theory",
+    "authors": "Robert M. Gray (editor); Lloyd, Max, Linde, Buzo contributions",
+    "year": "1998",
+    "distortion_equations": [
+      "Lloyd's optimality conditions for quantizers: necessary conditions any optimal quantizer must satisfy",
+      "Minimum distortion quantizer characterization",
+      "High-resolution approximations: distortion via Bennett's formula",
+      "Vector quantization as block/multidimensional quantization"
+    ],
+    "clustering_algorithms": [
+      "Lloyd algorithm (Method I) - generalizes to vector quantizers",
+      "Lloyd-Max algorithm (Method II, rediscovered by Max 1960)",
+      "Linde-Buzo-Gray (LBG) algorithm for codebook design",
+      "Generalized Lloyd algorithm (GLA)"
+    ],
+    "theoretical_insights": "Foundational theory of quantization through Lloyd's optimality conditions. These conditions are necessary for any optimal quantizer achieving minimal distortion. Lloyd's Method I generalizes naturally to vector quantizers (preferred over Method II). High-resolution theory provides upper bounds on minimum distortion for block quantizers of any dimension."
+  },
+  {
+    "url": "https://ocw.mit.edu/courses/6-345-automatic-speech-recognition-spring-2003/03cf90ad84bcc6971e4fc8bf26c6fee3_lecture6new.pdf",
+    "title": "Vector Quantization and Clustering - MIT OpenCourseWare Lecture",
+    "authors": "MIT automatic speech recognition course faculty",
+    "year": "2003",
+    "distortion_equations": [
+      "Distortion D = sum of squared distances = ∑_i ||x_i - μ_i||²",
+      "Euclidean distance: ||x - μ_i||² = (x - μ_i)^T(x - μ_i)",
+      "Normalized dot-product distance: x^T·y / (||x||·||y||)",
+      "Weighted Euclidean: (x - μ_i)^T·W·(x - μ_i)"
+    ],
+    "clustering_algorithms": [
+      "K-means clustering for VQ",
+      "Lloyd algorithm",
+      "Distance metrics: Euclidean, normalized dot-product, weighted Euclidean",
+      "LBG algorithm for codebook design with binary splitting"
+    ],
+    "theoretical_insights": "Distance metrics strongly influence cluster shapes. Euclidean distance results in spherical clusters with optimal center being arithmetic mean. Codebook design is critical first step in VQ process. Performance measured by distortion metric or task-relevant metrics like speech recognition accuracy. Robust training minimizes performance degradation between training and testing."
+  }
+]

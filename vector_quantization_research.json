@@ -1,0 +1,82 @@
+[
+  {
+    "url": "https://arxiv.org/html/2606.05876",
+    "title": "An Ultra-Low-Bitrate Neural Speech Codec with Plain-to-Pseudo Synergistic Vector Quantization",
+    "authors": "Jiang, Liu, Zheng, Gao, Ling, Wu",
+    "year": 2025,
+    "key_findings": "Vector quantization enables ultra-low bitrate compression (0.5 kbps) by using multiple synergistic VQs where pseudo VQs predict auxiliary tokens without contributing to bitrate. Standard RVQ assigns same bitrate per stage; this approach allocates zero bitrate to pseudo VQs, achieving 75% bitrate reduction. VQ compression works at low bitrates by decomposing quantization into cascaded stages that progressively refine residuals, requiring smaller codebooks per stage vs single-codebook quantization.",
+    "bitrate_metrics": "Achieves speech reconstruction quality comparable to 2.0 kbps codecs at only 0.5 kbps using plain-to-pseudo quantizer architecture"
+  },
+  {
+    "url": "https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/",
+    "title": "TurboQuant: Redefining AI efficiency with extreme compression",
+    "authors": "Amir Zandieh, Vahab Mirrokni (Google Research)",
+    "year": 2026,
+    "key_findings": "Vector quantization achieves extreme compression at low bitrates through two-stage approach: PolarQuant (coordinate-to-polar transformation eliminating memory overhead) plus QJL (1-bit error correction). Key insight: VQ overcomes scalar quantization limitations by leveraging high-dimensional vector geometry - random rotation induces concentrated Beta distributions, enabling near-optimal scalar quantizers per coordinate while preserving geometric structure via residual QJL. Works without training/fine-tuning.",
+    "bitrate_metrics": "3-bit KV cache quantization with zero accuracy loss; 2.5-bit with marginal degradation; achieves 6x memory reduction; 8x speedup on attention logits"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.19874",
+    "title": "TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate",
+    "authors": "Amir Zandieh, Majid Daliri, Majid Hadian, Vahab Mirrokni",
+    "year": 2025,
+    "key_findings": "VQ solves low-bitrate problem via data-oblivious algorithms achieving near-optimal distortion across all bit-widths. Addresses two key advantages over scalar quantization: (1) MSE-optimal quantizers using random rotation + scalar per-coordinate quantization; (2) 1-bit QJL transform on residuals eliminates bias in inner product estimation. Provides information-theoretic lower bounds proving VQ superiority, showing TurboQuant differs only by 2.7x constant factor from theoretical optimum.",
+    "bitrate_metrics": "KV cache: 3.5 bits absolute neutrality, 2.5 bits marginal degradation; nearest neighbor search outperforms product quantization in recall with virtually zero indexing time"
+  },
+  {
+    "url": "https://www.assemblyai.com/blog/what-is-residual-vector-quantization",
+    "title": "What is Residual Vector Quantization?",
+    "authors": "AssemblyAI",
+    "year": 2025,
+    "key_findings": "RVQ achieves low-bitrate compression by cascading quantizers where each stage refines residuals from prior stage. Key advantage over single codebook: breaks high-dimensional quantization into many sub-problems. Used in SoundStream and EnCodec. VQ works at low bitrates because residual quantization progressively captures finer detail through independent codebooks, avoiding single exponentially-large codebook. Each stage requires only moderate codebook size, dramatically reducing computational cost while maintaining precision.",
+    "bitrate_metrics": "Neural audio codecs achieve near-lossless compression across broad spectrum of bitrates; enables speech coding for various applications from satellite to on-device"
+  },
+  {
+    "url": "https://www.pinecone.io/learn/series/faiss/product-quantization/",
+    "title": "Product Quantization: Compressing high-dimensional vectors by 97%",
+    "authors": "Pinecone",
+    "year": 2024,
+    "key_findings": "Product quantization partitions high-dimensional vectors into subvectors, assigning each to nearest centroid per subspace. Advantage over scalar quantization: subvector approach reduces memory/complexity from k^D to k^(1/m)*D where m=subvector count. VQ efficiency at low bitrates: decomposition reduces codebook requirements exponentially - 128D vectors quantized to 8D ID vectors (64x compression) with only 8 bits per centroid ID vs 32-bit float original.",
+    "bitrate_metrics": "97% memory compression; 5.5x faster nearest-neighbor search; 16.5x additional speedup with IVF+PQ composite indexing"
+  },
+  {
+    "url": "https://arxiv.org/abs/2102.04503",
+    "title": "VS-Quant: Per-vector Scaled Quantization for Accurate Low-Precision Neural Network Inference",
+    "authors": "Steve Dai, Rangharajan Venkatesan, Haoxing Ren, Brian Zimmer, William J. Dally, Brucek Khailany",
+    "year": 2021,
+    "key_findings": "Demonstrates VQ effectiveness via per-vector scaling: separate scale factors for 16-64 element vectors preserve precision better than coarse-grain scaling. Shows VQ captures local statistics effectively in quantization domain. At low bitwidths (4-bit), per-vector approach maintains accuracy where uniform scalar quantization fails. Two-level quantization scheme for scale factors with low-bitwidth integers reduces overhead.",
+    "bitrate_metrics": "4-bit weights/activations: 37% area savings, 24% energy savings, 75% accuracy on ResNet50; 4-bit weights/8-bit activations achieves near full-precision on BERT"
+  },
+  {
+    "url": "https://arxiv.org/abs/2106.08295",
+    "title": "A White Paper on Neural Network Quantization",
+    "authors": "Markus Nagel, Marios Fournarakis, Rana Ali Amjad, Yelysei Bondarenko, Mart van Baalen, Tijmen Blankevoort",
+    "year": 2021,
+    "key_findings": "Comprehensive analysis of quantization methods for low-bit networks. Shows quantization-aware training (QAT) enables lower bitrate than post-training quantization (PTQ). VQ implicit in hierarchical codebook designs - cascaded quantization mitigates noise from aggressive low-bit reduction. Key finding: quantization noise reduction requires fine-tuning when bitwidth very small (<4 bits), but VQ approaches achieve competitive sub-3bit results.",
+    "bitrate_metrics": "8-bit quantization close to floating-point accuracy via PTQ; lower bitrates require QAT fine-tuning; sub-3bit achievable with specialized methods"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.06016",
+    "title": "Variable Bitrate Residual Vector Quantization for Audio Coding",
+    "authors": "Yunkee Chae, Woosung Choi, Yuhta Takida, Junghyun Koo, Yukara Ikemiya, Zhi Zhong, Kin Wai Cheuk, Marco A. Martínez-Ramírez, Kyogu Lee, Wei-Hsiang Liao, Yuki Mitsufuji",
+    "year": 2024,
+    "key_findings": "Fixed RVQ uses same bitrate per stage inefficiently; variable bitrate RVQ adapts codebook count per frame via importance maps. Shows RVQ achieves low bitrate by allowing suboptimal frames (silence) to use fewer codebooks. Gradient estimation for masking operations enables efficient training. VQ superiority at low bitrates: flexibility to allocate bits per frame rather than fixed budget.",
+    "bitrate_metrics": "Superior rate-distortion tradeoff vs fixed RVQ; improved performance when applied to state-of-the-art codecs"
+  },
+  {
+    "url": "https://sites.google.com/view/insoochung/sub-3bit-quantization",
+    "title": "Sub-3bit Quantization for Efficient Deep Learning",
+    "authors": "Inso Chung, Kim et al.",
+    "year": 2020,
+    "key_findings": "Demonstrates sub-3bit quantization (2.5-3.5 bits) achievable with specialized methods including vector quantization. Shows 3.5x speedup, 8.3x memory reduction, 11.8x model compression while preserving BLEU scores. Mixed precision matmul (BiQGEMM) enables fast sub-3bit inference. VQ enables sub-3bit by distributing quantization across multiple dimensions rather than scalar approach, capturing inter-dimensional relationships.",
+    "bitrate_metrics": "Sub-3bit transformers: 3.5x speedup, 8.3x runtime memory reduction, 11.8x model size compression on device translation tasks"
+  },
+  {
+    "url": "https://vizuara.substack.com/p/turboquant-online-vector-quantization",
+    "title": "TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate",
+    "authors": "Vizuara Technical Blog",
+    "year": 2025,
+    "key_findings": "Explains VQ effectiveness at low bitrates through information theory lens. Key insight: scalar quantization creates gaps between grid lines (sub-grid residue); VQ avoids this by rotating coordinates and applying per-coordinate quantization. Gap problem in 3-bit scalar: requires exponentially more bits to close residual error. VQ solves by geometric transformation - polar coordinate conversion collapses unbounded space to predictable circle, eliminating memory overhead.",
+    "bitrate_metrics": "3-bit VQ KV cache compression without accuracy loss vs. scalar approaches requiring 4+ bits for comparable quality"
+  }
+]

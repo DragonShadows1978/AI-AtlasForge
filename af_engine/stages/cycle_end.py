@@ -250,15 +250,30 @@ Respond with JSON:
             )
 
         else:
-            # Status not explicitly handled - log at debug level and handle gracefully
-            logger.debug(f"CYCLE_END: Status '{status}' - treating as in-progress")
-            return StageResult(
-                success=False,
-                next_stage="CYCLE_END",
-                status=status,
-                output_data=response,
-                message=f"Unexpected status: {status}"
+            # Unrecognized status — still advance rather than looping forever.
+            # If cycles remain, treat as cycle_complete (advance to next cycle).
+            # If no cycles remain, treat as mission_complete (finish).
+            logger.warning(
+                f"CYCLE_END: Unrecognized status '{status}' with {cycles_remaining} "
+                f"cycles remaining — treating as {'cycle_complete' if cycles_remaining > 0 else 'mission_complete'}"
             )
+            if cycles_remaining > 0:
+                continuation_prompt = response.get("continuation_prompt", "")
+                return StageResult(
+                    success=True,
+                    next_stage="PLANNING",
+                    status="cycle_complete",
+                    output_data=response,
+                    message=f"Cycle {current_cycle} complete (status '{status}' treated as cycle_complete), continuing"
+                )
+            else:
+                return StageResult(
+                    success=True,
+                    next_stage="COMPLETE",
+                    status="mission_complete",
+                    output_data=response,
+                    message=f"Mission complete (status '{status}' treated as mission_complete)"
+                )
 
     def _read_continuation_manifest(self, context: StageContext) -> List[Dict[str, Any]]:
         """

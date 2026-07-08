@@ -72,6 +72,44 @@ class TestHostMatching:
         from WebProxy.mcp_server import _host_from_url
         assert _host_from_url("https://example.com/path") == "example.com"
 
+
+class TestInvestigationJsonCapture:
+    def test_capture_webproxy_json_output_writes_literal_payload_and_manifest(self, tmp_path, monkeypatch):
+        from WebProxy import mcp_server
+
+        payload = {
+            "type": "fetch",
+            "url": "https://example.com/article",
+            "title": "Example Article",
+            "text": "Literal proxy response text",
+            "_cache_path": "/home/vader/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch.json",
+        }
+        monkeypatch.setenv("ATLASFORGE_INVESTIGATION_WORKSPACE", str(tmp_path))
+        monkeypatch.setenv("ATLASFORGE_SUBAGENT_ID", "inv_test_sub_0")
+
+        record = mcp_server._capture_webproxy_json_output(
+            tool_name="WebFetch",
+            endpoint="/fetch",
+            request_payload={"url": "https://example.com/article"},
+            response_payload=payload,
+        )
+
+        assert record is not None
+        artifact_path = Path(record["artifact_json_path"])
+        assert artifact_path.exists()
+        assert artifact_path.is_relative_to(tmp_path)
+        assert json.loads(artifact_path.read_text(encoding="utf-8")) == payload
+
+        manifest_path = tmp_path / "artifacts" / "webproxy_json" / "manifest.jsonl"
+        manifest_records = [
+            json.loads(line)
+            for line in manifest_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert manifest_records[0]["artifact_type"] == "web_proxy_json_output"
+        assert manifest_records[0]["artifact_json_path"] == str(artifact_path)
+        assert manifest_records[0]["url"] == "https://example.com/article"
+
     def test_host_from_url_strips_port_and_userinfo(self):
         from WebProxy.mcp_server import _host_from_url
         assert _host_from_url("http://user:pw@example.com:8080/x") == "example.com"

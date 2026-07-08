@@ -1,0 +1,927 @@
+{
+  "metadata": {
+    "started": "2026-07-06T13:44:01.815001",
+    "research_question": "AQLM integration status across inference frameworks",
+    "frameworks": [
+      "vLLM",
+      "llama.cpp",
+      "HuggingFace",
+      "Ollama",
+      "Models",
+      "Deployment",
+      "Status"
+    ]
+  },
+  "frameworks": {
+    "vLLM": {
+      "searches": [
+        {
+          "query": "AQLM vLLM integration support",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "<strong>We took part in integrating AQLM into vLLM, allowing for its easy and efficient use in production pipelines and complicated text-processing chains</strong>. The aforementioned Llama-3-70b runs at 6.8 Tok/s on an RTX3090 when using vLLM.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Bringing 2bit LLMs to production: new AQLM models and integrations",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1clinlb/bringing_2bit_llms_to_production_new_aqlm_models/"
+            },
+            {
+              "display_url": null,
+              "snippet": "We cannot provide a description for this page right now",
+              "source": "brave",
+              "title": "Aqlm Example",
+              "url": "https://docs.vllm.ai/en/stable/getting_started/examples/aqlm_example.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "1import argparse 2 3from vllm import LLM, SamplingParams 4 5 6def main(): 7 8 parser = argparse.ArgumentParser(description=&#x27;AQLM examples&#x27;) 9 10 parser.add_argument(&#x27;--model&#x27;, 11 &#x27;-m&#x27;, 12 type=str, 13 default=None, 14 help=&#x27;model path, as for HF&#x27;) 15 parser.add_argument(&#x27;--choice&#x27;, 16 &#x27;-c&#x27;, 17 type=int, 18 default=0, 19 help=&#x27;known good models by index, [0-4]&#x27;) 20 parser.add_argument(&#x27;--tensor_parallel_size&#x27;, 21 &#x27;-t&#x27;, 22 type=int, 23 default=1, 24 help=&#x27;tensor parallel size&#x27;) 25 26 args = parser.parse_args() 27 28 models = [ 29 &quot;ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf&quot;, 30 &quot;ISTA-DASLab/Llama-",
+              "source": "brave",
+              "title": "Aqlm Example \u2014 vLLM",
+              "url": "https://docs.vllm.ai/en/v0.5.0/getting_started/examples/aqlm_example.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "To run an AWQ model with vLLM, you can use TheBloke/Llama-2-7b-Chat-AWQ with the following command: python examples/deployment/llm_engine_example.py \\ --model TheBloke/Llama-2-7b-Chat-AWQ \\ --quantization auto_awq \u00b7 AWQ models are also supported directly through the LLM entrypoint:",
+              "source": "brave",
+              "title": "AutoAWQ - vLLM",
+              "url": "https://docs.vllm.ai/en/stable/features/quantization/auto_awq/"
+            },
+            {
+              "display_url": null,
+              "snippet": "1from vllm import LLM, SamplingParams 2from vllm.utils import FlexibleArgumentParser 3 4 5def main(): 6 7 parser = FlexibleArgumentParser(description=&#x27;AQLM examples&#x27;) 8 9 parser.add_argument(&#x27;--model&#x27;, 10 &#x27;-m&#x27;, 11 type=str, 12 default=None, 13 help=&#x27;model path, as for HF&#x27;) 14 parser.add_argument(&#x27;--choice&#x27;, 15 &#x27;-c&#x27;, 16 type=int, 17 default=0, 18 help=&#x27;known good models by index, [0-4]&#x27;) 19 parser.add_argument(&#x27;--tensor-parallel-size&#x27;, 20 &#x27;-t&#x27;, 21 type=int, 22 default=1, 23 help=&#x27;tensor parallel size&#x27;) 24 25 args = parser.parse_args() 26 27 models = [ 28 &quot;ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-h",
+              "source": "brave",
+              "title": "Aqlm Example - vLLM Documentation",
+              "url": "https://docs.vllm.ai/en/v0.6.0/getting_started/examples/aqlm_example.html"
+            }
+          ]
+        },
+        {
+          "query": "vLLM additive quantization language models",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "Calibration: No calibration needed. Quantization happens at runtime during model loading. Quantization Type: Symmetric, block-wise (default block size of 64). Current vLLM Limitation: vLLM doesn&#x27;t currently support 8-bit BitsandBytes.",
+              "source": "brave",
+              "title": "The Complete Guide to LLM Quantization with vLLM",
+              "url": "https://jarvislabs.ai/blog/vllm-quantization-complete-guide-benchmarks"
+            },
+            {
+              "display_url": null,
+              "snippet": "# Register your quantization method (import the module containing your config) import my_quant_plugin from vllm import LLM # Use the custom quantization method llm = LLM(model=&quot;your-model&quot;, quantization=&quot;my_quant&quot;)",
+              "source": "brave",
+              "title": "Quantization - vLLM",
+              "url": "https://docs.vllm.ai/en/latest/features/quantization/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Quantization is best applied to very Large Language Models and does not work well for smaller models because of the loss in accuracy performance. ... In this article, I provided a step-by-step approach to measuring the speed performance of a Large Language Model, explained how vLLM works, and how it can be used to improve the latency and throughput of a Large Language Model.",
+              "source": "brave",
+              "title": "Deploying Large Language Models: vLLM and Quantization | by Ayoola Olafenwa | TDS Archive | Medium",
+              "url": "https://medium.com/data-science/deploying-large-language-models-vllm-and-quantizationstep-by-step-guide-on-how-to-accelerate-becfe17396a2"
+            },
+            {
+              "display_url": null,
+              "snippet": "VLLM is <strong>an efficient backend specifically designed to meet the inference needs of large language models</strong>. By optimizing memory management and computational efficiency, it significantly speeds up the inference process. LLMC supports exporting quantized model formats required by VLLM and, through ...",
+              "source": "brave",
+              "title": "VLLM Quantized Inference - llmc's documentation!",
+              "url": "https://llmc-en.readthedocs.io/en/stable/backend/vllm.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "vLLM Ascend supports models quantized by two main tools: <strong>ModelSlim and LLM-Compressor</strong>. ModelSlim is an Ascend-friendly compression tool focused on acceleration, using compression techniques, and built for Ascend hardware. It includes a series of inference optimization technologies such as ...",
+              "source": "brave",
+              "title": "Quantization Guide - Ascend - vLLM Documentation",
+              "url": "https://docs.vllm.ai/projects/ascend/en/main/user_guide/feature_guide/quantization.html"
+            }
+          ]
+        },
+        {
+          "query": "vLLM AQLM kernel implementation",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "We cannot provide a description for this page right now",
+              "source": "brave",
+              "title": "Aqlm Example",
+              "url": "https://docs.vllm.ai/en/stable/getting_started/examples/aqlm_example.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "1import argparse 2 3from vllm import LLM, SamplingParams 4 5 6def main(): 7 8 parser = argparse.ArgumentParser(description=&#x27;AQLM examples&#x27;) 9 10 parser.add_argument(&#x27;--model&#x27;, 11 &#x27;-m&#x27;, 12 type=str, 13 default=None, 14 help=&#x27;model path, as for HF&#x27;) 15 parser.add_argument(&#x27;--choice&#x27;, 16 &#x27;-c&#x27;, 17 type=int, 18 default=0, 19 help=&#x27;known good models by index, [0-4]&#x27;) 20 parser.add_argument(&#x27;--tensor_parallel_size&#x27;, 21 &#x27;-t&#x27;, 22 type=int, 23 default=1, 24 help=&#x27;tensor parallel size&#x27;) 25 26 args = parser.parse_args() 27 28 models = [ 29 &quot;ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf&quot;, 30 &quot;ISTA-DASLab/Llama-",
+              "source": "brave",
+              "title": "Aqlm Example \u2014 vLLM",
+              "url": "https://docs.vllm.ai/en/v0.4.2/getting_started/examples/aqlm_example.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>We took part in integrating AQLM into vLLM, allowing for its easy and efficient use in production pipelines and complicated text-processing chains</strong>. The aforementioned Llama-3-70b runs at 6.8 Tok/s on an RTX3090 when using vLLM.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Bringing 2bit LLMs to production: new AQLM models and integrations",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1clinlb/bringing_2bit_llms_to_production_new_aqlm_models/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Automatic Prefix Caching \u00b7 The table below shows the compatibility of various quantization implementations with different hardware platforms in vLLM:",
+              "source": "brave",
+              "title": "Supported Hardware for Quantization Kernels \u2014 vLLM",
+              "url": "https://docs.vllm.ai/en/v0.6.4/quantization/supported_hardware.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "1from vllm import LLM, SamplingParams 2from vllm.utils import FlexibleArgumentParser 3 4 5def main(): 6 7 parser = FlexibleArgumentParser(description=&#x27;AQLM examples&#x27;) 8 9 parser.add_argument(&#x27;--model&#x27;, 10 &#x27;-m&#x27;, 11 type=str, 12 default=None, 13 help=&#x27;model path, as for HF&#x27;) 14 parser.add_argument(&#x27;--choice&#x27;, 15 &#x27;-c&#x27;, 16 type=int, 17 default=0, 18 help=&#x27;known good models by index, [0-4]&#x27;) 19 parser.add_argument(&#x27;--tensor-parallel-size&#x27;, 20 &#x27;-t&#x27;, 21 type=int, 22 default=1, 23 help=&#x27;tensor parallel size&#x27;) 24 25 args = parser.parse_args() 26 27 models = [ 28 &quot;ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-h",
+              "source": "brave",
+              "title": "Aqlm Example - vLLM Documentation",
+              "url": "https://docs.vllm.ai/en/v0.6.0/getting_started/examples/aqlm_example.html"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "llama.cpp": {
+      "searches": [
+        {
+          "query": "llama.cpp AQLM support format",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "It&#x27;s quite different from the forward-pass-only imatrix stuff, so it will take substantial efforts to implement that in llama.cpp. (including the training support initiative by u/Remove_Ayys) However, it might be possible to requant some already PV-tuned models without much quality loss (hopefully?). ... Presumably it would be possible to run AQLM models within the context of GGML with effectively no precision loss vs.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Llama 70B 3.1 Instruct AQLM-PV Released. 22GB Weights.",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1fgblj1/llama_70b_31_instruct_aqlmpv_released_22gb_weights/"
+            },
+            {
+              "display_url": null,
+              "snippet": "The main goal of llama.cpp is to enable LLM inference with minimal setup and state-of-the-art performance on a wide range of hardware - locally and in the cloud. Plain C/C++ implementation without any dependencies \u00b7 Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks \u00b7 AVX, AVX2, AVX512 and AMX support for x86 architectures",
+              "source": "brave",
+              "title": "GitHub - ggml-org/llama.cpp: LLM inference in C/C++ \u00b7 GitHub",
+              "url": "https://github.com/ggml-org/llama.cpp"
+            },
+            {
+              "display_url": null,
+              "snippet": "Unfortunately, it doesn&#x27;t support gguf. ... You dont really need gguf of this. The existing IQ2_M quant has pretty much the same size and score as the AQLM quant. Its not that magical. ... I am a noob about most things. Is this something that needs to stay in it&#x27;s current format as opposed to gguf or exl2 size itself is a quantization?",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Release of Llama3.1-70B weights with AQLM-PV compression.",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1fiscnl/release_of_llama3170b_weights_with_aqlmpv/"
+            },
+            {
+              "display_url": null,
+              "snippet": "ggml-org / llama.cpp Public \u00b7 Notifications \u00b7 You must be signed in to change notification settings \u00b7 Fork 17.3k \u00b7 Star 106k \u00b7 New issueCopy link \u00b7 New issueCopy link \u00b7 Closed \u00b7 Closed \u00b7 Is possible to add AQLM to llamacpp? #7105 \u00b7 Copy link \u00b7 Labels \u00b7 enhancementNew feature or requestNew feature or requeststale \u00b7",
+              "source": "brave",
+              "title": "Is possible to add AQLM to llamacpp? \u00b7 Issue #7105 \u00b7 ggml-org/llama.cpp",
+              "url": "https://github.com/ggml-org/llama.cpp/issues/7105"
+            },
+            {
+              "display_url": null,
+              "snippet": "Llama.cpp supports a wide range of model architectures which includes Llama 1, 2 and 3, Mistral, Phi, Gemma, Yi, DeepSeek, Qwen, Solar, Alpaca and StableLM. This also includes any LLM model available in the <strong>GGUF format</strong>.",
+              "source": "brave",
+              "title": "Llama.cpp - Run LLM Inference in C/C++",
+              "url": "https://llama-cpp.com/"
+            }
+          ]
+        },
+        {
+          "query": "AQLM to GGUF conversion",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "We cannot provide a description for this page right now",
+              "source": "brave",
+              "title": "Demystifying LLM Quantization: GPTQ, AWQ, and GGUF ...",
+              "url": "https://www.linkedin.com/pulse/demystifying-llm-quantization-gptq-awq-gguf-explained-xiao-fei-zhang-1lmbe"
+            },
+            {
+              "display_url": null,
+              "snippet": "You should probably be able to find the &quot;base model&quot; that your AQLM was created from and create a GGUF from that though and this should have much better results.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Llama.cpp GGUF Wrapper",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1cx6ozp/llamacpp_gguf_wrapper/"
+            },
+            {
+              "display_url": null,
+              "snippet": "362 votes, 27 comments. I was getting confused by all the new quantization methods available for llama.cpp, so I did some testing and GitHub\u2026",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Overview of GGUF quantization methods",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1ba55rj/overview_of_gguf_quantization_methods/"
+            },
+            {
+              "display_url": null,
+              "snippet": "The idea here is you can get the original LLaMA model, convert it to GGUF format and finally, quantize GGUF format to lower precision.",
+              "source": "brave",
+              "title": "LLM Quantization | GPTQ | QAT | AWQ | GGUF | GGML | PTQ | by Siddharth vij | Medium",
+              "url": "https://medium.com/@siddharth.vij10/llm-quantization-gptq-qat-awq-gguf-ggml-ptq-2e172cd1b3b5"
+            },
+            {
+              "display_url": null,
+              "snippet": "mkdir -p ~/models huggingface-cli login huggingface-cli download mistralai/Mistral-7B-Instruct-v0.3 --local-dir &quot;~/models&quot; --include &quot;*&quot; #Convert to GGUF docker run --rm -v &quot;~/models&quot;:/repo ghcr.io/ggerganov/llama.cpp:full --convert &quot;/repo&quot; --outtype f32 ls ~/models | grep .gguf #&gt; ggml-model-f32.gguf #Quantize from F32.gguf to Q4_K_M.bin docker run --rm -v &quot;~/models&quot;:/repo ghcr.io/ggerganov/llama.cpp:full --quantize &quot;/repo/ggml-model-f32.gguf&quot; &quot;/repo/ggml-model-Q4_K_M.bin&quot; &quot;Q4_K_M&quot; ls ~/models | grep .bin #&gt; ggml-model-Q4_K_M.bin",
+              "source": "brave",
+              "title": "The easiest way to convert a model to GGUF and Quantize | by Damien Berezenko | Medium",
+              "url": "https://medium.com/@qdrddr/the-easiest-way-to-convert-a-model-to-gguf-and-quantize-91016e97c987"
+            }
+          ]
+        },
+        {
+          "query": "llama.cpp quantization additive",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "--override-kv option to override ... in the quantized model. May be specified multiple times. llama.cpp will convert the LLM portion of the source model, which is enough for conversational applications. If the model accepts multimodal inputs and you wish to take advantage of them, you need to create a separate GGUF file. This file is generically known as mmproj, for &quot;multimedia projector&quot;; however, it may contain various components such as vision or audio encoders in addition to ...",
+              "source": "brave",
+              "title": "llama.cpp/tools/quantize/README.md at master \u00b7 ggml-org/llama.cpp",
+              "url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md"
+            },
+            {
+              "display_url": null,
+              "snippet": "This project extends that foundation ... weight quantization formats, the turbo2 / turbo4 tier variants, the cross-backend kernel coverage (CUDA dp4a, HIP/ROCm RDNA/CDNA, Vulkan coopmat, Metal TurboFlash + V2.1 fused kernels), and a body of model-family-specific quality and operational fixes. The trailing + denotes that ongoing extension work; the original TurboQuant codec remains the foundation. This fork is additive: every existing llama.cpp quantization, ...",
+              "source": "brave",
+              "title": "GitHub - TheTom/llama-cpp-turboquant: LLM inference in C/C++ \u00b7 GitHub",
+              "url": "https://github.com/TheTom/llama-cpp-turboquant"
+            },
+            {
+              "display_url": null,
+              "snippet": "At high-level, all quantization supported by llama.cpp is <strong>weight quantization</strong>: Model parameters are quantized into lower bits, and in inference, they are dequantized and used in computation. In addition, you can mix different quantization data types in a single quantized model, e.g., you can ...",
+              "source": "brave",
+              "title": "llama.cpp - Qwen",
+              "url": "https://qwen.readthedocs.io/en/latest/quantization/llama.cpp.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "# Quantize to Q4_K_M (recommended for most users) ./llama-quantize model-f16.gguf model-q4.gguf Q4_K_M # Quantize to Q5_K_M (higher quality) ./llama-quantize model-f16.gguf model-q5.gguf Q5_K_M # Quantize to Q8_0 (near-original quality) ./llama-quantize model-f16.gguf model-q8.gguf Q8_0 \u00b7 llama.cpp supports many quantization methods.",
+              "source": "brave",
+              "title": "Quantizing Models - llama.cpp",
+              "url": "https://mintlify.com/ggml-org/llama.cpp/models/quantizing-models"
+            },
+            {
+              "display_url": null,
+              "snippet": "In this way one can have a &quot;true&quot; N-bit quantization (only using 2^N bytes per tensor row for the cluster means in addition to the N bpw for the quants). k-means clustering is a tricky business and the final outcome strongly depends on the details of the clustering algorithm and model weights used. My implementation is different from SqueezeLLM and does slightly worse on LLaMA-v1-7B (PPL = 6.04 vs theirs 6.03) but much better for LLaMA-v2-7B with PPL = 5.91 vs theirs 5.96 (and I don&#x27;t have their PPL values for other models.",
+              "source": "brave",
+              "title": "Even more quantization types? \u00b7 ggml-org/llama.cpp \u00b7 Discussion #5063",
+              "url": "https://github.com/ggml-org/llama.cpp/discussions/5063"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "HuggingFace": {
+      "searches": [
+        {
+          "query": "AQLM huggingface transformers",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "\ud83e\udd17 Transformers: <strong>the model-definition framework for state-of-the-art machine learning models in text, vision, audio, and multimodal models, for both inference and training</strong>. - huggingface/transformers",
+              "source": "brave",
+              "title": "transformers/docs/source/en/quantization/aqlm.md at main \u00b7 huggingface/transformers",
+              "url": "https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/aqlm.md"
+            },
+            {
+              "display_url": null,
+              "snippet": "Additive Quantization of Language Models (AQLM) <strong>quantizes multiple weights together and takes advantage of interdependencies between them</strong>.",
+              "source": "brave",
+              "title": "AQLM",
+              "url": "https://huggingface.co/docs/transformers/main/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "AQLM <strong>represents groups of 8-16 weights as a sum of multiple vector codes</strong>.",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/v4.47.1/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "Transformers supports loading models quantized with the llm-awq and autoawq libraries. This guide will show you how to load models quantized with autoawq, but the process is similar for llm-awq quantized models. ... AWQ-quantized models can be identified by checking the quantization_config attribute in the model\u2019s config.json file: ... { &quot;_name_or_path&quot;: &quot;/workspace/process/huggingfaceh4_zephyr-7b-alpha/source&quot;, &quot;architectures&quot;: [ &quot;MistralForCausalLM&quot; ], ...",
+              "source": "brave",
+              "title": "Quantization",
+              "url": "https://huggingface.co/docs/transformers/v4.38.1/en/quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "The code requires the LLaMA model to be downloaded in Huggingface format and saved locally. The scripts below assume that $TRANSFORMERS_CACHE variable points to the Huggingface Transformers cache folder.",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            }
+          ]
+        },
+        {
+          "query": "transformers library AQLM native support",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "AQLM only works with <strong>Python 3.10+</strong>. ... Load an AQLM-quantized model with [~PreTrainedModel.from_pretrained]. from transformers import AutoTokenizer, AutoModelForCausalLM quantized_model = AutoModelForCausalLM.from_pretrained( &quot;ISTA-DASLab/M...",
+              "source": "brave",
+              "title": "transformers/docs/source/en/quantization/aqlm.md at main \u00b7 huggingface/transformers",
+              "url": "https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/aqlm.md"
+            },
+            {
+              "display_url": null,
+              "snippet": "AQLM only works with <strong>Python 3.10+</strong>. ... Load an AQLM-quantized model with from_pretrained(). ... from transformers import AutoTokenizer, AutoModelForCausalLM quantized_model = AutoModelForCausalLM.from_pretrained( &quot;ISTA-DASLab/Mixtral-8x7b-A...",
+              "source": "brave",
+              "title": "AQLM",
+              "url": "https://huggingface.co/docs/transformers/main/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "The library provides efficient kernels for both GPU and CPU inference and training. The instructions on how to quantize models yourself, as well as all the relevant code can be found in the corresponding GitHub repository. Starting with version aqlm 1.0.2, AQLM supports Parameter-Efficient Fine-Tuning in a form of LoRA integrated into the PEFT library.",
+              "source": "brave",
+              "title": "Quantization \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/main/en//quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "from transformers import AutoTokenizer, ... Starting with version aqlm 1.0.2, AQLM supports <strong>Parameter-Efficient Fine-Tuning in a form of LoRA integrated into the PEFT library</strong>....",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/v4.49.0/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "AQLM quantization setpus vary mainly on the number of codebooks used as well as the codebook sizes in bits. The most popular setups, as well as inference kernels they support are: ... from transformers import AutoModelForCausalLM quantized_model = AutoModelForCausalLM.from_pretrained( &quot;ISTA-DASLab/Llama-2-7b-AQLM-2Bit-1x16-hf&quot;, trust_remote_code=True, torch_dtype=&quot;auto&quot; ).cuda()",
+              "source": "brave",
+              "title": "AQLM/README.md at main \u00b7 Vahe1994/AQLM",
+              "url": "https://github.com/Vahe1994/AQLM/blob/main/README.md"
+            }
+          ]
+        },
+        {
+          "query": "AQLM huggingface inference",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "Additive Quantization of Language Models (AQLM) quantizes multiple weights together and takes advantage of interdependencies between them.",
+              "source": "brave",
+              "title": "AQLM",
+              "url": "https://huggingface.co/docs/transformers/main/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "Additive Quantization of Language Models (AQLM) quantizes multiple weights together and takes advantage of interdependencies between them.",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "Additive Quantization of Language Models (AQLM) is <strong>a Large Language Models compression method</strong>. It quantizes multiple weights together and take advantage of interdependencies between them.",
+              "source": "brave",
+              "title": "Quantization \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/main/en//quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "huggingface / text-generation-inference Public archive \u00b7 Notifications \u00b7 You must be signed in to change notification settings \u00b7 Fork 1.3k \u00b7 Star 10.8k \u00b7 This repository was archived by the owner on Mar 21, 2026. It is now read-only. Copy link \u00b7 Copy link \u00b7 Closed as not planned \u00b7 Closed as not planned \u00b7 AQLM 2bit Quantization#1551 \u00b7",
+              "source": "brave",
+              "title": "AQLM 2bit Quantization \u00b7 Issue #1551 \u00b7 huggingface/text-generation-inference",
+              "url": "https://github.com/huggingface/text-generation-inference/issues/1551"
+            },
+            {
+              "display_url": null,
+              "snippet": "\ud83e\udd17 Transformers: the model-definition framework for state-of-the-art machine learning models in text, vision, audio, and multimodal models, for both inference and training. - huggingface/transformers",
+              "source": "brave",
+              "title": "transformers/docs/source/en/quantization/aqlm.md at main \u00b7 huggingface/transformers",
+              "url": "https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/aqlm.md"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "Ollama": {
+      "searches": [
+        {
+          "query": "Ollama AQLM quantized models",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "This article describes a seamless approach to find, load, and utilize quantized language models from Hugging Face\u2019s model repository using Ollama: an application built on top of llama.cpp that provides easy integration with nearly every model hosted on Hugging Face.",
+              "source": "brave",
+              "title": "Using Quantized Models with Ollama for Application Development - MachineLearningMastery.com",
+              "url": "https://machinelearningmastery.com/using-quantized-models-with-ollama-for-application-development/"
+            },
+            {
+              "display_url": null,
+              "snippet": "To use AWQ quantized models, you need to specify the quantized model name or path, for example model_name_or_path: TechxGenus/Meta-Llama-3-8B-Instruct-AWQ \u00b7 AQLM (Additive Quantization of Language Models), as <strong>a PTQ method that only quantizes model weights</strong>, achieved the best performance at ...",
+              "source": "brave",
+              "title": "Quantization - LLaMA Factory - Read the Docs",
+              "url": "https://llamafactory.readthedocs.io/en/latest/advanced/quantization.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "I saw some documentation talking about the source model to be quantized should be in &#x27;safe tensors&#x27; format, which makes me think the above simple approach is not valid. What do you say? ... Well, you can quantify from hugging face and then push into your own ollama registry.",
+              "source": "brave",
+              "title": "r/ollama on Reddit: Possible to quantize a model pulled from Ollama.com yourself?",
+              "url": "https://www.reddit.com/r/ollama/comments/1j7vtto/possible_to_quantize_a_model_pulled_from/"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>By default, Ollama uses 4-bit quantization</strong>. To try other quantization levels, please try the other tags. The number after the q represents the number of bits used for quantization (i.e. q4 means 4-bit quantization).",
+              "source": "brave",
+              "title": "wizardlm:13b-fp16",
+              "url": "https://ollama.com/library/wizardlm:13b-fp16"
+            },
+            {
+              "display_url": null,
+              "snippet": "You can quantize your own from original ollama fp16 models using &#x27;<strong>ollama create --quantize q6_k</strong> . . .&#x27; I forgot the exact syntax but its in their github.",
+              "source": "brave",
+              "title": "r/ollama on Reddit: Whats up with Quantized models selection?",
+              "url": "https://www.reddit.com/r/ollama/comments/1jlr3e4/whats_up_with_quantized_models_selection/"
+            }
+          ]
+        },
+        {
+          "query": "Ollama additive quantization",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "We used Ollama to run a quantized version of a LLaMA 3.2 model hosted in Hugging Face. By accessing hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF in your browser, you can view the information page of this model on the Hugging Face website.",
+              "source": "brave",
+              "title": "Using Quantized Models with Ollama for Application Development - MachineLearningMastery.com",
+              "url": "https://machinelearningmastery.com/using-quantized-models-with-ollama-for-application-development/"
+            },
+            {
+              "display_url": null,
+              "snippet": "VRAM cost is manageable: 118% throughput increase for only 2.2GB additional VRAM \u00b7 Here are the commonly used environment variables Ollama supports: # Flash Attention (highly recommended) export OLLAMA_FLASH_ATTENTION=1 # KV cache quantization: f16(default)/q8_0(~half)/q4_0(~quarter), needs ...",
+              "source": "brave",
+              "title": "Ollama Performance Optimization: Complete Guide to Quantization, Batch Processing, and Memory Tuning \u00b7 Easton Blog",
+              "url": "https://eastondev.com/blog/en/posts/ai/20260410-ollama-performance-optimization/"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>By default, Ollama uses 4-bit quantization</strong>. To try other quantization levels, please try the other tags. The number after the q represents the number of bits used for quantization (i.e. q4 means 4-bit quantization).",
+              "source": "brave",
+              "title": "llama2",
+              "url": "https://ollama.com/library/llama2"
+            },
+            {
+              "display_url": null,
+              "snippet": "Quantization in Ollama refers to <strong>reducing the precision of model weights and runtime data structures to decrease memory usage and improve inference performance</strong>. This system implements multiple quantiz",
+              "source": "brave",
+              "title": "Quantization | ollama/ollama | DeepWiki",
+              "url": "https://deepwiki.com/ollama/ollama/4.6-quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>By default, Ollama uses 4-bit quantization</strong>. To try other quantization levels, please try the other tags. The number after the q represents the number of bits used for quantization (i.e. q4 means 4-bit quantization).",
+              "source": "brave",
+              "title": "wizardlm",
+              "url": "https://ollama.com/library/wizardlm"
+            }
+          ]
+        },
+        {
+          "query": "Ollama AQLM format support",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "I&#x27;m losing my wits over finding a dang backend that&#x27;ll load up my AQLM Model (2-bit .safetensors) and/or my Omniquant Models (w3a16g40 + w4a16g128, IIRC it is autogptq and/or AWQ based). I think AQLM is still SotA as far as quants go...makes no sense ... It is using llama.cpp, so gguf only. ... I just wish the gguf format came with all the parameters that ollama magically gets.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: How ollama uses llama.cpp",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1cjaybn/how_ollama_uses_llamacpp/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Get up and running with Kimi-K2.6, GLM-5.1, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models. - ollama/ollama",
+              "source": "brave",
+              "title": "GitHub - ollama/ollama: Get up and running with Kimi-K2.6, GLM-5.1, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models. \u00b7 GitHub",
+              "url": "https://github.com/ollama/ollama"
+            },
+            {
+              "display_url": null,
+              "snippet": "Gemma (including Gemma 1 and Gemma 2) You can create the adapter using a fine tuning framework or tool which can output adapters in the Safetensors format, such as:",
+              "source": "brave",
+              "title": "Importing a Model - Ollama",
+              "url": "https://docs.ollama.com/import"
+            },
+            {
+              "display_url": null,
+              "snippet": "Ollama is the easiest way to automate your work using open models, while keeping your data safe.",
+              "source": "brave",
+              "title": "Ollama",
+              "url": "https://ollama.com/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Using the Ollama Python library, pass in the schema as a JSON object to the format parameter as either dict or use Pydantic (recommended) to serialize the schema using model_json_schema().",
+              "source": "brave",
+              "title": "Structured outputs \u00b7 Ollama Blog",
+              "url": "https://ollama.com/blog/structured-outputs"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "Models": {
+      "searches": [
+        {
+          "query": "AQLM quantized models huggingface hub",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "Run the AQLM demo notebook for more examples of how to quantize a model, push a quantized model to the Hub, and more.",
+              "source": "brave",
+              "title": "AQLM",
+              "url": "https://huggingface.co/docs/transformers/main/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "Run the AQLM demo notebook for more examples of how to quantize a model, push a quantized model to the Hub, and more.",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "Make sure to install it to run the models (note aqlm works only with python&gt;=3.10): ... The library provides efficient kernels for both GPU and CPU inference and training. The instructions on how to quantize models yourself, as well as all the relevant code can be found in the corresponding GitHub repository.",
+              "source": "brave",
+              "title": "Quantization \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/main/en//quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "Run the AQLM demo notebook for more examples of how to quantize a model, push a quantized model to the Hub, and more.",
+              "source": "brave",
+              "title": "transformers/docs/source/en/quantization/aqlm.md at main \u00b7 huggingface/transformers",
+              "url": "https://github.com/huggingface/transformers/blob/main/docs/source/en/quantization/aqlm.md"
+            },
+            {
+              "display_url": null,
+              "snippet": "AQLM falls into the first category, only quantizing weights. <strong>Model weights are static by definition, so they can be quantized offline before deployment and even distributed on platforms such as the HuggingFace Model Hub</strong>.",
+              "source": "brave",
+              "title": "The AQLM Quantization Algorithm, Explained | Towards Data Science",
+              "url": "https://towardsdatascience.com/the-aqlm-quantization-algorithm-explained-8cf33e4a783e/"
+            }
+          ]
+        },
+        {
+          "query": "AQLM model repository 1-bit 2-bit",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "[2025.04] Released aqlm v1.1.7. Added support for arbitrary 8-dimensional codebooks on GPU, improved accuracy for 1-bit models, e.g. ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf at ~1 bit achieves WikiText 2 PPL 7.85.",
+              "source": "brave",
+              "title": "AQLM/README.md at main \u00b7 Vahe1994/AQLM",
+              "url": "https://github.com/Vahe1994/AQLM/blob/main/README.md"
+            },
+            {
+              "display_url": null,
+              "snippet": "[2025.04] Released aqlm v1.1.7. Added support for arbitrary 8-dimensional codebooks on GPU, improved accuracy for 1-bit models, e.g. ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf at ~1 bit achieves WikiText 2 PPL 7.85.",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            },
+            {
+              "display_url": null,
+              "snippet": "Rust+WASM inference with state-of-the-art 2-bit AQLM+PV compression.",
+              "source": "brave",
+              "title": "AQLM.rs",
+              "url": "https://galqiwi.github.io/aqlm-rs/about.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "This <strong>allows it to compress models down to as low as 2-bit with considerably low accuracy losses</strong>. Since the AQLM quantization process is computationally expensive, the use of prequantized models is recommended.",
+              "source": "brave",
+              "title": "Quantization \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/peft/en/developer_guides/quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "Looks like the AQLM quants are slightly better. ... Hard to tell. We have greatly improved the quality since Feb 6 as well. Our latest benchmark results are in the readme. ... Why don&#x27;t you add the unquantized models to the README table? Should make it easier to compare the wikitext Perplexity without jumping to other websites ... Love to see a release for Mixtral 8x22 OP! ... Wondering the same thing. For Llama-3-70B on a 3090TI 24GB both the AQML-2Bit-1x16 and GGUF IQ2_XS just barely fully offload with ~4k context length.",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Bringing 2bit LLMs to production: new AQLM models and integrations",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1clinlb/bringing_2bit_llms_to_production_new_aqlm_models/"
+            }
+          ]
+        },
+        {
+          "query": "available AQLM quantized llama mistral",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "... The 2-2.5 bit quantization ... better than QuIP# and 3-bit GPTQ. <strong>We provide an set of prequantized models from the Llama-2 family, as well as some quantizations of Mixtral</strong>....",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Yet another state of the art in LLM quantization",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1al58xw/yet_another_state_of_the_art_in_llm_quantization/"
+            },
+            {
+              "display_url": null,
+              "snippet": "For instance, according to Table 1 of the AQLM paper, LLaMA-v2-7B has a 0-shot HellaSwag score of 56.69 for the fp16 model. In contrast, using the full HellaSwag validation dataset, I compute a score of 75.7, which is more in line with the few-shot scores one finds on the HF Leader Board. Apparently some researchers haven&#x27;t heard of Mistral or Mixtral yet, and keep publishing LLaMA-v2 results even in January of 2024, so LLaMA-v2 it is for the sake of the comparison. In all quantization papers I have seen, they keep the token embedding and the output tensor as fp16, but do not count the entirely non-negligible amount of extra bits in the bit balance.",
+              "source": "brave",
+              "title": "Even more quantization types? \u00b7 ggml-org/llama.cpp \u00b7 Discussion #5063",
+              "url": "https://github.com/ggml-org/llama.cpp/discussions/5063"
+            },
+            {
+              "display_url": null,
+              "snippet": "quantizationQ8_0 \u00b7 7.7GB \u00b7 license ... model, distributed with the Apache license. It is <strong>available in both instruct (instruction following) and text completion</strong>. The Mistral AI team has noted that Mistral 7B: Outperforms ...",
+              "source": "brave",
+              "title": "mistral:7b-text-q8_0",
+              "url": "https://ollama.com/library/mistral:7b-text-q8_0"
+            },
+            {
+              "display_url": null,
+              "snippet": "It&#x27;s an open-source project: https://github.com/Vahe1994/AQLM. If you&#x27;d like, you can quantize your own models if it&#x27;s llama like. BTW <strong>MIxtral is already quantized, although only with AQLM (without PV-tuning).</strong>",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Release of Llama3.1-70B weights with AQLM-PV compression.",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1fiscnl/release_of_llama3170b_weights_with_aqlmpv/"
+            },
+            {
+              "display_url": null,
+              "snippet": "from awq import AutoAWQForCausalLM from transformers import AutoTokenizer model_name_or_path = &quot;TheBloke/Mistral-7B-v0.1-AWQ&quot; # Load model model = AutoAWQForCausalLM.from_quantized(model_name_or_path, fuse_layers=True, trust_remote_code=False, safetensors=True) tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=False) prompt = &quot;Tell me about AI&quot; prompt_template=f&#x27;&#x27;&#x27;{prompt} &#x27;&#x27;&#x27; print(&quot;\\n\\n*** Generate:&quot;) tokens = tokenizer( prompt_template, return_tensors=&#x27;pt&#x27; ).input_ids.cuda() # Generate output generation_output = model.generate( tokens, do_sample=True, temperatu",
+              "source": "brave",
+              "title": "TheBloke/Mistral-7B-v0.1-AWQ \u00b7 Hugging Face",
+              "url": "https://huggingface.co/TheBloke/Mistral-7B-v0.1-AWQ"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "Deployment": {
+      "searches": [
+        {
+          "query": "AQLM inference deployment guide",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "Run the command below to install the AQLM library with kernel support for both GPU and CPU inference and training.",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "As of 2026, AWQ is the default INT4 format for production inference. Major model families ship pre-quantized AWQ checkpoints on Hugging Face. vLLM, SGLang, and TensorRT-LLM all include optimized AWQ kernels. If you&#x27;re serving on H100, A100, L40S, or RTX 4090 hardware and haven&#x27;t evaluated AWQ, this guide walks through the full process: how it works, how to quantize a 70B model, expected memory and throughput gains, and production deployment on cloud GPUs.",
+              "source": "brave",
+              "title": "AWQ Quantization Guide: Deploy LLMs at Half the GPU Cost (2026) | Spheron Blog",
+              "url": "https://www.spheron.network/blog/awq-quantization-guide-llm-deployment/"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>To perform zero-shot evaluation, we adopt Language Model Evaluation Harness framework</strong>. Our code works with models in standard transformers`` format and may (optionally) load the weights of a quantized model via --aqlm_checkpoint_path` argument.",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            },
+            {
+              "display_url": null,
+              "snippet": "I implemented multithreaded CPU inference for Llama 3.1-8b with AQLM+PV and LLM.int8() quantization from scratch in Rust. I then deployed it in the browser using WebAssembly and Web Workers.",
+              "source": "brave",
+              "title": "AQLM.rs",
+              "url": "https://galqiwi.github.io/aqlm-rs/about.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>To perform zero-shot evaluation, we adopt Language Model Evaluation Harness framework</strong>. Our code works with models in standard transformers`` format and may (optionally) load the weights of a quantized model via --aqlm_checkpoint_path` argument.",
+              "source": "brave",
+              "title": "AQLM/README.md at main \u00b7 Vahe1994/AQLM",
+              "url": "https://github.com/Vahe1994/AQLM/blob/main/README.md"
+            }
+          ]
+        },
+        {
+          "query": "AQLM performance benchmarks inference",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "<strong>AWQ generally outperforms GPTQ on both quality metrics (lower perplexity, higher task accuracy) and inference throughput</strong>, because AWQ&#x27;s calibration is activation-aware while GPTQ uses a layer-wise second-order approximation.",
+              "source": "brave",
+              "title": "AWQ Quantization Guide: Deploy LLMs at Half the GPU Cost (2026) | Spheron Blog",
+              "url": "https://www.spheron.network/blog/awq-quantization-guide-llm-deployment/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Performance is measured by perplexity on the WikiText2 [5] and C4 [6]. datasets (lower is better) as well as zero-shot accuracy on the WinoGrande [7] and HellaSwag [8] benchmarks (higher is better). For comparison, the performance of QuIP#, the top competing method, is shown for 4-bit and 2-bit compression. Since the available QuIP# implementation does not support 3-bit compression, SpQR [9] is included as the comparison method for AQLM at 3 bits. Table 1 \u2014AQLM vs. top competitor on Llama-2\u201370B compressed at 2, 3 and 4 bits per parameter \u00b7 While quantization can sometimes reduce inference latency compared to FP16, this is not guaranteed.",
+              "source": "brave",
+              "title": "The AQLM Quantization Algorithm, Explained | by Pierre Lienhart | TDS Archive | Medium",
+              "url": "https://medium.com/data-science/the-aqlm-quantization-algorithm-explained-8cf33e4a783e"
+            },
+            {
+              "display_url": null,
+              "snippet": "Figure 7 compares the performance of Mixtral-7x8B and \u00b7 70B models on H100 and A100 GPUs. The Mixtral model \u00b7 outperforms 70B models, whereas LLaMA-2-70B outperforms \u00b7 LLaMA-3-70B due to less vocabulary size. The Mixtral model \u00b7 is equivalent to a 14B model, as only two of eight experts are \u00b7 active per layer during inference.",
+              "source": "brave",
+              "title": "Inference Benchmarking of Large Language Models on AI ...",
+              "url": "https://arxiv.org/pdf/2411.00136"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>AWQ (Activation-aware Weight Quantization)1 achieves approximately 95% quality retention with perplexity of 6.84 on standard benchmarks</strong>, while GPTQ2 provides roughly 90% quality at similar compression.",
+              "source": "brave",
+              "title": "On-Device LLM Inference: The Definitive 2025-2026 Guide | Octomil Documentation",
+              "url": "https://docs.octomil.com/blog/on-device-llm-inference-2025-2026/"
+            },
+            {
+              "display_url": null,
+              "snippet": "AA-AgentPerf focuses on agentic AI workloads \u2014 long-context, multi-turn coding agents \u2014 and reports concurrent agent capacity instead of single-query throughput. Both benchmarks live on the same hardware page so AI accelerators can be compared on either workload. For the current Artificial Analysis System Load Test (AA-SLT), NVIDIA&#x27;s B200 is the most performant accelerator for LLM inference.",
+              "source": "brave",
+              "title": "AI Hardware Benchmarking & Performance Analysis",
+              "url": "https://artificialanalysis.ai/benchmarks/hardware"
+            }
+          ]
+        },
+        {
+          "query": "AQLM end-to-end deployment",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "We present a practical end-to-end deployment pipeline in which <strong>selective 2-bit quantization of gate and up projections delivers 7.5\u201323.3% TPS gains over uniform W4 across three model families (4B\u201320B) and two hardware platforms</strong>, depending on context length, and show Recover-LoRA as the ...",
+              "source": "brave",
+              "title": "Recover-LoRA for Aggressive Quantization: Reclaiming Accuracy in 2-Bit Language Models via Low-Rank Adaptation with Knowledge Distillation on Synthetic Data",
+              "url": "https://arxiv.org/html/2606.04238"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>End-to-end fine-tuning further enhances AQLM&#x27;s performance, particularly for 2-bit quantized models</strong>, bringing its accuracy to comparable levels with other fine-tuned state-of-the-art methods like QuIP# with end-to-end fine-tuning.",
+              "source": "brave",
+              "title": "[Quick Review] Extreme Compression of Large Language Models via Additive Quantization",
+              "url": "https://liner.com/review/extreme-compression-large-language-models-via-additive-quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "In Stage II, we convert the learned soft preferences into an exact, budget-feasible discrete assignment using integer programming, enabling reproducible deployment under strict memory constraints. A key practical advantage is that the learned preference scores can be reused across budgets: changing the target only requires re-solving the integer program, reducing per-budget adaptation from hours to a few minutes rather than retraining. We validate GAMMA on both QTIP Tseng et al. (2024b) and AQLM Egiazarian et al.",
+              "source": "brave",
+              "title": "GAMMA: Global Bit Allocation for Mixed-Precision Models under Arbitrary Budgets",
+              "url": "https://arxiv.org/html/2605.18475"
+            },
+            {
+              "display_url": null,
+              "snippet": "For example, when quantizing a 7B model from 16-bit half precision formats like FP16 (16 bits or 2 bytes per parameter) down to just 2 bits per parameter (0.25 bytes per parameter), the memory footprint is reduced by a factor of 8x \u2014 decreasing from 14GB down to only 1.75GB. PTQ methods fall into two categories: those that quantize just the model weights, and those that quantize both weights and activations. AQLM falls into the first category, only quantizing weights. Model weights are static by definition, so they can be quantized offline before deployment and even distributed on platforms such as the HuggingFace Model Hub.",
+              "source": "brave",
+              "title": "The AQLM Quantization Algorithm, Explained | by Pierre Lienhart | TDS Archive | Medium",
+              "url": "https://medium.com/data-science/the-aqlm-quantization-algorithm-explained-8cf33e4a783e"
+            },
+            {
+              "display_url": null,
+              "snippet": "The instructions on how to quantize models yourself, as well as all the relevant code can be found in the corresponding GitHub repository. To run AQLM models simply load a model that has been quantized with AQLM:",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/v4.47.1/quantization/aqlm"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    },
+    "Status": {
+      "searches": [
+        {
+          "query": "AQLM framework compatibility 2025",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "[2025.04] Released aqlm v1.1.7. <strong>Added support for arbitrary 8-dimensional codebooks on GPU</strong>, improved accuracy for 1-bit models, e.g. ISTA-DASLab/Llama-2-7b-AQLM-1Bit-1x8-hf at ~1 bit achieves WikiText 2 PPL 7.85.",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            },
+            {
+              "display_url": null,
+              "snippet": "The 2025-2026 retrospective lists <strong>FP8 plus INT8 activation quantization, Marlin and Machete kernels for GPTQ, AWQ, and wNa16, FP8 KV cache, AQLM, QQQ, HQQ, bitsandbytes, and GGUF support</strong>.",
+              "source": "brave",
+              "title": "vLLM vs Ollama 2026: 9x Throughput Gap, 172K Stars [Tested]",
+              "url": "https://tech-insider.org/vllm-vs-ollama-2026/"
+            },
+            {
+              "display_url": null,
+              "snippet": "This paper introduces AnTKV, a novel quantization framework for LLM KV caches that leverages an &quot;Anchor Score&quot; (AnS) to identify and preserve high-sensitivity tokens in full precision while aggressively quantizing the rest, significantly mitigating accuracy loss. AnTKV uses Anchor Token-aware Vector Quantization and a custom Triton kernel compatible with FlashAttention to achieve up to 3.5x decoding throughput improvement and enables longer context lengths on limited GPU memory, outperforming existing quantization methods under 4-bit settings.",
+              "source": "brave",
+              "title": "GitHub - pprp/Awesome-LLM-Quantization: Awesome list for LLM quantization \u00b7 GitHub",
+              "url": "https://github.com/pprp/Awesome-LLM-Quantization"
+            },
+            {
+              "display_url": null,
+              "snippet": "Home / Strategic QA Leadership &amp; Process Optimization / Building a Scalable QA Process: How to Implement the QA Framework &amp; AQLM in Your Team \u00b7 Strategic QA Leadership &amp; Process Optimization \u00b7 5 min read \u00b7 March 6, 2025 \u00b7 Updated March 26, 2026 \u00b7 532 views \u00b7 Discover how to build a scalable QA process by integrating our QA Framework and Adaptive QA Leadership Model (AQLM).",
+              "source": "brave",
+              "title": "Building a Scalable QA Process: Implement the QA Framework & AQLM Effectively",
+              "url": "https://qajourney.net/building-a-scalable-qa-process-how-to-implement-the-qa-framework-aqlm-in-your-team/"
+            },
+            {
+              "display_url": null,
+              "snippet": "JavaScript is not available \u00b7 We\u2019ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using x.com. You can see a list of supported browsers in our Help Center \u00b7 Help Center \u00b7 Terms of Service Privacy Policy Cookie ...",
+              "source": "brave",
+              "title": "AQLM - X",
+              "url": "https://x.com/AQLMMBL/status/1848421456125841441"
+            }
+          ]
+        },
+        {
+          "query": "AQLM production inference support",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "AQLM quantization setpus vary mainly on the number of codebooks used as well as the codebook sizes in bits. The most popular setups, as well as inference kernels they support are:",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            },
+            {
+              "display_url": null,
+              "snippet": "Run the command below to install the AQLM library with kernel support for both GPU and CPU inference and training.",
+              "source": "brave",
+              "title": "AQLM \u00b7 Hugging Face",
+              "url": "https://huggingface.co/docs/transformers/en/quantization/aqlm"
+            },
+            {
+              "display_url": null,
+              "snippet": "If you could open an Issue detailing ... properly support it. You can do it here: https://github.com/Vahe1994/AQLM/issues ... I added this because it fails to install on Windows due to a sub-dependency (triton?) as someone noted below. ... AQLM actually doesn&#x27;t need Triton for the 1x16 and 2x8 (basically, all the important ones) setups. I can isolate the Triton entirely for most of the models to run without installing it. ... I&#x27;m not sure if AQLM even uses triton for inference...",
+              "source": "brave",
+              "title": "r/LocalLLaMA on Reddit: Bringing 2bit LLMs to production: new AQLM models and integrations",
+              "url": "https://www.reddit.com/r/LocalLLaMA/comments/1clinlb/bringing_2bit_llms_to_production_new_aqlm_models/"
+            },
+            {
+              "display_url": null,
+              "snippet": "The A100 80G is the best balance of VRAM (80 GB, fitting a quantized 70B without tensor parallelism), memory bandwidth, and cost for production INT4 inference. The L40S (48 GB) fits quantized 34B models comfortably and costs less per hour. The RTX 4090 (24 GB) handles 7B-13B quantized models well and offers the lowest cost per token for small-to-medium models. All three run AWQ with full vLLM support.",
+              "source": "brave",
+              "title": "AWQ Quantization Guide: Deploy LLMs at Half the GPU Cost (2026) | Spheron Blog",
+              "url": "https://www.spheron.network/blog/awq-quantization-guide-llm-deployment/"
+            },
+            {
+              "display_url": null,
+              "snippet": "Run the command below to install the AQLM library with kernel support for both GPU and CPU inference and training.",
+              "source": "brave",
+              "title": "AQLM",
+              "url": "https://huggingface.co/docs/transformers/main/en/quantization/aqlm"
+            }
+          ]
+        },
+        {
+          "query": "AQLM research status current",
+          "result_count": 5,
+          "results": [
+            {
+              "display_url": null,
+              "snippet": "table tr { padding: .35em; background-color:#ffffff !important; border-bottom: 1px solid #ddd; } table td { padding: .625em; border-bottom: 1px solid #",
+              "source": "brave",
+              "title": "2025 AQLM Schedule | Marine Biological Laboratory",
+              "url": "https://www.mbl.edu/education/advanced-research-training-courses/course-offerings/analytical-and-quantitative-light-microscopy/aqlm-schedule"
+            },
+            {
+              "display_url": null,
+              "snippet": "<strong>Happy to release AQLM, a new SOTA method for low-bitwidth LLM quantization, targeted to the \u201cextreme\u201d 2-3bit / parameter range</strong>.",
+              "source": "brave",
+              "title": "Dan Alistarh on X: \"Happy to release AQLM, a new SOTA method for low-bitwidth LLM quantization, targeted to the \u201cextreme\u201d 2-3bit / parameter range. With: @black_samorez @efrantar and collaborators Arxiv: https://t.co/rWUe5FEfKU Compression &amp; Inference Code: https://t.co/T4fYggSEBm Snapshots: [1/n] https://t.co/wh45vXLhwV\" / X",
+              "url": "https://x.com/DAlistarh/status/1755251057733537953"
+            },
+            {
+              "display_url": null,
+              "snippet": "Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 - Vahe1994/AQLM",
+              "source": "brave",
+              "title": "GitHub - Vahe1994/AQLM: Official Pytorch repository for Extreme Compression of Large Language Models via Additive Quantization https://arxiv.org/pdf/2401.06118.pdf and PV-Tuning: Beyond Straight-Through Estimation for Extreme LLM Compression https://arxiv.org/abs/2405.14852 \u00b7 GitHub",
+              "url": "https://github.com/Vahe1994/AQLM"
+            },
+            {
+              "display_url": null,
+              "snippet": "In May 2024, my colleagues and I published a paper introducing a new compression method called PV-tuning. This method enhances existing compression techniques by refining compressed models without altering their representations. When combined with AQLM \u2014 a method developed in <strong>January 2024</strong> \u2014 ...",
+              "source": "brave",
+              "title": "AQLM.rs",
+              "url": "https://galqiwi.github.io/aqlm-rs/about.html"
+            },
+            {
+              "display_url": null,
+              "snippet": "The understanding of the molecular ... of corresponding novel targeted therapies. Since 2017, <strong>twelve agents have been approved for the treatment of AML subsets</strong>: the BCL2 inhibitor ......",
+              "source": "brave",
+              "title": "Current status and research directions in acute myeloid leukemia - PubMed",
+              "url": "https://pubmed.ncbi.nlm.nih.gov/39300079/"
+            }
+          ]
+        }
+      ],
+      "fetched_sources": [],
+      "key_findings": [],
+      "integration_status": "unknown"
+    }
+  }
+}

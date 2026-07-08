@@ -1,0 +1,459 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_db1c77795a0046da46aa7c977f1f3d276502336a198c43bee097987058f5967a",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_db1c77795a0046da46aa7c977f1f3d276502336a198c43bee097987058f5967a.json",
+  "_cached_at": 1779413706,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": 1779413706,
+  "headings": [
+    "KV Caching Explained: Optimizing Transformer Inference Efficiency",
+    "Introduction Prerequisites Standard Inference and the Rise of KV Caching How Does KV Caching Work? Step-by-Step Process Comparison: KV Caching vs. Standard Inference Practical Implementation Conclusion References & Further Reading Introduction",
+    "Prerequisites",
+    "Standard Inference and the Rise of KV Caching",
+    "How Does KV Caching Work?",
+    "Step-by-Step Process",
+    "Comparison: KV Caching vs. Standard Inference",
+    "Practical Implementation",
+    "Conclusion",
+    "References & Further Reading",
+    "Visualizing How VLMs Work",
+    "Mastering Tensor Dimensions in Transformers",
+    "Community"
+  ],
+  "links": [
+    {
+      "text": "Back to Articles",
+      "url": "https://huggingface.co/blog"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#kv-caching-explained-optimizing-transformer-inference-efficiency"
+    },
+    {
+      "text": "Community Article",
+      "url": "https://huggingface.co/blog/community"
+    },
+    {
+      "text": "Upvote 334",
+      "url": "https://huggingface.co/login?next=%2Fblog%2Fnot-lain%2Fkv-caching"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/salti"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/sbrandeis"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/pcuenq"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/RishuD7"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/ariG23498"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/mishig"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Not Lain not-lain Follow",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Introduction",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#introduction"
+    },
+    {
+      "text": "Prerequisites",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#prerequisites"
+    },
+    {
+      "text": "Standard Inference and the Rise of KV Caching",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#standard-inference-and-the-rise-of-kv-caching"
+    },
+    {
+      "text": "How Does KV Caching Work?",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#how-does-kv-caching-work"
+    },
+    {
+      "text": "Step-by-Step Process",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#step-by-step-process"
+    },
+    {
+      "text": "Comparison: KV Caching vs. Standard Inference",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#comparison-kv-caching-vs-standard-inference"
+    },
+    {
+      "text": "Practical Implementation",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#practical-implementation"
+    },
+    {
+      "text": "Conclusion",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#conclusion"
+    },
+    {
+      "text": "References & Further Reading",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#references--further-reading"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#introduction"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#prerequisites"
+    },
+    {
+      "text": "BLOG",
+      "url": "https://huggingface.co/blog/not-lain/tensor-dims"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/tensor-dims"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#standard-inference-and-the-rise-of-kv-caching"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#how-does-kv-caching-work"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#step-by-step-process"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#comparison-kv-caching-vs-standard-inference"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#practical-implementation"
+    },
+    {
+      "text": "cache_implementation",
+      "url": "https://huggingface.co/docs/transformers/main_classes/text_generation#transformers.GenerationConfig.cache_implementation"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#conclusion"
+    },
+    {
+      "text": "Aritra Roy Gosthipaty",
+      "url": "https://hf.co/ariG23498"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#references--further-reading"
+    },
+    {
+      "text": "Transformers KV Caching Explained",
+      "url": "https://medium.com/@joaolages/kv-caching-explained-276520203249"
+    },
+    {
+      "text": "Transformers Key-Value Caching Explained",
+      "url": "https://neptune.ai/blog/transformers-key-value-caching"
+    },
+    {
+      "text": "Mastering LLM Techniques: Inference Optimization",
+      "url": "https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/"
+    },
+    {
+      "text": "Hugging Face Documentation - KV Caching in Transformers",
+      "url": "https://huggingface.co/docs/transformers/main/en/generation_strategies#kv-caching"
+    },
+    {
+      "text": "Visualizing How VLMs Work 54 October 7, 2025",
+      "url": "https://huggingface.co/blog/not-lain/vlms"
+    },
+    {
+      "text": "Mastering Tensor Dimensions in Transformers 174 January 12, 2025",
+      "url": "https://huggingface.co/blog/not-lain/tensor-dims"
+    },
+    {
+      "text": "ryg81",
+      "url": "https://huggingface.co/ryg81"
+    },
+    {
+      "text": "Jan 31, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#679cd0243cc265a444a09923"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/olegGerbylev"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/stepanogil"
+    },
+    {
+      "text": "olegGerbylev",
+      "url": "https://huggingface.co/olegGerbylev"
+    },
+    {
+      "text": "Apr 1, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#67ec368b0d37308e10786d89"
+    },
+    {
+      "text": "emilibennett",
+      "url": "https://huggingface.co/emilibennett"
+    },
+    {
+      "text": "Jun 11, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6848fd432b1c7fe843b0c203"
+    },
+    {
+      "text": "mbcool",
+      "url": "https://huggingface.co/mbcool"
+    },
+    {
+      "text": "Jun 23, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6858ada7601774b43e2ba061"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Jul 16, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6877dfaf11ff0202663a9c79"
+    },
+    {
+      "text": "dutta18",
+      "url": "https://huggingface.co/dutta18"
+    },
+    {
+      "text": "Sep 13, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#68c4f66d50b2167a8bfe34ad"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Sep 13, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#68c59dad9e06a8db73e025b5"
+    },
+    {
+      "text": "@ dutta18",
+      "url": "https://huggingface.co/dutta18"
+    },
+    {
+      "text": "jonathon1964",
+      "url": "https://huggingface.co/jonathon1964"
+    },
+    {
+      "text": "Sep 26, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#68d60ff7a65200ac91b4101d"
+    },
+    {
+      "text": "Student-Xiaoji",
+      "url": "https://huggingface.co/Student-Xiaoji"
+    },
+    {
+      "text": "Oct 26, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#68fd85d5c35dcb59c382a379"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Oct 27, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#69000217d65f71e8227fe941"
+    },
+    {
+      "text": "seldn",
+      "url": "https://huggingface.co/seldn"
+    },
+    {
+      "text": "Oct 30, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6903890155e099299ba66ef1"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Nov 16, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#69191d497d3d488fd28cdc10"
+    },
+    {
+      "text": "chunlinyang",
+      "url": "https://huggingface.co/chunlinyang"
+    },
+    {
+      "text": "Nov 7, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#690d5210bdd77022732b6c09"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Nov 16, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#69191d1759f85b91230c4eff"
+    },
+    {
+      "text": "KANGKKANG",
+      "url": "https://huggingface.co/KANGKKANG"
+    },
+    {
+      "text": "Nov 14, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6916c70222626558d6dd306d"
+    },
+    {
+      "text": "kyars",
+      "url": "https://huggingface.co/kyars"
+    },
+    {
+      "text": "Dec 7, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6935ff250712d88b9e3ce84e"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/kyars"
+    },
+    {
+      "text": "not-lain",
+      "url": "https://huggingface.co/not-lain"
+    },
+    {
+      "text": "Dec 10, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#6938f9be4ad36d1320fbdc81"
+    },
+    {
+      "text": "@ kyars",
+      "url": "https://huggingface.co/kyars"
+    },
+    {
+      "text": "talrejaa8",
+      "url": "https://huggingface.co/talrejaa8"
+    },
+    {
+      "text": "Dec 13, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#693d9b325e5078b5f90a6d81"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/kyars"
+    },
+    {
+      "text": "kyars",
+      "url": "https://huggingface.co/kyars"
+    },
+    {
+      "text": "Dec 13, 2025",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#693deeb8c7eb6b6bbe489408"
+    },
+    {
+      "text": "TimHH",
+      "url": "https://huggingface.co/TimHH"
+    },
+    {
+      "text": "Apr 19",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#69e49977c4e5b93dfc051416"
+    },
+    {
+      "text": "edited Apr 19",
+      "url": "https://huggingface.co/blog/not-lain/kv-caching#69e49977c4e5b93dfc051416"
+    },
+    {
+      "text": "Sign up",
+      "url": "https://huggingface.co/join?next=%2Fblog%2Fnot-lain%2Fkv-caching"
+    },
+    {
+      "text": "log in",
+      "url": "https://huggingface.co/login?next=%2Fblog%2Fnot-lain%2Fkv-caching"
+    },
+    {
+      "text": "Upvote 334",
+      "url": "https://huggingface.co/login?next=%2Fblog%2Fnot-lain%2Fkv-caching"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/salti"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/sbrandeis"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/pcuenq"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/RishuD7"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/ariG23498"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/mishig"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/realjanpaulus"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/ltc"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/Programmer-RD-AI"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/merve"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/ianyeung"
+    },
+    {
+      "text": "",
+      "url": "https://huggingface.co/clepelaars"
+    }
+  ],
+  "meta_description": "A Blog post by Not Lain on Hugging Face",
+  "status_code": 200,
+  "text": "KV Caching Explained: Optimizing Transformer Inference Efficiency\n\n+328\n\nIntroduction Prerequisites Standard Inference and the Rise of KV Caching How Does KV Caching Work? Step-by-Step Process Comparison: KV Caching vs. Standard Inference Practical Implementation Conclusion References & Further Reading Introduction\n\nIntroduction\n\nPrerequisites\n\nStandard Inference and the Rise of KV Caching\n\nHow Does KV Caching Work? Step-by-Step Process\n\nStep-by-Step Process\n\nComparison: KV Caching vs. Standard Inference\n\nPractical Implementation\n\nConclusion\n\nReferences & Further Reading\n\nWhen AI models generate text, they often repeat many of the same calculations, which can slow things down. Key-Value caching is a technique that helps speed up this process by remembering important information from previous steps. Instead of recomputing everything from scratch, the model reuses what it has already calculated, making text generation much faster and more efficient.\n\nIn this blogpost, we’ll break down KV caching in an easy-to-understand way, explain why it’s useful, and show how it helps AI models work faster.\n\nPrerequisites\n\nTo fully grasp the content, readers should be familiar with:\n\nTransformer Architecture : Familiarity with components such as the attention mechanism.\n\nAutoregressive Modeling : Understanding of how models like GPT generate sequences.\n\nLinear Algebra Basics : Concepts like matrix multiplication and transposition, which are essential for understanding attention computations.\n\nThis 👉 BLOG should cover up most of the prerequisites needed for this article.\n\nattention weight has a shape of [ batch , h , S e q l e n , S e q l e n ] [\\text{batch}, h, \\mathrm{Seq}_{\\mathrm{len}}, \\mathrm{Seq}_{\\mathrm{len}}] [ batch , h , Seq len ​ , Seq len ​ ]\n\nmasked multi-head attention allows each token to be represented by itself and all the previous tokens.\n\nto generate a new token the model needs to look at all the previous tokens and their representations by their preceding tokens\n\nStandard Inference and the Rise of KV Caching\n\nWhen a model generates text, it looks at all the previous tokens to predict the next one. Normally, it would repeat the same calculations for every new token, which can slow things down.\n\nKV caching solves compute overlap by remembering these calculations from previous steps, this can be achieved by storing the intermediate states of attention layers during inference.\n\nKV caching solves compute overlap by remembering these calculations from previous steps, this can be achieved by storing the intermediate states of attention layers during inference.\n\nHow Does KV Caching Work?\n\nStep-by-Step Process\n\nFirst Generation : When the model sees the first input, it calculates and stores its keys and values in the cache. ⇓ \\Downarrow ⇓\n\nNext Words : For each new word, the model retrieves the stored keys and values and adds the new ones instead of starting over.\n\nEfficient Attention Computation : calculate attention using the cached K K K and V V V along with the new Q Q Q (query) to compute the output.\n\nUpdate Input : add the newly generated token to the input and go back to step 2 \\texttt{go back to step 2} go back to step 2 until we finish generating.\n\nThe process is illustrated below:\n\nIn the table above we used a d k = 5 d_k = 5 d k ​ = 5 for better visuals, note that this number can be significantly bigger than what we have presented.\n\nComparison: KV Caching vs. Standard Inference\n\nHere’s how KV caching compares to the regular generations :\n\nKV caching makes a big difference in speed and efficiency , especially for long texts. By saving and reusing past calculations, it avoids the need to start over each time, making it much faster than the regular way of generating text.\n\nPractical Implementation\n\nThis is a simplified example of implementing KV caching in PyTorch:\n\nWhen using the transformers library this behavior is enabled by default through the use_cache parameter, you can also access multiple caching methods through the cache_implementation parameter, here's a minimalistic code :\n\nWe benchmarked the code above with/without kv caching on a T4 GPU we got the following results :\n\nConclusion\n\nKV caching is a simple but powerful technique that helps AI models generate text faster and more efficiently. By remembering past calculations instead of repeating them, it reduces the time and effort needed to predict new words. While it does require extra memory, this method is especially useful for long conversations ensuring fast and efficient generation.\n\nUnderstanding KV caching can help developers and AI enthusiasts build faster, smarter, and more scalable language models for real-world applications.\n\nI would like to extend my sincerest gratitude to Aritra Roy Gosthipaty 🤗 for his invaluable support, feedback, and dedication in developing this blog post.\n\nReferences & Further Reading\n\nTransformers KV Caching Explained\n\nTransformers Key-Value Caching Explained\n\nMastering LLM Techniques: Inference Optimization\n\nHugging Face Documentation - KV Caching in Transformers\n\nMore from this author\n\nVisualizing How VLMs Work\n\nMastering Tensor Dimensions in Transformers\n\nCommunity\n\nCan this be similar for image generation models? (I am not a programmer :- or expert in AI))\n\n2 replies\n\nGreat reference, thanks for posting.\n\n1 reply\n\nThanks a lot for the kind words (≧∇≦)ﾉ✨\n\nI really appreciate the effort that HF team puts in to create these easy-to-digest blogs. Thanks a ton !\n\n1 reply\n\nVery grateful for the kind words @ dutta18 🤗\n\nvery clear ex!\n\nlove this simple, easy understood and straight forward explanation❤ thanks for you effort☺\n\nthanks for the kind feedback 🤗\n\nThis was a great read. Thanks for making this.\n\n1 reply\n\ndon't mention it (*/ω＼*)\n\nIt helps me understand KV cache better. Ty.\n\n1 reply\n\nthanks a lot for the kind warm words 🤗\n\nmaybe i can use this job on ACT model?\n\nI didn't understand the explanation\n\n2 replies\n\nHi @ kyars is there any part that you think i can improve upon or is it everything? would appreciate any feedback!\n\nI really appreciate your effort to explaining this so well. Just one doubt I have, what exactly is being cached?\n\nThe QK^t dot product results and the Value vectors of the already generated tokens or\n\nThe just the key vectors and the value vectors of already generated tokens?\n\nAlso, is this done for each transformer block in an LLM?\n\n1 reply\n\nYes, it's done for each transformer block in an LM because each transformer block has different attention heads. If you do it for only one transformer block across all blocks, then you don't get the same representation.\n\nWhat dose that \"<bos>\" mean? Some element, special character, start of message/text (0x02/STX), or what?\n\nEdit: replaced < / > with &lt; / &gt; show it dose show...\n\n· Sign up or log in to comment\n\n+322",
+  "text_length": 6809,
+  "title": "KV Caching Explained: Optimizing Transformer Inference Efficiency",
+  "url": "https://huggingface.co/blog/not-lain/kv-caching"
+}

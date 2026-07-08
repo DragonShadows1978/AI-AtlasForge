@@ -1,0 +1,918 @@
+{
+  "https://medium.com/data-science-ai-at-microsoft/a-practical-guide-to-int4-quantization-for-slms-gptq-vs-awq-olive-and-real-world-results-34f28c4d4eaf": {
+    "correlation_id": "95d628a26c1d",
+    "error": "fetch failed",
+    "url": "https://medium.com/data-science-ai-at-microsoft/a-practical-guide-to-int4-quantization-for-slms-gptq-vs-awq-olive-and-real-world-results-34f28c4d4eaf"
+  },
+  "https://github.com/mit-han-lab/llm-awq": {
+    "_cache_hit": true,
+    "_cache_key": "fetch_de22f9d71fa74ccf42cc9b4ab591a1754e9779e438a2b02d6d3b0e89635e360e",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_de22f9d71fa74ccf42cc9b4ab591a1754e9779e438a2b02d6d3b0e89635e360e.json",
+    "_cached_at": 1783359704,
+    "content_type": "text/html; charset=utf-8",
+    "fetched_at": 1783359704,
+    "headings": [
+      "Uh oh!",
+      "mit-han-lab/llm-awq",
+      "Folders and files",
+      "Latest commit",
+      "History",
+      "Repository files navigation",
+      "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+      "News",
+      "Contents",
+      "Helpful Links",
+      "Install",
+      "AWQ Model Zoo",
+      "Examples",
+      "Usage",
+      "Results on Visual Language Models",
+      "Reference",
+      "Related Projects",
+      "About",
+      "Resources",
+      "License",
+      "Uh oh!",
+      "Stars",
+      "Watchers",
+      "Forks",
+      "Releases",
+      "Packages 0",
+      "Uh oh!",
+      "Uh oh!",
+      "Contributors",
+      "Uh oh!",
+      "Languages"
+    ],
+    "links": [
+      {
+        "text": "mit-han-lab",
+        "url": "https://github.com/mit-han-lab"
+      },
+      {
+        "text": "llm-awq",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "Notifications",
+        "url": "https://github.com/login?return_to=%2Fmit-han-lab%2Fllm-awq"
+      },
+      {
+        "text": "Fork 315",
+        "url": "https://github.com/login?return_to=%2Fmit-han-lab%2Fllm-awq"
+      },
+      {
+        "text": "Star 3.6k",
+        "url": "https://github.com/login?return_to=%2Fmit-han-lab%2Fllm-awq"
+      },
+      {
+        "text": "Code",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "Issues 170",
+        "url": "https://github.com/mit-han-lab/llm-awq/issues"
+      },
+      {
+        "text": "Pull requests 12",
+        "url": "https://github.com/mit-han-lab/llm-awq/pulls"
+      },
+      {
+        "text": "Actions",
+        "url": "https://github.com/mit-han-lab/llm-awq/actions"
+      },
+      {
+        "text": "Projects",
+        "url": "https://github.com/mit-han-lab/llm-awq/projects"
+      },
+      {
+        "text": "Security and quality 0",
+        "url": "https://github.com/mit-han-lab/llm-awq/security"
+      },
+      {
+        "text": "Insights",
+        "url": "https://github.com/mit-han-lab/llm-awq/pulse"
+      },
+      {
+        "text": "Code",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "Issues",
+        "url": "https://github.com/mit-han-lab/llm-awq/issues"
+      },
+      {
+        "text": "Pull requests",
+        "url": "https://github.com/mit-han-lab/llm-awq/pulls"
+      },
+      {
+        "text": "Actions",
+        "url": "https://github.com/mit-han-lab/llm-awq/actions"
+      },
+      {
+        "text": "Projects",
+        "url": "https://github.com/mit-han-lab/llm-awq/projects"
+      },
+      {
+        "text": "Security and quality",
+        "url": "https://github.com/mit-han-lab/llm-awq/security"
+      },
+      {
+        "text": "Insights",
+        "url": "https://github.com/mit-han-lab/llm-awq/pulse"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "Branches",
+        "url": "https://github.com/mit-han-lab/llm-awq/branches"
+      },
+      {
+        "text": "Tags",
+        "url": "https://github.com/mit-han-lab/llm-awq/tags"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/branches"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/tags"
+      },
+      {
+        "text": "148 Commits",
+        "url": "https://github.com/mit-han-lab/llm-awq/commits/main/"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/commits/main/"
+      },
+      {
+        "text": "awq",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/awq"
+      },
+      {
+        "text": "awq",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/awq"
+      },
+      {
+        "text": "examples",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/examples"
+      },
+      {
+        "text": "examples",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/examples"
+      },
+      {
+        "text": "figures",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/figures"
+      },
+      {
+        "text": "figures",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/figures"
+      },
+      {
+        "text": "scripts",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/scripts"
+      },
+      {
+        "text": "scripts",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/scripts"
+      },
+      {
+        "text": "tinychat",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/tinychat"
+      },
+      {
+        "text": "tinychat",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/main/tinychat"
+      },
+      {
+        "text": ".gitignore",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/.gitignore"
+      },
+      {
+        "text": ".gitignore",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/.gitignore"
+      },
+      {
+        "text": "LICENSE",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/LICENSE"
+      },
+      {
+        "text": "LICENSE",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/LICENSE"
+      },
+      {
+        "text": "README.md",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/README.md"
+      },
+      {
+        "text": "README.md",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/README.md"
+      },
+      {
+        "text": "pyproject.toml",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/pyproject.toml"
+      },
+      {
+        "text": "pyproject.toml",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/pyproject.toml"
+      },
+      {
+        "text": "README",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "MIT license",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#awq-activation-aware-weight-quantization-for-llm-compression-and-acceleration"
+      },
+      {
+        "text": "Paper",
+        "url": "https://arxiv.org/abs/2306.00978"
+      },
+      {
+        "text": "Website",
+        "url": "https://hanlab.mit.edu/projects/awq"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/figures/overview.png"
+      },
+      {
+        "text": "TinyChat 2.0",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/figures/4090_example_new.gif"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/figures/orin_example_new.gif"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/figures/4090_nvila_single.gif"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/figures/4090_nvila_multi.gif"
+      },
+      {
+        "text": "https://vila.hanlab.ai",
+        "url": "https://vila.hanlab.ai"
+      },
+      {
+        "text": "TinyChat",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#news"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/DeepSeek_R1_Distill_example.sh"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/qwen_example.sh"
+      },
+      {
+        "text": "TinyChat 2.0",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "README",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/README.md"
+      },
+      {
+        "text": "blog",
+        "url": "https://hanlab.mit.edu/blog/tinychat20"
+      },
+      {
+        "text": "here",
+        "url": "https://vila.hanlab.ai"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/vila15_example.sh"
+      },
+      {
+        "text": "AMD",
+        "url": "https://community.amd.com/t5/ai/reduce-memory-footprint-and-improve-performance-running-llms-on/ba-p/686157"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/llama3_example.sh"
+      },
+      {
+        "text": "VILA Vision Languague Models",
+        "url": "https://arxiv.org/abs/2312.07533"
+      },
+      {
+        "text": "TinyChat",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "Google Vertex AI",
+        "url": "https://console.cloud.google.com/vertex-ai/publishers/meta/model-garden/llama-2-quantized"
+      },
+      {
+        "text": "Amazon Sagemaker Containers",
+        "url": "https://aws.amazon.com/blogs/machine-learning/boost-inference-performance-for-llms-with-new-amazon-sagemaker-containers/"
+      },
+      {
+        "text": "here",
+        "url": "https://huggingface.co/datasets/mit-han-lab/awq-model-zoo"
+      },
+      {
+        "text": "TensorRT-LLM",
+        "url": "https://github.com/NVIDIA/TensorRT-LLM/"
+      },
+      {
+        "text": "Intel Neural Compressor",
+        "url": "https://github.com/intel/neural-compressor"
+      },
+      {
+        "text": "FastChat",
+        "url": "https://github.com/lm-sys/FastChat/blob/main/docs/awq.md"
+      },
+      {
+        "text": "vLLM",
+        "url": "https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/quantization/awq.py"
+      },
+      {
+        "text": "HuggingFace TGI",
+        "url": "https://github.com/huggingface/text-generation-inference/pull/1054"
+      },
+      {
+        "text": "LMDeploy",
+        "url": "https://github.com/InternLM/lmdeploy"
+      },
+      {
+        "text": "TinyChat",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "AutoAWQ",
+        "url": "https://github.com/casper-hansen/AutoAWQ"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat"
+      },
+      {
+        "text": "here",
+        "url": "https://huggingface.co/datasets/mit-han-lab/awq-model-zoo"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#contents"
+      },
+      {
+        "text": "AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+        "url": "https://github.com/mit-han-lab/llm-awq#awq-activation-aware-weight-quantization-for-llm-compression-and-acceleration"
+      },
+      {
+        "text": "News",
+        "url": "https://github.com/mit-han-lab/llm-awq#news"
+      },
+      {
+        "text": "Contents",
+        "url": "https://github.com/mit-han-lab/llm-awq#contents"
+      },
+      {
+        "text": "Helpful Links",
+        "url": "https://github.com/mit-han-lab/llm-awq#helpful-links"
+      },
+      {
+        "text": "Install",
+        "url": "https://github.com/mit-han-lab/llm-awq#install"
+      },
+      {
+        "text": "AWQ Model Zoo",
+        "url": "https://github.com/mit-han-lab/llm-awq#awq-model-zoo"
+      },
+      {
+        "text": "Examples",
+        "url": "https://github.com/mit-han-lab/llm-awq#examples"
+      },
+      {
+        "text": "Usage",
+        "url": "https://github.com/mit-han-lab/llm-awq#usage"
+      },
+      {
+        "text": "Results on Visual Language Models",
+        "url": "https://github.com/mit-han-lab/llm-awq#results-on-visual-language-models"
+      },
+      {
+        "text": "Reference",
+        "url": "https://github.com/mit-han-lab/llm-awq#reference"
+      },
+      {
+        "text": "Related Projects",
+        "url": "https://github.com/mit-han-lab/llm-awq#related-projects"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#helpful-links"
+      },
+      {
+        "text": "VILA online demo",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/vila.hanlab.ai"
+      },
+      {
+        "text": "LLM on the Edge",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/nv_laptop?tab=readme-ov-file#install"
+      },
+      {
+        "text": "VLMs on Laptop",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/nv_laptop?tab=readme-ov-file#run-vila-on-laptop"
+      },
+      {
+        "text": "Gradio Server",
+        "url": "https://github.com/mit-han-lab/llm-awq/tree/nv_laptop/tinychat/serve#gradio-demo-vila-with-tinychat"
+      },
+      {
+        "text": "QServe",
+        "url": "https://github.com/mit-han-lab/qserve"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#install"
+      },
+      {
+        "text": "pyproject.toml",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/pyproject.toml"
+      },
+      {
+        "text": "this line",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/3fce69061682fdd528824e5da3d03a8a8b545f2a/pyproject.toml#L17"
+      },
+      {
+        "text": "NVIDIA",
+        "url": "https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048"
+      },
+      {
+        "text": "here",
+        "url": "https://github.com/Dao-AILab/flash-attention/releases/tag/v2.5.8"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#awq-model-zoo"
+      },
+      {
+        "text": "DeepSeek-R1-Distill",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/DeepSeek_R1_Distill_example.sh"
+      },
+      {
+        "text": "Qwen-2.5",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/qwen_example.sh"
+      },
+      {
+        "text": "NVILA",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/nvila_example.sh"
+      },
+      {
+        "text": "VILA-1.5",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/vila15_example.sh"
+      },
+      {
+        "text": "Llama3",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/llama_example.sh"
+      },
+      {
+        "text": "VILA",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/vila_example.sh"
+      },
+      {
+        "text": "Llama2",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/llama_example.sh"
+      },
+      {
+        "text": "LLaMA",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/llama2_example.sh"
+      },
+      {
+        "text": "OPT",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/opt_example.sh"
+      },
+      {
+        "text": "CodeLlama",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/codellama_example.sh"
+      },
+      {
+        "text": "StarCoder",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/starcoder_example.sh"
+      },
+      {
+        "text": "Vicuna-v1.1",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/vicuna_example.sh"
+      },
+      {
+        "text": "LLaVA-v0",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/scripts/llava_example.sh"
+      },
+      {
+        "text": "AWQ searching results",
+        "url": "https://huggingface.co/datasets/mit-han-lab/awq-model-zoo/tree/main"
+      },
+      {
+        "text": "AWQ search",
+        "url": "https://github.com/mit-han-lab/llm-awq#usage"
+      },
+      {
+        "text": "here",
+        "url": "https://huggingface.co/Efficient-Large-Model/NVILA-AWQ"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#examples"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/figures/example_vis.jpg"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#usage"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#results-on-visual-language-models"
+      },
+      {
+        "text": "TinyChat",
+        "url": "https://github.com/mit-han-lab/llm-awq/blob/main/tinychat/README.md"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#reference"
+      },
+      {
+        "text": "",
+        "url": "https://github.com/mit-han-lab/llm-awq#related-projects"
+      },
+      {
+        "text": "SmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models",
+        "url": "https://github.com/mit-han-lab/smoothquant"
+      },
+      {
+        "text": "GPTQ: Accurate Post-training Compression for Generative Pretrained Transformers",
+        "url": "https://arxiv.org/abs/2210.17323"
+      },
+      {
+        "text": "Vicuna and FastChat",
+        "url": "https://github.com/lm-sys/FastChat#readme"
+      },
+      {
+        "text": "LLaVA: Large Language and Vision Assistant",
+        "url": "https://github.com/haotian-liu/LLaVA"
+      },
+      {
+        "text": "VILA: On Pre-training for Visual Language Models",
+        "url": "https://github.com/Efficient-Large-Model/VILA"
+      },
+      {
+        "text": "Readme",
+        "url": "https://github.com/mit-han-lab/llm-awq#readme-ov-file"
+      },
+      {
+        "text": "MIT license",
+        "url": "https://github.com/mit-han-lab/llm-awq#MIT-1-ov-file"
+      },
+      {
+        "text": "Activity",
+        "url": "https://github.com/mit-han-lab/llm-awq/activity"
+      },
+      {
+        "text": "Custom properties",
+        "url": "https://github.com/mit-han-lab/llm-awq/custom-properties"
+      },
+      {
+        "text": "315 forks",
+        "url": "https://github.com/mit-han-lab/llm-awq/forks"
+      },
+      {
+        "text": "Report repository",
+        "url": "https://github.com/contact/report-content?content_url=https%3A%2F%2Fgithub.com%2Fmit-han-lab%2Fllm-awq&report=mit-han-lab+%28user%29"
+      },
+      {
+        "text": "Releases",
+        "url": "https://github.com/mit-han-lab/llm-awq/releases"
+      },
+      {
+        "text": "Packages 0",
+        "url": "https://github.com/orgs/mit-han-lab/packages?repo_name=llm-awq"
+      },
+      {
+        "text": "Contributors",
+        "url": "https://github.com/mit-han-lab/llm-awq/graphs/contributors"
+      },
+      {
+        "text": "Python 61.8%",
+        "url": "https://github.com/mit-han-lab/llm-awq/search?l=python"
+      },
+      {
+        "text": "Cuda 22.7%",
+        "url": "https://github.com/mit-han-lab/llm-awq/search?l=cuda"
+      },
+      {
+        "text": "C++ 13.5%",
+        "url": "https://github.com/mit-han-lab/llm-awq/search?l=c%2B%2B"
+      },
+      {
+        "text": "Shell 1.4%",
+        "url": "https://github.com/mit-han-lab/llm-awq/search?l=shell"
+      },
+      {
+        "text": "C 0.6%",
+        "url": "https://github.com/mit-han-lab/llm-awq/search?l=c"
+      }
+    ],
+    "meta_description": "[MLSys 2024 Best Paper Award] AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration - mit-han-lab/llm-awq",
+    "status_code": 200,
+    "text": "Uh oh!\n\nThere was an error while loading. Please reload this page .\n\nNotifications You must be signed in to change notification settings\n\nFork 315\n\nStar 3.6k\n\nCode\n\nIssues 170\n\nPull requests 12\n\nActions\n\nProjects\n\nSecurity and quality 0\n\nInsights\n\nCode\n\nIssues\n\nPull requests\n\nActions\n\nProjects\n\nSecurity and quality\n\nInsights\n\nmit-han-lab/llm-awq\n\nFolders and files\n\nLatest commit\n\nHistory\n\nRepository files navigation\n\nREADME\n\nMIT license\n\nAWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration\n\n[ Paper ][ Website ]\n\nEfficient and accurate low-bit weight quantization (INT3/4) for LLMs, supporting instruction-tuned models and multi-modal LMs.\n\nThe current release supports:\n\nAWQ search for accurate quantization.\n\nPre-computed AWQ model zoo for LLMs (Llama-1/2/3, OPT, CodeLlama, StarCoder, Vicuna, VILA, LLaVA; load to generate quantized weights).\n\nMemory-efficient 4-bit Linear in PyTorch.\n\nEfficient CUDA kernel implementation for fast inference (support context and decoding stage).\n\nExamples on 4-bit inference of an instruction-tuned model (Vicuna) and multi-modal LM (VILA).\n\nChunk prefilling for faster prefilling in multi-round Q&A setting.\n\nState-of-the-art prefilling speed of LLMs/VLMs on edge devices: TinyChat 2.0 .\n\nThanks to AWQ, TinyChat can deliver more efficient responses with LLM/VLM chatbots through 4-bit inference.\n\nTinyChat with LLaMA-3-8b on RTX 4090 (2.7x faster than FP16):\n\nTinyChat with LLaMA-3-8b on Jetson Orin (2.9x faster than FP16):\n\nTinyChat also supports inference with vision language models (e.g., VILA, LLaVA). In the following examples, W4A16 quantized models from VILA family are launched with TinyChat.\n\nTinyChat with NVILA-8B on RTX 4090 (single-image inputs):\n\nTinyChat with NVILA-8B on RTX 4090 (multi-image inputs):\n\nTinyChat with video reasoning:\n\nPrompt: What might be the next step according to the video?\n\nAnswer: The next step in the video could be to place the shaped dough onto a baking sheet and let it rise before baking.\n\nOnline demo: https://vila.hanlab.ai\n\nCheck out TinyChat , which offers a turn-key solution for on-device inference of LLMs and VLMs on resource-constrained edge platforms . With TinyChat, it is now possible to efficiently run large models on small and low-power devices even without Internet connection!\n\nNews\n\n[2025/04] \ud83d\udd25 AWQ now supports DeepSeek-R1-Distilled models. Try our example here !\n\n[2025/02] AWQ now supports BF16 precision. See example here .\n\n[2024/10] \ud83d\udd25\u26a1 Explore advancements in TinyChat 2.0 , the latest version with significant advancements in prefilling speed of Edge LLMs and VLMs, 1.5-1.7x faster than the previous version of TinyChat. Please refer to the README and blog for more details.\n\n[2024/05] \ud83c\udfc6 AWQ receives the Best Paper Award at MLSys 2024 . \ud83c\udf89\n\n[2024/05] \ud83d\udd25 The VILA-1.5 model family which features video understanding is now supported in AWQ and TinyChat. Check out out online demo powered by TinyChat here . Example is here .\n\n[2024/05] \ud83d\udd25 AMD adopts AWQ to improve LLM serving efficiency.\n\n[2024/04] \ud83d\udd25 We released AWQ and TinyChat support for The Llama-3 model family! Check out our example here .\n\n[2024/02] \ud83d\udd25 AWQ has been accepted to MLSys 2024 !\n\n[2024/02] \ud83d\udd25 We supported VILA Vision Languague Models in AWQ & TinyChat! Check our latest demos with multi-image inputs!\n\n[2024/02] \ud83d\udd25 We released new version of quantized GEMM/GEMV kernels in TinyChat , leading to 38 tokens/second inference speed on NVIDIA Jetson Orin!\n\n[2024/01] \ud83d\udd25 AWQ has been integrated by Google Vertex AI !\n\n[2023/11] \ud83d\udd25 AWQ has been integrated by Amazon Sagemaker Containers !\n\n[2023/11] \ud83d\udd25 We added AWQ support and pre-computed search results for CodeLlama, StarCoder, StableCode models. Checkout our model zoo here !\n\n[2023/11] \ud83d\udd25 AWQ is now integrated natively in Hugging Face transformers through from_pretrained . You can either load quantized models from the Hub or your own HF quantized models.\n\n[2023/10] AWQ is integrated into NVIDIA TensorRT-LLM\n\n[2023/09] AWQ is integrated into Intel Neural Compressor , FastChat , vLLM , HuggingFace TGI , and LMDeploy .\n\n[2023/09] \u26a1 Check out our latest TinyChat , which is ~2x faster than the first release on Orin!\n\n[2023/09] \u26a1 Check out AutoAWQ , a third-party implementation to make AWQ easier to expand to new models, improve inference speed, and integrate into Huggingface.\n\n[2023/07] \ud83d\udd25 We released TinyChat , an efficient and lightweight chatbot interface based on AWQ. TinyChat enables efficient LLM inference on both cloud and edge GPUs. Llama-2-chat models are supported! Check out our implementation here .\n\n[2023/07] \ud83d\udd25 We added AWQ support and pre-computed search results for Llama-2 models (7B & 13B). Checkout our model zoo here !\n\n[2023/07] We extended the support for more LLM models including MPT, Falcon, and BLOOM.\n\nContents\n\nAWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration News Contents Helpful Links Install AWQ Model Zoo Examples Usage Results on Visual Language Models Reference Related Projects\n\nNews\n\nContents\n\nHelpful Links\n\nInstall\n\nAWQ Model Zoo\n\nExamples\n\nUsage\n\nResults on Visual Language Models\n\nReference\n\nRelated Projects\n\nHelpful Links\n\nVILA online demo : Visual Language Models efficiently supported by AWQ & TinyChat.\n\nLLM on the Edge : AWQ and TinyChat support edge GPUs such as NVIDIA Jetson Orin.\n\nVLMs on Laptop : Follow the instructions to deploy VLMs on NVIDIA Laptops with TinyChat.\n\nGradio Server : Try to build your own VLM online demo with AWQ and TinyChat!\n\nQServe : \ud83d\udd25 [New] Efficient and accurate serving system for large-scale LLM inference.\n\nInstall\n\nClone this repository and navigate to AWQ folder\n\nInstall Package\n\nFor edge devices like Orin, before running the commands above, please: Modify pyproject.toml by commenting out this line . Manually install precompiled PyTorch binaries (>=2.0.0) from NVIDIA . You also need to install torchvision from this website when running NVILA. Set the appropriate Python version for conda environment (e.g., conda create -n awq python=3.8 -y for JetPack 5).\n\nFor edge devices like Orin, before running the commands above, please:\n\nModify pyproject.toml by commenting out this line .\n\nManually install precompiled PyTorch binaries (>=2.0.0) from NVIDIA . You also need to install torchvision from this website when running NVILA.\n\nSet the appropriate Python version for conda environment (e.g., conda create -n awq python=3.8 -y for JetPack 5).\n\nInstall efficient W4A16 (4-bit weight, 16-bit activation) CUDA kernel and optimized FP16 kernels (e.g. layernorm, positional encodings).\n\nInstall Flash Attention\n\nWe recommend starting an interactive python CLI interface and run import flash_attn to check whether FlashAttention-2 is installed successfully. If not, we recommend downloading pre-built wheels from here . Please notice:\n\nPyTorch version needs to exactly match with the version specified in the .whl name;\n\nCheck out both cxx11abiTRUE and cxx11abiFALSE wheels if one of them does not work;\n\nIt's recommended to match CUDA version specified in the .whl filename, but minor mismatches (e.g. 12.1 vs 12.2, or even 11.8 vs 12.2) usually do not matter.\n\n[Optional] In order to run AWQ and TinyChat with NVILA model family, please install VILA:\n\nAWQ Model Zoo\n\nWe provide pre-computed AWQ search results for multiple model families, including LLaMA, OPT, Vicuna, and LLaVA. To get the pre-computed AWQ search results, run:\n\nThe detailed support list:\n\nNote: We only list models that we have prepare the AWQ searching results in the table above. AWQ also supports models such as LLaVA-v1.5 7B, and you may need to run the AWQ search on your own to quantize these models. For our latest VLM NVILA, quantized weights are available here .\n\nExamples\n\nAWQ can be easily applied to various LMs thanks to its good generalization, including instruction-tuned models and multi-modal LMs. It provides an easy-to-use tool to reduce the serving cost of LLMs.\n\nHere we provide two examples of AWQ application: Vicuna-7B (chatbot) and LLaVA-13B (visual reasoning) under ./examples directory. AWQ can easily reduce the GPU memory of model serving and speed up token generation. It provides accurate quantization, providing reasoning outputs. You should be able to observe memory savings when running the models with 4-bit weights.\n\nNote that we perform AWQ using only textual calibration data, depsite we are running on multi-modal input. Please refer to ./examples for details.\n\nUsage\n\nWe provide several sample script to run AWQ (please refer to ./scripts ). We use Llama3-8B as an example.\n\nPerform AWQ search and save search results (we already did it for you):\n\nEvaluate the AWQ quantized model on WikiText-2 (simulated pseudo quantization)\n\nGenerate real quantized weights (INT4)\n\nLoad and evaluate the real quantized model (now you can see smaller gpu memory usage)\n\nResults on Visual Language Models\n\nAWQ also seamlessly supports large multi-modal models (LMMs). Please refer to TinyChat for more details.\n\nReference\n\nIf you find AWQ useful or relevant to your research, please kindly cite our paper:\n\nRelated Projects\n\nSmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models\n\nGPTQ: Accurate Post-training Compression for Generative Pretrained Transformers\n\nVicuna and FastChat\n\nLLaVA: Large Language and Vision Assistant\n\nVILA: On Pre-training for Visual Language Models\n\nAbout\n\n[MLSys 2024 Best Paper Award] AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration\n\nResources\n\nLicense\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nStars\n\nWatchers\n\nForks\n\nReleases\n\nPackages 0\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nContributors\n\nUh oh!\n\nThere was an error while loading. Please reload this page .\n\nLanguages\n\nPython 61.8%\n\nCuda 22.7%\n\nC++ 13.5%\n\nShell 1.4%\n\nC 0.6%",
+    "text_length": 9919,
+    "title": "GitHub - mit-han-lab/llm-awq: [MLSys 2024 Best Paper Award] AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration \u00b7 GitHub",
+    "url": "https://github.com/mit-han-lab/llm-awq"
+  },
+  "https://arxiv.org/abs/2306.00978": {
+    "_cache_hit": true,
+    "_cache_key": "fetch_09fea2ee2b2e752279976ad87137be0ed8d5e2f6a89788d23d1f75301075e82b",
+    "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_09fea2ee2b2e752279976ad87137be0ed8d5e2f6a89788d23d1f75301075e82b.json",
+    "_cached_at": 1783359768,
+    "content_type": "text/html; charset=utf-8",
+    "fetched_at": 1783359768,
+    "headings": [
+      "Computer Science > Computation and Language",
+      "Title: AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+      "Submission history",
+      "Access Paper:",
+      "Current browse context:",
+      "References & Citations",
+      "BibTeX formatted citation",
+      "Bookmark",
+      "Bibliographic and Citation Tools",
+      "Code, Data and Media Associated with this Article",
+      "Demos",
+      "Recommenders and Search Tools",
+      "arXivLabs: experimental projects with community collaborators"
+    ],
+    "links": [
+      {
+        "text": "v1",
+        "url": "https://arxiv.org/abs/2306.00978v1"
+      },
+      {
+        "text": "Ji Lin",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Lin,+J"
+      },
+      {
+        "text": "Jiaming Tang",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Tang,+J"
+      },
+      {
+        "text": "Haotian Tang",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Tang,+H"
+      },
+      {
+        "text": "Shang Yang",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Yang,+S"
+      },
+      {
+        "text": "Wei-Ming Chen",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Chen,+W"
+      },
+      {
+        "text": "Wei-Chen Wang",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Wang,+W"
+      },
+      {
+        "text": "Guangxuan Xiao",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Xiao,+G"
+      },
+      {
+        "text": "Xingyu Dang",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Dang,+X"
+      },
+      {
+        "text": "Chuang Gan",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Gan,+C"
+      },
+      {
+        "text": "Song Han",
+        "url": "https://arxiv.org/search/cs?searchtype=author&query=Han,+S"
+      },
+      {
+        "text": "View PDF",
+        "url": "https://arxiv.org/pdf/2306.00978"
+      },
+      {
+        "text": "HTML (experimental)",
+        "url": "https://arxiv.org/html/2306.00978v6"
+      },
+      {
+        "text": "this https URL",
+        "url": "https://github.com/mit-han-lab/llm-awq"
+      },
+      {
+        "text": "arXiv:2306.00978",
+        "url": "https://arxiv.org/abs/2306.00978"
+      },
+      {
+        "text": "arXiv:2306.00978v6",
+        "url": "https://arxiv.org/abs/2306.00978v6"
+      },
+      {
+        "text": "https://doi.org/10.48550/arXiv.2306.00978",
+        "url": "https://doi.org/10.48550/arXiv.2306.00978"
+      },
+      {
+        "text": "view email",
+        "url": "https://arxiv.org/show-email/9f84e992/2306.00978"
+      },
+      {
+        "text": "[v1]",
+        "url": "https://arxiv.org/abs/2306.00978v1"
+      },
+      {
+        "text": "[v2]",
+        "url": "https://arxiv.org/abs/2306.00978v2"
+      },
+      {
+        "text": "[v3]",
+        "url": "https://arxiv.org/abs/2306.00978v3"
+      },
+      {
+        "text": "[v4]",
+        "url": "https://arxiv.org/abs/2306.00978v4"
+      },
+      {
+        "text": "[v5]",
+        "url": "https://arxiv.org/abs/2306.00978v5"
+      },
+      {
+        "text": "View PDF",
+        "url": "https://arxiv.org/pdf/2306.00978"
+      },
+      {
+        "text": "HTML (experimental)",
+        "url": "https://arxiv.org/html/2306.00978v6"
+      },
+      {
+        "text": "TeX Source",
+        "url": "https://arxiv.org/src/2306.00978"
+      },
+      {
+        "text": "view license",
+        "url": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/"
+      },
+      {
+        "text": "<\u00a0prev",
+        "url": "https://arxiv.org/prevnext?id=2306.00978&function=prev&context=cs.CL"
+      },
+      {
+        "text": "next\u00a0>",
+        "url": "https://arxiv.org/prevnext?id=2306.00978&function=next&context=cs.CL"
+      },
+      {
+        "text": "new",
+        "url": "https://arxiv.org/list/cs.CL/new"
+      },
+      {
+        "text": "recent",
+        "url": "https://arxiv.org/list/cs.CL/recent"
+      },
+      {
+        "text": "2023-06",
+        "url": "https://arxiv.org/list/cs.CL/2023-06"
+      },
+      {
+        "text": "cs",
+        "url": "https://arxiv.org/abs/2306.00978?context=cs"
+      },
+      {
+        "text": "NASA ADS",
+        "url": "https://ui.adsabs.harvard.edu/abs/arXiv:2306.00978"
+      },
+      {
+        "text": "Google Scholar",
+        "url": "https://scholar.google.com/scholar_lookup?arxiv_id=2306.00978"
+      },
+      {
+        "text": "Semantic Scholar",
+        "url": "https://api.semanticscholar.org/arXiv:2306.00978"
+      },
+      {
+        "text": "",
+        "url": "http://www.bibsonomy.org/BibtexHandler?requTask=upload&url=https://arxiv.org/abs/2306.00978&description=AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
+      },
+      {
+        "text": "",
+        "url": "https://reddit.com/submit?url=https://arxiv.org/abs/2306.00978&title=AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration"
+      },
+      {
+        "text": "What is the Explorer?",
+        "url": "https://info.arxiv.org/labs/showcase.html#arxiv-bibliographic-explorer"
+      },
+      {
+        "text": "What is Connected Papers?",
+        "url": "https://www.connectedpapers.com/about"
+      },
+      {
+        "text": "What is Litmaps?",
+        "url": "https://www.litmaps.co/"
+      },
+      {
+        "text": "What are Smart Citations?",
+        "url": "https://www.scite.ai/"
+      },
+      {
+        "text": "What is alphaXiv?",
+        "url": "https://alphaxiv.org/"
+      },
+      {
+        "text": "What is CatalyzeX?",
+        "url": "https://www.catalyzex.com"
+      },
+      {
+        "text": "What is DagsHub?",
+        "url": "https://dagshub.com/"
+      },
+      {
+        "text": "What is GotitPub?",
+        "url": "http://gotit.pub/faq"
+      },
+      {
+        "text": "What is Huggingface?",
+        "url": "https://huggingface.co/huggingface"
+      },
+      {
+        "text": "What is ScienceCast?",
+        "url": "https://sciencecast.org/welcome"
+      },
+      {
+        "text": "What is Replicate?",
+        "url": "https://replicate.com/docs/arxiv/about"
+      },
+      {
+        "text": "What is Spaces?",
+        "url": "https://huggingface.co/docs/hub/spaces"
+      },
+      {
+        "text": "What is TXYZ.AI?",
+        "url": "https://txyz.ai"
+      },
+      {
+        "text": "What are Influence Flowers?",
+        "url": "https://influencemap.cmlab.dev/"
+      },
+      {
+        "text": "What is CORE?",
+        "url": "https://core.ac.uk/services/recommender"
+      },
+      {
+        "text": "Learn more about arXivLabs",
+        "url": "https://info.arxiv.org/labs/index.html"
+      },
+      {
+        "text": "Which authors of this paper are endorsers?",
+        "url": "https://arxiv.org/auth/show-endorsers/2306.00978"
+      },
+      {
+        "text": "What is MathJax?",
+        "url": "https://info.arxiv.org/help/mathjax.html"
+      }
+    ],
+    "meta_description": "Abstract page for arXiv paper 2306.00978: AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+    "status_code": 200,
+    "text": "Computer Science > Computation and Language\n\nTitle: AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration\n\nAbstract: Large language models (LLMs) have transformed numerous AI applications. On-device LLM is becoming increasingly important: running LLMs locally on edge devices can reduce the cloud computing cost and protect users' privacy. However, the astronomical model size and the limited hardware resource pose significant deployment challenges. We propose Activation-aware Weight Quantization (AWQ), a hardware-friendly approach for LLM low-bit weight-only quantization. AWQ finds that not all weights in an LLM are equally important. Protecting only 1% salient weights can greatly reduce quantization error. To identify salient weight channels, we should refer to the activation distribution, not weights. To avoid the hardware-inefficient mix-precision quantization, we mathematically derive that scaling up the salient channels can reduce the quantization error. AWQ employs an equivalent transformation to scale the salient weight channels to protect them. The scale is determined by collecting the activation statistics offline. AWQ does not rely on any backpropagation or reconstruction, so it generalizes to different domains and modalities without overfitting the calibration set. AWQ outperforms existing work on various language modeling and domain-specific benchmarks (coding and math). Thanks to better generalization, it achieves excellent quantization performance for instruction-tuned LMs and, for the first time, multi-modal LMs. Alongside AWQ, we implement TinyChat, an efficient and flexible inference framework tailored for 4-bit on-device LLM/VLMs. With kernel fusion and platform-aware weight packing, TinyChat offers more than 3x speedup over the Huggingface FP16 implementation on both desktop and mobile GPUs. It also democratizes the deployment of the 70B Llama-2 model on mobile GPUs.\n\nSubmission history\n\nAccess Paper:\n\nView PDF\n\nHTML (experimental)\n\nTeX Source\n\nCurrent browse context:\n\nReferences & Citations\n\nNASA ADS\n\nGoogle Scholar\n\nSemantic Scholar\n\nBibTeX formatted citation\n\nBookmark\n\nBibliographic and Citation Tools\n\nCode, Data and Media Associated with this Article\n\nDemos\n\nRecommenders and Search Tools\n\nAuthor\n\nVenue\n\nInstitution\n\nTopic\n\narXivLabs: experimental projects with community collaborators\n\narXivLabs is a framework that allows collaborators to develop and share new arXiv features directly on our website.\n\nBoth individuals and organizations that work with arXivLabs have embraced and accepted our values of openness, community, excellence, and user data privacy. arXiv is committed to these values and only works with partners that adhere to them.\n\nHave an idea for a project that will add value for arXiv's community? Learn more about arXivLabs .",
+    "text_length": 2830,
+    "title": "[2306.00978] AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration",
+    "url": "https://arxiv.org/abs/2306.00978"
+  },
+  "https://towardsdatascience.com/from-16-bit-to-2-bit-finding-the-best-trade-off-between-memory-efficiency-and-accuracy-2ecca87b86f": {
+    "correlation_id": "285a4d353ada",
+    "error": "fetch failed",
+    "url": "https://towardsdatascience.com/from-16-bit-to-2-bit-finding-the-best-trade-off-between-memory-efficiency-and-accuracy-2ecca87b86f"
+  },
+  "https://towardsdatascience.com/extreme-compression-of-large-language-models-via-additive-quantization-cbadbf0b7f14": {
+    "correlation_id": "2bfed4e54e21",
+    "error": "fetch failed",
+    "url": "https://towardsdatascience.com/extreme-compression-of-large-language-models-via-additive-quantization-cbadbf0b7f14"
+  },
+  "https://towardsdatascience.com/taking-it-a-step-further-extreme-3-bit-quantization-of-llama-2-8ac0e3ebab63": {
+    "correlation_id": "7526082806a1",
+    "error": "fetch failed",
+    "url": "https://towardsdatascience.com/taking-it-a-step-further-extreme-3-bit-quantization-of-llama-2-8ac0e3ebab63"
+  }
+}

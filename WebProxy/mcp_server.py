@@ -17,12 +17,14 @@ Usage:
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import logging
 import os
 import re
 import socket
 import sys
+import threading
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 from pathlib import Path
@@ -236,6 +238,109 @@ _URL_FORBIDDEN_CHARS = frozenset("\\<>\"^`{|}")
 # Default is fail-closed: if getaddrinfo raises gaierror, we refuse the URL
 # rather than let the downstream fetcher resolve to a blocked IP.
 _DNS_FAIL_OPEN = os.environ.get("WEB_PROXY_ALLOW_DNS_FAIL", "0") == "1"
+
+_CAPTURE_LOCK = threading.Lock()
+_CAPTURE_COUNTER = 0
+
+
+def _safe_artifact_segment(value: str, default: str = "agent") -> str:
+    """Return a filesystem-safe artifact path segment."""
+    if not isinstance(value, str):
+        value = ""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    safe = safe.strip("._-")
+    return safe[:120] or default
+
+
+def _investigation_workspace_from_env() -> Path | None:
+    raw = (
+        os.environ.get("ATLASFORGE_INVESTIGATION_WORKSPACE")
+        or os.environ.get("ATLASFORGE_WORKSPACE_DIR")
+        or ""
+    ).strip()
+    if not raw:
+        return None
+    try:
+        workspace = Path(raw).expanduser().resolve()
+    except OSError:
+        return None
+    if workspace.is_symlink():
+        return None
+    return workspace
+
+
+def _capture_webproxy_json_output(
+    *,
+    tool_name: str,
+    endpoint: str,
+    request_payload: dict,
+    response_payload: dict,
+) -> dict | None:
+    """
+    Mirror the literal WebProxy JSON response into the active investigation.
+
+    This is intentionally done in the MCP layer so the artifact exists for both
+    Claude and Codex workflows, independent of their transcript/event formats.
+    """
+    if not isinstance(response_payload, dict):
+        return None
+    workspace = _investigation_workspace_from_env()
+    if workspace is None:
+        return None
+
+    try:
+        subagent_id = _safe_artifact_segment(
+            os.environ.get("ATLASFORGE_SUBAGENT_ID")
+            or os.environ.get("ATLASFORGE_ARTIFACT_LABEL")
+            or os.environ.get("ATLASFORGE_AGENT_LABEL")
+            or "agent"
+        )
+        tool_segment = _safe_artifact_segment(tool_name, "webproxy")
+        endpoint_segment = _safe_artifact_segment(endpoint.strip("/").replace("/", "_"), "call")
+
+        global _CAPTURE_COUNTER
+        with _CAPTURE_LOCK:
+            _CAPTURE_COUNTER += 1
+            seq = _CAPTURE_COUNTER
+
+        data = json.dumps(response_payload, ensure_ascii=False, indent=2).encode("utf-8")
+        sha256 = hashlib.sha256(data).hexdigest()
+        capture_dir = workspace / "artifacts" / "webproxy_json" / subagent_id
+        capture_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = capture_dir / f"{seq:06d}_{tool_segment}_{endpoint_segment}_{sha256[:12]}.json"
+        if not dest_path.exists():
+            tmp_path = dest_path.with_name(f".{dest_path.name}.tmp.{os.getpid()}")
+            tmp_path.write_bytes(data)
+            os.replace(tmp_path, dest_path)
+
+        now = datetime.now(timezone.utc).isoformat()
+        record = {
+            "timestamp": now,
+            "seq": seq,
+            "artifact_type": "web_proxy_json_output",
+            "subagent_id": subagent_id,
+            "tool_name": tool_name,
+            "endpoint": endpoint,
+            "request": request_payload,
+            "url": response_payload.get("url") or response_payload.get("pdf_url"),
+            "query": response_payload.get("query"),
+            "title": response_payload.get("title") or response_payload.get("paper_title"),
+            "type": response_payload.get("type") or endpoint_segment,
+            "cache_json_path": response_payload.get("_cache_path"),
+            "artifact_json_path": str(dest_path),
+            "sha256": sha256,
+            "byte_length": len(data),
+        }
+
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        for manifest_path in (capture_dir / "manifest.jsonl", workspace / "artifacts" / "webproxy_json" / "manifest.jsonl"):
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(manifest_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        return record
+    except Exception as exc:
+        _logger.debug("failed to capture WebProxy JSON output: %s", exc)
+        return None
 
 
 def _sanitize_error(text: str) -> str:
@@ -783,6 +888,8 @@ def _format_search_results(data: dict) -> str:
     lines.append(f"Web search results for query: \"{data.get('query', '')}\"")
     lines.append(f"Provider: {data.get('provider', 'unknown')}")
     lines.append(f"Cache hit: {data.get('_cache_hit', False)}")
+    if data.get("_investigation_json_path"):
+        lines.append(f"Investigation JSON: {data.get('_investigation_json_path')}")
     lines.append("")
     for r in data.get("results", []):
         lines.append(f"**{r.get('title', '')}**")
@@ -799,6 +906,7 @@ def _format_fetch_results(data: dict) -> str:
             f"Saved PDF: {data.get('local_pdf_path', '')}",
             f"Saved text: {data.get('local_text_path', '')}",
             f"Cache JSON: {data.get('_cache_path', '')}",
+            f"Investigation JSON: {data.get('_investigation_json_path', '')}",
             f"SHA-256: {data.get('sha256', '')}",
             f"Size: {data.get('byte_length', 0)} bytes",
             f"Pages extracted: {data.get('pages_extracted', 0)}/{data.get('page_count', '?')}",
@@ -841,6 +949,7 @@ def _format_fetch_results(data: dict) -> str:
         f"Title: {data.get('title', '')}",
         f"Cache hit: {data.get('_cache_hit', False)}",
         f"Cache JSON: {data.get('_cache_path', '')}",
+        f"Investigation JSON: {data.get('_investigation_json_path', '')}",
         "",
     ]
     if data.get("headings"):
@@ -1306,7 +1415,16 @@ def handle_tool_call(name: str, arguments: dict) -> str:
         if not all(isinstance(d, str) for d in blocked):
             return "Error: blocked_domains must contain only strings"
 
-        data = _proxy_post("/search", {"query": query, "count": 10})
+        request_payload = {"query": query, "count": 10}
+        data = _proxy_post("/search", request_payload)
+        capture = _capture_webproxy_json_output(
+            tool_name=name,
+            endpoint="/search",
+            request_payload=request_payload,
+            response_payload=data,
+        )
+        if capture:
+            data["_investigation_json_path"] = capture["artifact_json_path"]
 
         if allowed or blocked:
             filtered = []
@@ -1331,7 +1449,16 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             url = _require_url(arguments)
         except ValueError as exc:
             return f"Error: {exc}"
-        data = _proxy_post("/fetch", {"url": url, "max_chars": MAX_MAX_CHARS})
+        request_payload = {"url": url, "max_chars": MAX_MAX_CHARS}
+        data = _proxy_post("/fetch", request_payload)
+        capture = _capture_webproxy_json_output(
+            tool_name=name,
+            endpoint="/fetch",
+            request_payload=request_payload,
+            response_payload=data,
+        )
+        if capture:
+            data["_investigation_json_path"] = capture["artifact_json_path"]
         return _format_fetch_results(data)
 
     elif name == "WebResearch":
@@ -1342,12 +1469,21 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             max_chars = _clamp_int(arguments.get("max_chars"), 0, MAX_MAX_CHARS, 12000)
         except ValueError as exc:
             return f"Error: {exc}"
-        data = _proxy_post("/research", {
+        request_payload = {
             "query": query,
             "count": count,
             "fetch_top_n": fetch_top_n,
             "max_chars": max_chars,
-        })
+        }
+        data = _proxy_post("/research", request_payload)
+        capture = _capture_webproxy_json_output(
+            tool_name=name,
+            endpoint="/research",
+            request_payload=request_payload,
+            response_payload=data,
+        )
+        if capture:
+            data["_investigation_json_path"] = capture["artifact_json_path"]
         lines = [_format_search_results(data)]
         for page in data.get("fetched", []):
             lines.append("---")
@@ -1363,7 +1499,16 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             max_chars = _clamp_int(arguments.get("max_chars"), -1, MAX_MAX_CHARS, -1)
         except ValueError as exc:
             return f"Error: {exc}"
-        data = _proxy_post("/paper/fetch", {"url": url, "max_chars": max_chars})
+        request_payload = {"url": url, "max_chars": max_chars}
+        data = _proxy_post("/paper/fetch", request_payload)
+        capture = _capture_webproxy_json_output(
+            tool_name=name,
+            endpoint="/paper/fetch",
+            request_payload=request_payload,
+            response_payload=data,
+        )
+        if capture:
+            data["_investigation_json_path"] = capture["artifact_json_path"]
         return _format_fetch_results(data)
 
     elif name == "ImageSearch":
@@ -1373,13 +1518,25 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             fetch_top_n = _clamp_int(arguments.get("fetch_top_n"), 0, MAX_COUNT, 0)
         except ValueError as exc:
             return f"Error: {exc}"
-        data = _proxy_post("/image_search", {
+        request_payload = {
             "query": query,
             "count": count,
             "fetch_top_n": fetch_top_n,
             "safesearch": arguments.get("safesearch", "off"),
-        })
+        }
+        data = _proxy_post("/image_search", request_payload)
+        capture = _capture_webproxy_json_output(
+            tool_name=name,
+            endpoint="/image_search",
+            request_payload=request_payload,
+            response_payload=data,
+        )
+        if capture:
+            data["_investigation_json_path"] = capture["artifact_json_path"]
         lines = [f"Image search for: \"{query}\"", ""]
+        if data.get("_investigation_json_path"):
+            lines.append(f"Investigation JSON: {data.get('_investigation_json_path')}")
+            lines.append("")
         for r in data.get("results", []):
             lines.append(f"**{r.get('title', '')}**")
             lines.append(f"Image: {r.get('url', '')}")

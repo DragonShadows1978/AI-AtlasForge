@@ -1,0 +1,82 @@
+{
+  "lane_type": "logic",
+  "status": "failed",
+  "summary": "APA-Quant attention has a critical bug: causal masking allows information leakage from future value positions to earlier query positions. 5 of 7 logical invariants pass (refinement fraction, monotonicity, full-precision equivalence, softmax normalization, determinism, gradient flow), but invariant 4 (causal mask independence) fails catastrophically. With is_causal=True, output[i] is affected by V[j] for j > i, violating the fundamental requirement for autoregressive models.",
+  "issues": [
+    {
+      "severity": "critical",
+      "title": "Causal Mask Information Leakage - is_causal=True Broken",
+      "evidence": "Invariant 4 test: When V[4:8] differ by ~100 from V[0:4], positions 0-3 with is_causal=True show output differences of 9.99e+01 (should be ~0). This is a 10-magnitude correctness failure. Test file: test_inv4_debug.py lines 31-58.",
+      "affected_code": "/mnt/ForgeRealm/Project-Tensor/tensor_gpu_v2/_core.py lines 2042-2055 (non-tiled) and 2115-2127 (tiled): Refinement mask selection does not respect causal boundaries. Specifically, the code masks causal positions when computing the abs_bulk for threshold (lines 2043-2044, 2116-2117) but the subsequent percentile-based selection does not guarantee causal positions remain masked.",
+      "recommendation": "Investigate the refinement mask selection logic. The fix likely requires ensuring that refine_mask[cmask] = False always holds when is_causal=True. This may require explicit masking of the refinement selection or a different threshold calculation that excludes masked positions from percentile computation."
+    }
+  ],
+  "passing_invariants": [
+    {
+      "name": "Refinement Fraction Invariant",
+      "description": "At refine_percentile=0.15, exactly 15% ± 1% of Q·K interactions are refined",
+      "status": "PASS",
+      "details": "Tested at shapes (2,4,128,64), (2,4,256,64), (2,4,1024,64). All within 1% tolerance. refine_k = max(1, int(S * refine_percentile)) correctly implements the calculation."
+    },
+    {
+      "name": "Monotonicity Invariant",
+      "description": "MSE vs SDPA monotonically decreases as refine_percentile increases from 0.0 to 1.0",
+      "status": "PASS",
+      "details": "Tested percentiles [0.0, 0.05, 0.10, 0.15, 0.25, 0.50, 0.75, 1.0]. MSE decreases from 3.44e-3 to 1.01e-15 with perfect monotonicity. No violations detected."
+    },
+    {
+      "name": "Full-Precision Equivalence Invariant",
+      "description": "At refine_percentile=1.0, output matches SDPA within 1e-4 relative MSE",
+      "status": "PASS",
+      "details": "Tested at (2,4,64,64) and (2,4,256,64). Relative MSE achieved: 2.46e-14 and 9.02e-14, both <<1e-4. Perfect equivalence at 100% refinement."
+    },
+    {
+      "name": "Softmax Sum-to-One Invariant",
+      "description": "Attention weights sum to 1.0 per query position (verified via V=ones test)",
+      "status": "PASS",
+      "details": "Shape (2,4,64,64) with V=ones produces output near all-ones. Max deviation: 3.58e-07, mean: 8.92e-08, both <<1e-3 threshold. Softmax normalization is correct."
+    },
+    {
+      "name": "Determinism Invariant",
+      "description": "At dropout_p=0.0, repeated calls return identical outputs",
+      "status": "PASS",
+      "details": "10 repeated calls with identical inputs and dropout_p=0.0 produced bitwise-identical outputs. Max variance: 0.0. Perfect determinism confirmed."
+    },
+    {
+      "name": "Gradient Flow Invariant",
+      "description": "Loss = output.sum() produces finite, non-zero gradients for Q, K, V",
+      "status": "PASS",
+      "details": "Shape (2,4,64,64): Query grad norm=3.30e+01, Key grad norm=2.88e+01, Value grad norm=1.84e+02. All finite, all non-zero. Backward pass works correctly."
+    }
+  ],
+  "failing_invariants": [
+    {
+      "name": "Causal Mask Independence Invariant",
+      "description": "With is_causal=True, output[b,h,i,j] is independent of V[b,h,k,:] for all k > i",
+      "status": "FAIL",
+      "details": "Extreme value test: Set V[0:4]=0.1, V[4:8]=100. With is_causal=True, outputs at positions 0-3 differ by max=9.99e+01 between the two runs. Expected max difference: ~0 (should be independent of future values). This is a 10-magnitude error magnitude.",
+      "mechanism": "The two-tier mechanism applies causal masking to the scores (lines 2026-2028, 2035-2036) but the refinement mask selection (lines 2042-2055, 2115-2127) may not properly exclude causally-masked positions. When abs_bulk is computed, causal positions are zeroed (lines 2043-2044, 2116-2117) but the subsequent percentile-based selection via xp.partition or z-score does not guarantee these positions remain excluded from the refinement mask."
+    }
+  ],
+  "test_log": [
+    "test_inv1.py: Refinement fraction - PASS",
+    "test_inv2.py: Monotonicity - PASS (8 percentiles, perfect decay)",
+    "test_inv3456.py: Invariants 3,4,5,6 - 3/4 PASS (Invariant 4 CRITICAL FAIL)",
+    "test_inv4_debug.py: Detailed causal mask analysis - CONFIRMS FAILURE",
+    "test_inv7.py: Gradient flow - PASS"
+  ],
+  "commands_run": [
+    "python3 test_inv1.py",
+    "python3 test_inv2.py",
+    "python3 test_inv3456.py",
+    "python3 test_inv4_debug.py",
+    "python3 test_inv7.py"
+  ],
+  "files_examined": [
+    "/mnt/ForgeRealm/Project-Tensor/tensor_gpu_v2/_core.py:1884-2256 (apa_quant_attention implementation)",
+    "/mnt/ForgeRealm/Project-Tensor/tensor_gpu_v2/_core.py:1877-1881 (_apa_zscore helper)",
+    "/mnt/ForgeRealm/Project-Tensor/tensor_gpu_v2/_core.py:1873-1875 (quantizer cache)"
+  ],
+  "confidence": 0.95,
+  "notes": "The critical failure is reproducible and quantifiable. The bug prevents use of APA-Quant with autoregressive models (GPT, etc.) where causal masking is essential. The non-causal case works correctly. The root cause is clear: refinement mask selection does not properly respect causal boundaries. Estimated severity: Code breaks a primary use case and will produce silent correctness violations."
+}

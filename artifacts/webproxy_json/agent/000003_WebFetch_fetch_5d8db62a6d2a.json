@@ -1,0 +1,43 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_bef0579de8c292ba139186fbef0f0760bc20a5e01f8076507337af973ed46a85",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_bef0579de8c292ba139186fbef0f0760bc20a5e01f8076507337af973ed46a85.json",
+  "_cached_at": 1779556614,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": 1779556614,
+  "headings": [
+    "Using the NVIDIA CUDA Stream&#x2d;Ordered Memory Allocator, Part 1",
+    "Overview",
+    "What You'll Learn",
+    "Prerequisites & Requirements",
+    "Key Questions Answered",
+    "Technologies & Tools",
+    "Key Actionable Insights",
+    "Common Pitfalls",
+    "Related Concepts"
+  ],
+  "links": [
+    {
+      "text": "Home",
+      "url": "https://www.engineering.fyi/"
+    },
+    {
+      "text": "NVIDIA",
+      "url": "https://www.engineering.fyi/company/nvidia"
+    },
+    {
+      "text": "NVIDIA",
+      "url": "https://www.engineering.fyi/company/nvidia"
+    },
+    {
+      "text": "View Original",
+      "url": "https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/?utm_source=engineering.fyi"
+    }
+  ],
+  "meta_description": "This article introduces the new NVIDIA CUDA API functions, cudaMallocAsync and cudaFreeAsync, which allow for stream-ordered memory allocation and deallocati...",
+  "status_code": 200,
+  "text": "Using the NVIDIA CUDA Stream&#x2d;Ordered Memory Allocator, Part 1\n\nThis post introduces new API functions that enable memory allocation and deallocation to be stream&#x2d;ordered operations.\n\nOverview\n\nThis article introduces the new NVIDIA CUDA API functions, cudaMallocAsync and cudaFreeAsync, which allow for stream-ordered memory allocation and deallocation. It discusses the efficiency improvements these functions provide over traditional cudaMalloc and cudaFree, particularly in managing memory within GPU streams.\n\nWhat You'll Learn\n\nHow to implement cudaMallocAsync and cudaFreeAsync for efficient memory management\n\nWhy stream-ordered memory allocation improves GPU application performance\n\nHow to configure memory pools for optimized memory reuse\n\nPrerequisites & Requirements\n\nUnderstanding of CUDA programming and GPU memory management concepts\n\nKey Questions Answered\n\nTechnologies & Tools\n\nKey Actionable Insights\n\n1 Implementing cudaMallocAsync and cudaFreeAsync can significantly enhance the performance of your CUDA applications by allowing memory management to occur concurrently with GPU work submission. This is particularly useful in applications with multiple streams, where traditional memory allocation methods would introduce unnecessary synchronization delays.\n\n2 Configuring memory pools with appropriate release thresholds can help maintain a low memory footprint and improve allocation performance. By preventing unused memory from being released back to the OS too frequently, applications can benefit from faster subsequent allocations.\n\n3 Utilizing stream ordering semantics ensures that memory allocated in one stream can be safely accessed in another, provided the correct dependencies are established. This allows for more flexible and efficient memory usage patterns, especially in complex applications with multiple concurrent operations.\n\nCommon Pitfalls\n\nRelated Concepts",
+  "text_length": 1912,
+  "title": "Using the NVIDIA CUDA Stream&#x2d;Ordered Memory Allocator, Part 1 | NVIDIA Engineering Blog | Engineering.fyi",
+  "url": "https://www.engineering.fyi/article/using-the-nvidia-cuda-stream-x2d-ordered-memory-allocator-part-1"
+}

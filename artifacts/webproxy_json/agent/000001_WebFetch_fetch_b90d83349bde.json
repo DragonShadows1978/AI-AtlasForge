@@ -1,0 +1,243 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "fetch_e95d07eee7d1f76df519522c90231f6a7a48b2d26979e8f6cc2f0f1c1b02577c",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/fetch_e95d07eee7d1f76df519522c90231f6a7a48b2d26979e8f6cc2f0f1c1b02577c.json",
+  "_cached_at": 1779337682,
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": 1779337682,
+  "headings": [
+    "Computer Science > Machine Learning",
+    "Title: EfficientQAT: Efficient Quantization-Aware Training for Large Language Models",
+    "Submission history",
+    "Access Paper:",
+    "Current browse context:",
+    "References & Citations",
+    "BibTeX formatted citation",
+    "Bookmark",
+    "Bibliographic and Citation Tools",
+    "Code, Data and Media Associated with this Article",
+    "Demos",
+    "Recommenders and Search Tools",
+    "arXivLabs: experimental projects with community collaborators"
+  ],
+  "links": [
+    {
+      "text": "v1",
+      "url": "https://arxiv.org/abs/2407.11062v1"
+    },
+    {
+      "text": "Mengzhao Chen",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Chen,+M"
+    },
+    {
+      "text": "Wenqi Shao",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Shao,+W"
+    },
+    {
+      "text": "Peng Xu",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Xu,+P"
+    },
+    {
+      "text": "Jiahao Wang",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Wang,+J"
+    },
+    {
+      "text": "Peng Gao",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Gao,+P"
+    },
+    {
+      "text": "Kaipeng Zhang",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Zhang,+K"
+    },
+    {
+      "text": "Ping Luo",
+      "url": "https://arxiv.org/search/cs?searchtype=author&query=Luo,+P"
+    },
+    {
+      "text": "View PDF",
+      "url": "https://arxiv.org/pdf/2407.11062"
+    },
+    {
+      "text": "HTML (experimental)",
+      "url": "https://arxiv.org/html/2407.11062v3"
+    },
+    {
+      "text": "this https URL",
+      "url": "https://github.com/OpenGVLab/EfficientQAT"
+    },
+    {
+      "text": "arXiv:2407.11062",
+      "url": "https://arxiv.org/abs/2407.11062"
+    },
+    {
+      "text": "arXiv:2407.11062v3",
+      "url": "https://arxiv.org/abs/2407.11062v3"
+    },
+    {
+      "text": "https://doi.org/10.48550/arXiv.2407.11062",
+      "url": "https://doi.org/10.48550/arXiv.2407.11062"
+    },
+    {
+      "text": "view email",
+      "url": "https://arxiv.org/show-email/b33469aa/2407.11062"
+    },
+    {
+      "text": "[v1]",
+      "url": "https://arxiv.org/abs/2407.11062v1"
+    },
+    {
+      "text": "[v2]",
+      "url": "https://arxiv.org/abs/2407.11062v2"
+    },
+    {
+      "text": "View PDF",
+      "url": "https://arxiv.org/pdf/2407.11062"
+    },
+    {
+      "text": "HTML (experimental)",
+      "url": "https://arxiv.org/html/2407.11062v3"
+    },
+    {
+      "text": "TeX Source",
+      "url": "https://arxiv.org/src/2407.11062"
+    },
+    {
+      "text": "view license",
+      "url": "http://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "text": "< prev",
+      "url": "https://arxiv.org/prevnext?id=2407.11062&function=prev&context=cs.LG"
+    },
+    {
+      "text": "next >",
+      "url": "https://arxiv.org/prevnext?id=2407.11062&function=next&context=cs.LG"
+    },
+    {
+      "text": "new",
+      "url": "https://arxiv.org/list/cs.LG/new"
+    },
+    {
+      "text": "recent",
+      "url": "https://arxiv.org/list/cs.LG/recent"
+    },
+    {
+      "text": "2024-07",
+      "url": "https://arxiv.org/list/cs.LG/2024-07"
+    },
+    {
+      "text": "cs",
+      "url": "https://arxiv.org/abs/2407.11062?context=cs"
+    },
+    {
+      "text": "cs.AI",
+      "url": "https://arxiv.org/abs/2407.11062?context=cs.AI"
+    },
+    {
+      "text": "cs.CL",
+      "url": "https://arxiv.org/abs/2407.11062?context=cs.CL"
+    },
+    {
+      "text": "NASA ADS",
+      "url": "https://ui.adsabs.harvard.edu/abs/arXiv:2407.11062"
+    },
+    {
+      "text": "Google Scholar",
+      "url": "https://scholar.google.com/scholar_lookup?arxiv_id=2407.11062"
+    },
+    {
+      "text": "Semantic Scholar",
+      "url": "https://api.semanticscholar.org/arXiv:2407.11062"
+    },
+    {
+      "text": "",
+      "url": "http://www.bibsonomy.org/BibtexHandler?requTask=upload&url=https://arxiv.org/abs/2407.11062&description=EfficientQAT: Efficient Quantization-Aware Training for Large Language Models"
+    },
+    {
+      "text": "",
+      "url": "https://reddit.com/submit?url=https://arxiv.org/abs/2407.11062&title=EfficientQAT: Efficient Quantization-Aware Training for Large Language Models"
+    },
+    {
+      "text": "What is the Explorer?",
+      "url": "https://info.arxiv.org/labs/showcase.html#arxiv-bibliographic-explorer"
+    },
+    {
+      "text": "What is Connected Papers?",
+      "url": "https://www.connectedpapers.com/about"
+    },
+    {
+      "text": "What is Litmaps?",
+      "url": "https://www.litmaps.co/"
+    },
+    {
+      "text": "What are Smart Citations?",
+      "url": "https://www.scite.ai/"
+    },
+    {
+      "text": "What is alphaXiv?",
+      "url": "https://alphaxiv.org/"
+    },
+    {
+      "text": "What is CatalyzeX?",
+      "url": "https://www.catalyzex.com"
+    },
+    {
+      "text": "What is DagsHub?",
+      "url": "https://dagshub.com/"
+    },
+    {
+      "text": "What is GotitPub?",
+      "url": "http://gotit.pub/faq"
+    },
+    {
+      "text": "What is Huggingface?",
+      "url": "https://huggingface.co/huggingface"
+    },
+    {
+      "text": "What is ScienceCast?",
+      "url": "https://sciencecast.org/welcome"
+    },
+    {
+      "text": "What is Replicate?",
+      "url": "https://replicate.com/docs/arxiv/about"
+    },
+    {
+      "text": "What is Spaces?",
+      "url": "https://huggingface.co/docs/hub/spaces"
+    },
+    {
+      "text": "What is TXYZ.AI?",
+      "url": "https://txyz.ai"
+    },
+    {
+      "text": "What are Influence Flowers?",
+      "url": "https://influencemap.cmlab.dev/"
+    },
+    {
+      "text": "What is CORE?",
+      "url": "https://core.ac.uk/services/recommender"
+    },
+    {
+      "text": "What is IArxiv?",
+      "url": "https://iarxiv.org/about"
+    },
+    {
+      "text": "Learn more about arXivLabs",
+      "url": "https://info.arxiv.org/labs/index.html"
+    },
+    {
+      "text": "Which authors of this paper are endorsers?",
+      "url": "https://arxiv.org/auth/show-endorsers/2407.11062"
+    },
+    {
+      "text": "What is MathJax?",
+      "url": "https://info.arxiv.org/help/mathjax.html"
+    }
+  ],
+  "meta_description": "Abstract page for arXiv paper 2407.11062: EfficientQAT: Efficient Quantization-Aware Training for Large Language Models",
+  "status_code": 200,
+  "text": "Computer Science > Machine Learning\n\nTitle: EfficientQAT: Efficient Quantization-Aware Training for Large Language Models\n\nAbstract: Large language models (LLMs) are crucial in modern natural language processing and artificial intelligence. However, they face challenges in managing their significant memory requirements. Although quantization-aware training (QAT) offers a solution by reducing memory consumption through low-bit representations with minimal accuracy loss, it is impractical due to substantial training resources. To address this, we propose Efficient Quantization-Aware Training (EfficientQAT), a more feasible QAT algorithm. EfficientQAT involves two consecutive phases: Block-wise training of all parameters (Block-AP) and end-to-end training of quantization parameters (E2E-QP). To the best of our knowledge, Block-AP is the first method to enable direct training of all parameters in a block-wise manner, reducing accuracy loss in low-bit scenarios by enhancing the solution space during optimization. E2E-QP then trains only the quantization parameters (step sizes) end-to-end, further improving the performance of quantized models by considering interactions among all sub-modules. Extensive experiments demonstrate that EfficientQAT outperforms previous quantization methods across a range of models, including base LLMs, instruction-tuned LLMs, and multimodal LLMs, with scales from 7B to 70B parameters at various quantization bits. For instance, EfficientQAT obtains a 2-bit Llama-2-70B model on a single A100-80GB GPU in 41 hours, with less than 3 points accuracy degradation compared to the full precision (69.48 vs. 72.41). Code is available at this https URL .\n\nSubmission history\n\nAccess Paper:\n\nView PDF\n\nHTML (experimental)\n\nTeX Source\n\nCurrent browse context:\n\nReferences & Citations\n\nNASA ADS\n\nGoogle Scholar\n\nSemantic Scholar\n\nBibTeX formatted citation\n\nBookmark\n\nBibliographic and Citation Tools\n\nCode, Data and Media Associated with this Article\n\nDemos\n\nRecommenders and Search Tools\n\nAuthor\n\nVenue\n\nInstitution\n\nTopic\n\narXivLabs: experimental projects with community collaborators\n\narXivLabs is a framework that allows collaborators to develop and share new arXiv features directly on our website.\n\nBoth individuals and organizations that work with arXivLabs have embraced and accepted our values of openness, community, excellence, and user data privacy. arXiv is committed to these values and only works with partners that adhere to them.\n\nHave an idea for a project that will add value for arXiv's community? Learn more about arXivLabs .",
+  "text_length": 2581,
+  "title": "[2407.11062] EfficientQAT: Efficient Quantization-Aware Training for Large Language Models",
+  "url": "https://arxiv.org/abs/2407.11062"
+}

@@ -38,6 +38,10 @@ def _write_codex_session(
     input_tokens: int = 0,
     cached_input_tokens: int = 0,
     output_tokens: int = 0,
+    last_total_tokens: int | None = None,
+    cumulative_input_tokens: int | None = None,
+    cumulative_cached_input_tokens: int | None = None,
+    cumulative_output_tokens: int | None = None,
     originator: str = "codex_exec",
     source: str = "exec",
 ) -> None:
@@ -72,9 +76,13 @@ def _write_codex_session(
                 "type": "token_count",
                 "info": {
                     "total_token_usage": {
-                        "input_tokens": input_tokens,
-                        "cached_input_tokens": cached_input_tokens,
-                        "output_tokens": output_tokens,
+                        "input_tokens": cumulative_input_tokens if cumulative_input_tokens is not None else input_tokens,
+                        "cached_input_tokens": (
+                            cumulative_cached_input_tokens
+                            if cumulative_cached_input_tokens is not None
+                            else cached_input_tokens
+                        ),
+                        "output_tokens": cumulative_output_tokens if cumulative_output_tokens is not None else output_tokens,
                         "reasoning_output_tokens": 0,
                         "total_tokens": total_tokens,
                     },
@@ -83,7 +91,7 @@ def _write_codex_session(
                         "cached_input_tokens": cached_input_tokens,
                         "output_tokens": output_tokens,
                         "reasoning_output_tokens": 0,
-                        "total_tokens": total_tokens,
+                        "total_tokens": last_total_tokens if last_total_tokens is not None else total_tokens,
                     },
                     "model_context_window": model_context_window,
                 },
@@ -147,6 +155,32 @@ def test_codex_workspace_match_rejects_interactive_cli_session_in_same_workspace
 
     assert not _is_codex_file_for_workspace(session_file, str(workspace))
     assert not _codex_transcript_matches_workspace(session_file, str(workspace))
+
+
+def test_start_watching_honors_explicit_provider_over_stale_state(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace" / "project" / "mission_123"
+    workspace.mkdir(parents=True)
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+
+    monkeypatch.setattr(cw_mod, "CODEX_SESSIONS_DIR", session_dir)
+    monkeypatch.setattr(cw_mod, "_load_provider_from_state", lambda: "claude")
+
+    watcher = cw_mod.ContextWatcher()
+    session_id = watcher.start_watching(
+        str(workspace),
+        lambda signal: None,
+        enable_time_handoff=False,
+        provider="codex",
+    )
+
+    try:
+        assert session_id is not None
+        stats = watcher.get_session_stats(session_id)
+        assert stats["provider"] == "codex"
+        assert stats["transcript_dir"] == str(session_dir)
+    finally:
+        watcher.stop_all()
 
 
 def test_codex_graceful_handoff_uses_context_window(tmp_path):
@@ -277,6 +311,45 @@ def test_codex_gpt5_uses_one_million_window_when_cli_reports_smaller_window(tmp_
     assert monitor.last_tokens.model_name == "gpt-5.5"
     assert monitor.last_tokens.model_context_window == 1_000_000
     assert monitor.peak_tokens == 256_328
+    assert received == []
+
+
+def test_codex_cumulative_total_does_not_drive_context_handoff(tmp_path):
+    workspace = tmp_path / "workspace" / "project" / "mission_123"
+    workspace.mkdir(parents=True)
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    session_file = session_dir / "codex-session.jsonl"
+    _write_codex_session(
+        session_file,
+        cwd=str(workspace),
+        model="gpt-5.5",
+        total_tokens=1_130_000,
+        model_context_window=258_400,
+        input_tokens=180_000,
+        cached_input_tokens=150_000,
+        output_tokens=500,
+        last_total_tokens=180_500,
+        cumulative_input_tokens=1_100_000,
+        cumulative_cached_input_tokens=800_000,
+        cumulative_output_tokens=30_000,
+    )
+
+    received = []
+    monitor = SessionMonitor(
+        "codex-session",
+        str(workspace),
+        received.append,
+        enable_time_handoff=False,
+        provider="codex",
+    )
+    monitor.transcript_dir = session_dir
+    monitor.started_at -= timedelta(seconds=120)
+
+    assert monitor.process_updates() is None
+    assert monitor.last_tokens.total_tokens_seen == 180_500
+    assert monitor.last_tokens.model_context_window == 1_000_000
+    assert monitor.peak_tokens == 180_500
     assert received == []
 
 
@@ -412,11 +485,11 @@ def test_codex_monitor_tracks_multiple_matching_transcripts_without_rereading(tm
                                 "total_tokens": 300,
                             },
                             "last_token_usage": {
-                                "input_tokens": 100,
+                                "input_tokens": 300,
                                 "cached_input_tokens": 0,
                                 "output_tokens": 0,
                                 "reasoning_output_tokens": 0,
-                                "total_tokens": 100,
+                                "total_tokens": 300,
                             },
                             "model_context_window": 1000,
                         },

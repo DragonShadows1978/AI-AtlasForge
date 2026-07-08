@@ -1,0 +1,627 @@
+{
+  "search_metadata": {
+    "search_date": "2026-07-06",
+    "searches_executed": [
+      "quantization visual explanation papers",
+      "quantization examples tutorial",
+      "quantization implementation examples",
+      "quantization step-by-step guide",
+      "quantization neural networks arxiv paper visual",
+      "GPTQ quantization post-training paper",
+      "quantization aware training tutorial implementation",
+      "BitNet 1.58 bit quantization",
+      "QLoRA quantization fine-tuning paper",
+      "learned step size quantization neural network",
+      "integer only inference neural network",
+      "binary weight networks training",
+      "activation quantization symmetric asymmetric"
+    ],
+    "total_results_found": 15,
+    "focus": "Papers and resources with visual explanations and practical implementation examples"
+  },
+  "papers": [
+    {
+      "rank": 1,
+      "title": "A Visual Guide to Quantization",
+      "authors": ["Maarten Grootendorst"],
+      "publication_year": 2024,
+      "venue": "Blog/Newsletter",
+      "resource_type": "Tutorial",
+      "visual_content": {
+        "has_visuals": true,
+        "number_of_visuals": 50,
+        "visual_type": "Custom interactive diagrams"
+      },
+      "topics": [
+        "Representation of numerical values",
+        "Common data types (FP32, FP16, INT8)",
+        "Symmetric quantization",
+        "Asymmetric quantization",
+        "Range mapping and clipping",
+        "Calibration techniques",
+        "Post-training quantization (PTQ)",
+        "Dynamic vs static quantization",
+        "4-bit quantization",
+        "Quantization-aware training (QAT)",
+        "BitNet 1.58-bit models"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "urls": {
+        "primary": "https://www.maartengrootendorst.com/blog/quantization/",
+        "newsletter": "https://newsletter.maartengrootendorst.com/p/a-visual-guide-to-quantization"
+      },
+      "key_strengths": [
+        "Comprehensive coverage from fundamentals to advanced",
+        "Exceptional visual clarity",
+        "Language model focus",
+        "Covers extreme quantization (1-bit models)"
+      ]
+    },
+    {
+      "rank": 2,
+      "title": "GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers",
+      "authors": ["Elias Frantar", "Saleh Ashkboos", "Torsten Hoefler", "Dan Alistarh"],
+      "publication_year": 2022,
+      "venue": "ICLR 2023",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Technical diagrams, algorithm illustrations, performance charts"
+      },
+      "topics": [
+        "One-shot weight quantization",
+        "Approximate second-order information",
+        "Layer-wise quantization",
+        "2-bit, 3-bit, 4-bit quantization",
+        "Ternary quantization",
+        "Large language model compression",
+        "175B parameter models",
+        "Inference speedups",
+        "GPU memory optimization"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "quantization_bitwidth": [2, 3, 4, "ternary"],
+      "model_scale": "175B parameters",
+      "speedup": {
+        "A100_GPU": "3.25x",
+        "A6000_GPU": "4.5x"
+      },
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/2210.17323",
+        "pdf": "https://arxiv.org/pdf/2210.17323",
+        "github": "https://github.com/IST-DASLab/gptq"
+      },
+      "key_strengths": [
+        "Industry-standard method",
+        "Proven on largest models",
+        "Highly efficient implementation",
+        "Practical inference gains"
+      ]
+    },
+    {
+      "rank": 3,
+      "title": "A White Paper on Neural Network Quantization",
+      "authors": ["Markus Nagel", "et al. (6+ authors)"],
+      "publication_year": 2021,
+      "venue": "arXiv",
+      "resource_type": "Academic Paper - Comprehensive Review",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Technical diagrams, flowcharts, benchmark charts"
+      },
+      "topics": [
+        "Quantization fundamentals",
+        "State-of-the-art methods",
+        "Training techniques",
+        "Hardware implications",
+        "Performance benchmarks",
+        "Quantization taxonomy",
+        "Practical considerations"
+      ],
+      "implementation_details": true,
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/2106.08295"
+      },
+      "key_strengths": [
+        "Authoritative reference",
+        "Comprehensive scope",
+        "Clear taxonomy",
+        "Hardware-aware analysis"
+      ]
+    },
+    {
+      "rank": 4,
+      "title": "QLoRA: Efficient Finetuning of Quantized LLMs",
+      "authors": ["Tim Dettmers", "Artidoro Pagnoni"],
+      "publication_year": 2023,
+      "venue": "NeurIPS 2023",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Algorithm visualizations, performance comparisons, memory charts"
+      },
+      "topics": [
+        "4-bit quantization",
+        "Low-Rank Adaptation (LoRA)",
+        "Fine-tuning with quantized models",
+        "High-precision quantization",
+        "Memory efficiency",
+        "Consumer GPU optimization"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "quantization_bitwidth": [4],
+      "model_scale": "65B parameters",
+      "hardware": "48GB GPU",
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/2305.14314",
+        "pdf": "https://proceedings.neurips.cc/paper_files/paper/2023/file/1feb87871436031bdc0f2beaa62a049b-Paper-Conference.pdf",
+        "github": "https://github.com/artidoro/qlora"
+      },
+      "key_strengths": [
+        "Practical fine-tuning approach",
+        "Memory-efficient",
+        "Consumer hardware focus",
+        "Minimal performance loss"
+      ]
+    },
+    {
+      "rank": 5,
+      "title": "Learned Step Size Quantization",
+      "authors": ["Steven K. Esser", "Jeffrey L. McKinstry", "Deepika Bablani", "Rathinakumar Appuswamy", "Dharmendra S. Modha"],
+      "publication_year": 2019,
+      "published_venue": "ICLR 2020",
+      "venue": "ICLR 2020",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Algorithm diagrams, training curves, visual comparisons"
+      },
+      "topics": [
+        "Learnable step-size parameters",
+        "Gradient-based quantization training",
+        "2-bit, 3-bit, 4-bit quantization",
+        "ImageNet benchmarks",
+        "Weight quantization",
+        "Activation quantization",
+        "Gradient estimation"
+      ],
+      "implementation_details": true,
+      "quantization_bitwidth": [2, 3, 4],
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/1902.08153",
+        "pdf": "https://arxiv.org/pdf/1902.08153"
+      },
+      "key_strengths": [
+        "Foundational method",
+        "Clear mathematical formulation",
+        "Gradient-based training",
+        "State-of-the-art ImageNet results"
+      ]
+    },
+    {
+      "rank": 6,
+      "title": "BitNet: 1.58-bit Large Language Models",
+      "authors": ["Microsoft Research", "Ma et al."],
+      "publication_year": 2024,
+      "venue": "Technical Publication",
+      "resource_type": "Industry Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Architectural diagrams, performance comparisons, scaling law charts"
+      },
+      "topics": [
+        "Ternary (1.58-bit) quantization",
+        "BitLinear layer transformation",
+        "W1A8 structure (1-bit weights, 8-bit activations)",
+        "Learnable beta parameter",
+        "Scaling laws",
+        "Extreme quantization",
+        "Efficient inference"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "quantization_bitwidth": [1.58],
+      "structure": "W1A8 (1-bit weights, 8-bit activations)",
+      "urls": {
+        "wikipedia": "https://en.wikipedia.org/wiki/1.58-bit_large_language_model",
+        "arxiv_exploration": "https://arxiv.org/abs/2411.05882",
+        "github": "https://github.com/microsoft/BitNet",
+        "arxiv_exploration_html": "https://arxiv.org/html/2411.05882v1"
+      },
+      "key_strengths": [
+        "Cutting-edge extreme quantization",
+        "Practical inference optimizations",
+        "Comparable to FP16 Llama 2",
+        "Opens era of 1-bit LLMs"
+      ]
+    },
+    {
+      "rank": 7,
+      "title": "Binarized Neural Networks: Training Deep Neural Networks with Weights and Activations Constrained to +1 or -1",
+      "authors": ["Matthieu Courbariaux", "Yoshua Bengio", "Jean-Pierre David"],
+      "publication_year": 2016,
+      "venue": "NIPS",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Training process diagrams, network architectures, comparative results"
+      },
+      "topics": [
+        "Binary weights and activations",
+        "Gradient computation with constraints",
+        "Forward propagation with binary constraints",
+        "Backward propagation with binary constraints",
+        "Extreme quantization",
+        "Fundamental techniques"
+      ],
+      "implementation_details": true,
+      "quantization_bitwidth": [1],
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/1602.02830"
+      },
+      "key_strengths": [
+        "Foundational work on BNNs",
+        "Mathematical rigor",
+        "Constraint handling techniques",
+        "Backward propagation innovations"
+      ]
+    },
+    {
+      "rank": 8,
+      "title": "BinaryConnect: Training Deep Neural Networks with Binary Weights During Propagations",
+      "authors": ["Matthieu Courbariaux", "Yoshua Bengio", "Jean-Pierre David"],
+      "publication_year": 2015,
+      "venue": "NIPS",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Training procedure diagrams, comparison charts"
+      },
+      "topics": [
+        "Binary weight training",
+        "Forward/backward propagation with binary weights",
+        "Full-precision gradient accumulation",
+        "Computational efficiency",
+        "Memory reduction",
+        "Early practical approach"
+      ],
+      "implementation_details": true,
+      "quantization_bitwidth": [1],
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/1511.00363",
+        "nips_papers": "https://papers.nips.cc/paper/5647-binaryconnect-training-deep-neural-networks-with-binary-weights-during-propagations"
+      },
+      "key_strengths": [
+        "Early practical binary weight approach",
+        "Efficient training strategy",
+        "Precision/efficiency trade-off",
+        "Influential foundational work"
+      ]
+    },
+    {
+      "rank": 9,
+      "title": "Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference",
+      "authors": ["Bennet et al."],
+      "publication_year": 2017,
+      "venue": "IEEE Conference",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Fixed-point representation diagrams, computational flow charts, implementation guides"
+      },
+      "topics": [
+        "Integer-only arithmetic",
+        "Fixed-point representation",
+        "Quantization scheme design",
+        "Hardware-efficient inference",
+        "Practical C implementation",
+        "Mobile/edge deployment"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "programming_language": "C",
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/1712.05877",
+        "ieee_xplore": "https://ieeexplore.ieee.org/document/8578384/",
+        "github": "https://github.com/benja263/Integer-Only-Inference-for-Deep-Learning-in-Native-C"
+      },
+      "key_strengths": [
+        "Hardware-efficient focus",
+        "Fixed-point emphasis",
+        "Native C implementation",
+        "Practical embedded deployment"
+      ]
+    },
+    {
+      "rank": 10,
+      "title": "Model Quantization: Concepts, Methods, and Why It Matters",
+      "authors": ["NVIDIA Developer Relations"],
+      "publication_year": "2023/2024",
+      "venue": "NVIDIA Technical Blog",
+      "resource_type": "Industry Tutorial",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Detailed diagrams, comparison charts, visual explanations, performance graphs"
+      },
+      "topics": [
+        "Quantization fundamentals",
+        "Precision reduction (FP32 to FP8)",
+        "Quantization methods and techniques",
+        "Memory benefits",
+        "Performance benefits",
+        "Energy consumption reduction",
+        "Practical applications",
+        "NVIDIA GPU optimization"
+      ],
+      "implementation_details": true,
+      "urls": {
+        "primary": "https://developer.nvidia.com/blog/model-quantization-concepts-methods-and-why-it-matters/"
+      },
+      "key_strengths": [
+        "Industry perspective",
+        "Practical optimization insights",
+        "NVIDIA framework integration",
+        "Real-world deployment focus"
+      ]
+    },
+    {
+      "rank": 11,
+      "title": "Quantization-Aware Training (QAT): A Step-by-Step Guide with PyTorch",
+      "authors": ["Weights & Biases Community", "Young"],
+      "publication_year": "2023/2024",
+      "venue": "W&B Report",
+      "resource_type": "Tutorial",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Step-by-step diagrams, code examples, training visualizations, interactive plots"
+      },
+      "topics": [
+        "QAT fundamentals",
+        "PyTorch implementation",
+        "Simulating quantization during training",
+        "Fake quantization approach",
+        "Training procedures",
+        "Performance evaluation",
+        "Best practices"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "framework": "PyTorch",
+      "urls": {
+        "primary": "https://wandb.ai/byyoung3/Generative-AI/reports/Quantization-Aware-Training-QAT-A-step-by-step-guide-with-PyTorch--VmlldzoxMTk2NTY2Mw"
+      },
+      "key_strengths": [
+        "Practical PyTorch tutorial",
+        "W&B visualization integration",
+        "Complete end-to-end workflow",
+        "Interactive examples"
+      ]
+    },
+    {
+      "rank": 12,
+      "title": "Quantization-Aware Training for Large Language Models with PyTorch",
+      "authors": ["PyTorch Team"],
+      "publication_year": "2024",
+      "venue": "Official PyTorch Blog",
+      "resource_type": "Official Documentation",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Code examples, comparison charts, architecture diagrams"
+      },
+      "topics": [
+        "QAT implementation in PyTorch",
+        "Simulating quantization numerics",
+        "Fake quantization techniques",
+        "Training procedures",
+        "LLM-specific considerations",
+        "Inference optimization"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "framework": "PyTorch",
+      "urls": {
+        "primary": "https://pytorch.org/blog/quantization-aware-training/"
+      },
+      "key_strengths": [
+        "Official PyTorch documentation",
+        "Native PyTorch implementations",
+        "LLM focus",
+        "Current best practices"
+      ]
+    },
+    {
+      "rank": 13,
+      "title": "Quantization (Hugging Face Documentation)",
+      "authors": ["Hugging Face Team"],
+      "publication_year": "2023/2024 (ongoing)",
+      "venue": "Hugging Face Documentation",
+      "resource_type": "Official Documentation",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Code examples, workflow diagrams, practical demonstrations, comparison tables"
+      },
+      "topics": [
+        "Data type fundamentals",
+        "Accumulation data types",
+        "Post-training techniques (GPTQ, GGUF)",
+        "Quantization-aware training",
+        "Integration with Transformers",
+        "Practical examples",
+        "Model optimization"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "framework": "Hugging Face Transformers",
+      "urls": {
+        "primary": "https://huggingface.co/docs/optimum/concept_guides/quantization"
+      },
+      "key_strengths": [
+        "Comprehensive documentation",
+        "Transformers ecosystem integration",
+        "Practical code examples",
+        "Active community updates"
+      ]
+    },
+    {
+      "rank": 14,
+      "title": "Integer-Only Inference for Deep Learning in Native C",
+      "authors": ["Benjamin Harvey"],
+      "publication_year": "2020",
+      "venue": "Towards Data Science / Medium",
+      "resource_type": "Tutorial",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Step-by-step explanations, code walkthroughs, architectural diagrams"
+      },
+      "topics": [
+        "Post-training quantization",
+        "Fixed-point representation",
+        "Integer-only arithmetic",
+        "Native C implementation",
+        "Practical examples",
+        "MNIST and CIFAR datasets",
+        "Model conversion"
+      ],
+      "implementation_details": true,
+      "includes_code": true,
+      "programming_language": "C",
+      "datasets": ["MNIST", "CIFAR"],
+      "urls": {
+        "medium": "https://towardsdatascience.com/integer-only-inference-for-deep-learning-in-native-c-e57f29a20adc/",
+        "github": "https://github.com/benja263/Integer-Only-Inference-for-Deep-Learning-in-Native-C"
+      },
+      "key_strengths": [
+        "Complete end-to-end implementation",
+        "Easy-to-follow explanations",
+        "Practical C code",
+        "Runnable examples"
+      ]
+    },
+    {
+      "rank": 15,
+      "title": "Quantization Effects on Neural Networks Perception: How Would Quantization Change the Perceptual Field of Vision Models?",
+      "authors": ["Mohamed Amine Kerkouri", "et al."],
+      "publication_year": "2024",
+      "venue": "arXiv",
+      "resource_type": "Academic Paper",
+      "visual_content": {
+        "has_visuals": true,
+        "visual_type": "Visual analysis diagrams, CAM visualizations, perceptual field maps, heatmaps"
+      },
+      "topics": [
+        "Impact on perceptual fields",
+        "Vision model quantization",
+        "Class Activation Maps (CAM)",
+        "Perceptual changes analysis",
+        "Visual explanation",
+        "Attention mechanism effects"
+      ],
+      "implementation_details": true,
+      "model_type": "Vision Models",
+      "urls": {
+        "arxiv": "https://arxiv.org/abs/2403.09939",
+        "html": "https://arxiv.org/html/2403.09939v2"
+      },
+      "key_strengths": [
+        "Unique perceptual impact focus",
+        "Visual analysis methodology",
+        "CAM-based insights",
+        "Important for interpretability"
+      ]
+    }
+  ],
+  "statistics": {
+    "total_results": 15,
+    "by_type": {
+      "academic_papers": 10,
+      "industry_resources": 3,
+      "tutorials_documentation": 2
+    },
+    "with_code_examples": 13,
+    "with_visual_content": 15,
+    "date_range": {
+      "earliest": 2015,
+      "latest": 2024,
+      "span": "9 years of research"
+    }
+  },
+  "topics_covered": {
+    "fundamentals": [
+      "Data types (FP32, FP16, INT8, INT4, etc.)",
+      "Binary representation",
+      "Fixed-point arithmetic",
+      "Numerical precision"
+    ],
+    "quantization_techniques": [
+      "Symmetric quantization",
+      "Asymmetric quantization",
+      "Post-training quantization (PTQ)",
+      "Quantization-aware training (QAT)",
+      "Dynamic quantization",
+      "Static quantization"
+    ],
+    "algorithms": [
+      "GPTQ",
+      "LSQ (Learned Step Size Quantization)",
+      "QLoRA",
+      "BitNet (1.58-bit)",
+      "BinaryConnect",
+      "Binarized Neural Networks (BNNs)",
+      "Integer-only inference"
+    ],
+    "applications": [
+      "Large Language Models (LLMs)",
+      "Convolutional Neural Networks (CNNs)",
+      "Vision models",
+      "Transformer architectures",
+      "Edge/Mobile deployment"
+    ],
+    "benefits": [
+      "Memory reduction",
+      "Inference speedup",
+      "Energy efficiency",
+      "Hardware acceleration",
+      "Cost reduction"
+    ]
+  },
+  "recommended_learning_path": [
+    {
+      "step": 1,
+      "resource": "A Visual Guide to Quantization",
+      "reason": "Comprehensive visual overview of entire field"
+    },
+    {
+      "step": 2,
+      "resource": "A White Paper on Neural Network Quantization",
+      "reason": "Deep theoretical foundations and taxonomy"
+    },
+    {
+      "step": 3,
+      "resource": "Learned Step Size Quantization",
+      "reason": "Mathematical foundations and gradient-based training"
+    },
+    {
+      "step": 4,
+      "resource": "GPTQ: Accurate Post-Training Quantization",
+      "reason": "Industry-standard practical application on large models"
+    },
+    {
+      "step": 5,
+      "resource": "QLoRA: Efficient Finetuning",
+      "reason": "Fine-tuning quantized models on consumer hardware"
+    },
+    {
+      "step": 6,
+      "resource": "PyTorch/Hugging Face Guides",
+      "reason": "Hands-on implementation with modern frameworks"
+    },
+    {
+      "step": 7,
+      "resource": "BitNet: 1.58-bit LLMs",
+      "reason": "Cutting-edge extreme quantization techniques"
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "lane_type": "spec_alignment",
+  "status": "passed",
+  "summary": "Game state machine implementation matches mission Section 4 spec contract. All 9 transitions verified with source code file:line references. 17/17 FSM tests passing. No invalid transitions detected.",
+  "issues": [],
+  "commands_run": [
+    "python -m pytest test_fsm_spec_alignment.py -v",
+    "grep -n 'def descend\\|def _on_new_run\\|def begin_battle' labyrinth/shell/app.py labyrinth/engine/run.py"
+  ],
+  "files_examined": [
+    "labyrinth/shell/app.py",
+    "labyrinth/engine/run.py",
+    "labyrinth/engine/explore.py",
+    "test_fsm_spec_alignment.py"
+  ],
+  "confidence": 0.99,
+  "transition_verification": {
+    "TITLE_to_RUN_SETUP": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py",
+      "lines": "235, 264",
+      "handler": "_on_new_run() -> _show_run_setup()",
+      "guard": "None (always valid from title menu)",
+      "test": "test_title_shows_run_setup_on_new_game PASSED"
+    },
+    "RUN_SETUP_to_EXPLORE": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py",
+      "lines": "272-276",
+      "handler": "_on_choose_class() -> _build_explore_run() -> _show_explore()",
+      "guard": "Class must be valid (from CLASS_ORDER)",
+      "test": "test_run_setup_to_explore_on_class_choice PASSED"
+    },
+    "EXPLORE_to_BATTLE": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py, labyrinth/engine/run.py",
+      "lines": "303-307 (app), 198-211 (run.py)",
+      "handler": "_on_explore_encounter() -> run.begin_battle() -> _show_battle()",
+      "guard": "Must be in EXPLORE phase",
+      "test": "test_begin_battle_changes_phase_to_battle PASSED"
+    },
+    "BATTLE_to_EXPLORE": {
+      "status": "PRESENT",
+      "file": "labyrinth/engine/run.py",
+      "lines": "296",
+      "handler": "resolve_battle() returns EXPLORE on non-final victory",
+      "guard": "Not final boss: outcome==victory && !is_final_boss",
+      "test": "test_resolve_victory_returns_to_explore_on_non_final_boss PASSED"
+    },
+    "BATTLE_to_DEATH": {
+      "status": "PRESENT",
+      "file": "labyrinth/engine/run.py",
+      "lines": "272-277",
+      "handler": "resolve_battle() detects defeat, sets phase=DEATH",
+      "guard": "outcome == 'defeat'",
+      "test": "test_resolve_defeat_moves_to_death PASSED"
+    },
+    "BATTLE_to_VICTORY": {
+      "status": "PRESENT",
+      "file": "labyrinth/engine/run.py",
+      "lines": "282-286",
+      "handler": "resolve_battle() detects final boss victory",
+      "guard": "outcome==victory && is_final_boss (depth >= FINAL_BOSS_FLOOR)",
+      "test": "test_resolve_final_boss_victory_goes_to_victory PASSED"
+    },
+    "DEATH_to_SCORE": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py",
+      "lines": "339-342, 352-355",
+      "handler": "_on_battle_end() routes DEATH -> _show_death() -> on_continue -> _on_run_over() -> _show_score()",
+      "guard": "run.phase == DEATH enforced by resolve_battle()",
+      "test": "test_app_routes_death_to_score PASSED"
+    },
+    "VICTORY_to_SCORE": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py",
+      "lines": "343-346, 357-360",
+      "handler": "_on_battle_end() routes VICTORY -> _show_victory() -> on_continue -> _on_run_over() -> _show_score()",
+      "guard": "run.phase == VICTORY enforced by resolve_battle()",
+      "test": "test_app_routes_victory_to_score PASSED"
+    },
+    "SCORE_to_TITLE": {
+      "status": "PRESENT",
+      "file": "labyrinth/shell/app.py",
+      "lines": "367-372, 220-231",
+      "handler": "ScoreScene has on_back callback -> _show_title()",
+      "guard": "Always valid from score screen",
+      "test": "test_score_back_button_returns_to_title PASSED"
+    }
+  },
+  "guards_verified": {
+    "cannot_descend_outside_explore": {
+      "location": "labyrinth/engine/run.py:190",
+      "guard": "if self.phase is not RunPhase.EXPLORE or self.explore is None: return self.depth",
+      "test_passing": "test_cannot_descend_outside_explore PASSED"
+    },
+    "cannot_bypass_score_after_death": {
+      "location": "labyrinth/shell/app.py:339-342",
+      "guard": "All DEATH paths go through _record_score() before scene change",
+      "test_passing": "test_app_routes_death_to_score PASSED"
+    },
+    "cannot_bypass_score_after_victory": {
+      "location": "labyrinth/shell/app.py:343-346",
+      "guard": "All VICTORY paths go through _record_score() before scene change",
+      "test_passing": "test_app_routes_victory_to_score PASSED"
+    },
+    "final_boss_victory_check": {
+      "location": "labyrinth/engine/run.py:251, 282",
+      "guard": "is_final_boss = depth >= FINAL_BOSS_FLOOR; VICTORY only if is_final_boss",
+      "test_passing": "test_resolve_final_boss_victory_goes_to_victory PASSED"
+    },
+    "mid_boss_rearm_protection": {
+      "location": "labyrinth/engine/run.py:227-228, 293",
+      "guard": "boss_cleared_depth tracks cleared floor; begin_boss_battle() returns None if already cleared",
+      "test_note": "Documented in source; prevents soft-lock on mid-boss stairs"
+    }
+  },
+  "test_summary": {
+    "total_tests": 17,
+    "passed": 17,
+    "failed": 0,
+    "test_classes": [
+      "TestFSMPhaseDefinitions (2 tests)",
+      "TestTitleToRunSetup (1 test)",
+      "TestRunSetupToExplore (1 test)",
+      "TestExploreCreation (1 test)",
+      "TestExploreToEncounter (1 test)",
+      "TestBattleToExplore (1 test)",
+      "TestBattleToDeath (1 test)",
+      "TestBattleToVictory (1 test)",
+      "TestDeathToScore (1 test)",
+      "TestVictoryToScore (1 test)",
+      "TestScoreToTitle (1 test)",
+      "TestTitleContinuePath (1 test)",
+      "TestInvalidTransitions (3 tests)",
+      "TestExploreExitConditions (1 test)"
+    ]
+  },
+  "spec_compliance": {
+    "spec_quote": "TITLE -> RUN_SETUP (class select) -> EXPLORE <-> BATTLE -> (DEATH | VICTORY) -> SCORE -> TITLE",
+    "all_transitions_verified": true,
+    "all_guards_in_place": true,
+    "phase_enum_complete": true,
+    "terminal_phases_correct": true
+  }
+}

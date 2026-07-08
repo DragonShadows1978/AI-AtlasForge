@@ -1,0 +1,109 @@
+{
+  "lane_type": "mutation",
+  "status": "passed",
+  "summary": "Mutation testing of Project Labyrinth test suite completed successfully. All 3 mutation targets (connectivity reconciliation, combat damage formula, hunger clock decrement) were KILLED by existing tests, demonstrating strong test coverage. Mutation Score: 3/3 = 100%. All source files restored to original unmodified state.",
+  "issues": [],
+  "commands_run": [
+    "python /mnt/ForgeRealm/AI-AtlasForge/artifacts/testing/mutation/mutation_test_connectivity.py",
+    "python /mnt/ForgeRealm/AI-AtlasForge/artifacts/testing/mutation/mutation_test_damage.py",
+    "python /mnt/ForgeRealm/AI-AtlasForge/artifacts/testing/mutation/mutation_test_hunger.py",
+    "python -m pytest labyrinth/tests/test_procgen.py::test_floor_is_solvable -q",
+    "python -m pytest labyrinth/tests/test_explore.py::test_successful_step_decrements_hunger_by_exactly_one_step -q",
+    "python -m pytest labyrinth/tests/test_combat.py::test_defend_halves_incoming_damage_in_battle -q"
+  ],
+  "files_examined": [
+    "labyrinth/engine/procgen.py (line 612: _reconcile_connectivity call)",
+    "labyrinth/engine/combat_types.py (line 239: compute_physical_damage return)",
+    "labyrinth/engine/explore.py (line 427: hunger decrement)",
+    "labyrinth/tests/test_procgen.py (210 connectivity tests)",
+    "labyrinth/tests/test_combat.py (40+ combat tests)",
+    "labyrinth/tests/test_explore.py (50+ explore tests)"
+  ],
+  "mutation_results": [
+    {
+      "mutant_id": 1,
+      "name": "Connectivity Reconciliation Disabled",
+      "mechanism": "procgen.py:612 — comment out _reconcile_connectivity call",
+      "severity": "critical",
+      "expected_behavior": "Without connectivity reconciliation, vault sealing can strand corridor stubs, creating orphan regions",
+      "verdict": "KILLED",
+      "test_framework": "test_procgen.py::test_floor_is_solvable",
+      "affected_tests": [
+        "test_floor_is_solvable[4-4]"
+      ],
+      "failure_message": "room 2 (treasure_vault) unreachable. Solvability must hold by construction (see _reconcile_connectivity).",
+      "test_count": 210,
+      "parametrizations": "35 seeds × 6 depths (1, 4, 9, 13, 19, 26)",
+      "analysis": "The breadth of parametrization caught the orphaned vault on seed=4 depth=4. Test crashed during bounded regenerate-on-fail loop, proving that reconciliation is essential to solvability."
+    },
+    {
+      "mutant_id": 2,
+      "name": "Combat Damage Always Zero",
+      "mechanism": "combat_types.py:239 — return 0 instead of max(B.MIN_DAMAGE, int(dmg))",
+      "severity": "critical",
+      "expected_behavior": "Without damage, enemies never lose HP and battles cannot end",
+      "verdict": "KILLED",
+      "test_framework": "test_combat.py",
+      "affected_tests": [
+        "test_defend_halves_incoming_damage_in_battle",
+        "test_victory_economy_and_survivor_carryback",
+        "test_defeat_when_player_dies"
+      ],
+      "failure_message": "assert 0 < 0 (line 446 of test_combat.py)",
+      "test_count": 3,
+      "parametrizations": "none (direct numerical assertions)",
+      "analysis": "The defend test explicitly checks that damage > 0. Immediate failure on first assertion proves tests validate damage values, not just crash-free execution."
+    },
+    {
+      "mutant_id": 3,
+      "name": "Hunger Clock Decrement Disabled",
+      "mechanism": "explore.py:427 — comment out self.player.hunger -= B.HUNGER_PER_STEP",
+      "severity": "high",
+      "expected_behavior": "Without hunger decrement, the explore-phase endurance clock is broken and starvation never occurs",
+      "verdict": "KILLED",
+      "test_framework": "test_explore.py",
+      "affected_tests": [
+        "test_successful_step_decrements_hunger_by_exactly_one_step",
+        "test_hunger_is_monotonic_non_increasing_over_many_steps_and_reaches_zero",
+        "test_step_at_zero_hunger_drains_hp_by_starve_damage"
+      ],
+      "failure_message": "assert 1000 == (1000 - 1) (line 104 of test_explore.py)",
+      "test_count": 3,
+      "parametrizations": "none (fixed assertions)",
+      "analysis": "The first test checks exact hunger delta after one step. Immediate failure proves tests enforce precise mechanics, not just happy-path coverage."
+    }
+  ],
+  "mutation_score": {
+    "total_mutants": 3,
+    "killed": 3,
+    "survived": 0,
+    "score": 1.0,
+    "interpretation": "100% mutation score indicates strong test coverage for critical mechanisms. All tested mutations were detected."
+  },
+  "test_coverage_summary": {
+    "connectivity": {
+      "tests": 210,
+      "coverage": "STRONG",
+      "note": "Broad parametrization across seeds and depths ensures orphan detection"
+    },
+    "combat_damage": {
+      "tests": 40,
+      "coverage": "STRONG",
+      "note": "Explicit damage assertions in defend and victory tests"
+    },
+    "hunger_mechanics": {
+      "tests": 50,
+      "coverage": "STRONG",
+      "note": "Exact hunger delta and monotonicity checks"
+    }
+  },
+  "artifacts_created": [
+    "artifacts/testing/mutation/mutation_test_connectivity.py",
+    "artifacts/testing/mutation/mutation_test_damage.py",
+    "artifacts/testing/mutation/mutation_test_hunger.py",
+    "artifacts/testing/mutation/MUTATION_TEST_REPORT.md",
+    "artifacts/testing/mutation/mutation_testing_results.json"
+  ],
+  "source_files_state": "ALL RESTORED — No source file modifications remain. Verified via git status and test execution.",
+  "confidence": 0.95
+}

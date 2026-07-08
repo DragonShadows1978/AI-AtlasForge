@@ -1,0 +1,74 @@
+{
+  "_cache_hit": false,
+  "_cache_key": "search_198ea1fa93c46c75da47c800e2ee39b19dcbf00e0a73f8c9041fa331123a3ea1",
+  "_cache_path": "/mnt/ForgeRealm/AI-AtlasForge/WebProxy/atlasforge_data/web_proxy_cache/search_198ea1fa93c46c75da47c800e2ee39b19dcbf00e0a73f8c9041fa331123a3ea1.json",
+  "_cached_at": 1779337577,
+  "count": 10,
+  "fallback_from": "brave",
+  "fallback_reason": "brave_quota_or_rate_limit",
+  "fetched_at": 1779337577,
+  "provider": "duckduckgo",
+  "query": "attention mechanisms spurious zero weights interpretability",
+  "results": [
+    {
+      "snippet": "Despite this, existing work on interpretability is only beginning to assess what computed attention weights actually communicate. In an independent and contemporaneous study, Jain and Wallace (2019) explore whether attention mechanisms can identify the relative importance of inputs to the full model, finding them to be highly inconsistent predictors. In this work, we apply a different analysis ...",
+      "source": "duckduckgo",
+      "title": "PDF Is Attention Interpretable? - sites.lafayette.edu",
+      "url": "https://sites.lafayette.edu/serranos/wp-content/blogs.dir/4593/files/2024/07/Is-Attention-Interpretable.pdf"
+    },
+    {
+      "snippet": "Abstract Attention mechanisms represent a fundamental paradigm shift in neural network architectures, enabling models to selectively focus on relevant portions of input sequences through learned weighting functions. This monograph provides a comprehensive and rigorous mathematical treatment of attention mechanisms , encompassing their theoretical foundations, computational properties, and ...",
+      "source": "duckduckgo",
+      "title": "Attention mechanisms in neural networks - arXiv.org",
+      "url": "https://arxiv.org/pdf/2601.03329"
+    },
+    {
+      "snippet": "Despite this, existing work on interpretability is only beginning to assess what computed atten-tion weights actually communicate. In an indepen-dent and contemporaneous study, Jain and Wallace (2019) explore whether attention mechanisms can identify the relative importance of inputs to the full model, finding them to be highly inconsistent pre-dictors. In this work, we apply a different analy ...",
+      "source": "duckduckgo",
+      "title": "PDF Is Attention Interpretable? - ACL Anthology",
+      "url": "https://aclanthology.org/P19-1282.pdf"
+    },
+    {
+      "snippet": "Besides, we summarize network architectures used in conjunction with the attention mechanism and describe some typical applications of attention mechanism . Finally, we discuss the interpretability that attention brings to deep learning and present its potential future trends.",
+      "source": "duckduckgo",
+      "title": "A review on the attention mechanism of deep learning",
+      "url": "https://www.sciencedirect.com/science/article/pii/S092523122100477X"
+    },
+    {
+      "snippet": "Interpretability of attention mechanisms is the study of using attention weights to indicate which input features drive a model's predictions across various tasks. Empirical analyses, including gradient-based and leave-one-out methods, show that attention weights sometimes correlate weakly with true feature importance. Findings suggest combining attention maps with post-hoc methods and model ...",
+      "source": "duckduckgo",
+      "title": "Interpretability of Attention Mechanisms - emergentmind.com",
+      "url": "https://www.emergentmind.com/topics/interpretability-of-attention-mechanisms"
+    },
+    {
+      "snippet": "Here we propose the generalization of attention from low-level input features to high-level concepts as a mechanism to ensure the interpretability of attention scores within a given application domain.",
+      "source": "duckduckgo",
+      "title": "Attention-based Interpretability with Concept Transformers",
+      "url": "https://openreview.net/forum?id=kAa9eDS0RdO"
+    },
+    {
+      "snippet": "Attention mechanisms form a core component of several successful deep learning architectures, and are based on one key idea: \"The output depends only on a small (but unknown) segment of the input.\" In several practical applications like image captioning and language translation, this is mostly true. In trained models with an attention mechanism , the outputs of an intermediate module that ...",
+      "source": "duckduckgo",
+      "title": "On the Interpretability of Attention Networks - PMLR",
+      "url": "https://proceedings.mlr.press/v189/pandey23a.html"
+    },
+    {
+      "snippet": "The attention mechanism has offered some transparency in the workings of otherwise black-box RNN models: attention weights (scalar values assigned input words) invite to be interpreted as the importance of that word, providing a simple method of interpretability . Recent work, however, has questioned the faithfulness of this practice.",
+      "source": "duckduckgo",
+      "title": "Toward Practical Usage of the Attention Mechanism as a Tool for ...",
+      "url": "https://ieeexplore.ieee.org/document/9762294"
+    },
+    {
+      "snippet": "The authors proposed a novel attention mechanism that is directional and multi-dimensional. Multi-dimensional attention extends additive attention to produce a vector of values instead of a scalar value, achieved by replacing the final weight vector with a weight matrix. Directional self- attention (DiSA) adds a forward/backward directional mask prior to the attention softmax to zero out tokens ...",
+      "source": "duckduckgo",
+      "title": "PDF Interpreting Self-Attention Weights - Stanford University",
+      "url": "https://web.stanford.edu/class/archive/cs/cs224n/cs224n.1194/reports/custom/15794705.pdf"
+    },
+    {
+      "snippet": "We theoretically analyze combinatorial shortcuts, design one intuitive experiment to show their existence, and propose two methods to mitigate this issue. We conduct empirical studies on attention -based interpretation models. The results show that the proposed methods can effectively improve the interpretability of attention mechanisms .",
+      "source": "duckduckgo",
+      "title": "Why Attentions May Not Be Interpretable? · Explainable AI",
+      "url": "https://explainableairesearch.github.io/publications/bai2020attentions/"
+    }
+  ]
+}
