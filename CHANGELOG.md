@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.8.0] - 2026-07-08
+
+### Other
+
+- WebProxy fetch hardening + provider integration session work
+
+### Code Changes
+
+- **Modified** `WebProxy/mcp_server.py` — `_safe_artifact_segment`, `_investigation_workspace_from_env`, `_capture_webproxy_json_output`
+- **Modified** `WebProxy/service.py` — `_float_env`, `_bool_env`, `_retry_after_seconds`, `_compute_backoff_s`, `_session_get_with_retry`
+- **Added** `WebProxy/tests/test_fetch_hardening.py` — `_FakeResponse`, `__init__`, `raise_for_status`, `iter_content`, `close`
+- **Modified** `WebProxy/tests/test_mcp_server.py` — `TestInvestigationJsonCapture`, `test_capture_webproxy_json_output_writes_literal_payload_and_manifest`
+- **Modified** `af_engine/stages/analyzing.py` — `_spec_integrity_blockers`, `_spec_ledger_blockers`, `_extract_hard_requirements`, `_clean_requirement_line`, `_is_hard_requirement_line`
+- **Modified** `af_engine/stages/cycle_end.py`
+- **Added** `af_engine/tests/test_analyzing_spec_integrity.py` — `_context`, `test_analyzing_rejects_selective_precision_false_premise`, `test_analyzing_allows_success_without_selective_contract`, `test_analyzing_rejects_missing_general_spec_ledger`, `test_analyzing_rejects_unmet_general_spec_ledger`
+- **Modified** `agent_stream_manager.py` — `_clip_stream_text`, `_format_codex_task_event`, `_format_claude_system_event`
+- **Added** `aqlm_research.py` — `search_framework`, `fetch_url`, `main`
+- **Added** `artifacts/testing/mutation/mutation_test_connectivity.py` — `test_connectivity_mutant`
+- **Added** `artifacts/testing/mutation/mutation_test_damage.py` — `test_damage_mutant`
+- **Added** `artifacts/testing/mutation/mutation_test_hunger.py` — `test_hunger_mutant`
+- **Added** `artifacts/testing/test_inv1.py`
+- **Added** `artifacts/testing/test_inv2.py`
+- **Added** `artifacts/testing/test_inv3456.py`
+- **Added** `artifacts/testing/test_inv4_debug.py`
+- **Added** `artifacts/testing/test_inv7.py`
+- **Modified** `atlasforge_conductor.py`
+- **Modified** `context_watcher/context_watcher.py`
+- **Modified** `context_watcher/tests/test_codex_provider.py` — `test_start_watching_honors_explicit_provider_over_stale_state`, `test_codex_cumulative_total_does_not_drive_context_handoff`
+
+### Stats
+
+```
+ tests/test_investigation_subagent_waves.py         |   46 +
+ tests/test_llm_provider_selection.py               |   43 +
+ triton_search.py                                   |   54 +
+ vector_quantization_research.json                  |   82 ++
+ 285 files changed, 106463 insertions(+), 186 deletions(-)
+```
+
+_Full diff: `git diff v2.7.5..v2.8.0`_
+
+
 ## [2.7.5] - 2026-05-21
 
 ### Added
