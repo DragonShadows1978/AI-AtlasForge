@@ -818,14 +818,43 @@ def invoke_claude(
         cmd = ["claude", "-p", "--dangerously-skip-permissions"]
         if model:
             cmd.extend(["--model", model.value])
+        # Pin effort explicitly: headless spawns run with cwd inside
+        # investigations/<id>/, a descendant of this repo, and project-level
+        # .claude/settings.json is NOT picked up from a nested cwd (verified
+        # empirically 2026-07-14 — only an exact cwd match at the repo root
+        # inherits it). Without this, a user-global effortLevel of "xhigh"
+        # with thinking disabled makes Opus reject the request with a 400.
+        #
+        # Left unconditional (not wired to llm_provider.json's selected.*.thinking):
+        # checked upstream AI-AtlasForge/investigation_engine.py 2026-07-14 during
+        # the llm-provider-backend port (see REGISTRATION_TODO_llm_provider.txt) —
+        # upstream's own invoke_claude() has no --effort flag at all and never reads
+        # llm_provider.json's `selected` block, only top-level `provider`. The model
+        # bar's thinking level is consumed by the R&D conductor spawn path
+        # (dashboard_modules/core.py:594-599 / _update_active_mission_provider),
+        # a different surface from investigation lead/subagent/synthesis spawns.
+        # No upstream mapping exists here to mirror, so this pin stays as the
+        # fork's own 400-guard rather than being made conditional on selection.
+        cmd.extend(["--effort", "high"])
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
         # Route WebSearch/WebFetch through the AtlasForge local proxy MCP.
         # Fail loudly if routing can't be set up — silent fallback to the
         # built-in (filtered) web tools produces mysteriously degraded
         # research output and contradicts the CLAUDE.md guarantee.
+        #
+        # Usage-containment: also hard-deny Task (subagent spawning) and
+        # Workflow (multi-agent orchestration) on every claude spawn. A
+        # spawned investigation session must not be able to fan out its own
+        # sub-agents — one research thread already self-backgrounded in a
+        # past run, silently multiplying usage outside the engine's control.
+        # proxy_cli_args() merges its disallowed_base arg with the
+        # WebSearch/WebFetch redirect set into a SINGLE --disallowedTools
+        # flag, so passing "Task,Workflow" here avoids ever emitting
+        # --disallowedTools twice (which would be last-wins and clobber the
+        # web redirect).
         from WebProxy import proxy_cli_args
-        cmd.extend(proxy_cli_args(""))
+        cmd.extend(proxy_cli_args("Task,Workflow"))
         # Add stream-json for real-time agent activity visibility
         cmd.extend(["--output-format", "stream-json", "--verbose"])
         full_prompt = prompt
