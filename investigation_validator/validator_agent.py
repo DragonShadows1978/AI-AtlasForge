@@ -407,7 +407,13 @@ def _invoke_claude(prompt: str, model: str = "haiku", timeout: int = 60) -> Tupl
     """
     start_time = time.time()
 
-    cmd = ["claude", "-p", "--dangerously-skip-permissions", "--model", model]
+    try:
+        from investigation_engine import _resolve_cli_executable
+        claude_executable = _resolve_cli_executable("claude")
+    except (ImportError, FileNotFoundError) as exc:
+        return f"ERROR: {exc}", time.time() - start_time
+
+    cmd = [claude_executable, "-p", "--dangerously-skip-permissions", "--model", model]
 
     try:
         result = subprocess.run(
