@@ -144,3 +144,28 @@ Your final message MUST contain, verbatim:
 - New-test names and pass status.
 - The chosen trafilatura settings and the D5 thresholds, stated explicitly.
 - A **Residuals** section: anything not covered, known weaknesses, follow-ups.
+
+## ADDENDUM r2 (lead, 2026-08-14) — offline baseline correction
+
+Your r1 stop was correct and is on the record. The 5 baseline failures are
+ENVIRONMENTAL: those tests resolve real hostnames (live DNS) inside
+`_require_url`, and your sandbox has no network. The lead's networked
+baseline at your base commit is 317 passed. Amended gates:
+
+- Baseline AND final suite command is now:
+
+  ```
+  python3 -m pytest WebProxy/tests/ -q \
+    --deselect WebProxy/tests/test_mcp_server.py::TestWebFetchProxyContract::test_webfetch_requests_content_from_proxy \
+    --deselect WebProxy/tests/test_mcp_server.py::TestPaperFetchProxyContract::test_paperfetch_uses_paper_endpoint \
+    --deselect WebProxy/tests/test_mcp_server.py::TestRequireUrlSchemeWhitelist::test_accepts_http \
+    --deselect WebProxy/tests/test_mcp_server.py::TestRequireUrlSchemeWhitelist::test_accepts_https \
+    --deselect WebProxy/tests/test_mcp_server.py::TestIter3SsrfProtection::test_public_url_still_accepted
+  ```
+
+- Expected baseline: `312 passed, 5 deselected`. If baseline deviates from
+  that, STOP as before.
+- Your new tests MUST NOT require network or live DNS (mock resolution where
+  needed). The lead re-runs the full 317-test networked suite after merge.
+
+Everything else in the order stands unchanged.
