@@ -2350,7 +2350,12 @@ class TestFetchPageConnectionCleanupOnError:
             fetch_page("https://example.com/x")
         assert close_calls["n"] >= 1
 
-    def test_302_redirect_status_raises(self, monkeypatch):
+    def test_302_redirect_loop_raises_and_closes(self, monkeypatch):
+        """WP-R1 D1 moved this contract: a 302 is now FOLLOWED (with per-hop
+        re-validation and re-pinning) rather than raised on sight. This fake
+        302s every URL back to the same Location, so the follower must abort —
+        loop detection on the repeat — and still close every response it read.
+        """
         close_calls = {"n": 0}
 
         class _FakeResponse:
@@ -2388,8 +2393,7 @@ class TestFetchPageConnectionCleanupOnError:
         )
         monkeypatch.setattr(web_proxy_service, "_is_reddit_url", lambda url: False)
 
-        import requests as _rq
-        with pytest.raises(_rq.HTTPError, match="302"):
+        with pytest.raises(web_proxy_service.RedirectError, match="loop"):
             fetch_page("https://example.com/x")
         assert close_calls["n"] >= 1
 
@@ -3202,10 +3206,15 @@ class TestFetchResponseRoundTripEquivalence:
         "status_code", "content_type", "fetched_at",
     })
 
+    # WP-R1 D1 re-blessed this set: the html path now always reports where the
+    # fetch actually landed. `resolved_url` (final URL) and `redirect_chain`
+    # (hop list, [] when no redirect) are additive — no key was removed or
+    # renamed, so existing consumers that read by key are unaffected.
     _HTML_KEYS = frozenset({
         "url", "title", "meta_description", "headings",
         "text", "links", "text_length",
         "status_code", "content_type", "fetched_at",
+        "resolved_url", "redirect_chain",
     })
 
     def test_reddit_returns_canonical_key_set(self, monkeypatch):

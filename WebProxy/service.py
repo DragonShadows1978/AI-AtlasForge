@@ -182,6 +182,17 @@ RETRY_JITTER = _bool_env("ATLASFORGE_WEB_PROXY_RETRY_JITTER", True)
 UA_RETRY_ON_403 = _bool_env("ATLASFORGE_WEB_PROXY_UA_RETRY_ON_403", True)
 REDDIT_OLD_FALLBACK = _bool_env("ATLASFORGE_WEB_PROXY_REDDIT_OLD_FALLBACK", True)
 
+# WP-R1: bounded, manually-followed redirects. Every hop is re-validated and
+# re-pinned by `_follow_redirects`; requests/urllib3 redirect handling stays
+# OFF everywhere (allow_redirects=False on every underlying GET). 0 = the old
+# do-not-follow behavior.
+MAX_REDIRECTS = _int_env("ATLASFORGE_WEB_PROXY_MAX_REDIRECTS", 5, min_value=0)
+_REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
+# Minimum rendered-text length for a D3 403 render to count as real content.
+JS_RENDER_MIN_TEXT_LEN = _int_env(
+    "ATLASFORGE_WEB_PROXY_JS_RENDER_MIN_TEXT_LEN", 200, min_value=1
+)
+
 _TRANSIENT_HTTP_STATUS = frozenset({429, 502, 503, 504})
 _RETRYABLE_REQUEST_EXCEPTIONS = (
     requests.Timeout,
@@ -612,6 +623,179 @@ def _session_get_with_retry(
     raise RuntimeError("unreachable: _session_get_with_retry exhausted without result")
 
 
+class RedirectError(ValueError):
+    """Raised when a redirect chain is unfollowable (loop, cap, bad Location)."""
+
+
+class TargetHTTPError(requests.HTTPError):
+    """Non-2xx from the TARGET, carrying the honest status + final URL.
+
+    D2: the endpoint layer still answers 502 for upstream failure, but the
+    JSON body now names what actually happened upstream. Subclassing
+    ``requests.HTTPError`` keeps every existing ``except requests.HTTPError``
+    and ``pytest.raises(requests.HTTPError)`` site working unchanged.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        target_status: int,
+        final_url: str,
+        response: Optional[requests.Response] = None,
+    ):
+        super().__init__(message, response=response)
+        self.target_status = int(target_status)
+        self.final_url = final_url
+
+    @property
+    def target_status_class(self) -> Optional[str]:
+        return _status_class(self.target_status)
+
+
+def _status_class(status: Optional[int]) -> Optional[str]:
+    """Map an HTTP status to the D2 coarse class, or None when unclassifiable."""
+    if status is None:
+        return None
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        return None
+    if 400 <= status < 500:
+        return "client_error"
+    if 500 <= status < 600:
+        return "server_error"
+    return None
+
+
+def _redirect_target_url(current_url: str, location: str) -> str:
+    """Resolve a ``Location`` against ``current_url`` and structurally vet it.
+
+    Relative locations are allowed (RFC 7231 permits them). The result must be
+    http(s), must carry no userinfo, and must pass ``_validate_url_structure``.
+    DNS/IP validation is the caller's job (``_resolve_first_safe_ip``) so the
+    two checks stay exactly where the rest of the codebase expects them.
+    """
+    location = (location or "").strip()
+    if not location:
+        raise RedirectError("redirect response has empty Location header")
+    if "\r" in location or "\n" in location or "\x00" in location:
+        raise RedirectError("redirect Location contains control characters")
+    try:
+        next_url = urljoin(current_url, location)
+    except Exception as exc:
+        raise RedirectError(f"could not resolve redirect Location: {exc}") from exc
+
+    parsed = urlparse(next_url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise RedirectError(f"redirect to unsupported scheme: {scheme or '(none)'}")
+    # Userinfo in a redirect target is a classic credential/parser-confusion
+    # vector; the pinning adapter would also happily carry it onto the wire.
+    if parsed.username is not None or parsed.password is not None:
+        raise RedirectError("redirect target carries userinfo")
+
+    parts, reason = _validate_url_structure(next_url)
+    if parts is None:
+        raise RedirectError(f"unsafe redirect target: {reason}")
+    return next_url
+
+
+def _get_following_redirects(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    timeout_s: float,
+    consume: Any,
+    max_redirects: Optional[int] = None,
+    max_attempts: Optional[int] = None,
+) -> Tuple[Any, str, List[str]]:
+    """GET ``url``, manually following redirects with full per-hop SSRF checks.
+
+    ``consume(response, final_url)`` is invoked on the FINAL (non-redirect)
+    response while its pinned session is still open, and whatever it returns is
+    handed back as the first element of ``(consumed, final_url, redirect_chain)``.
+    The callback shape exists because the response body is still streaming when
+    the final hop resolves: returning the raw response would either leak the
+    session or close the connection out from under the body. Callers wrap a
+    ``_stream_capped_body*`` helper (which also closes the response).
+
+    SSRF invariants (WP-R1 registered gates):
+      1. Every hop runs the FULL pipeline — ``_validate_url_structure`` then
+         ``_resolve_first_safe_ip`` — and gets a FRESH ``_pinned_session``
+         bound to that hop's host/IP. No hop can reach an ``_ip_is_unsafe``
+         address.
+      2. ``allow_redirects=False`` on every underlying request: requests and
+         urllib3 never follow anything. Only this loop does.
+      3. Env proxies stay refused because every hop's session comes from
+         ``_pinned_session`` (``trust_env=False`` + ``PinnedIPAdapter``).
+    """
+    if max_redirects is None:
+        max_redirects = MAX_REDIRECTS
+
+    current_url = url
+    redirect_chain: List[str] = []
+    visited = {current_url}
+
+    for hop in range(max_redirects + 1):
+        # Law 1: full validation pipeline on EVERY hop, including hop 0.
+        parts, reason = _validate_url_structure(current_url)
+        if parts is None:
+            raise UnsafeUrlError(reason)
+        _scheme, hostname, port = parts
+        pinned_ip = _resolve_first_safe_ip(current_url)
+
+        with _pinned_session(
+            pinned_ip=pinned_ip, hostname=hostname, port=port
+        ) as session:
+            response = _session_get_with_retry(
+                session,
+                current_url,
+                headers=headers,
+                timeout_s=timeout_s,
+                stream=True,
+                allow_redirects=False,  # Law 2
+                max_attempts=max_attempts,
+            )
+            status = int(getattr(response, "status_code", 0) or 0)
+            if status not in _REDIRECT_STATUS:
+                # Consume inside the session scope so the connection is alive
+                # for the body read and released immediately afterwards.
+                return consume(response, current_url), current_url, redirect_chain
+
+            if hop >= max_redirects:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+                raise RedirectError(
+                    f"redirect limit exceeded ({max_redirects}) at {current_url}"
+                )
+
+            location = response.headers.get("location") or response.headers.get(
+                "Location"
+            )
+            try:
+                response.close()
+            except Exception:
+                pass
+
+        next_url = _redirect_target_url(current_url, location or "")
+        if next_url in visited:
+            raise RedirectError(f"redirect loop detected at {next_url}")
+        visited.add(next_url)
+        redirect_chain.append(next_url)
+        logger.info(
+            "fetch redirect %d/%d %s -> %s", hop + 1, max_redirects,
+            current_url, next_url,
+        )
+        current_url = next_url
+
+    # max_redirects == 0 with a redirect status exits via the
+    # `hop >= max_redirects` branch above, so this is genuinely unreachable.
+    raise RedirectError("redirect following exhausted without a final response")
+
+
 def _now_ts() -> int:
     return int(time.time())
 
@@ -741,6 +925,13 @@ class FetchResponse:
     width: Optional[int] = None
     height: Optional[int] = None
     rendered: Optional[bool] = None
+    # WP-R1 D1: hop URLs actually followed, in order (empty list = no redirect).
+    # Unlike the other optional fields this one is emitted even when empty, so
+    # callers can always read it without a key check.
+    redirect_chain: Optional[List[str]] = None
+    # WP-R1 D3: set only when a 403 was recovered by the JS render ladder.
+    js_rendered: Optional[bool] = None
+    original_status: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -769,6 +960,36 @@ def _stream_capped_body(response, *, chunk_size: int = 65536) -> Tuple[int, str,
         status_code = response.status_code
         if not 200 <= status_code < 300:
             raise requests.HTTPError(f"unexpected HTTP status {status_code}", response=response)
+        content_type = response.headers.get("content-type", "")
+        chunks: List[bytes] = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=chunk_size):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_FETCH_BYTES:
+                raise ValueError(
+                    f"response body exceeds MAX_FETCH_BYTES ({MAX_FETCH_BYTES})"
+                )
+            chunks.append(chunk)
+    finally:
+        response.close()
+    return status_code, content_type, b"".join(chunks)
+
+
+def _stream_capped_body_any_status(
+    response, *, chunk_size: int = 65536
+) -> Tuple[int, str, bytes]:
+    """Like ``_stream_capped_body`` but does NOT raise on non-2xx.
+
+    WP-R1 D3: the named residual from the prior hardening pass was that a 403
+    body was discarded by ``raise_for_status`` before the JS-render ladder
+    could look at it. This variant captures the body for ANY status (still
+    capped at ``MAX_FETCH_BYTES``, still closing in a finally) and hands the
+    status back so the CALLER decides whether it is a failure.
+    """
+    try:
+        status_code = int(getattr(response, "status_code", 0) or 0)
         content_type = response.headers.get("content-type", "")
         chunks: List[bytes] = []
         total = 0
@@ -872,21 +1093,33 @@ def fetch_paper(url: str, max_chars: int = -1, timeout_s: int = DEFAULT_TIMEOUT_
     parts, reason = _validate_url_structure(pdf_url)
     if parts is None:
         raise UnsafeUrlError(reason)
-    _scheme, hostname, port = parts
-    pinned_ip = _resolve_first_safe_ip(pdf_url)
 
-    with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
-        response = session.get(
+    # WP-R1 D1: doi.org and most publisher PDF links redirect at least once.
+    # Every hop is re-validated and re-pinned by `_get_following_redirects`;
+    # allow_redirects=False stays on the underlying requests.
+    def _consume_paper(response: Any, hop_url: str) -> Tuple[int, str, bytes]:
+        status = int(getattr(response, "status_code", 0) or 0)
+        if not 200 <= status < 300:
+            try:
+                response.close()
+            except Exception:
+                pass
+            # D2: name the real upstream status instead of a generic failure.
+            raise TargetHTTPError(
+                f"unexpected HTTP status {status}",
+                target_status=status,
+                final_url=hop_url,
+            )
+        return _stream_capped_body_with_limit(response, MAX_PAPER_BYTES)
+
+    (status_code, content_type, body_bytes), final_url, redirect_chain = (
+        _get_following_redirects(
             pdf_url,
             headers={**REQUEST_HEADERS, "Accept": "application/pdf,*/*;q=0.8"},
-            timeout=timeout_s,
-            stream=True,
-            allow_redirects=False,
+            timeout_s=timeout_s,
+            consume=_consume_paper,
         )
-        status_code, content_type, body_bytes = _stream_capped_body_with_limit(
-            response,
-            MAX_PAPER_BYTES,
-        )
+    )
 
     sha256 = hashlib.sha256(body_bytes).hexdigest()
     artifact_id = _paper_key(f"{pdf_url}:{sha256}")
@@ -909,6 +1142,8 @@ def fetch_paper(url: str, max_chars: int = -1, timeout_s: int = DEFAULT_TIMEOUT_
         "type": "paper",
         "url": url,
         "pdf_url": pdf_url,
+        "resolved_url": final_url,
+        "redirect_chain": redirect_chain,
         "status_code": status_code,
         "content_type": content_type,
         "fetched_at": _now_ts(),
@@ -1952,153 +2187,186 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
     if _is_reddit_url(url):
         return fetch_reddit(url, timeout_s=timeout_s)
 
-    _scheme, hostname, port = parts
-    # Single DNS lookup via the SSRF guard for non-reddit URLs. The IP
-    # returned here is the ONLY IP this fetch will ever talk to — urllib3
-    # never gets to resolve the hostname on its own.
-    pinned_ip = _resolve_first_safe_ip(url)
-
-    # allow_redirects=False keeps us from chasing a 302 to an internal host.
-    # If redirects are ever needed, re-validate the target via
-    # _resolve_first_safe_ip before following.
+    # WP-R1 D1: redirects are followed manually. `_get_following_redirects`
+    # re-runs the FULL validation pipeline (_validate_url_structure +
+    # _resolve_first_safe_ip) and builds a FRESH pinned session on EVERY hop,
+    # with allow_redirects=False on every underlying request. urllib3 never
+    # follows anything and never resolves a hostname itself.
     request_headers = dict(REQUEST_HEADERS)
-    with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
-        response = _session_get_with_retry(
-            session,
-            url,
-            headers=request_headers,
+
+    def _consume_page(response: Any, _hop_url: str) -> Tuple[int, str, bytes, str]:
+        # Capture response.encoding BEFORE the body helper closes the response.
+        # `encoding` is attribute-level (parsed from Content-Type), not
+        # stream-level, but reading it only from the live object keeps us
+        # future-proof against requests internals.
+        encoding = getattr(response, "encoding", None) or "utf-8"
+        # D3: capture the body for ANY status so a 403 challenge page survives
+        # to the render ladder instead of being discarded by raise_for_status.
+        status, ctype, body = _stream_capped_body_any_status(response)
+        return status, ctype, body, encoding
+
+    (
+        (status_code, content_type, body_bytes, response_encoding),
+        final_url,
+        redirect_chain,
+    ) = _get_following_redirects(
+        url,
+        headers=request_headers,
+        timeout_s=timeout_s,
+        consume=_consume_page,
+    )
+
+    # Generic 403 UA-retry: many Cloudflare/WAF frontends 403 only the honest
+    # research-proxy UA. One additional attempt with a browser-like UA recovers
+    # those pages without a full JS render. Permanent; not part of the
+    # transient retry loop. The retry re-enters the redirect follower, so its
+    # hops are validated and pinned exactly like the first attempt's.
+    if (
+        UA_RETRY_ON_403
+        and status_code == 403
+        and request_headers.get("User-Agent") != BROWSER_USER_AGENT
+    ):
+        browser_headers = {
+            **request_headers,
+            "User-Agent": BROWSER_USER_AGENT,
+            "Accept": request_headers.get(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ),
+        }
+        logger.info("fetch 403 UA-retry once url=%s", final_url)
+        (
+            (status_code, content_type, body_bytes, response_encoding),
+            final_url,
+            ua_chain,
+        ) = _get_following_redirects(
+            final_url,
+            headers=browser_headers,
             timeout_s=timeout_s,
-            stream=True,
-            allow_redirects=False,
+            consume=_consume_page,
         )
-        # Capture response.encoding BEFORE _stream_capped_body closes the
-        # response. `encoding` is attribute-level (parsed from Content-Type),
-        # not stream-level, but reading it only from the live object keeps
-        # us future-proof against requests internals.
-        response_encoding = response.encoding or "utf-8"
+        redirect_chain = redirect_chain + ua_chain
 
-        # Generic 403 UA-retry: many Cloudflare/WAF frontends 403 only the
-        # honest research-proxy UA. One additional attempt with a browser-like
-        # UA recovers those pages without a full JS render. Permanent; not
-        # part of the transient retry loop.
-        if (
-            UA_RETRY_ON_403
-            and int(getattr(response, "status_code", 0) or 0) == 403
-            and request_headers.get("User-Agent") != BROWSER_USER_AGENT
-        ):
-            try:
-                response.close()
-            except Exception:
-                pass
-            browser_headers = {
-                **request_headers,
-                "User-Agent": BROWSER_USER_AGENT,
-                "Accept": request_headers.get(
-                    "Accept",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                ),
-            }
-            logger.info("fetch 403 UA-retry once url=%s", url)
-            response = _session_get_with_retry(
-                session,
-                url,
-                headers=browser_headers,
-                timeout_s=timeout_s,
-                stream=True,
-                allow_redirects=False,
+    ct_main = content_type.split(";")[0].strip().lower()
+
+    if not 200 <= status_code < 300 and status_code != 403:
+        # Non-2xx that is not a render-ladder candidate: fail with the honest
+        # target status attached (D2).
+        raise TargetHTTPError(
+            f"unexpected HTTP status {status_code}",
+            target_status=status_code,
+            final_url=final_url,
+        )
+
+    if ct_main.startswith("image/"):
+        if not 200 <= status_code < 300:
+            raise TargetHTTPError(
+                f"unexpected HTTP status {status_code}",
+                target_status=status_code,
+                final_url=final_url,
             )
-            response_encoding = response.encoding or "utf-8"
+        image_payload = _save_image(url=url, content_type=content_type, data=body_bytes)
+        return FetchResponse(
+            url=url,
+            status_code=status_code,
+            content_type=image_payload["content_type"],
+            fetched_at=_now_ts(),
+            type=image_payload["type"],
+            local_path=image_payload["local_path"],
+            byte_length=image_payload["byte_length"],
+            width=image_payload["width"],
+            height=image_payload["height"],
+            resolved_url=final_url,
+            redirect_chain=redirect_chain,
+        ).to_dict()
 
-        status_code, content_type, body_bytes = _stream_capped_body(response)
-        ct_main = content_type.split(";")[0].strip().lower()
-
-        if ct_main.startswith("image/"):
-            image_payload = _save_image(url=url, content_type=content_type, data=body_bytes)
-            return FetchResponse(
-                url=url,
-                status_code=status_code,
-                content_type=image_payload["content_type"],
-                fetched_at=_now_ts(),
-                type=image_payload["type"],
-                local_path=image_payload["local_path"],
-                byte_length=image_payload["byte_length"],
-                width=image_payload["width"],
-                height=image_payload["height"],
-            ).to_dict()
-
+    try:
+        html = body_bytes.decode(response_encoding)
+    except UnicodeDecodeError as exc:
+        logger.warning(
+            "html decode replacement used url=%r encoding=%r error=%s",
+            url,
+            response_encoding,
+            exc,
+        )
+        html = body_bytes.decode(response_encoding, errors="replace")
+    except LookupError:
         try:
-            html = body_bytes.decode(response_encoding)
+            html = body_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
             logger.warning(
                 "html decode replacement used url=%r encoding=%r error=%s",
                 url,
-                response_encoding,
+                "utf-8",
                 exc,
             )
-            html = body_bytes.decode(response_encoding, errors="replace")
-        except LookupError:
-            try:
-                html = body_bytes.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                logger.warning(
-                    "html decode replacement used url=%r encoding=%r error=%s",
-                    url,
-                    "utf-8",
-                    exc,
-                )
-                html = body_bytes.decode("utf-8", errors="replace")
-        extracted = extract_page_content(url=url, html=html, max_chars=max_chars)
+            html = body_bytes.decode("utf-8", errors="replace")
+    extracted = extract_page_content(url=final_url, html=html, max_chars=max_chars)
 
-        # JS-rendering fallback. Plain requests can't execute JavaScript, so
-        # SPAs (ChatGPT shares, Claude shares, Twitter/X, etc.) and
-        # Cloudflare-challenged endpoints come back with near-empty bodies.
-        # Two triggers: either the host is on a known-needs-render list, OR
-        # the extracted text looks suspiciously thin.
-        used_js_render = False
-        _jsr = None
+    # JS-rendering fallback. Plain requests can't execute JavaScript, so
+    # SPAs (ChatGPT shares, Claude shares, Twitter/X, etc.) and
+    # Cloudflare-challenged endpoints come back with near-empty bodies.
+    # Two triggers: either the host is on a known-needs-render list, OR
+    # the extracted text looks suspiciously thin.
+    used_js_render = False
+    _jsr = None
+    try:
+        # Package-context import (python -m WebProxy.service or imported)
+        from . import js_render as _jsr  # type: ignore
+    except ImportError:
         try:
-            # Package-context import (python -m WebProxy.service or imported)
-            from . import js_render as _jsr  # type: ignore
+            # Script-context import (systemd invokes service.py directly,
+            # so __name__ == "__main__" and there is no parent package).
+            import js_render as _jsr  # type: ignore
         except ImportError:
-            try:
-                # Script-context import (systemd invokes service.py directly,
-                # so __name__ == "__main__" and there is no parent package).
-                import js_render as _jsr  # type: ignore
-            except ImportError:
-                _jsr = None
+            _jsr = None
 
-        needs_render = False
-        if _js_render_enabled() and _jsr is not None:
-            if _jsr.host_wants_render(url):
-                needs_render = True
-            elif extracted["text_length"] < 200 or status_code == 403:
-                needs_render = _jsr.should_render(html, status_code, content_type)
+    needs_render = False
+    if _js_render_enabled() and _jsr is not None:
+        if _jsr.host_wants_render(final_url):
+            needs_render = True
+        elif extracted["text_length"] < 200 or status_code == 403:
+            needs_render = _jsr.should_render(html, status_code, content_type)
 
-        if needs_render and _jsr is not None:
-            if True:  # kept as nested to minimize diff to existing body
-                try:
-                    rendered = _jsr.render(url)
-                except Exception as e:
-                    logger.warning("js_render: rendering %s failed: %s", url, e)
-                    rendered = None
-                if rendered:
-                    rendered_html = rendered.get("rendered_html") or html
-                    extracted = extract_page_content(
-                        url=url, html=rendered_html, max_chars=max_chars
-                    )
-                    rtext = rendered.get("rendered_text") or ""
-                    if rtext and len(rtext) > extracted["text_length"]:
-                        if max_chars > 0:
-                            rtext = rtext[:max_chars]
-                        extracted["text"] = rtext
-                        extracted["text_length"] = len(rtext)
-                    if not extracted.get("title"):
-                        extracted["title"] = rendered.get("rendered_title", "")
-                    used_js_render = True
+    rendered_text_len = 0
+    if needs_render and _jsr is not None:
+        try:
+            rendered = _jsr.render(final_url)
+        except Exception as e:
+            logger.warning("js_render: rendering %s failed: %s", final_url, e)
+            rendered = None
+        if rendered:
+            rendered_html = rendered.get("rendered_html") or html
+            extracted = extract_page_content(
+                url=final_url, html=rendered_html, max_chars=max_chars
+            )
+            rtext = rendered.get("rendered_text") or ""
+            rendered_text_len = len(rtext)
+            if rtext and len(rtext) > extracted["text_length"]:
+                if max_chars > 0:
+                    rtext = rtext[:max_chars]
+                extracted["text"] = rtext
+                extracted["text_length"] = len(rtext)
+            if not extracted.get("title"):
+                extracted["title"] = rendered.get("rendered_title", "")
+            used_js_render = True
 
+    if status_code == 403:
+        # D3: a 403 is only a success if the render ladder actually produced
+        # real content. "Real" is rendered text >= JS_RENDER_MIN_TEXT_LEN.
+        # Anything else fails per D2 with target_status: 403.
+        recovered = used_js_render and max(
+            rendered_text_len, int(extracted.get("text_length") or 0)
+        ) >= JS_RENDER_MIN_TEXT_LEN
+        if not recovered:
+            raise TargetHTTPError(
+                f"unexpected HTTP status {status_code}",
+                target_status=status_code,
+                final_url=final_url,
+            )
         return FetchResponse(
             url=url,
-            status_code=status_code,
+            status_code=200,
             content_type=content_type,
             fetched_at=_now_ts(),
             title=extracted["title"],
@@ -2107,8 +2375,28 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
             text=extracted["text"],
             links=extracted["links"],
             text_length=extracted["text_length"],
-            rendered=used_js_render or None,
+            rendered=True,
+            js_rendered=True,
+            original_status=403,
+            resolved_url=final_url,
+            redirect_chain=redirect_chain,
         ).to_dict()
+
+    return FetchResponse(
+        url=url,
+        status_code=status_code,
+        content_type=content_type,
+        fetched_at=_now_ts(),
+        title=extracted["title"],
+        meta_description=extracted["meta_description"],
+        headings=extracted["headings"],
+        text=extracted["text"],
+        links=extracted["links"],
+        text_length=extracted["text_length"],
+        rendered=used_js_render or None,
+        resolved_url=final_url,
+        redirect_chain=redirect_chain,
+    ).to_dict()
 
 
 def _new_correlation_id() -> str:
@@ -2119,6 +2407,39 @@ def _error_body(message: str, correlation_id: str, **extra: Any) -> Dict[str, An
     body: Dict[str, Any] = {"error": message, "correlation_id": correlation_id}
     body.update(extra)
     return body
+
+
+def _target_status_fields(exc: BaseException) -> Dict[str, Any]:
+    """D2: extract honest upstream-status fields from a fetch exception.
+
+    Returns ``{}`` when the failure produced no HTTP response at all
+    (connection error, timeout, DNS) — callers then report the distinct
+    "no HTTP response" case instead of inventing a status.
+    """
+    target_status: Optional[int] = None
+    final_url: Optional[str] = None
+
+    if isinstance(exc, TargetHTTPError):
+        target_status = exc.target_status
+        final_url = exc.final_url
+    elif isinstance(exc, requests.HTTPError):
+        response = getattr(exc, "response", None)
+        raw = getattr(response, "status_code", None)
+        try:
+            target_status = int(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            target_status = None
+        final_url = getattr(response, "url", None)
+
+    if target_status is None:
+        return {}
+    fields: Dict[str, Any] = {
+        "target_status": target_status,
+        "target_status_class": _status_class(target_status),
+    }
+    if final_url:
+        fields["final_url"] = final_url
+    return fields
 
 
 def _item_error(message: str, correlation_id: str, **extra: Any) -> Dict[str, Any]:
@@ -2301,11 +2622,17 @@ def create_app() -> Flask:
                 jsonify(_error_body("unsafe url", cid, url=url)),
                 400,
             )
-        except Exception:  # pragma: no cover
+        except Exception as exc:  # pragma: no cover
             cid = _new_correlation_id()
             logger.exception("fetch failed cid=%s url=%r", cid, url)
+            # D2: keep the 502 response code (client.py + existing consumers
+            # depend on it); the honest target status rides in the body.
             return (
-                jsonify(_error_body("fetch failed", cid, url=url)),
+                jsonify(
+                    _error_body(
+                        "fetch failed", cid, url=url, **_target_status_fields(exc)
+                    )
+                ),
                 502,
             )
 
@@ -2351,10 +2678,18 @@ def create_app() -> Flask:
             cid = _new_correlation_id()
             logger.exception("paper fetch rejected unsafe url cid=%s url=%r", cid, url)
             return jsonify(_error_body("unsafe url", cid, url=url)), 400
-        except Exception:
+        except Exception as exc:
             cid = _new_correlation_id()
             logger.exception("paper fetch failed cid=%s url=%r", cid, url)
-            return jsonify(_error_body("paper fetch failed", cid, url=url)), 502
+            return (
+                jsonify(
+                    _error_body(
+                        "paper fetch failed", cid, url=url,
+                        **_target_status_fields(exc),
+                    )
+                ),
+                502,
+            )
 
         stored = cache.put(cache_key, result)
         stored["_cache_hit"] = False
@@ -2437,12 +2772,16 @@ def create_app() -> Flask:
                     "research per-item unsafe url cid=%s url=%r", cid, url
                 )
                 fetched.append(_item_error("unsafe url", cid, url=url))
-            except Exception:
+            except Exception as exc:
                 cid = _new_correlation_id()
                 logger.exception(
                     "research per-item fetch failed cid=%s url=%r", cid, url
                 )
-                fetched.append(_item_error("fetch failed", cid, url=url))
+                fetched.append(
+                    _item_error(
+                        "fetch failed", cid, url=url, **_target_status_fields(exc)
+                    )
+                )
 
         return jsonify(
             {
@@ -2539,12 +2878,17 @@ def create_app() -> Flask:
                         "image_search per-item unsafe url cid=%s url=%r", cid, img_url
                     )
                     fetched.append(_item_error("unsafe url", cid, url=img_url))
-                except Exception:
+                except Exception as exc:
                     cid = _new_correlation_id()
                     logger.exception(
                         "image_search per-item fetch failed cid=%s url=%r", cid, img_url
                     )
-                    fetched.append(_item_error("fetch failed", cid, url=img_url))
+                    fetched.append(
+                        _item_error(
+                            "fetch failed", cid, url=img_url,
+                            **_target_status_fields(exc),
+                        )
+                    )
             result["fetched_images"] = fetched
 
         result["fetched_at"] = _now_ts()

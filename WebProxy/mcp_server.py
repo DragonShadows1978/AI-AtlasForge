@@ -458,6 +458,68 @@ def _host_matches(host: str, filter_entry: str) -> bool:
     return h == fe or h.endswith("." + fe)
 
 
+_HTTP_STATUS_PHRASES = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    402: "Payment Required",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    408: "Request Timeout",
+    410: "Gone",
+    429: "Too Many Requests",
+    451: "Unavailable For Legal Reasons",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+}
+
+
+class ProxyTargetError(RuntimeError):
+    """WP-R1 D2: the proxy answered, but the TARGET site failed.
+
+    Carries the honest upstream status so the tool result the model reads can
+    say "target returned HTTP 404 (Not Found)" instead of an opaque
+    "fetch failed". A RuntimeError subclass so the existing
+    `except RuntimeError` branch in `_handle_tools_call` already catches it.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
+def _describe_target_failure(body: dict) -> str:
+    """Render a D2 proxy error body into one honest line for the model.
+
+    `target_status` present  -> name the status, phrase, and final URL.
+    `target_status` absent   -> the fetch never got an HTTP response at all
+                                (connection error / timeout / DNS), which is a
+                                materially different retry decision.
+    """
+    base = body.get("error") or "proxy request failed"
+    status = body.get("target_status")
+    try:
+        status = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status = None
+
+    if status is None:
+        detail = "no HTTP response (connection/timeout)"
+    else:
+        phrase = _HTTP_STATUS_PHRASES.get(status)
+        detail = f"target returned HTTP {status}"
+        if phrase:
+            detail += f" ({phrase})"
+    final_url = body.get("final_url") or body.get("url")
+    if final_url:
+        detail += f" for {final_url}"
+    cid = body.get("correlation_id")
+    if cid:
+        detail += f" [cid {cid}]"
+    return f"{base.capitalize()}: {detail}"
+
+
 def _proxy_post(endpoint: str, payload: dict) -> dict:
     """POST to the proxy and return parsed JSON.
 
@@ -467,8 +529,22 @@ def _proxy_post(endpoint: str, payload: dict) -> dict:
     `_handle_tools_call`. JSONDecodeError messages contain raw parser
     detail like "Expecting value: line 1 column 1 (char 0)" which is
     confusing-noise at best and information-disclosure at worst.
+
+    WP-R1 D2: on an upstream failure the proxy answers 502 with a JSON body
+    naming the real target status. `raise_for_status` alone would throw that
+    body away and leave the model with "Proxy returned HTTP 502", so parse the
+    error body first and re-raise as a `ProxyTargetError` carrying the honest
+    status. Non-JSON error bodies fall through to `raise_for_status`.
     """
     resp = requests.post(f"{PROXY_BASE}{endpoint}", json=payload, timeout=TIMEOUT)
+    if resp.status_code >= 400:
+        body = None
+        try:
+            body = resp.json()
+        except (json.JSONDecodeError, ValueError):
+            body = None
+        if isinstance(body, dict) and "error" in body:
+            raise ProxyTargetError(_describe_target_failure(body))
     resp.raise_for_status()
     try:
         return resp.json()
@@ -1509,7 +1585,8 @@ def handle_tool_call(name: str, arguments: dict) -> str:
         for page in data.get("fetched", []):
             lines.append("---")
             if "error" in page:
-                lines.append(f"FETCH ERROR: {page['url']} — {page['error']}")
+                # WP-R1 D2: per-item failures name the real upstream status.
+                lines.append(f"FETCH ERROR: {_describe_target_failure(page)}")
             else:
                 lines.append(_format_fetch_results(page))
         return "\n".join(lines)
@@ -1568,7 +1645,8 @@ def handle_tool_call(name: str, arguments: dict) -> str:
             lines.append("Downloaded images:")
             for img in data["fetched_images"]:
                 if "error" in img:
-                    lines.append(f"  FAILED: {img.get('url', '')} — {img['error']}")
+                    # WP-R1 D2: name the real upstream status per image too.
+                    lines.append(f"  FAILED: {_describe_target_failure(img)}")
                 else:
                     lines.append(f"  Saved: {img.get('local_path', '')} ({img.get('byte_length', 0)} bytes)")
         return "\n".join(lines)
@@ -1656,6 +1734,12 @@ def _handle_tools_call(msg_id: Any, raw_params: Any, is_notification: bool) -> N
         # the LLM. Never useful, sometimes discloses intermediate state.
         _logger.exception("tools/call proxy JSON decode failed")
         resp = _err_result("Proxy returned non-JSON body")
+    except ProxyTargetError as exc:
+        # WP-R1 D2: the proxy worked; the TARGET failed. The message already
+        # names the upstream status (or says there was no HTTP response at
+        # all), so do not bury it under a generic "Proxy error" prefix.
+        _logger.warning("tools/call target failure: %s", exc)
+        resp = _err_result(_sanitize_error(str(exc)))
     except RuntimeError as exc:
         # H4: our own tagged runtime error from `_proxy_post` for the
         # non-JSON-body case. Safe to surface the short message.
