@@ -100,11 +100,39 @@ Returns live counters consumed by the dashboard widget:
 {
   "searches_total": 142,
   "fetches_total": 831,
+  "paper_fetches_total": 12,
+  "image_searches_total": 19,
+  "research_total": 7,
+  "search_cache_hits": 64,
+  "fetch_cache_hits": 402,
+  "paper_fetch_cache_hits": 8,
+  "image_search_cache_hits": 11,
+  "provider_breakdown": {"brave": 105, "duckduckgo": 37},
   "cached_searches": 37,
   "cached_fetches": 206,
-  "provider_breakdown": {"brave": 105, "duckduckgo": 37}
+  "cached_image_searches": 4,
+  "cached_images": 18,
+  "providers": {"brave": 20, "duckduckgo": 17},
+  "cache_dir": "/path/to/atlasforge_data/web_proxy_cache"
 }
 ```
+
+Lifetime counters are stored in `atlasforge_data/web_proxy_stats.json` and
+are flushed synchronously after every increment using an atomic temporary-file
+replace. `provider_breakdown` counts each live provider call; the `providers`
+field remains the provider breakdown of currently present cache entries.
+
+Cache eviction and production serving can be tuned with these environment
+variables:
+
+- `ATLASFORGE_WEB_PROXY_CACHE_STALE_GRACE` — stale sweep age multiplier for
+  each entry TTL (default `2.0`).
+- `ATLASFORGE_WEB_PROXY_CACHE_MAX_BYTES` — maximum combined size of cache
+  JSON files and `images/` files (default `2000000000`).
+- `ATLASFORGE_WEB_PROXY_CACHE_SWEEP_INTERVAL_S` — startup/periodic sweep
+  interval in seconds; `0` disables both sweeps (default `3600`).
+- `ATLASFORGE_WEB_PROXY_THREADS` — Waitress worker threads when not debugging
+  (default `16`).
 
 ### `GET /health`
 

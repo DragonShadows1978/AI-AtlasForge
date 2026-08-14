@@ -24,6 +24,7 @@ import os
 import random
 import re
 import socket
+import stat as stat_module
 import tempfile
 import threading
 import time
@@ -39,6 +40,11 @@ from bs4 import BeautifulSoup
 from flask import Flask, jsonify, request
 from requests.adapters import HTTPAdapter
 from werkzeug.exceptions import RequestEntityTooLarge
+
+try:
+    import waitress
+except ImportError:  # pragma: no cover - exercised when optional dependency is absent
+    waitress = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +129,17 @@ PAPER_ARTIFACT_DIR = Path(
 SEARCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_SEARCH_TTL_S", 1800, min_value=0)
 FETCH_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_FETCH_TTL_S", 86400, min_value=0)
 PAPER_TTL_S = _int_env("ATLASFORGE_WEB_PROXY_PAPER_TTL_S", 7 * 86400, min_value=0)
+CACHE_STALE_GRACE = _float_env(
+    "ATLASFORGE_WEB_PROXY_CACHE_STALE_GRACE", 2.0, min_value=0.0
+)
+CACHE_MAX_BYTES = _int_env(
+    "ATLASFORGE_WEB_PROXY_CACHE_MAX_BYTES", 2_000_000_000, min_value=0
+)
+CACHE_SWEEP_INTERVAL_S = _float_env(
+    "ATLASFORGE_WEB_PROXY_CACHE_SWEEP_INTERVAL_S", 3600.0, min_value=0.0
+)
+WEB_PROXY_THREADS = _int_env("ATLASFORGE_WEB_PROXY_THREADS", 16, min_value=1)
+STATS_PATH = CACHE_DIR.parent / "web_proxy_stats.json"
 USER_AGENT = _header_env(
     "ATLASFORGE_WEB_PROXY_USER_AGENT",
     (
@@ -929,10 +946,108 @@ def fetch_paper(url: str, max_chars: int = -1, timeout_s: int = DEFAULT_TIMEOUT_
     return payload
 
 
+_STATS_COUNTER_KEYS = (
+    "searches_total",
+    "fetches_total",
+    "paper_fetches_total",
+    "image_searches_total",
+    "research_total",
+    "search_cache_hits",
+    "fetch_cache_hits",
+    "paper_fetch_cache_hits",
+    "image_search_cache_hits",
+)
+
+
+class WebProxyStats:
+    """Persistent, process-safe lifetime counters for the web proxy."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        self._data = self._load()
+
+    @staticmethod
+    def _fresh() -> Dict[str, Any]:
+        return {
+            **{key: 0 for key in _STATS_COUNTER_KEYS},
+            "provider_breakdown": {},
+        }
+
+    def _load(self) -> Dict[str, Any]:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("root is not an object")
+            data = self._fresh()
+            for key in _STATS_COUNTER_KEYS:
+                value = raw.get(key, 0)
+                if type(value) is not int or value < 0:
+                    raise ValueError(f"invalid {key}")
+                data[key] = value
+            providers = raw.get("provider_breakdown", {})
+            if not isinstance(providers, dict):
+                raise ValueError("provider_breakdown is not an object")
+            for name, value in providers.items():
+                if not isinstance(name, str) or type(value) is not int or value < 0:
+                    raise ValueError("invalid provider_breakdown entry")
+            data["provider_breakdown"] = dict(providers)
+            return data
+        except FileNotFoundError:
+            return self._fresh()
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError) as exc:
+            logger.warning("stats file %s is corrupt; starting fresh: %s", self.path, exc)
+            return self._fresh()
+
+    def _flush_locked(self) -> None:
+        tmp_path = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.path.parent), prefix=".web_proxy_stats_tmp_", suffix=".json"
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(self._data, fh, ensure_ascii=False, indent=2, sort_keys=True)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, self.path)
+            tmp_path = None
+        except OSError as exc:
+            logger.warning("failed to persist stats file %s: %s", self.path, exc)
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    def increment(self, key: str, amount: int = 1) -> None:
+        if key not in _STATS_COUNTER_KEYS:
+            raise KeyError(key)
+        with self._lock:
+            self._data[key] += amount
+            self._flush_locked()
+
+    def increment_provider(self, provider: str, amount: int = 1) -> None:
+        with self._lock:
+            breakdown = self._data["provider_breakdown"]
+            breakdown[provider] = breakdown.get(provider, 0) + amount
+            self._flush_locked()
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                **{key: self._data[key] for key in _STATS_COUNTER_KEYS},
+                "provider_breakdown": dict(self._data["provider_breakdown"]),
+            }
+
+
 class FileCache:
     def __init__(self, root: Path):
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
+        self._sweep_stop = threading.Event()
+        self._sweep_thread: Optional[threading.Thread] = None
 
     def _path_for(self, key: str) -> Path:
         return self.root / f"{key}.json"
@@ -993,10 +1108,137 @@ class FileCache:
             raise
         return to_write
 
+    def _iter_files(self) -> List[Path]:
+        files: List[Path] = []
+
+        def _walk_error(exc: OSError) -> None:
+            logger.warning("cache sweep scan failed: %s", exc)
+
+        for dirpath, _dirnames, filenames in os.walk(self.root, onerror=_walk_error):
+            for filename in filenames:
+                path = Path(dirpath) / filename
+                try:
+                    mode = path.lstat().st_mode
+                except OSError as exc:
+                    logger.warning("cache sweep stat failed for %s: %s", path, exc)
+                    continue
+                if stat_module.S_ISREG(mode):
+                    files.append(path)
+        return files
+
+    @staticmethod
+    def _ttl_for_name(name: str) -> Optional[int]:
+        if name.startswith("paper_fetch_"):
+            return PAPER_TTL_S
+        if name.startswith("search_") or name.startswith("image_search_"):
+            return SEARCH_TTL_S
+        if name.startswith("fetch_"):
+            return FETCH_TTL_S
+        return None
+
+    @staticmethod
+    def _unlink(path: Path) -> bool:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            logger.debug("cache sweep skipped vanished file %s", path)
+            return False
+        except PermissionError as exc:
+            logger.warning("cache sweep could not delete %s: %s", path, exc)
+            return False
+        except OSError as exc:
+            logger.warning("cache sweep could not delete %s: %s", path, exc)
+            return False
+        return True
+
+    def sweep(self) -> Dict[str, int]:
+        """Evict stale JSON entries, then oldest files until under the byte cap."""
+        now = time.time()
+        deleted_files = 0
+        bytes_freed = 0
+        files = self._iter_files()
+
+        for path in files:
+            if path.parent != self.root or path.suffix != ".json":
+                continue
+            ttl_s = self._ttl_for_name(path.name)
+            if ttl_s is None:
+                continue
+            try:
+                stat_result = path.lstat()
+            except OSError as exc:
+                logger.warning("cache sweep stat failed for %s: %s", path, exc)
+                continue
+            age_s = now - stat_result.st_mtime
+            if age_s > ttl_s * CACHE_STALE_GRACE:
+                if self._unlink(path):
+                    deleted_files += 1
+                    bytes_freed += stat_result.st_size
+
+        file_info: List[Tuple[float, int, Path]] = []
+        bytes_remaining = 0
+        for path in self._iter_files():
+            try:
+                stat_result = path.lstat()
+            except OSError as exc:
+                logger.warning("cache sweep stat failed for %s: %s", path, exc)
+                continue
+            if not stat_module.S_ISREG(stat_result.st_mode):
+                continue
+            info = (stat_result.st_mtime, stat_result.st_size, path)
+            file_info.append(info)
+            bytes_remaining += stat_result.st_size
+
+        if bytes_remaining > CACHE_MAX_BYTES:
+            for mtime, size_bytes, path in sorted(file_info, key=lambda item: item[0]):
+                if bytes_remaining <= CACHE_MAX_BYTES:
+                    break
+                if self._unlink(path):
+                    deleted_files += 1
+                    bytes_freed += size_bytes
+                    bytes_remaining -= size_bytes
+
+        logger.info(
+            "cache sweep: files deleted=%d, bytes freed=%d, bytes remaining=%d",
+            deleted_files,
+            bytes_freed,
+            bytes_remaining,
+        )
+        return {
+            "files_deleted": deleted_files,
+            "bytes_freed": bytes_freed,
+            "bytes_remaining": bytes_remaining,
+        }
+
+    def start_sweeper(self) -> None:
+        if CACHE_SWEEP_INTERVAL_S <= 0:
+            return
+        self.sweep()
+
+        def _run() -> None:
+            while not self._sweep_stop.wait(CACHE_SWEEP_INTERVAL_S):
+                self.sweep()
+
+        self._sweep_thread = threading.Thread(
+            target=_run,
+            name="atlasforge-web-proxy-cache-sweeper",
+            daemon=True,
+        )
+        self._sweep_thread.start()
+
 
 class SearchProvider:
-    def __init__(self, session: Optional[requests.Session] = None):
+    def __init__(
+        self,
+        session: Optional[requests.Session] = None,
+        stats: Optional[WebProxyStats] = None,
+    ):
         self.session = session or requests.Session()
+        self.stats = stats
+
+    def _record_provider_call(self, provider: str) -> None:
+        if self.stats is not None:
+            self.stats.increment_provider(provider)
 
     def _brave_api_key(self) -> Optional[str]:
         return _first_env(BRAVE_API_KEY_ENV_NAMES)
@@ -1116,6 +1358,7 @@ class SearchProvider:
         if not api_key:
             raise RuntimeError("Brave search selected but no API key is configured")
 
+        self._record_provider_call("brave")
         response = self.session.get(
             "https://api.search.brave.com/res/v1/web/search",
             params={"q": query, "count": count},
@@ -1265,6 +1508,7 @@ class SearchProvider:
                 "error": "ddgs package not installed (pip install ddgs)",
             }
 
+        self._record_provider_call("duckduckgo_images")
         raw = list(
             DDGS().images(
                 query,
@@ -1298,6 +1542,7 @@ class SearchProvider:
         if not api_key:
             raise RuntimeError("Brave image search requires an API key")
 
+        self._record_provider_call("brave_images")
         response = self.session.get(
             "https://api.search.brave.com/res/v1/images/search",
             params={"q": query, "count": count},
@@ -1344,6 +1589,7 @@ class SearchProvider:
         except ImportError as exc:
             raise RuntimeError("ddgs package not installed (pip install ddgs)") from exc
 
+        self._record_provider_call("ddgs_images")
         backend = ",".join(DDGS_IMAGE_FALLBACK_BACKENDS)
         raw = DDGS(timeout=DEFAULT_TIMEOUT_S).images(
             query,
@@ -1382,6 +1628,7 @@ class SearchProvider:
         except ImportError as exc:
             raise RuntimeError("ddgs package not installed (pip install ddgs)") from exc
 
+        self._record_provider_call("ddgs")
         backend = ",".join(DDGS_FALLBACK_BACKENDS)
         raw = DDGS(timeout=DEFAULT_TIMEOUT_S).text(
             query,
@@ -1410,6 +1657,7 @@ class SearchProvider:
 
     def search_duckduckgo(self, query: str, count: Any = 5) -> Dict[str, Any]:
         count = self._normalize_count(count, max_value=20)
+        self._record_provider_call("duckduckgo")
         response = self.session.post(
             "https://html.duckduckgo.com/html/",
             data={"q": query},
@@ -2198,7 +2446,10 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     cache = FileCache(CACHE_DIR)
-    provider = SearchProvider()
+    stats = WebProxyStats(STATS_PATH)
+    app.extensions["web_proxy_stats"] = stats
+    cache.start_sweeper()
+    provider = SearchProvider(stats=stats)
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_entity_too_large(_exc):  # type: ignore[no-untyped-def]
@@ -2235,11 +2486,13 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
+        stats.increment("searches_total")
         cache_key = _cache_key(
             "search", {"query": query, "count": count, "provider": provider_name}
         )
         cached = cache.get(cache_key, SEARCH_TTL_S)
         if cached:
+            stats.increment("search_cache_hits")
             return jsonify(cached)
 
         try:
@@ -2286,9 +2539,11 @@ def create_app() -> Flask:
         if parts is None:
             return jsonify({"error": f"unsafe url: {reason}", "url": url}), 400
 
+        stats.increment("fetches_total")
         cache_key = _cache_key("fetch", {"url": url})
         cached = cache.get(cache_key, FETCH_TTL_S)
         if cached:
+            stats.increment("fetch_cache_hits")
             return jsonify(_apply_max_chars(cached, max_chars))
 
         try:
@@ -2340,9 +2595,11 @@ def create_app() -> Flask:
         if parts is None:
             return jsonify({"error": f"unsafe url: {reason}", "url": url}), 400
 
+        stats.increment("paper_fetches_total")
         cache_key = _cache_key("paper_fetch", {"url": url})
         cached = cache.get(cache_key, PAPER_TTL_S)
         if cached:
+            stats.increment("paper_fetch_cache_hits")
             return jsonify(_apply_max_chars(cached, max_chars))
 
         try:
@@ -2397,6 +2654,8 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
+        stats.increment("research_total")
+        stats.increment("searches_total")
         try:
             search_result = provider.search(query=query, count=count, provider=provider_name)
         except Exception:  # pragma: no cover
@@ -2486,6 +2745,7 @@ def create_app() -> Flask:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
+        stats.increment("image_searches_total")
         cache_key = _cache_key(
             "image_search",
             {
@@ -2498,6 +2758,7 @@ def create_app() -> Flask:
         )
         cached = cache.get(cache_key, SEARCH_TTL_S)
         if cached:
+            stats.increment("image_search_cache_hits")
             return jsonify(cached)
 
         try:
@@ -2657,6 +2918,7 @@ def create_app() -> Flask:
             "cached_images": len(img_files),
             "providers": providers,
             "cache_dir": str(CACHE_DIR),
+            **stats.snapshot(),
         })
 
     return app
@@ -2692,7 +2954,27 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     app = create_app()
-    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+    if waitress is not None and not args.debug:
+        logger.info(
+            "serving with waitress host=%s port=%d threads=%d",
+            args.host,
+            args.port,
+            WEB_PROXY_THREADS,
+        )
+        waitress.serve(
+            app,
+            host=args.host,
+            port=args.port,
+            threads=WEB_PROXY_THREADS,
+        )
+    else:
+        logger.info(
+            "serving with Flask/Werkzeug host=%s port=%d debug=%s",
+            args.host,
+            args.port,
+            args.debug,
+        )
+        app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":
