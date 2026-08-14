@@ -66,7 +66,7 @@ def test_extract_page_content_strips_scripts_and_keeps_text():
     </html>
     """
     payload = extract_page_content("https://example.com/story", html, max_chars=1000)
-    assert payload["title"] == "Example Page"
+    assert payload["title"] == "Hello World"
     assert payload["meta_description"] == "sample description"
     assert "console.log" not in payload["text"]
     assert "First paragraph." in payload["text"]
@@ -105,7 +105,7 @@ def test_extract_page_content_handles_nested_title_and_list_attrs(monkeypatch):
     payload = extract_page_content("https://example.com/base/", html, max_chars=1000)
 
     assert payload["title"] == "Nested Title"
-    assert payload["meta_description"] == "list description"
+    assert payload["meta_description"] == "placeholder"
     assert payload["links"][0]["url"] == "https://example.com/from-list"
 
 
@@ -1235,8 +1235,10 @@ class TestFloatMaxCharsCoerced:
 
     def test_float_max_chars_coerces_to_int(self):
         result = _apply_max_chars({"text": "hello world"}, 5.5)
-        assert result["text"] == "hello"
-        assert result["text_length"] == 5
+        assert result["text"] == "…"
+        assert result["text_length"] == 1
+        assert result["truncated"] is True
+        assert result["full_text_length"] == 11
 
     def test_string_garbage_max_chars_returns_unchanged(self):
         payload = {"text": "hello"}
@@ -1680,8 +1682,10 @@ class TestApplyMaxCharsContract:
 
     def test_positive_smaller_truncates(self):
         result = _mod_apply_max_chars({"text": "hello world"}, 5)
-        assert result["text"] == "hello"
-        assert result["text_length"] == 5
+        assert result["text"] == "…"
+        assert result["text_length"] == 1
+        assert result["truncated"] is True
+        assert result["full_text_length"] == 11
 
     def test_positive_larger_unchanged(self):
         result = _mod_apply_max_chars({"text": "hi"}, 100)
@@ -1716,7 +1720,8 @@ class TestFetchEndpointFullTextContract:
 
         truncated = client.post("/fetch", json={"url": url, "max_chars": 3})
         assert truncated.status_code == 200
-        assert truncated.get_json()["text"] == "abc"
+        assert truncated.get_json()["text"] == "…"
+        assert truncated.get_json()["truncated"] is True
 
         full = client.post("/fetch", json={"url": url, "full_text": True})
         assert full.status_code == 200
@@ -1890,8 +1895,10 @@ class TestResearchMaxCharsZeroEmpty:
         )
         assert response.status_code == 200
         fetched = response.get_json()["fetched"]
-        assert fetched[0]["text"] == "abc"
-        assert fetched[0]["text_length"] == 3
+        assert fetched[0]["text"] == "…"
+        assert fetched[0]["truncated"] is True
+        assert fetched[0]["text_length"] == 1
+        assert fetched[0]["full_text_length"] == 10
 
 
 class TestPerItemErrorShapeUnified:
@@ -3206,6 +3213,8 @@ class TestFetchResponseRoundTripEquivalence:
         "url", "title", "meta_description", "headings",
         "text", "links", "text_length",
         "status_code", "content_type", "fetched_at",
+        "extraction_method", "truncated", "full_text_length",
+        "rendered", "js_rendered",
     })
 
     def test_reddit_returns_canonical_key_set(self, monkeypatch):

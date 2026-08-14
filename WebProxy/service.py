@@ -32,7 +32,7 @@ from dataclasses import asdict, dataclass, field
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -41,6 +41,13 @@ from requests.adapters import HTTPAdapter
 from werkzeug.exceptions import RequestEntityTooLarge
 
 logger = logging.getLogger(__name__)
+
+try:
+    import trafilatura as _trafilatura
+except ImportError:  # pragma: no cover - exercised only in minimal deployments
+    _trafilatura = None
+
+_TRAFILATURA_MISSING_WARNED = False
 
 
 def _int_env(name: str, default: int, *, min_value: Optional[int] = None) -> int:
@@ -673,12 +680,12 @@ def _validate_timeout_s(timeout_s: Any) -> float:
 
 
 def _apply_max_chars(payload: Dict[str, Any], max_chars: Any) -> Dict[str, Any]:
-    """Truncate payload["text"] to max_chars and keep text_length consistent.
+    """Truncate payload["text"] honestly and keep length metadata consistent.
 
     Contract:
       max_chars < 0  -> unlimited (text preserved, text_length recomputed)
       max_chars == 0 -> empty text, text_length == 0
-      max_chars > 0  -> truncate to that many chars, text_length recomputed
+      max_chars > 0  -> word-boundary truncation with a visible marker
 
     Negative values are an internal-use sentinel for populating cached
     full-text payloads. HTTP endpoints reject `max_chars < 0` at
@@ -695,20 +702,49 @@ def _apply_max_chars(payload: Dict[str, Any], max_chars: Any) -> Dict[str, Any]:
         return payload
     text = payload.get("text") or ""
     out = dict(payload)
+    full_text_length = out.get("full_text_length")
+    if not isinstance(full_text_length, int) or full_text_length < len(text):
+        full_text_length = len(text)
+    out["full_text_length"] = full_text_length
     if max_chars < 0:
         out["text"] = text
         out["text_length"] = len(text)
+        out["truncated"] = False
         return out
     if max_chars == 0:
         out["text"] = ""
         out["text_length"] = 0
+        out["truncated"] = bool(text)
         return out
     if max_chars >= len(text):
         out["text"] = text
         out["text_length"] = len(text)
+        out["truncated"] = False
         return out
-    out["text"] = text[:max_chars]
+
+    # Reserve room for the marker before selecting content. The marker's
+    # displayed-count field can only get shorter than this conservative form.
+    marker_reserve = f"…[truncated: showing {max_chars} of {full_text_length} chars]"
+    content_budget = max_chars - len(marker_reserve) - 1
+    if content_budget <= 0:
+        # No representation can contain the full marker and also satisfy a
+        # smaller max_chars. Keep the hard bound and expose the flag/lengths.
+        truncated_text = "…"[:max_chars]
+    else:
+        cut = content_budget
+        boundary_start = max(0, cut - 200)
+        boundary = max(
+            (i for i in range(boundary_start, cut) if text[i].isspace()),
+            default=-1,
+        )
+        if boundary >= 0:
+            cut = boundary
+        shown = text[:cut].rstrip()
+        marker = f"…[truncated: showing {len(shown)} of {full_text_length} chars]"
+        truncated_text = f"{shown}\n{marker}" if shown else marker
+    out["text"] = truncated_text[:max_chars]
     out["text_length"] = len(out["text"])
+    out["truncated"] = True
     return out
 
 
@@ -741,6 +777,12 @@ class FetchResponse:
     width: Optional[int] = None
     height: Optional[int] = None
     rendered: Optional[bool] = None
+    js_rendered: Optional[bool] = None
+    extraction_method: Optional[str] = None
+    truncated: Optional[bool] = None
+    full_text_length: Optional[int] = None
+    content_kind: Optional[str] = None
+    content_length: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -1425,7 +1467,7 @@ class SearchProvider:
             snippet = block.select_one(".result__snippet")
             if not link:
                 continue
-            href = link.get("href", "").strip()
+            href = _unwrap_duckduckgo_redirect(link.get("href", "").strip())
             title = _normalize_whitespace(link.get_text(" ", strip=True))
             snippet_text = _normalize_whitespace(
                 snippet.get_text(" ", strip=True) if snippet else ""
@@ -1447,7 +1489,81 @@ class SearchProvider:
         }
 
 
+def _unwrap_duckduckgo_redirect(href: str) -> str:
+    """Return a DDG redirect target, preserving malformed/raw hrefs."""
+    try:
+        parsed = urlparse(href)
+        host = (parsed.hostname or "").lower()
+        if not (
+            (host == "duckduckgo.com" or host.endswith(".duckduckgo.com"))
+            and parsed.path.rstrip("/") == "/l"
+        ):
+            return href
+        for pair in parsed.query.split("&"):
+            key, separator, value = pair.partition("=")
+            if separator and unquote(key) == "uddg":
+                if re.search(r"%(?![0-9A-Fa-f]{2})", value):
+                    return href
+                destination = unquote(value)
+                target = urlparse(destination)
+                if target.scheme.lower() in ("http", "https") and target.hostname:
+                    return destination
+                return href
+    except (TypeError, ValueError):
+        return href
+    return href
+
+
 def extract_page_content(url: str, html: str, max_chars: int = 12000) -> Dict[str, Any]:
+    global _TRAFILATURA_MISSING_WARNED
+
+    extractor_mode = os.environ.get(
+        "ATLASFORGE_WEB_PROXY_EXTRACTOR", "auto"
+    ).strip().lower()
+    if extractor_mode not in {"auto", "trafilatura", "bs4"}:
+        logger.warning(
+            "unknown ATLASFORGE_WEB_PROXY_EXTRACTOR=%r; using auto",
+            extractor_mode,
+        )
+        extractor_mode = "auto"
+
+    trafilatura_text: Optional[str] = None
+    trafilatura_title = ""
+    trafilatura_description = ""
+    if extractor_mode != "bs4":
+        if _trafilatura is None:
+            if not _TRAFILATURA_MISSING_WARNED:
+                logger.warning(
+                    "trafilatura is unavailable; falling back to BeautifulSoup extraction"
+                )
+                _TRAFILATURA_MISSING_WARNED = True
+        else:
+            try:
+                trafilatura_text = _trafilatura.extract(
+                    html,
+                    url=url,
+                    include_comments=False,
+                    include_tables=True,
+                    favor_recall=True,
+                    deduplicate=False,
+                )
+            except Exception as exc:
+                logger.warning("trafilatura extraction failed for %s: %s", url, exc)
+                trafilatura_text = None
+            try:
+                metadata = _trafilatura.extract_metadata(html, default_url=url)
+                if metadata is not None:
+                    trafilatura_title = _normalize_whitespace(metadata.title or "")
+                    if re.search(r"</?[A-Za-z][^>]*>", trafilatura_title):
+                        trafilatura_title = _normalize_whitespace(
+                            re.sub(r"</?[A-Za-z][^>]*>", " ", trafilatura_title)
+                        )
+                    trafilatura_description = _normalize_whitespace(
+                        metadata.description or ""
+                    )
+            except Exception as exc:
+                logger.warning("trafilatura metadata extraction failed for %s: %s", url, exc)
+
     soup = BeautifulSoup(html, "lxml")
 
     for tag in soup(["script", "style", "noscript", "svg", "iframe", "canvas"]):
@@ -1481,14 +1597,19 @@ def extract_page_content(url: str, html: str, max_chars: int = 12000) -> Dict[st
     if not text_parts:
         text_parts.append(_normalize_whitespace(main.get_text("\n", strip=True)))
 
-    text = "\n\n".join(part for part in text_parts if part)
-    text = _normalize_whitespace(text)
-    try:
-        max_chars = int(max_chars)
-    except (TypeError, ValueError, OverflowError):
-        max_chars = 0
-    if max_chars > 0:
-        text = text[:max_chars]
+    bs4_text = "\n\n".join(part for part in text_parts if part)
+    bs4_text = _normalize_whitespace(bs4_text)
+
+    normalized_trafilatura_text = _normalize_whitespace(trafilatura_text or "")
+    use_trafilatura = extractor_mode == "trafilatura" and _trafilatura is not None
+    if extractor_mode == "auto":
+        use_trafilatura = len(normalized_trafilatura_text) >= 200
+    if use_trafilatura:
+        text = normalized_trafilatura_text
+        extraction_method = "trafilatura"
+    else:
+        text = bs4_text
+        extraction_method = "bs4" if extractor_mode == "bs4" else "bs4_fallback"
 
     links: List[Dict[str, str]] = []
     for anchor in main.find_all("a", href=True):
@@ -1506,15 +1627,17 @@ def extract_page_content(url: str, html: str, max_chars: int = 12000) -> Dict[st
             }
         )
 
-    return {
+    payload = {
         "url": url,
-        "title": title,
-        "meta_description": meta_description,
+        "title": trafilatura_title or title,
+        "meta_description": trafilatura_description or meta_description,
         "headings": headings,
         "text": text,
         "links": links,
         "text_length": len(text),
+        "extraction_method": extraction_method,
     }
+    return _apply_max_chars(payload, max_chars)
 
 
 def _is_reddit_url(url: str) -> bool:
@@ -1938,6 +2061,55 @@ def _save_image(url: str, content_type: str, data: bytes) -> Dict[str, Any]:
     }
 
 
+def _is_textual_content_type(content_type: str) -> bool:
+    """Recognize response types that are safe and useful to decode as text."""
+    if content_type.startswith("text/"):
+        return True
+    return content_type in {
+        "application/json",
+        "application/xml",
+        "application/xhtml+xml",
+    } or content_type.endswith(("+json", "+xml"))
+
+
+def _binary_fetch_payload(
+    url: str,
+    status_code: int,
+    content_type: str,
+    body_bytes: bytes,
+    max_chars: Any,
+) -> Dict[str, Any]:
+    ct_main = content_type.split(";")[0].strip().lower() or "unknown"
+    content_length = len(body_bytes)
+    if ct_main == "application/pdf":
+        text = (
+            f"PDF content ({ct_main}, {content_length} bytes) — use the "
+            "PaperFetch tool or /paper/fetch to extract text."
+        )
+    else:
+        text = (
+            f"Binary content ({ct_main}, {content_length} bytes) — "
+            "not fetchable as text."
+        )
+    payload = FetchResponse(
+        url=url,
+        status_code=status_code,
+        content_type=ct_main,
+        fetched_at=_now_ts(),
+        title="",
+        meta_description="",
+        headings=[],
+        text=text,
+        links=[],
+        text_length=len(text),
+        js_rendered=False,
+        rendered=False,
+        content_kind="binary",
+        content_length=content_length,
+    ).to_dict()
+    return _apply_max_chars(payload, max_chars)
+
+
 def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
     timeout_s = _validate_timeout_s(timeout_s)
     # Structural validation first — cheap, no DNS. Then delegate reddit URLs
@@ -2026,6 +2198,15 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
                 height=image_payload["height"],
             ).to_dict()
 
+        if ct_main == "application/pdf" or not _is_textual_content_type(ct_main):
+            return _binary_fetch_payload(
+                url=url,
+                status_code=status_code,
+                content_type=content_type,
+                body_bytes=body_bytes,
+                max_chars=max_chars,
+            )
+
         try:
             html = body_bytes.decode(response_encoding)
         except UnicodeDecodeError as exc:
@@ -2071,7 +2252,7 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
         if _js_render_enabled() and _jsr is not None:
             if _jsr.host_wants_render(url):
                 needs_render = True
-            elif extracted["text_length"] < 200 or status_code == 403:
+            else:
                 needs_render = _jsr.should_render(html, status_code, content_type)
 
         if needs_render and _jsr is not None:
@@ -2088,10 +2269,10 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
                     )
                     rtext = rendered.get("rendered_text") or ""
                     if rtext and len(rtext) > extracted["text_length"]:
-                        if max_chars > 0:
-                            rtext = rtext[:max_chars]
-                        extracted["text"] = rtext
-                        extracted["text_length"] = len(rtext)
+                        extracted["text"] = _normalize_whitespace(rtext)
+                        extracted["text_length"] = len(extracted["text"])
+                        extracted.pop("full_text_length", None)
+                        extracted = _apply_max_chars(extracted, max_chars)
                     if not extracted.get("title"):
                         extracted["title"] = rendered.get("rendered_title", "")
                     used_js_render = True
@@ -2107,7 +2288,11 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
             text=extracted["text"],
             links=extracted["links"],
             text_length=extracted["text_length"],
-            rendered=used_js_render or None,
+            rendered=used_js_render,
+            js_rendered=used_js_render,
+            extraction_method=extracted["extraction_method"],
+            truncated=extracted["truncated"],
+            full_text_length=extracted["full_text_length"],
         ).to_dict()
 
 

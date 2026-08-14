@@ -8,6 +8,12 @@ yields nothing useful. This module provides a headless-Chromium fallback
 via Playwright that actually executes the page's JavaScript and returns the
 post-hydration DOM.
 
+The markup-density SPA signal requires a framework marker, at least 3 script
+tags, at least 10,000 HTML characters, no more than 1,500 visible-text
+characters, and a visible-text/HTML ratio below 2%. These conservative bounds
+catch large hydration shells while leaving ordinary server-rendered articles
+on the plain HTTP path.
+
 Activation is lazy — Playwright and its Chromium binary are only imported
 and launched when a fetch site needs them. The plain requests path stays
 fast and cheap for the 95% of sites that don't need a browser.
@@ -27,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -81,7 +88,7 @@ def should_render(html: str, status_code: int, content_type: str) -> bool:
     Signals we check:
       - HTTP 403 with a Cloudflare challenge marker
       - Very short body with an SPA framework marker
-      - Body with <noscript> banners and almost no visible text
+      - A framework-marked, script-heavy body with under 2% visible text
 
     Returns False for anything that clearly doesn't need rendering so we
     don't spend a headless Chrome launch on a page that already rendered
@@ -114,6 +121,23 @@ def should_render(html: str, status_code: int, content_type: str) -> bool:
         script_count = low.count("<script")
         para_count = low.count("<p>") + low.count("<article") + low.count("<section")
         if script_count >= 3 and para_count <= 2:
+            return True
+        without_code = re.sub(
+            r"<(?:script|style|noscript)\b[^>]*>.*?</(?:script|style|noscript)\s*>",
+            " ",
+            html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        visible_text = re.sub(r"<[^>]+>", " ", without_code)
+        visible_length = len(re.sub(r"\s+", " ", visible_text).strip())
+        markup_length = len(html)
+        script_count = len(re.findall(r"<script\b", html, flags=re.IGNORECASE))
+        if (
+            markup_length >= 10_000
+            and script_count >= 3
+            and visible_length <= 1_500
+            and visible_length / markup_length < 0.02
+        ):
             return True
     # Very short body with script-heavy shell is almost certainly SPA
     if len(html) < 4000 and html.count("<script") >= 2 and "<p>" not in html and "<article" not in html:

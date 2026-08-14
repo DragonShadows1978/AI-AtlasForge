@@ -968,6 +968,9 @@ def _format_fetch_results(data: dict) -> str:
     lines = [
         f"URL: {data.get('url', '')}",
         f"Title: {data.get('title', '')}",
+        f"Extraction method: {data.get('extraction_method', 'unavailable')}",
+        f"JS-rendered: {'yes' if data.get('js_rendered') or data.get('rendered') else 'no'}",
+        f"Truncated: {data.get('truncated', False)}",
         f"Cache hit: {data.get('_cache_hit', False)}",
         f"Cache JSON: {data.get('_cache_path', '')}",
         f"Investigation JSON: {data.get('_investigation_json_path', '')}",
