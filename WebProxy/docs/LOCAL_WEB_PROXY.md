@@ -78,6 +78,8 @@ curl http://127.0.0.1:8765/health
 }
 ```
 
+Redirects are followed with per-hop SSRF re-validation; results carry `resolved_url`/`redirect_chain`, and errors carry `target_status`.
+
 ### `POST /research`
 
 Combined search + fetch-top-N. Useful for "give me a research brief on X".
@@ -131,6 +133,12 @@ variables:
   JSON files and `images/` files (default `2000000000`).
 - `ATLASFORGE_WEB_PROXY_CACHE_SWEEP_INTERVAL_S` — startup/periodic sweep
   interval in seconds; `0` disables both sweeps (default `3600`).
+- `ATLASFORGE_WEB_PROXY_MAX_REDIRECTS` — maximum manually-followed redirect
+  hops (default `5`).
+- `ATLASFORGE_WEB_PROXY_JS_RENDER_MIN_TEXT_LEN` — minimum rendered text length
+  for a 403 JS-render recovery to count as content (default `200`).
+- `ATLASFORGE_WEB_PROXY_EXTRACTOR` — content extractor selection: `auto`,
+  `trafilatura`, or `bs4` (default `auto`).
 - `ATLASFORGE_WEB_PROXY_THREADS` — Waitress worker threads when not debugging
   (default `16`).
 

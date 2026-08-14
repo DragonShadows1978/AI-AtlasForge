@@ -3290,10 +3290,15 @@ def test_main_allows_debug_on_loopback_host(monkeypatch):
         def run(self, **kwargs):
             calls.update(kwargs)
 
+    def _fake_create_app(*, start_sweeper=False):
+        calls["start_sweeper"] = start_sweeper
+        return _FakeApp()
+
     monkeypatch.setattr(sys, "argv", ["service.py", "--host", "127.0.0.1", "--debug"])
-    monkeypatch.setattr(web_proxy_service, "create_app", lambda: _FakeApp())
+    monkeypatch.setattr(web_proxy_service, "create_app", _fake_create_app)
 
     web_proxy_service.main()
 
     assert calls["host"] == "127.0.0.1"
     assert calls["debug"] is True
+    assert calls["start_sweeper"] is True

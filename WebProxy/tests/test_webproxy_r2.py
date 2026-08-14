@@ -203,7 +203,7 @@ def test_main_uses_waitress_without_debug(monkeypatch):
         def serve(self, app, **kwargs):
             calls.append(("waitress", app, kwargs))
 
-    monkeypatch.setattr(service, "create_app", lambda: FakeApp())
+    monkeypatch.setattr(service, "create_app", lambda **kwargs: FakeApp())
     monkeypatch.setattr(service, "waitress", FakeWaitress())
     monkeypatch.setattr(service, "WEB_PROXY_THREADS", 3)
     monkeypatch.setattr(sys, "argv", ["web-proxy", "--port", "9876"])
@@ -228,7 +228,7 @@ def test_main_uses_flask_in_debug_mode(monkeypatch):
         def serve(self, *args, **kwargs):
             raise AssertionError("waitress must not serve debug mode")
 
-    monkeypatch.setattr(service, "create_app", lambda: FakeApp())
+    monkeypatch.setattr(service, "create_app", lambda **kwargs: FakeApp())
     monkeypatch.setattr(service, "waitress", FakeWaitress())
     monkeypatch.setattr(sys, "argv", ["web-proxy", "--debug"])
 

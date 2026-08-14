@@ -2955,13 +2955,14 @@ def _iter_dir_limited(root: Path, *, label: str, limit: Optional[int] = None) ->
     return entries
 
 
-def create_app() -> Flask:
+def create_app(start_sweeper: bool = False) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
     cache = FileCache(CACHE_DIR)
     stats = WebProxyStats(STATS_PATH)
     app.extensions["web_proxy_stats"] = stats
-    cache.start_sweeper()
+    if start_sweeper:
+        cache.start_sweeper()
     provider = SearchProvider(stats=stats)
 
     @app.errorhandler(RequestEntityTooLarge)
@@ -3489,7 +3490,7 @@ def main() -> None:
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    app = create_app()
+    app = create_app(start_sweeper=True)
     if waitress is not None and not args.debug:
         logger.info(
             "serving with waitress host=%s port=%d threads=%d",
