@@ -653,6 +653,27 @@ TOOLS = [
         },
     },
     {
+        "name": "FetchURL",
+        "description": (
+            "Fetch content from a URL. Returns raw extracted content: title, headings, "
+            "full text, and links. No summarization — returns the actual page content. "
+            "Reddit URLs auto-route to JSON API. Image URLs auto-detect and save locally. "
+            "Cached for 24h per URL."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "The URL to fetch content from",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    {
         "name": "WebResearch",
         "description": (
             "Combined search + fetch: searches the web, then fetches the top N result "
@@ -1444,7 +1465,7 @@ def handle_tool_call(name: str, arguments: dict) -> str:
 
         return _format_search_results(data)
 
-    elif name == "WebFetch":
+    elif name in ("WebFetch", "FetchURL"):
         try:
             url = _require_url(arguments)
         except ValueError as exc:
