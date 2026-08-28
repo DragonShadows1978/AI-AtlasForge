@@ -436,9 +436,17 @@ def test_fetch_reddit_www_403_rewrites_to_old(monkeypatch):
 
 
 def test_fetch_reddit_302_still_fails_immediately(monkeypatch):
-    """Permanent non-403 must not walk the fallback ladder (legacy contract)."""
+    """Permanent non-403 must not walk the JSON host ladder (legacy contract).
+
+    WP-R3 D1 re-bless: the assertion moved from 1 GET to 2. The legacy
+    contract this guards — a 302 does NOT walk to old.reddit.com and is never
+    followed to the Location target — is unchanged and still asserted. The
+    second GET is the new `.rss` rung, which this fake also 302s, so the
+    honest HTTPError still propagates.
+    """
     monkeypatch.setattr(web_proxy_service, "REDDIT_OLD_FALLBACK", True)
     calls = {"n": 0}
+    seen_urls: list[str] = []
 
     class _Session:
         def __init__(self, hostname: str):
@@ -446,6 +454,7 @@ def test_fetch_reddit_302_still_fails_immediately(monkeypatch):
 
         def get(self, url, **kwargs):
             calls["n"] += 1
+            seen_urls.append(url)
             assert kwargs.get("allow_redirects") is False
             return _FakeResponse(
                 status_code=302,
@@ -462,4 +471,9 @@ def test_fetch_reddit_302_still_fails_immediately(monkeypatch):
 
     with pytest.raises(requests.HTTPError):
         fetch_reddit("https://www.reddit.com/r/python/comments/abc123/x/")
-    assert calls["n"] == 1
+    # 1 json rung (stopped by the 302, NOT walked to old.reddit) + 1 rss rung.
+    assert calls["n"] == 2
+    assert not any("old.reddit.com" in u for u in seen_urls)
+    assert seen_urls[-1].endswith("/.rss")
+    # The Location target is never contacted — the whole point of the contract.
+    assert not any("evil.example" in u for u in seen_urls)

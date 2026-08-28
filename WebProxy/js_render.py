@@ -41,6 +41,20 @@ logger = logging.getLogger(__name__)
 
 JS_RENDER_TIMEOUT_S = int(os.environ.get("ATLASFORGE_WEBPROXY_JS_TIMEOUT_S", "30"))
 JS_RENDER_HYDRATE_MS = int(os.environ.get("ATLASFORGE_WEBPROXY_JS_HYDRATE_MS", "2500"))
+# WP-R3 D3: `goto` waits for `domcontentloaded` (fast and always reached), then
+# we spend a BOUNDED settle window trying for networkidle instead of handing
+# the whole budget to a page that will never idle. Before this, a never-idle
+# page burned the full JS_RENDER_TIMEOUT_S inside goto and only then captured,
+# so the MCP client's own 30s ceiling fired first and the fetch surfaced as a
+# hard "Proxy timed out after 30s" even though the DOM was there all along.
+JS_RENDER_SETTLE_MS = int(
+    os.environ.get("ATLASFORGE_WEB_PROXY_JS_SETTLE_MS", "4000")
+)
+# Hard ceiling for the goto itself. Kept well under the caller's 30s so the
+# settle wait and the capture always get their turn.
+JS_RENDER_GOTO_TIMEOUT_S = int(
+    os.environ.get("ATLASFORGE_WEB_PROXY_JS_GOTO_TIMEOUT_S", "12")
+)
 JS_RENDER_UA = os.environ.get(
     "ATLASFORGE_WEBPROXY_JS_UA",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -149,8 +163,18 @@ def render(
     url: str,
     timeout_s: int = JS_RENDER_TIMEOUT_S,
     hydrate_ms: int = JS_RENDER_HYDRATE_MS,
+    settle_ms: int = JS_RENDER_SETTLE_MS,
 ) -> Optional[Dict[str, Any]]:
     """Load `url` in headless Chromium and return the rendered HTML + text.
+
+    Budget (WP-R3 D3): `goto` waits only for `domcontentloaded`, capped at
+    ``min(JS_RENDER_GOTO_TIMEOUT_S, timeout_s)``. Then we give the page a
+    BOUNDED ``settle_ms`` to reach `networkidle` (its failure is normal and
+    ignored), then the usual ``hydrate_ms``, then capture. Worst case is
+    goto_cap + settle_ms + hydrate_ms, which for the defaults is
+    12 + 4 + 2.5 = ~18.5s — comfortably under the MCP client's 30s ceiling.
+    Pages that load normally are unaffected: they reach `domcontentloaded`
+    and `networkidle` immediately and fall straight through to capture.
 
     Returns None if Playwright isn't installed. Raises RuntimeError on
     rendering failure (caller can fall back to whatever it had).
@@ -171,12 +195,33 @@ def render(
                 java_script_enabled=True,
             )
             page = context.new_page()
+            goto_timeout_s = max(1, min(JS_RENDER_GOTO_TIMEOUT_S, int(timeout_s)))
             try:
-                page.goto(url, wait_until="networkidle", timeout=timeout_s * 1000)
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=goto_timeout_s * 1000,
+                )
             except Exception as e:
-                # Many SPAs never hit "networkidle" — fall through and grab
-                # whatever DOM has hydrated so far.
-                logger.info("js_render: goto('%s') did not reach networkidle: %s", url, e)
+                # Even domcontentloaded can miss on a stalled server — fall
+                # through and grab whatever DOM exists.
+                logger.info(
+                    "js_render: goto('%s') did not reach domcontentloaded: %s", url, e
+                )
+            if settle_ms > 0:
+                try:
+                    page.wait_for_load_state("networkidle", timeout=settle_ms)
+                except Exception as e:
+                    # Many SPAs (and anything with long-polling/analytics
+                    # beacons) never hit "networkidle". That is EXPECTED here:
+                    # the settle wait is a bounded best-effort, not a
+                    # requirement. Capture whatever hydrated in the window.
+                    logger.info(
+                        "js_render: '%s' did not reach networkidle within %dms: %s",
+                        url,
+                        settle_ms,
+                        e,
+                    )
             page.wait_for_timeout(hydrate_ms)
             rendered_html = page.content()
             try:

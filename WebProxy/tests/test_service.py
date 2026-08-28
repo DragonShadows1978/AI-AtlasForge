@@ -233,9 +233,12 @@ def test_fetch_reddit_does_not_follow_redirects(monkeypatch):
         def close(self):
             return None
 
+    seen_urls: list = []
+
     class _FakeSession:
-        def get(self, *args, **kwargs):
+        def get(self, url, *args, **kwargs):
             call_count["n"] += 1
+            seen_urls.append(url)
             assert kwargs.get("allow_redirects") is False
             return _RedirectResponse()
 
@@ -244,7 +247,15 @@ def test_fetch_reddit_does_not_follow_redirects(monkeypatch):
     import requests as _rq
     with pytest.raises(_rq.HTTPError, match="302"):
         fetch_reddit("https://www.reddit.com/r/python/comments/abc123/x/")
-    assert call_count["n"] == 1
+    # WP-R3 D1 re-bless: 1 -> 2 calls. The load-bearing contract this test
+    # guards is unchanged and still asserted above — every GET goes out with
+    # allow_redirects=False and the 302 is never followed to evil.example.
+    # What moved is only how many rungs are tried before giving up: the json
+    # ladder still stops at the 302 (no second json candidate), and the new
+    # `.rss` rung then takes its shot. It gets the same 302 from this fake, so
+    # the honest json-rung HTTPError("302") is re-raised exactly as before.
+    assert call_count["n"] == 2
+    assert not any("evil.example" in u for u in seen_urls)
 
 
 def test_fetch_reddit_rejects_non_positive_timeout():
@@ -3207,10 +3218,16 @@ class TestFetchResponseRoundTripEquivalence:
     key set as before the FetchResponse introduction. The canonical keys are
     listed here; any drift is a regression."""
 
+    # WP-R3 D1 re-blessed this set: `source_format` names which upstream
+    # surface produced the payload ("json" for the preferred API path, "rss"
+    # for the Atom fallback rung). Additive — no key was removed or renamed,
+    # so existing consumers that read by key are unaffected. Same shape of
+    # change WP-R1 D1 made for resolved_url/redirect_chain below.
     _REDDIT_KEYS = frozenset({
         "url", "resolved_url", "title", "meta_description", "headings",
         "text", "links", "text_length", "reddit",
         "status_code", "content_type", "fetched_at",
+        "source_format",
     })
 
     # WP-R1 D1 re-blessed this set: the html path now always reports where the
