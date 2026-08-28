@@ -1030,6 +1030,14 @@ def _format_fetch_results(data: dict) -> str:
     reddit = data.get("reddit")
     if reddit:
         lines = [f"Reddit: {data.get('url', '')}"]
+        # WP-R3 D1: name the surface. On the `.rss` fallback rung reddit's Atom
+        # feed carries no scores and only the top ~16 comments, so a reader
+        # must not read "0 points" or a short comment list as ground truth.
+        if data.get("source_format") == "rss":
+            lines.append(
+                "Source: .rss fallback (reddit .json is blocked; scores "
+                "unavailable, comments limited to the feed window)"
+            )
         for p in reddit.get("posts", []):
             lines.append(f"\n**{p.get('title', '')}**")
             lines.append(f"by u/{p.get('author', '')} | {p.get('score', 0)} points | {p.get('num_comments', 0)} comments")

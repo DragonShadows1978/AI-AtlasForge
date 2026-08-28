@@ -29,7 +29,9 @@ import tempfile
 import threading
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -205,6 +207,14 @@ RETRY_AFTER_MAX_S = _float_env("ATLASFORGE_WEB_PROXY_RETRY_AFTER_MAX_S", 60.0, m
 RETRY_JITTER = _bool_env("ATLASFORGE_WEB_PROXY_RETRY_JITTER", True)
 UA_RETRY_ON_403 = _bool_env("ATLASFORGE_WEB_PROXY_UA_RETRY_ON_403", True)
 REDDIT_OLD_FALLBACK = _bool_env("ATLASFORGE_WEB_PROXY_REDDIT_OLD_FALLBACK", True)
+# WP-R3 D1: Reddit killed unauthenticated `.json` in May 2026 (TLS-fingerprint +
+# IP reputation, so UA rotation does not help). `/.rss` is the only surviving
+# anonymous surface. It is a FALLBACK rung, not a replacement: if `.json` ever
+# works again (OAuth wiring, policy reversal) it stays preferred.
+REDDIT_RSS_FALLBACK = _bool_env("ATLASFORGE_WEB_PROXY_REDDIT_RSS_FALLBACK", True)
+# WP-R3 D2: Medium (Cloudflare) 403s both the plain fetch and the headless
+# ladder, but the author feed at /feed/@<author> is served open.
+MEDIUM_FEED_FALLBACK = _bool_env("ATLASFORGE_WEB_PROXY_MEDIUM_FEED_FALLBACK", True)
 
 # WP-R1: bounded, manually-followed redirects. Every hop is re-validated and
 # re-pinned by `_follow_redirects`; requests/urllib3 redirect handling stays
@@ -235,6 +245,22 @@ _LEGACY_NUMERIC_HOST_RE = re.compile(r"^(?:0x[0-9a-f]+|0[0-7]*|[0-9]+)$", re.IGN
 
 class UnsafeUrlError(ValueError):
     """Raised when a URL fails the SSRF guard."""
+
+
+# WP-R3: the ONLY failures a fallback rung (reddit `.rss`, medium author feed)
+# may swallow and report as "this rung produced nothing". Deliberately an
+# ALLOWLIST, not `except ValueError`: `UnsafeUrlError` subclasses ValueError,
+# so a broad catch would silently downgrade an SSRF refusal into a soft
+# fallback-miss and hide a blocked outbound connection from the caller. The
+# SSRF laws are registered gates — a refusal must always propagate. Keeping
+# this a named tuple also survives `importlib.reload` aliasing, where an
+# `except SomeClass` clause and a raised class can end up as two distinct
+# class objects and stop matching.
+_FALLBACK_SOFT_ERRORS = (
+    requests.RequestException,
+    ET.ParseError,
+    UnicodeDecodeError,
+)
 
 
 def _ip_is_unsafe(ip: "ipaddress._BaseAddress") -> bool:
@@ -990,6 +1016,10 @@ class FetchResponse:
     # WP-R1 D3: set only when a 403 was recovered by the JS render ladder.
     js_rendered: Optional[bool] = None
     original_status: Optional[int] = None
+    # WP-R3: which upstream surface produced this payload. Reddit: "json"
+    # (preferred) or "rss" (the D1 Atom fallback). Medium: "author_feed" (D2).
+    # Absent on every other path, so existing consumers are unaffected.
+    source_format: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -2210,6 +2240,235 @@ def _reddit_get_json(
         return _stream_capped_body(response)
 
 
+_ATOM_NS = "http://www.w3.org/2005/Atom"
+
+
+def _reddit_rss_url(url: str, host: str = "www.reddit.com") -> str:
+    """Build the Reddit Atom (`/.rss`) URL for ``url``.
+
+    Same derivation style as ``_reddit_json_url``: the path gets ``/.rss``
+    appended (idempotently), and the original query string is DROPPED — the
+    feed takes no limit/depth parameters. Works for post permalinks
+    (``/r/<sub>/comments/<id>/<slug>/``) and for subreddit listings
+    (``/r/<sub>/``, ``/r/<sub>/hot``), both of which reddit serves as Atom.
+    """
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    lower = path.lower()
+    if lower.endswith(".rss"):
+        rss_path = path
+    elif lower.endswith(".json"):
+        rss_path = path[: -len(".json")].rstrip("/") + "/.rss"
+    else:
+        rss_path = path.rstrip("/") + "/.rss"
+    return f"https://{host}{rss_path}"
+
+
+def _reddit_get_rss(
+    rss_url: str,
+    headers: Dict[str, str],
+    timeout_s: float,
+) -> Tuple[int, str, bytes]:
+    """One Reddit Atom GET through the full validate+pin pipeline.
+
+    Identical safety posture to ``_reddit_get_json``: structural validation,
+    single DNS resolve via ``_resolve_first_safe_ip`` (which refuses any
+    address failing ``_ip_is_unsafe``), a fresh ``PinnedIPAdapter`` session,
+    and ``allow_redirects=False`` so requests/urllib3 never follows anything.
+    """
+    parts, reason = _validate_url_structure(rss_url)
+    if parts is None:
+        raise UnsafeUrlError(reason)
+    _scheme, hostname, port = parts
+    pinned_ip = _resolve_first_safe_ip(rss_url)
+    with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
+        response = _session_get_with_retry(
+            session,
+            rss_url,
+            headers=headers,
+            timeout_s=timeout_s,
+            stream=True,
+            allow_redirects=False,
+        )
+        return _stream_capped_body(response)
+
+
+def _atom_text(entry: "ET.Element", tag: str) -> str:
+    """Read the text of a direct Atom child element, or "" when absent."""
+    node = entry.find(f"{{{_ATOM_NS}}}{tag}")
+    if node is None:
+        return ""
+    return _as_text_or_empty(node.text)
+
+
+def _as_text_or_empty(value: Any) -> str:
+    return str(value) if value is not None else ""
+
+
+def _reddit_rss_entry_text(entry: "ET.Element") -> str:
+    """Extract plain text from an Atom entry's ``<content>`` HTML.
+
+    Reddit ships escaped HTML inside ``<content type="html">``. Reuse the
+    repo's own extraction pipeline (``extract_page_content``) rather than
+    hand-rolling a stripper, so trafilatura/bs4 behavior and whitespace
+    normalization stay identical to every other text the proxy returns.
+    """
+    html = _atom_text(entry, "content")
+    if not html:
+        return ""
+    extracted = extract_page_content(url="", html=html, max_chars=-1)
+    return _as_str_field(extracted.get("text"))
+
+
+def _as_str_field(value: Any) -> str:
+    return str(value) if value else ""
+
+
+def _reddit_rss_author(entry: "ET.Element") -> str:
+    """Author name with reddit's ``/u/`` prefix stripped (json shape parity)."""
+    author_el = entry.find(f"{{{_ATOM_NS}}}author")
+    name = ""
+    if author_el is not None:
+        name_el = author_el.find(f"{{{_ATOM_NS}}}name")
+        if name_el is not None:
+            name = _as_text_or_empty(name_el.text)
+    name = name.strip()
+    if name.startswith("/u/"):
+        name = name[3:]
+    elif name.startswith("u/"):
+        name = name[2:]
+    return name
+
+
+def _reddit_rss_link(entry: "ET.Element") -> str:
+    """Absolute permalink from the entry's ``<link href=...>``."""
+    link_el = entry.find(f"{{{_ATOM_NS}}}link")
+    if link_el is None:
+        return "https://www.reddit.com"
+    href = (link_el.get("href") or "").strip()
+    if not href.lower().startswith(("http://", "https://")):
+        return "https://www.reddit.com"
+    return href
+
+
+def _reddit_rss_updated_ts(entry: "ET.Element") -> int:
+    """Epoch seconds from the entry's ``<updated>``/``<published>`` stamp."""
+    for tag in ("published", "updated"):
+        raw = _atom_text(entry, tag).strip()
+        if not raw:
+            continue
+        cleaned = raw.replace("Z", "+00:00")
+        try:
+            return int(datetime.fromisoformat(cleaned).timestamp())
+        except (ValueError, OverflowError, OSError):
+            continue
+    return 0
+
+
+def _reddit_rss_is_post_permalink(url: str) -> bool:
+    """True when ``url`` addresses a single submission (``/comments/<id>/``)."""
+    return "/comments/" in (urlparse(url).path or "").lower()
+
+
+def _parse_reddit_rss(body_bytes: bytes, url: str) -> Tuple[
+    List[Dict[str, Any]], List[Dict[str, Any]]
+]:
+    """Parse a Reddit Atom feed into the json path's (posts, comments) shape.
+
+    For a POST permalink the feed's entry[0] is the submission itself and
+    entries[1..] are its comments. For a SUBREDDIT LISTING every entry is a
+    submission, so all of them land in ``posts`` and ``comments`` stays empty —
+    mirroring what the json listing path produces.
+
+    Fields reddit's Atom feed does not carry (score, num_comments, flair,
+    is_self, over_18, stickied) are filled with the same defaults the json
+    coercion helpers would produce for a missing key, so downstream renderers
+    and ``mcp_server.py`` formatting keep working unchanged.
+    """
+    root = ET.fromstring(body_bytes.decode("utf-8", errors="replace"))
+    entries = root.findall(f"{{{_ATOM_NS}}}entry")
+    feed_subreddit = ""
+    m = re.search(r"/r/([A-Za-z0-9_]+)", urlparse(url).path or "")
+    if m:
+        feed_subreddit = m.group(1)
+
+    posts: List[Dict[str, Any]] = []
+    comments: List[Dict[str, Any]] = []
+    is_permalink = _reddit_rss_is_post_permalink(url)
+
+    for index, entry in enumerate(entries):
+        title = _normalize_whitespace(_atom_text(entry, "title"))
+        author = _reddit_rss_author(entry)
+        permalink = _reddit_rss_link(entry)
+        created = _reddit_rss_updated_ts(entry)
+        text = _reddit_rss_entry_text(entry)
+        if is_permalink and index > 0:
+            comments.append(
+                {
+                    "author": author,
+                    "score": 0,
+                    "body": text[:2000],
+                    "created_utc": created,
+                    "permalink": permalink,
+                    # RSS carries no reply nesting; every comment is flat.
+                    "depth": 0,
+                }
+            )
+            continue
+        posts.append(
+            {
+                "title": title,
+                "author": author,
+                "score": 0,
+                "num_comments": 0,
+                "flair": "",
+                "subreddit": feed_subreddit,
+                "created_utc": created,
+                "url": permalink,
+                "permalink": permalink,
+                "selftext": text[:2000],
+                "is_self": True,
+                "over_18": False,
+                "stickied": False,
+            }
+        )
+    return posts, comments
+
+
+def _reddit_rss_attempt(
+    url: str,
+    timeout_s: float,
+) -> Optional[Tuple[str, int, str, List[Dict[str, Any]], List[Dict[str, Any]]]]:
+    """Try the `/.rss` rung. Returns None when it does not yield usable content.
+
+    Returns ``(rss_url, status_code, content_type, posts, comments)`` on
+    success. Any transport/HTTP/parse failure returns None so the caller can
+    re-raise the honest json-rung error instead of masking it.
+    """
+    rss_url = _reddit_rss_url(url)
+    headers = {
+        "User-Agent": _reddit_primary_user_agent(),
+        "Accept": "application/atom+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    try:
+        status_code, content_type, body_bytes = _reddit_get_rss(
+            rss_url, headers, timeout_s
+        )
+    except _FALLBACK_SOFT_ERRORS as exc:
+        logger.info("reddit rss rung failed for %s: %s", rss_url, exc)
+        return None
+    if not body_bytes:
+        return None
+    try:
+        posts, comments = _parse_reddit_rss(body_bytes, url)
+    except ET.ParseError as exc:
+        logger.info("reddit rss parse failed for %s: %s", rss_url, exc)
+        return None
+    if not posts and not comments:
+        return None
+    return rss_url, status_code, content_type, posts, comments
+
+
 def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
     timeout_s = _validate_timeout_s(timeout_s)
     # Structural-only validation of the caller's URL. The URL we actually
@@ -2225,6 +2484,7 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
     content_type = ""
     body_bytes = b""
     json_url = _reddit_json_url(url)
+    source_format = "json"
     last_http_error: Optional[requests.HTTPError] = None
 
     for candidate_url, user_agent in _reddit_fetch_candidates(url):
@@ -2242,21 +2502,36 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
         except requests.HTTPError as exc:
             resp = getattr(exc, "response", None)
             status = getattr(resp, "status_code", None) if resp is not None else None
-            # Only the 403 ladder continues; 401/404/302/etc. fail immediately
-            # (preserves historical contract e.g. no-redirect tests).
+            # Only the 403 ladder walks to the NEXT json candidate; 401/404/302
+            # etc. stop the json ladder here (preserves the historical contract:
+            # reddit redirects are never followed, and a 404 is not retried on
+            # another host). Either way the error is recorded so the WP-R3 rss
+            # rung below still gets its shot before we give up.
+            last_http_error = exc
+            json_url = candidate_url
             if status == 403:
                 logger.info(
                     "reddit 403 on %s (ua=%s...); trying next fallback",
                     candidate_url,
                     user_agent[:40],
                 )
-                last_http_error = exc
-                json_url = candidate_url
                 continue
-            raise
+            break
 
+    rss_posts: Optional[List[Dict[str, Any]]] = None
+    rss_comments: Optional[List[Dict[str, Any]]] = None
     if last_http_error is not None:
-        raise last_http_error
+        # WP-R3 D1: every `.json` rung is dead (403 since May 2026, 302 to the
+        # logged-out wall on old.reddit). Try the Atom feed before failing.
+        # If it does not produce content, re-raise the honest json-rung error
+        # so callers still see the real upstream status.
+        attempt = (
+            _reddit_rss_attempt(url, timeout_s) if REDDIT_RSS_FALLBACK else None
+        )
+        if attempt is None:
+            raise last_http_error
+        json_url, status_code, content_type, rss_posts, rss_comments = attempt
+        source_format = "rss"
 
     # Headers used for optional morechildren expansion (best-effort).
     reddit_headers = {
@@ -2373,7 +2648,12 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
                 if isinstance(ids, list):
                     more_ids.extend(ids)
 
-    if isinstance(data, list):
+    if rss_posts is not None or rss_comments is not None:
+        # WP-R3 D1: the Atom rung already produced the (posts, comments) shape;
+        # the json collectors have nothing to walk (`data` is []).
+        posts = list(rss_posts or [])
+        comments = list(rss_comments or [])
+    elif isinstance(data, list):
         if len(data) >= 1:
             _collect_listing(data[0], posts, "post")
         if len(data) >= 2:
@@ -2458,11 +2738,13 @@ def fetch_reddit(url: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]
         links=[{"text": p["title"], "url": p["permalink"]} for p in posts],
         text_length=len(text),
         resolved_url=json_url,
+        source_format=source_format,
         reddit={
             "posts": posts,
             "comments": comments,
             "post_count": len(posts),
             "comment_count": len(comments),
+            "source_format": source_format,
         },
     ).to_dict()
 
@@ -2590,6 +2872,139 @@ def _binary_fetch_payload(
         content_length=content_length,
     ).to_dict()
     return _apply_max_chars(payload, max_chars)
+
+
+# ---------------------------------------------------------------------------
+# WP-R3 D2: Medium author-feed fallback
+# ---------------------------------------------------------------------------
+
+# Medium article permalinks look like /@<author>/<slug>-<hex12>. The trailing
+# hex id is the post id and is what we match against the author feed's <link>
+# / <guid>. 8-16 hex chars covers the observed id range with margin.
+_MEDIUM_ARTICLE_RE = re.compile(
+    r"^/@(?P<author>[A-Za-z0-9._-]{1,64})/(?P<slug>[^/]*?-)?(?P<postid>[0-9a-f]{8,16})/?$"
+)
+_CONTENT_ENCODED_TAG = "{http://purl.org/rss/1.0/modules/content/}encoded"
+
+
+def _medium_article_parts(url: str) -> Optional[Tuple[str, str]]:
+    """Return ``(author, post_id)`` for a Medium article URL, else None.
+
+    Scope (per the order): ``medium.com`` and ``<publication>.medium.com``
+    only. Custom domains that proxy Medium are NOT recognized — their author
+    feed location is not derivable from the URL.
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return None
+    try:
+        host = host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+    if host != "medium.com" and not host.endswith(".medium.com"):
+        return None
+    m = _MEDIUM_ARTICLE_RE.match(parsed.path or "")
+    if not m:
+        return None
+    return m.group("author"), m.group("postid")
+
+
+def _medium_feed_url(author: str) -> str:
+    return f"https://medium.com/feed/@{author}"
+
+
+def _medium_feed_get(feed_url: str, timeout_s: float) -> Tuple[int, str, bytes]:
+    """One author-feed GET through the full validate+pin pipeline.
+
+    Same posture as every other outbound fetch: structural validation, one
+    ``_resolve_first_safe_ip`` (which refuses any address failing
+    ``_ip_is_unsafe``), a fresh pinned session, ``allow_redirects=False``.
+    """
+    parts, reason = _validate_url_structure(feed_url)
+    if parts is None:
+        raise UnsafeUrlError(reason)
+    _scheme, hostname, port = parts
+    pinned_ip = _resolve_first_safe_ip(feed_url)
+    headers = {
+        **REQUEST_HEADERS,
+        "User-Agent": BROWSER_USER_AGENT,
+        "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    with _pinned_session(pinned_ip=pinned_ip, hostname=hostname, port=port) as session:
+        response = _session_get_with_retry(
+            session,
+            feed_url,
+            headers=headers,
+            timeout_s=timeout_s,
+            stream=True,
+            allow_redirects=False,
+        )
+        return _stream_capped_body(response)
+
+
+def _medium_feed_find_item(body_bytes: bytes, post_id: str) -> Optional["ET.Element"]:
+    """Find the RSS ``<item>`` whose link or guid carries ``post_id``."""
+    root = ET.fromstring(body_bytes.decode("utf-8", errors="replace"))
+    needle = post_id.lower()
+    for item in root.iter("item"):
+        for tag in ("link", "guid"):
+            node = item.find(tag)
+            if node is None:
+                continue
+            if needle in _as_text_or_empty(node.text).lower():
+                return item
+    return None
+
+
+def _medium_feed_attempt(
+    url: str,
+    timeout_s: float,
+    max_chars: Any,
+) -> Optional[Dict[str, Any]]:
+    """Try the author feed for a 403'd Medium article.
+
+    Returns the extracted-content dict (``extract_page_content`` shape) on a
+    match, or None when the URL is not a recognizable Medium article, the feed
+    is unreachable/unparsable, or the article is outside the feed window.
+    A ``None`` return leaves the caller's existing 403 error contract intact.
+    """
+    parts = _medium_article_parts(url)
+    if parts is None:
+        return None
+    author, post_id = parts
+    feed_url = _medium_feed_url(author)
+    try:
+        _status, _ctype, body_bytes = _medium_feed_get(feed_url, timeout_s)
+    except _FALLBACK_SOFT_ERRORS as exc:
+        logger.info("medium author-feed rung failed for %s: %s", feed_url, exc)
+        return None
+    if not body_bytes:
+        return None
+    try:
+        item = _medium_feed_find_item(body_bytes, post_id)
+    except ET.ParseError as exc:
+        logger.info("medium author-feed parse failed for %s: %s", feed_url, exc)
+        return None
+    if item is None:
+        logger.info(
+            "medium author-feed %s carries no item for post id %s "
+            "(article older than the feed window)",
+            feed_url,
+            post_id,
+        )
+        return None
+    encoded = item.find(_CONTENT_ENCODED_TAG)
+    html = _as_text_or_empty(encoded.text if encoded is not None else "")
+    if not html.strip():
+        return None
+    extracted = extract_page_content(url=url, html=html, max_chars=max_chars)
+    if not extracted.get("title"):
+        title_el = item.find("title")
+        extracted["title"] = _normalize_whitespace(
+            _as_text_or_empty(title_el.text if title_el is not None else "")
+        )
+    return extracted
 
 
 def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOUT_S) -> Dict[str, Any]:
@@ -2791,6 +3206,33 @@ def fetch_page(url: str, max_chars: int = 12000, timeout_s: int = DEFAULT_TIMEOU
         recovered = used_js_render and max(
             rendered_text_len, int(extracted.get("text_length") or 0)
         ) >= JS_RENDER_MIN_TEXT_LEN
+        if not recovered and MEDIUM_FEED_FALLBACK:
+            # WP-R3 D2: Cloudflare 403s Medium for both the plain fetch and the
+            # headless ladder, but the author feed is open and carries the full
+            # article body in <content:encoded>.
+            feed_extracted = _medium_feed_attempt(url, timeout_s, max_chars)
+            if feed_extracted is not None:
+                return FetchResponse(
+                    url=url,
+                    status_code=200,
+                    content_type="text/html",
+                    fetched_at=_now_ts(),
+                    title=feed_extracted["title"],
+                    meta_description=feed_extracted["meta_description"],
+                    headings=feed_extracted["headings"],
+                    text=feed_extracted["text"],
+                    links=feed_extracted["links"],
+                    text_length=feed_extracted["text_length"],
+                    rendered=False,
+                    js_rendered=False,
+                    original_status=403,
+                    source_format="author_feed",
+                    extraction_method=feed_extracted["extraction_method"],
+                    truncated=feed_extracted["truncated"],
+                    full_text_length=feed_extracted["full_text_length"],
+                    resolved_url=final_url,
+                    redirect_chain=redirect_chain,
+                ).to_dict()
         if not recovered:
             raise TargetHTTPError(
                 f"unexpected HTTP status {status_code}",
