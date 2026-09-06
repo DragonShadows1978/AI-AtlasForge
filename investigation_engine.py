@@ -15,6 +15,7 @@ no mission.json modifications, no iterative cycles.
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import logging
@@ -65,6 +66,11 @@ def _stream_label(default_label: str, artifact_label: Optional[str]) -> str:
 # Shared provider routing (dashboard toggle)
 SUPPORTED_LLM_PROVIDERS = {"claude", "codex", "gemini"}
 DEFAULT_LLM_PROVIDER = "claude"
+_PROVIDER_EXECUTABLE_ENV = {
+    "claude": "ATLASFORGE_CLAUDE_BIN",
+    "codex": "ATLASFORGE_CODEX_BIN",
+    "gemini": "ATLASFORGE_GEMINI_BIN",
+}
 
 # Model name allowlist regex — prevents shell-injection via env-supplied model names
 _MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_./:@\[\]-]{0,127}$')
@@ -114,6 +120,77 @@ def _normalize_provider(provider: Optional[str]) -> str:
     if normalized in SUPPORTED_LLM_PROVIDERS:
         return normalized
     return DEFAULT_LLM_PROVIDER
+
+
+def _user_local_cli_path(provider: str) -> Path:
+    """Return the standard per-user install path for a provider CLI."""
+    return Path.home() / ".local" / "bin" / provider
+
+
+def _is_usable_cli_executable(candidate: Path) -> bool:
+    """Return True for an executable native binary or shebang script.
+
+    ``os.access(..., X_OK)`` alone is insufficient: a broken global Claude
+    installation can leave an executable ASCII fallback without a shebang.
+    Linux accepts neither that file nor a Windows launcher via ``execve`` and
+    raises ``ENOEXEC`` (``Exec format error``).
+    """
+    try:
+        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+            return False
+        with candidate.open("rb") as handle:
+            header = handle.read(4)
+        return header.startswith(b"\x7fELF") or header.startswith(b"#!")
+    except OSError:
+        return False
+
+
+def _resolve_cli_executable(provider: str) -> str:
+    """Resolve a provider CLI to a validated absolute executable path.
+
+    Resolution order is: explicit AtlasForge override, the standard per-user
+    install directory, then PATH. The per-user directory intentionally comes
+    before PATH because systemd user services commonly omit ``~/.local/bin``.
+    """
+    provider = _normalize_provider(provider)
+    env_name = _PROVIDER_EXECUTABLE_ENV[provider]
+    executable_name = provider
+    candidates: List[Path] = []
+
+    override = os.environ.get(env_name, "").strip()
+    if override:
+        override_path = Path(override).expanduser()
+        if override_path.is_absolute() or os.sep in override:
+            candidates.append(override_path)
+        else:
+            resolved_override = shutil.which(override)
+            if resolved_override:
+                candidates.append(Path(resolved_override))
+
+    candidates.append(_user_local_cli_path(provider))
+
+    path_match = shutil.which(executable_name)
+    if path_match:
+        candidates.append(Path(path_match))
+
+    checked = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        display = str(resolved)
+        if display in checked:
+            continue
+        checked.append(display)
+        if _is_usable_cli_executable(resolved):
+            return display
+
+    checked_text = ", ".join(checked) if checked else "no candidates found"
+    raise FileNotFoundError(
+        f"No usable {provider} CLI executable found ({checked_text}). "
+        f"Set {env_name} to a native executable or shebang script."
+    )
 
 
 def _get_active_llm_provider() -> str:
@@ -739,6 +816,10 @@ def invoke_claude(
 
     start_time = time.time()
     provider = _get_active_llm_provider()
+    try:
+        provider_executable = _resolve_cli_executable(provider)
+    except FileNotFoundError as exc:
+        return f"ERROR: {exc}", time.time() - start_time
     env = os.environ.copy()
     env = _apply_agent_process_guard_env(env)
     env["ATLASFORGE_INVESTIGATION_WORKSPACE"] = str(cwd)
@@ -753,7 +834,7 @@ def invoke_claude(
 
     if provider == "codex":
         from WebProxy import codex_proxy_cli_args
-        cmd = ["codex"]
+        cmd = [provider_executable]
         cmd.extend(codex_proxy_cli_args())
         if _codex_web_search_enabled():
             # Native Responses web_search. Off by default so proxy MCP is authoritative.
@@ -780,7 +861,7 @@ def invoke_claude(
                 f"{prompt}"
             )
     elif provider == "gemini":
-        cmd = ["gemini"]
+        cmd = [provider_executable]
         if _gemini_autonomous_enabled():
             cmd.append("--yolo")
         cmd.extend(["--output-format", "json"])
@@ -815,7 +896,7 @@ def invoke_claude(
         # Keep HOME explicit so Gemini resolves local auth/config consistently.
         env.setdefault("HOME", str(Path.home()))
     else:
-        cmd = ["claude", "-p", "--dangerously-skip-permissions"]
+        cmd = [provider_executable, "-p", "--dangerously-skip-permissions"]
         if model:
             cmd.extend(["--model", model.value])
         # Pin effort explicitly: headless spawns run with cwd inside

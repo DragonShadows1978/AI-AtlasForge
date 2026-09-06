@@ -415,18 +415,40 @@ def test_hierarchical_claude_routes_web_tools_through_proxy():
     assert "WebFetch" in disallowed
 
 
-def test_investigation_codex_uses_proxy_and_no_native_search_by_default(monkeypatch):
-    import subprocess
+def test_investigation_codex_uses_proxy_and_no_native_search_by_default(monkeypatch, tmp_path):
+    import agent_stream_manager
     import investigation_engine
 
     captured = {}
 
-    def fake_run(cmd, **kwargs):
+    class FakeProc:
+        pid = 4242
+        returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            return "ok", ""
+
+        def poll(self):
+            return self.returncode
+
+    def fake_popen(cmd, **kwargs):
         captured["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+        return FakeProc()
 
     monkeypatch.setattr(investigation_engine, "_get_active_llm_provider", lambda: "codex")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(investigation_engine.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        agent_stream_manager,
+        "register_agent",
+        lambda *_args, **_kwargs: tmp_path / "codex-stream.jsonl",
+    )
+    monkeypatch.setattr(agent_stream_manager, "update_agent_pid", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(agent_stream_manager, "complete_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        agent_stream_manager,
+        "stream_codex_session_to_file",
+        lambda *_args, **_kwargs: None,
+    )
     monkeypatch.delenv("ATLASFORGE_CODEX_WEB_SEARCH", raising=False)
 
     response, _elapsed = investigation_engine.invoke_claude("search something")
